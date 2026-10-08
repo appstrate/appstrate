@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
@@ -72,7 +71,7 @@ export function PreferencesDevicesPage() {
         itemKey={(s) => s.familyId}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           <EmptyState
             icon={Laptop}

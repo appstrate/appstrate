@@ -40,6 +40,7 @@ import { CHAT_TOOL_STEP_BUDGET, CHAT_TURN_DEADLINE_MS } from "@appstrate/core/ch
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { applyOperationIndexPolicy } from "../operation-index.ts";
 import { logger } from "../logger.ts";
+import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
@@ -50,10 +51,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
-import {
-  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
-  type ResolvedPiChatModelBinding,
-} from "./model-binding.ts";
+import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
 import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
@@ -74,6 +72,8 @@ export interface PiChatInput {
   userId: string;
   /** Chat session the turn belongs to (null for an ephemeral, unpersisted turn). */
   chatSessionId: string | null;
+  /** The chat request's `Request-Id`. */
+  requestId?: string;
   /** Canonical active UIMessage branch, including the current user head. */
   messages: UIMessage[];
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
@@ -125,6 +125,13 @@ export interface PiChatInput {
    * test wraps the real builder and replaces `close` alone.
    */
   buildMcpTools?: typeof buildPlatformMcpTools;
+  /**
+   * Grace given to the session's and the MCP client's wind-down before the
+   * turn tears down without them. Production omits it (`SESSION_ABORT_GRACE_MS`).
+   * The tests that prove the bound hold a wind-down that never settles, so each
+   * of them would otherwise sit out the full production grace.
+   */
+  windDownGraceMs?: number;
 }
 
 /**
@@ -199,6 +206,7 @@ function settledWithin(work: Promise<unknown>, ms: number): Promise<boolean> {
  * Drive one admitted Pi chat turn and return the UI-message-stream `Response`.
  */
 export function runPiChat(input: PiChatInput): Response {
+  const windDownGraceMs = input.windDownGraceMs ?? SESSION_ABORT_GRACE_MS;
   const { modelBinding, platformMcp, abortSignal, onError } = input;
   const model = modelBinding.model;
   const startedAt = Date.now();
@@ -452,9 +460,7 @@ export function runPiChat(input: PiChatInput): Response {
         // on an abort here; what `untilAborted` adds is that the abort is
         // OBSERVED — none of these calls takes a signal of its own.
         const runtimeStartedAt = Date.now();
-        const modelRuntime = await untilAborted(
-          ModelRuntime.create(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS),
-        );
+        const modelRuntime = await untilAborted(ModelRuntime.create(piChatModelRuntimeOptions()));
         await untilAborted(
           setPiRuntimeCredential(modelRuntime, modelBinding.provider, modelBinding.runtimeApiKey),
         );
@@ -585,10 +591,10 @@ export function runPiChat(input: PiChatInput): Response {
           // on the same producer. Giving up on the wind-down is strictly better
           // than holding the slot for the life of the process.
           const winding = typedSession.abort?.();
-          if (winding && !(await settledWithin(winding, SESSION_ABORT_GRACE_MS))) {
+          if (winding && !(await settledWithin(winding, windDownGraceMs))) {
             logger.warn("Pi chat session abort did not settle — tearing the turn down anyway", {
               chatSessionId: input.chatSessionId,
-              graceMs: SESSION_ABORT_GRACE_MS,
+              graceMs: windDownGraceMs,
             });
           }
           if (!turnAbort.signal.aborted) throw err;
@@ -601,9 +607,10 @@ export function runPiChat(input: PiChatInput): Response {
         // localizes the stable category.
         const meta = mapper.result();
         const stepCount = mapper.stepCount();
+        const turnError =
+          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
         const closing = closePiTurn({
-          error:
-            meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined),
+          error: turnError,
           finishReason: meta.finishReason,
           streamStarted,
           aborted: turnAbort.signal.aborted,
@@ -616,7 +623,19 @@ export function runPiChat(input: PiChatInput): Response {
           ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
           modelId: input.presetId,
           modelLabel: input.modelLabel,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
         });
+        // A provider-reported error throws nothing: log it under both request ids.
+        if (closing.clientError) {
+          logger.warn("chat turn failed on a model error", {
+            ...turnErrorLogIds(input.requestId, closing.clientError),
+            orgId: input.orgId,
+            presetId: input.presetId,
+            chatSessionId: input.chatSessionId,
+            category: closing.clientError.category,
+            err: turnError,
+          });
+        }
         // Same invariant, second failure mode: a turn killed by the deadline
         // used to end in complete silence. The emitter gives it a REAL text part
         // — an `error` chunk is transient and never becomes a persisted part.
@@ -656,10 +675,6 @@ export function runPiChat(input: PiChatInput): Response {
         if (streamFinished) {
           logger.error("Pi chat failed after its finish chunk", { err: String(err) });
         } else {
-          logger.error("Pi chat turn failed", {
-            err: String(err),
-            chatSessionId: input.chatSessionId,
-          });
           const aborted = turnAbort.signal.aborted;
           const closing = closePiTurn({
             // An abort is a normal ending (the user already knows) — there is
@@ -674,6 +689,13 @@ export function runPiChat(input: PiChatInput): Response {
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
             modelId: input.presetId,
             modelLabel: input.modelLabel,
+            ...(input.requestId ? { requestId: input.requestId } : {}),
+          });
+          logger.error("Pi chat turn failed", {
+            err: String(err),
+            chatSessionId: input.chatSessionId,
+            ...turnErrorLogIds(input.requestId, closing.clientError),
+            ...(closing.clientError ? { category: closing.clientError.category } : {}),
           });
           for (const chunk of closing.chunks) write(chunk);
         }
@@ -696,10 +718,10 @@ export function runPiChat(input: PiChatInput): Response {
         // closed either way — giving up on the wind-down costs nothing the
         // turn still needs.
         const closing = mcpTools?.close();
-        if (closing && !(await settledWithin(closing, SESSION_ABORT_GRACE_MS))) {
+        if (closing && !(await settledWithin(closing, windDownGraceMs))) {
           logger.warn("Pi chat MCP close did not settle — tearing the turn down anyway", {
             chatSessionId: input.chatSessionId,
-            graceMs: SESSION_ABORT_GRACE_MS,
+            graceMs: windDownGraceMs,
           });
         }
       }

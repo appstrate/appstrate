@@ -23,7 +23,7 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { ArrowUpFromLine, Building2, CircleCheck, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
@@ -53,7 +53,7 @@ import {
  * table and level for the next tier: on a phone what matters is which clients
  * exist and how to remove one, and on a narrow table which one is in use.
  *
- * What a row offers follows its level: a space's own client can be rotated,
+ * What a row offers follows its level: a space's own client can be edited,
  * shared with the organisation or deleted by whoever configures the space; an
  * organisation client only by an org integrations admin; the system's by nobody.
  */
@@ -65,7 +65,7 @@ export function useIntegrationClientColumns({
   pendingClientRef,
   onUseHere,
   onUseForOrg,
-  onRotate,
+  onEdit,
   onPromote,
   onDelete,
 }: {
@@ -81,7 +81,7 @@ export function useIntegrationClientColumns({
   pendingClientRef: string | null;
   onUseHere: (row: ClientRow) => void;
   onUseForOrg: (row: ClientRow) => void;
-  onRotate: (row: ClientRow) => void;
+  onEdit: (row: ClientRow) => void;
   onPromote: (row: ClientRow) => void;
   onDelete: (row: ClientRow) => void;
 }): DataColumn<ClientRow>[] {
@@ -144,8 +144,8 @@ export function useIntegrationClientColumns({
       cell: (row) => {
         const { client, level } = row;
         // A system client is the platform's, and an auto-provisioned one was
-        // minted by the server at connect time — neither has credentials an
-        // admin could rotate here. Deleting the auto-provisioned one is
+        // minted by the server at connect time — neither has settings an
+        // admin could edit here. Deleting the auto-provisioned one is
         // allowed: it re-triggers registration.
         const ownLevel = level === "space" || (level === "org" && canManageOrg);
         const editable = ownLevel && !client.auto_provisioned;
@@ -190,11 +190,11 @@ export function useIntegrationClientColumns({
             )}
             {editable && (
               <DropdownMenuItem
-                onSelect={() => onRotate(row)}
-                data-testid={`oauth-client-rotate-${client.client_ref}`}
+                onSelect={() => onEdit(row)}
+                data-testid={`oauth-client-edit-${client.client_ref}`}
               >
-                <RotateCcw />
-                {t("integration.oauthClient.btnRotate")}
+                <Pencil />
+                {t("integration.oauthClient.btnEdit")}
               </DropdownMenuItem>
             )}
             {ownLevel && (

@@ -25,7 +25,7 @@ import {
   Minimize2Icon,
   XIcon,
 } from "lucide-react";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import {
   Artifact,
   ArtifactAction,

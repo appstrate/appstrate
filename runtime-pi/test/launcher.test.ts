@@ -16,13 +16,16 @@ describe("runtime launcher", () => {
     dir = mkdtempSync(join(tmpdir(), "launcher-test-"));
     entry = join(dir, "entry.ts");
     // Reports its env, its stdin, and what a child spawned WITHOUT an explicit
-    // env inherits (the startup snapshot), then exits with $EXIT_CODE.
+    // env inherits (the startup snapshot), then exits with $EXIT_CODE. The
+    // SIGTERM handler is installed BEFORE the report line: that line is what
+    // tells the test the entrypoint is ready to be signalled.
     writeFileSync(
       entry,
       `const stdin = await Bun.stdin.text();
        const child = Bun.spawnSync(["sh", "-c", "echo \${APPSTRATE_SINK_SECRET:-none}"]);
+       if (process.env.HANG) process.on("SIGTERM", () => process.exit(42));
        console.log(JSON.stringify({ env: process.env, stdin, child: child.stdout.toString().trim() }));
-       if (process.env.HANG) { process.on("SIGTERM", () => process.exit(42)); await Bun.sleep(60_000); }
+       if (process.env.HANG) await Bun.sleep(60_000);
        process.exit(Number(process.env.EXIT_CODE ?? 0));`,
     );
   });

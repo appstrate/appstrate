@@ -14,6 +14,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import {
   buildAgentBundle,
   docker,
@@ -32,6 +33,7 @@ const { run: RUN, daemon } = resolveContainerE2eGate("runtime-secrets-container.
 ]);
 
 const RID = "run_secrets_e2e";
+const RECORD = getPiModel("anthropic", "claude-sonnet-4-6", "anthropic-messages")!;
 const SINK_SECRET = "secrets-e2e-sink-secret-0123456789";
 const SIDECAR_AUTH_TOKEN = "secrets-e2e-sidecar-token-0123456789";
 const PLACEHOLDER = "sk-secrets-e2e-placeholder";
@@ -250,6 +252,11 @@ describe.skipIf(!RUN)("runtime-pi keeps run-scoped secrets out of reach after bo
             MODEL_API: "anthropic-messages",
             MODEL_ID: "claude-sonnet-4-6",
             MODEL_PROVIDER: "anthropic",
+            // The rest of what the platform resolves off Pi's record of the model.
+            MODEL_DIALECT: JSON.stringify(piModelDialect(RECORD)),
+            MODEL_REASONING: String(RECORD.reasoning),
+            MODEL_CONTEXT_WINDOW: String(RECORD.contextWindow),
+            MODEL_MAX_TOKENS: String(RECORD.maxTokens),
             MODEL_BASE_URL: "http://sidecar:8080/llm",
             MODEL_API_KEY: PLACEHOLDER,
             SIDECAR_URL: "http://sidecar:8080",

@@ -225,6 +225,15 @@ describe("integration-client-registry", () => {
       expect(message).not.toContain("c2");
     });
 
+    it("throws on a UUID-shaped client id, which would shadow a custom client", () => {
+      const id = "0b9d6f0e-3a51-4c1e-9f55-2f6d8c1a7e42";
+      expect(() =>
+        initSystemIntegrations([
+          { id: GMAIL, clients: [{ id, auth_key: "google", client_id: "c", client_secret: "s" }] },
+        ]),
+      ).toThrow("clients[0].id: id must not be UUID-shaped");
+    });
+
     it("throws on a duplicate integration id instead of keeping the first", () => {
       expect(() =>
         initSystemIntegrations([

@@ -27,7 +27,43 @@ describe("parseSidecarEnv", () => {
       runToken: "run-token",
       port: 8080,
       forwardProxyPort: 8081,
+      listenHost: "0.0.0.0",
+      runtimeToolNames: [],
     });
+  });
+
+  it("parses the run's runtime tools and output schema", () => {
+    const env = parseSidecarEnv({
+      ...VALID,
+      RUNTIME_TOOLS_JSON: '["output","note"]',
+      OUTPUT_SCHEMA: '{"type":"object"}',
+    });
+    expect(env.runtimeToolNames).toEqual(["output", "note"]);
+    expect(env.outputSchema).toEqual({ type: "object" });
+  });
+
+  it("fails on a malformed runtime-tool list or output schema instead of dropping it", () => {
+    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: "[output" })).toEqual([
+      "RUNTIME_TOOLS_JSON: must be valid JSON",
+    ]);
+    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: '["output",1]' })).toEqual([
+      "RUNTIME_TOOLS_JSON: unexpected shape",
+    ]);
+    expect(issuesOf({ ...VALID, OUTPUT_SCHEMA: "[]" })).toEqual([
+      "OUTPUT_SCHEMA: unexpected shape",
+    ]);
+  });
+
+  it("requires a 32-byte CONNECT_RESULT_KEY in connect mode, and only there", () => {
+    const connect = { ...VALID, CONNECT_LOGIN_JSON: "{}" };
+    expect(issuesOf(connect)).toEqual(["CONNECT_RESULT_KEY: required in connect mode"]);
+    expect(
+      issuesOf({ ...connect, CONNECT_RESULT_KEY: Buffer.alloc(16).toString("base64") }),
+    ).toEqual(["CONNECT_RESULT_KEY: must decode to 32 bytes (AES-256 key)"]);
+    const key = Buffer.alloc(32, 7);
+    const env = parseSidecarEnv({ ...connect, CONNECT_RESULT_KEY: key.toString("base64") });
+    expect(env.connectResultKey).toEqual(key);
+    expect(parseSidecarEnv({ ...VALID, CONNECT_RESULT_KEY: "x" }).connectResultKey).toBeUndefined();
   });
 
   it("keeps the optional values optional, empty meaning absent", () => {
@@ -61,6 +97,14 @@ describe("parseSidecarEnv", () => {
       expect(issuesOf({ ...VALID, PORT: bad })[0]).toStartWith("PORT:");
       expect(issuesOf({ ...VALID, FORWARD_PROXY_PORT: bad })[0]).toStartWith("FORWARD_PROXY_PORT:");
     }
+  });
+
+  it("binds every interface unless LISTEN_HOST names one IP address", () => {
+    expect(parseSidecarEnv(VALID).listenHost).toBe("0.0.0.0");
+    expect(parseSidecarEnv({ ...VALID, LISTEN_HOST: "127.0.0.1" }).listenHost).toBe("127.0.0.1");
+    expect(issuesOf({ ...VALID, LISTEN_HOST: "localhost" })).toEqual([
+      'LISTEN_HOST: must be an IP address (got "localhost")',
+    ]);
   });
 
   it("takes the forward proxy port as given — not adjacent to PORT, but never equal", () => {

@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageShare, seedPublishedVersion } from "../../helpers/seed.ts";
 import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
@@ -48,6 +48,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
       },
     }),
   });
+  await seedPublishedVersion(PACKAGE_ID, "1.0.0");
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
@@ -100,6 +101,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       )) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,
@@ -129,6 +131,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       )) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,

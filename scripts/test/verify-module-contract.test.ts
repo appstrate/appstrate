@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// @run-tests exclusive — rewrites the tracked `scripts/verify-module-contract.ts` and restores
+// it, so `scripts/run-tests.ts` keeps it away from processes that read it.
+
 /**
  * The two roster invariants of `scripts/verify-module-contract.ts`.
  *

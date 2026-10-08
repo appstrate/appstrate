@@ -48,7 +48,7 @@ import { assertSpaceAssignmentsValid } from "../services/space-assignments.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
-import { isPlatformAdmin } from "@appstrate/db/auth-policy";
+import { mayCreateOrganization } from "@appstrate/db/auth-policy";
 import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
@@ -164,8 +164,13 @@ router.post("/", async (c) => {
   // platform-wide, only platform admins (AUTH_PLATFORM_ADMIN_EMAILS) may
   // create new organizations. The OrgGate webapp branch surfaces a
   // "waiting for invitation" page to non-admin users with no org.
-  if (getEnv().AUTH_DISABLE_ORG_CREATION && !isPlatformAdmin(user.email)) {
-    throw forbidden("Organization creation is disabled on this instance");
+  if (!mayCreateOrganization(user.email)) {
+    throw new ApiError({
+      status: 403,
+      code: "org_creation_disabled",
+      title: "Forbidden",
+      detail: "Organization creation is disabled on this instance",
+    });
   }
   const data = await readJsonBody(c, createOrgSchema);
 
@@ -342,8 +347,6 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
     // `deleting_at` under the per-org lock run admission takes, so a repeat of
     // this DELETE resumes and the hooks tolerate a second `onOrgDelete`.
     //
-    // Both calls throw plain Errors, and both land on the same 400
-    // `delete_failed` below — the wire contract is unchanged.
     await reserveOrgDeletion(orgId);
 
     // Notify modules of org deletion (non-fatal — errors isolated per module, FK CASCADE handles cleanup)
@@ -351,6 +354,7 @@ router.delete("/:orgId", requirePermission("org", "delete"), async (c) => {
 
     await deleteOrganization(orgId);
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     const msg = err instanceof Error ? err.message : "Failed to delete organization";
     // This catch spans three calls and logs nothing — a `delete_failed` used
     // to produce ZERO log lines, so the only record was a message the client

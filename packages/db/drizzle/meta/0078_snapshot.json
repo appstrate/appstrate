@@ -1,5 +1,5 @@
 {
-  "id": "d7b6c0cc-9b98-41ee-b926-5bc5bae7a41f",
+  "id": "30f86b88-b3f2-4691-9942-8cf520a24ae8",
   "prevId": "2a133790-95d1-4ed1-8aab-bd10043181c6",
   "version": "7",
   "dialect": "postgresql",
@@ -1513,12 +1513,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3879,7 +3873,8 @@
         },
         "model_source": {
           "name": "model_source",
-          "type": "text",
+          "type": "credential_source",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -4454,6 +4449,10 @@
         "runs_proxy_route_has_model": {
           "name": "runs_proxy_route_has_model",
           "value": "inference_route <> 'proxy' OR model_id IS NOT NULL"
+        },
+        "runs_remote_has_no_platform_model": {
+          "name": "runs_remote_has_no_platform_model",
+          "value": "run_origin = 'platform' OR (model_source IS NULL AND model_id IS NULL AND inference_route IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -4510,6 +4509,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
+        },
+        "disabled_reason": {
+          "name": "disabled_reason",
+          "type": "schedule_disabled_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
         },
         "cron_expression": {
           "name": "cron_expression",
@@ -4724,6 +4730,10 @@
         "package_schedules_exactly_one_actor": {
           "name": "package_schedules_exactly_one_actor",
           "value": "(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)"
+        },
+        "package_schedules_enabled_has_no_disabled_reason": {
+          "name": "package_schedules_enabled_has_no_disabled_reason",
+          "value": "NOT enabled OR disabled_reason IS NULL"
         }
       },
       "isRLSEnabled": false
@@ -4976,6 +4986,10 @@
         "notifications_recipient_type_valid": {
           "name": "notifications_recipient_type_valid",
           "value": "recipient_type IN ('user', 'end_user')"
+        },
+        "notifications_type_valid": {
+          "name": "notifications_type_valid",
+          "value": "type IN ('run_completed', 'package_shared')"
         }
       },
       "isRLSEnabled": false
@@ -5390,6 +5404,34 @@
           "method": "btree",
           "with": {}
         },
+        "idx_ioc_one_org_default": {
+          "name": "idx_ioc_one_org_default",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "integration_package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auth_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"integration_oauth_clients\".\"is_default\" AND \"integration_oauth_clients\".\"space_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_ioc_one_auto": {
           "name": "idx_ioc_one_auto",
           "columns": [
@@ -5460,34 +5502,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_ioc_one_org_default": {
-          "name": "idx_ioc_one_org_default",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "integration_package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "auth_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"integration_oauth_clients\".\"is_default\" AND \"integration_oauth_clients\".\"space_id\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_integration_oauth_clients_org_lookup": {
           "name": "idx_integration_oauth_clients_org_lookup",
           "columns": [
@@ -5517,15 +5531,6 @@
         }
       },
       "foreignKeys": {
-        "integration_oauth_clients_integration_package_id_packages_id_fk": {
-          "name": "integration_oauth_clients_integration_package_id_packages_id_fk",
-          "tableFrom": "integration_oauth_clients",
-          "tableTo": "packages",
-          "columnsFrom": ["integration_package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "integration_oauth_clients_org_id_organizations_id_fk": {
           "name": "integration_oauth_clients_org_id_organizations_id_fk",
           "tableFrom": "integration_oauth_clients",
@@ -5540,6 +5545,15 @@
           "tableFrom": "integration_oauth_clients",
           "tableTo": "spaces",
           "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "integration_oauth_clients_integration_package_id_packages_id_fk": {
+          "name": "integration_oauth_clients_integration_package_id_packages_id_fk",
+          "tableFrom": "integration_oauth_clients",
+          "tableTo": "packages",
+          "columnsFrom": ["integration_package_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -9035,20 +9049,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
         "skill_mode": {
           "name": "skill_mode",
           "type": "chat_skill_mode",
@@ -9063,6 +9063,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::text[]"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
@@ -9221,6 +9235,11 @@
       "name": "run_status",
       "schema": "public",
       "values": ["pending", "running", "success", "failed", "timeout", "cancelled"]
+    },
+    "public.schedule_disabled_reason": {
+      "name": "schedule_disabled_reason",
+      "schema": "public",
+      "values": ["actor_invalid", "actor_left_org", "connection_deleted"]
     }
   },
   "schemas": {},

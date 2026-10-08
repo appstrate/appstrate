@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { createConfirmer } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
   /** Extra content under the description, for a decision that needs more than a sentence. */
@@ -19,6 +21,8 @@ interface ConfirmModalProps {
   isPending?: boolean;
   /** The action cannot go ahead: the description says why, and only Cancel answers. */
   confirmDisabled?: boolean;
+  /** For a dialog that shows the refusal itself: every other one closes on it, a toast says why. */
+  keepOpenOnRefusal?: boolean;
 }
 
 export function ConfirmModal({
@@ -31,9 +35,23 @@ export function ConfirmModal({
   variant = "destructive",
   isPending,
   confirmDisabled,
+  keepOpenOnRefusal,
   children,
 }: ConfirmModalProps) {
   const { t } = useTranslation("common");
+  const mutationCache = useQueryClient().getMutationCache();
+  const [runConfirm] = useState(() => createConfirmer(mutationCache));
+  const latest = useRef({ open, keepOpenOnRefusal, onClose });
+  useEffect(() => {
+    latest.current = { open, keepOpenOnRefusal, onClose };
+  });
+
+  // A success is closed by the caller's `onSuccess`.
+  const confirm = () =>
+    runConfirm(onConfirm, () => {
+      const now = latest.current;
+      if (now.open && !now.keepOpenOnRefusal) now.onClose();
+    });
 
   return (
     <Modal
@@ -46,7 +64,7 @@ export function ConfirmModal({
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("btn.cancel")}
           </Button>
-          <Button variant={variant} onClick={onConfirm} disabled={isPending || confirmDisabled}>
+          <Button variant={variant} onClick={confirm} disabled={isPending || confirmDisabled}>
             {isPending ? <Spinner label={t("loading")} /> : (confirmLabel ?? t("btn.confirm"))}
           </Button>
         </>

@@ -17,8 +17,9 @@ import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { client } from "../../api/client";
+import { errorMessage } from "../../lib/mutation-error";
+import { spaceLabel } from "../../lib/space-label";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
 import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
@@ -29,7 +30,11 @@ import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
-import { useSpaceSwitcher, useCurrentSpaceId } from "../../hooks/use-current-space";
+import {
+  isSpaceEnterable,
+  useSpaceSwitcher,
+  useCurrentSpaceId,
+} from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { modalReturnTarget, openAsModal, useBackgroundLocation } from "../../lib/modal-route";
@@ -250,7 +255,7 @@ export function UnifiedSettingsLayout() {
     } catch (error) {
       if (organizationSwitchRequest.current !== requestId) return;
       toast.error(label("unifiedSettings.switchError"), {
-        description: getErrorMessage(error),
+        description: errorMessage(error),
       });
     } finally {
       if (organizationSwitchRequest.current === requestId) setSwitchingOrganization(false);
@@ -283,7 +288,12 @@ export function UnifiedSettingsLayout() {
       value={spaceId ?? ""}
       label={label("unifiedSettings.workspaceSelector")}
       disabled={switchingOrganization || applications.length === 0}
-      options={applications}
+      // Listed is not enterable: a closed space shows, disabled.
+      options={applications.map((space) => ({
+        id: space.id,
+        name: spaceLabel(space, t),
+        disabled: !isSpaceEnterable(space),
+      }))}
       onValueChange={changeWorkspace}
     />
   );

@@ -21,8 +21,8 @@ import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-ro
 import type { components } from "../../../api/client";
 import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
 import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { toast } from "sonner";
+import { ApiError } from "../../../api/errors";
+import { toastError } from "../../../lib/mutation-error";
 
 type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
 
@@ -35,7 +35,7 @@ export function OrgSettingsAppGeneralPage() {
   if (!can("org:read")) return null;
   if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
+  if (error) return <ErrorState error={error} />;
   if (!application) return <ErrorState />;
 
   return <GeneralForm spaceId={spaceId} application={application} />;
@@ -113,9 +113,7 @@ function GeneralForm({
         },
       },
       {
-        onError: (error) => {
-          toast.error(t("error.prefix", { message: getErrorMessage(error) }));
-        },
+        onError: (error) => toastError(error),
         onSettled: () => setSaving(null),
       },
     );
@@ -335,6 +333,16 @@ function GeneralForm({
                 setConfirmOpen(false);
                 navigate("/org-settings/spaces", { state: location.state });
               },
+              // A space that homes packages refuses (409 `space_homes_packages`,
+              // RBAC spec §6.9) and the detail names them — but not how to act
+              // on it, which is one move per package from its own page.
+              onError: (error) =>
+                toastError(error, {
+                  description:
+                    error instanceof ApiError && error.code === "space_homes_packages"
+                      ? t("spaces.deleteHomesPackagesHint")
+                      : undefined,
+                }),
             },
           );
         }}

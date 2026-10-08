@@ -6,7 +6,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ORG_ROLES_WITH_FULL_ACCESS } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -58,6 +57,7 @@ import { ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
 import { useSpaceMemberColumns } from "./space-member-columns";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../rbac-deeds";
+import { errorMessage } from "../../../lib/mutation-error";
 
 /** Owners and admins reach every space by role; a space-member row adds nothing. */
 const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
@@ -116,9 +116,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     { enabled: canSeeInvitations && !!currentOrg?.id },
   );
 
-  const onError = (err: unknown) =>
-    toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-
   /**
    * One control, two routes: an explicit row is PATCHed, an implicit member
    * (open space) has no row yet, so picking a role CREATES one. `PATCH` 404s
@@ -136,13 +133,13 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     if (member.source === "explicit") {
       updateMember.mutate(
         { params: { path: { id: spaceId, userId: member.userId } }, body },
-        { onError, onSuccess },
+        { onSuccess },
       );
       return;
     }
     addMember.mutate(
       { params: { path: { id: spaceId } }, body: { userId: member.userId, ...body } },
-      { onError, onSuccess },
+      { onSuccess },
     );
   };
 
@@ -161,7 +158,6 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               : t("spaceMembers.removedNone", { name: memberLabel(member) }),
           );
         },
-        onError,
       },
     );
   };
@@ -255,7 +251,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           rowKey={(member) => member.userId}
           isLoading={isLoading}
           isError={Boolean(error)}
-          error={<ErrorState message={getErrorMessage(error)} compact />}
+          error={<ErrorState error={error} compact />}
           empty={
             <EmptyState
               message={t("spaceMembers.empty")}
@@ -342,7 +338,7 @@ function AddSpaceMemberModal({
     error: rolesError,
     refetch: refetchRoles,
   } = useSpaceRoleOptions(spaceId);
-  const addMember = useAddSpaceMember();
+  const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   const canInviteExternal = can("members:invite");
@@ -359,6 +355,7 @@ function AddSpaceMemberModal({
   // one (add this space), never a second token — the server refuses with 409.
   const [pendingConflict, setPendingConflict] = useState(false);
   const inviteGuest = $api.useMutation("post", "/api/orgs/{orgId}/members", {
+    meta: { errorHandledByCaller: true },
     onSuccess: (invitation) => {
       setInvitationToken(invitation.token);
       void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
@@ -370,7 +367,7 @@ function AddSpaceMemberModal({
         setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
         return;
       }
-      setFormError(getErrorMessage(err));
+      setFormError(errorMessage(err));
     },
   });
   const isPending = addMember.isPending || inviteGuest.isPending;
@@ -453,7 +450,7 @@ function AddSpaceMemberModal({
           setFormError(
             err instanceof ApiError && err.code === "redundant_space_role"
               ? t("spaceMembers.redundantRole")
-              : getErrorMessage(err),
+              : errorMessage(err),
           ),
       },
     );

@@ -6,6 +6,7 @@
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
  *   1b. Integration tool/scope selections against each integration's PINNED catalog
+ *   1c. `connection_overrides` keys against the integrations the manifest declares
  *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, integrations)
  *
@@ -50,6 +51,7 @@ import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
+import { assertConnectionOverrideKeysDeclared } from "../lib/launch-schemas.ts";
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
@@ -194,6 +196,21 @@ export async function runInlinePreflight(params: {
     if (selectionErrors.length > 0) {
       if (mode === "fail-fast") throw validationFailed(selectionErrors);
       push(selectionErrors);
+    }
+  }
+
+  // ----- 1c. `connection_overrides` keys against the declared integrations -----
+  if (manifest) {
+    try {
+      assertConnectionOverrideKeysDeclared(
+        manifest as unknown as Record<string, unknown>,
+        body.connection_overrides,
+      );
+    } catch (err) {
+      if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
+      push([
+        { field: "connection_overrides", code: err.code, title: err.title, message: err.message },
+      ]);
     }
   }
 

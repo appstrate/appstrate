@@ -16,6 +16,7 @@
  * - Numeric IPs: 2130706433, 0x7f000001, 0177.0.0.1 → 127.0.0.1
  * - IPv6 variations: ::ffff:7f00:1, 0:0:0:0:0:ffff:7f00:1 → ::ffff:7f00:1
  * - IPv4-mapped IPv6: ::ffff:169.254.169.254 → ::ffff:a9fe:a9fe
+ * - IPv4 embedded in IPv6 (compatible, mapped, SIIT, NAT64, 6to4) is judged as that IPv4
  */
 
 /**
@@ -46,6 +47,8 @@ export function isBlockedHost(hostname: string): boolean {
   if (h === "localhost" || h === "sidecar" || h === "agent" || h === "host.docker.internal") {
     return true;
   }
+  // Every `*.localhost` name is loopback (RFC 6761 §6.3).
+  if (h.endsWith(".localhost")) return true;
   if (h === "metadata.google.internal") return true;
 
   // --- IPv4 checks (URL parser normalizes all numeric formats to dotted-decimal) ---
@@ -78,44 +81,55 @@ export function isBlockedHost(hostname: string): boolean {
     // Link-local (fe80::/10 — fe80:: through febf::)
     if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
 
+    // Deprecated site-local (fec0::/10 — fec0:: through feff::)
+    if (/^fe[c-f][0-9a-f]:/.test(h)) return true;
+
+    // Multicast (ff00::/8)
+    if (/^ff[0-9a-f]{2}:/.test(h)) return true;
+
     // Unique local address (fc00::/7 — fc00:: through fdff::)
     if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
 
-    // IPv4-mapped IPv6 in hex form (::ffff:HHHH:LLLL)
-    // URL parser normalizes ::ffff:127.0.0.1 → ::ffff:7f00:1
-    const mappedHex = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (mappedHex) {
-      const high = parseInt(mappedHex[1]!, 16);
-      const low = parseInt(mappedHex[2]!, 16);
-      const ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-      return isBlockedHost(ipv4);
-    }
+    // 64:ff9b:1::/48 — RFC 8215 local-use translation prefix, not globally
+    // reachable, and its operator picks the embedding length: blocked whole, like ULA.
+    const groups = ipv6Groups(h);
+    if (!groups) return true;
+    if (groups[0] === 0x64 && groups[1] === 0xff9b && groups[2] === 1) return true;
 
-    // IPv4-mapped IPv6 in dotted notation (::ffff:d.d.d.d) — some parsers preserve this
-    const mappedDot = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mappedDot) {
-      return isBlockedHost(mappedDot[1]!);
-    }
-
-    // IPv4-compatible IPv6 (deprecated but still routed by some stacks): the
-    // low 32 bits embed an IPv4 with NO `::ffff:` prefix — ::7f00:1 = 127.0.0.1,
-    // ::a9fe:a9fe = 169.254.169.254. Without this branch these slip past the
-    // IPv4 blocklist entirely. (`::ffff:H:L` mapped form is matched above and
-    // won't collide — it carries three hextets, not two.)
-    const compatHex = h.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (compatHex) {
-      const high = parseInt(compatHex[1]!, 16);
-      const low = parseInt(compatHex[2]!, 16);
-      const ipv4 = `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-      return isBlockedHost(ipv4);
-    }
-    const compatDot = h.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
-    if (compatDot) {
-      return isBlockedHost(compatDot[1]!);
-    }
+    // An IPv6 address that carries an IPv4 one reaches that IPv4 host: judge it as such.
+    const ipv4 = embeddedIpv4(groups);
+    if (ipv4) return isBlockedHost(ipv4);
   }
 
   return false;
+}
+
+/** The eight 16-bit groups of a WHATWG-serialized (hex, `::`-compressed) IPv6 address, or null. */
+function ipv6Groups(h: string): number[] | null {
+  const halves = h.split("::");
+  if (halves.length > 2) return null;
+  const hex = (part: string | undefined) => (part ? part.split(":") : []);
+  const head = hex(halves[0]);
+  const tail = hex(halves[1]);
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  const parts = [...head, ...new Array<string>(Math.max(fill, 0)).fill("0"), ...tail];
+  if (parts.length !== 8 || !parts.every((p) => /^[0-9a-f]{1,4}$/.test(p))) return null;
+  return parts.map((p) => parseInt(p, 16));
+}
+
+/**
+ * The IPv4 address embedded under a prefix that routes to it: IPv4-compatible `::/96`,
+ * IPv4-mapped `::ffff:0:0/96`, SIIT IPv4-translated `::ffff:0:0:0/96` (RFC 2765),
+ * NAT64 `64:ff9b::/96` (RFC 6052), 6to4 `2002::/16` (RFC 3056).
+ */
+function embeddedIpv4(g: number[]): string | null {
+  const quad = (hi: number, lo: number) => `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  const zero = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+  if (zero(0, 5) && (g[5] === 0 || g[5] === 0xffff)) return quad(g[6]!, g[7]!);
+  if (zero(0, 4) && g[4] === 0xffff && g[5] === 0) return quad(g[6]!, g[7]!);
+  if (g[0] === 0x64 && g[1] === 0xff9b && zero(2, 6)) return quad(g[6]!, g[7]!);
+  if (g[0] === 0x2002) return quad(g[1]!, g[2]!);
+  return null;
 }
 
 /**

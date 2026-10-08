@@ -9,10 +9,16 @@ import {
   useScheduleFormDeps,
 } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { isQueryInFlight } from "../lib/query-state";
 import { ScheduleForm } from "../components/schedule-form";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import {
+  LoadingState,
+  ErrorState,
+  ResourceErrorState,
+  EmptyState,
+} from "../components/page-states";
 import { NoAccessState } from "../components/route-gate";
 import { usePermissions } from "../hooks/use-permissions";
 import { Lock } from "lucide-react";
@@ -22,15 +28,16 @@ export function ScheduleEditPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
 
-  const { data: schedule, isLoading, error } = useScheduleById(id);
+  const scheduleQuery = useScheduleById(id);
+  const { data: schedule, error } = scheduleQuery;
   const { deps, error: depsError, denied } = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const { can } = usePermissions();
   const mayWrite = useCanWriteSchedule(schedule);
 
-  if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error?.message} />;
+  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
+  if (error || !schedule) return <ResourceErrorState error={error} />;
   // Reached by URL on a schedule running as another member: every write would 403.
   // Drawn like `NoAccessState`: the shell pads the page, the state needs no frame.
   if (!mayWrite) return <EmptyState message={t("schedule.memberGoverned")} icon={Lock} />;
@@ -40,7 +47,7 @@ export function ScheduleEditPage() {
   // on every save). `key={schedule.id}` gives no remount to repair it. When
   // that query FAILS (deleted agent, revoked permission) the detail never
   // lands, so waiting is waiting forever — say so instead.
-  if (depsError) return <ErrorState message={depsError.message} />;
+  if (depsError) return <ErrorState error={depsError} />;
   if (denied) return <NoAccessState />;
   if (!deps) return <LoadingState />;
 
@@ -65,7 +72,7 @@ export function ScheduleEditPage() {
           name: schedule.name ?? "",
           cron_expression: schedule.cron_expression,
           timezone: schedule.timezone,
-          enabled: schedule.enabled ?? true,
+          enabled: schedule.enabled,
           input: schedule.input ?? {},
           model_id_override: schedule.model_id_override ?? null,
           generation_config_override: schedule.generation_config_override ?? null,

@@ -43,7 +43,7 @@ export function useScheduleColumns({
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium">{schedule.name || schedule.id}</span>
+            <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
             {schedule.unread_count > 0 && (
               <span className="bg-destructive text-destructive-foreground relative z-10 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
                 {schedule.unread_count > 99 ? "99+" : schedule.unread_count}
@@ -79,7 +79,7 @@ export function useScheduleColumns({
       width: "116px",
       cell: (schedule) => (
         <>
-          <ScheduleStatusBadge enabled={schedule.enabled ?? true} />
+          <ScheduleStatusBadge schedule={schedule} />
           {schedule.running_runs > 0 && (
             <Loader2
               className="text-primary size-3.5 shrink-0 animate-spin"
@@ -143,6 +143,7 @@ export function SchedulesTable({
   columns,
   isLoading,
   isError,
+  error,
   empty,
   columnMode,
   surface,
@@ -152,6 +153,8 @@ export function SchedulesTable({
   columns: DataColumn<EnrichedSchedule>[];
   isLoading?: boolean;
   isError?: boolean;
+  /** The failure, said the way the caller words it; the table has a default. */
+  error?: React.ReactNode;
   empty?: React.ReactNode;
   /** Level-one collections keep every reader-selected column reachable. */
   columnMode?: "tiered" | "scroll";
@@ -169,10 +172,11 @@ export function SchedulesTable({
       rows={schedules}
       isLoading={isLoading}
       isError={isError}
+      error={error}
       empty={empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />}
       rowKey={(schedule) => schedule.id}
       rowHref={(schedule) => `/schedules/${schedule.id}`}
-      rowLabel={(schedule) => schedule.name || schedule.id}
+      rowLabel={(schedule) => schedule.name || t("schedule.unnamed", { ns: "agents" })}
     />
   );
 }

@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Download, ExternalLink, Pin, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { FileDto } from "../hooks/use-files";
 import { documentExpiryInfo, documentRunHref } from "../lib/documents";

@@ -55,6 +55,7 @@ const member: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => false,
+  formatBytes: String,
 };
 
 /** Holds `billing:manage`: billing refusals link to the billing page instead. */

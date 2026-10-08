@@ -3,9 +3,10 @@
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { ConnectionResolutionSource } from "@appstrate/core/integration";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -40,7 +41,11 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type { RunArtifactsSummary } from "@appstrate/db/schema";
+import type {
+  CredentialSource,
+  RunArtifactsSummary,
+  ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -117,7 +122,7 @@ export interface RunWireDto {
   version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
-  model_source: string | null;
+  model_source: CredentialSource | null;
   /** Effective generation controls frozen at kickoff and raw override layer. */
   generation: ModelGenerationSettings | null;
   generation_override: ModelGenerationSettings | null;
@@ -141,18 +146,18 @@ export interface RunWireDto {
 /**
  * One integration connection resolved for a run, projected from the internal
  * `runs.resolved_connections` snapshot for display — one entry per bound
- * connection, so several may share an `integration_id`. The raw `connectionId`
+ * connection, so several may share an `integration_package_id`. The raw `connectionId`
  * is deliberately omitted — only display-safe fields cross the wire.
  */
 export interface RunConnectionUsed {
   /** Integration package id (`@scope/integration`). */
-  integration_id: string;
-  /** Connection label, denormalized at kickoff. Null on pre-snapshot runs. */
-  label: string | null;
+  integration_package_id: string;
+  /** Connection label, denormalized at kickoff. */
+  label: string;
   /** Account identifier (email, sub), denormalized at kickoff. */
-  account_id: string | null;
-  /** Resolution mechanism (`admin_pin` | `run_override` | `fallback_auto` | …). */
-  source: string;
+  account_id: string;
+  /** The cascade layer that bound the connection. */
+  source: ConnectionResolutionSource;
 }
 
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
@@ -205,8 +210,6 @@ export interface AppConfigFeatures {
   smtp: boolean;
   /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
   signupDisabled: boolean;
-  /** AUTH_DISABLE_ORG_CREATION — webapp routes org-less users to "waiting for invitation". */
-  orgCreationDisabled: boolean;
   /**
    * AUTH_BOOTSTRAP_TOKEN is set and unredeemed (#344 Layer 2b). The webapp
    * routes the user to `/claim` instead of `/login`, where they paste the
@@ -225,15 +228,6 @@ export interface AppConfig {
     terms?: string;
     privacy?: string;
   };
-  /**
-   * AUTH_BOOTSTRAP_OWNER_EMAIL surfaced for the SPA so `RegisterForm` can
-   * pre-fill and lock the email field on the bootstrap signup. The value
-   * is the same admin contact that any visitor would discover by
-   * submitting `/register` and reading the rejection message, so exposing
-   * it does not widen the threat surface — but it removes the only path
-   * to a typo on the bootstrap account.
-   */
-  bootstrapOwnerEmail?: string;
   trustedOrigins: string[];
   /**
    * Deployed build identity (APP_VERSION / GIT_SHA stamped into the image at
@@ -321,6 +315,8 @@ export interface ScheduleWireDto {
   spaceId: string;
   name: string | null;
   enabled: boolean;
+  /** The system act that disabled the schedule — `null` when enabled or paused by a person. */
+  disabled_reason: ScheduleDisabledReason | null;
   cron_expression: string;
   timezone: string;
   input: Record<string, unknown> | null;
@@ -934,19 +930,23 @@ export interface OrgModelInfo extends ModelMetadata {
   provider_name: string | null;
   /**
    * Pi builtin provider key of {@link providerId}'s models (e.g. `moonshotai`
-   * for `moonshot`) — what a client builds the Pi model record from. `null`
+   * for `moonshot`) — the provider a client builds its Pi model under. `null`
    * for a gateway and for model aliases (part of the stripped backing).
    */
   pi_provider: string | null;
+  /**
+   * The Pi dialect of this model's registry record, for a client building its
+   * own Pi model. `null` without a record and for model aliases.
+   */
+  pi_dialect: PiModelDialect | null;
   base_url: string | null;
   modelId: string | null;
   enabled: boolean;
   is_default: boolean;
   /**
    * True when the model's stored credential can no longer be used for
-   * inference — an OAuth credential flagged `needsReconnection` (revoked
-   * refresh token), or, for either auth mode, a stored blob that no longer
-   * decrypts (e.g. a key rotation that retired a kid still in use). The model
+   * inference — flagged `needsReconnection` (revoked OAuth grant, BYOK key
+   * rejected upstream repeatedly) or a stored blob that no longer decrypts. The model
    * is listed (so it can be inspected/detached/deleted) but must never be
    * selectable for inference. Always false for built-in/system models, which
    * read their key from the environment and have no stored blob.

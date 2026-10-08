@@ -29,7 +29,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { useTranslation } from "react-i18next";
 import {
@@ -70,6 +69,7 @@ import { useCurrentOrgId, useOrg } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { missingIntegrations } from "../lib/activation-closure";
 import { chatEnforceErrorKey } from "../lib/chat-enforce-errors";
+import { toastError } from "../lib/mutation-error";
 import type { CataloguePlacement } from "../lib/catalogue-placement";
 import {
   sheetChatEnforce,
@@ -279,7 +279,8 @@ export function CataloguePreview({
   const enforcesAnywhere = enforceable && rows.some((row) => chatEnforcedIn(row.id));
   const notifyEnforceError = (err: unknown) => {
     const key = chatEnforceErrorKey(err);
-    toast.error(key ? t(key, { ns: "common" }) : getErrorMessage(err));
+    if (key) toast.error(t(key, { ns: "common" }));
+    else toastError(err);
   };
   const enforceSwitchFor = (row: SheetSpaceRow) => {
     const verdict = sheetChatEnforce(type, row, {

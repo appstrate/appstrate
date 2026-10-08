@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { CheckCircle2, FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
@@ -19,7 +18,6 @@ import {
   useTestProxy,
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -247,7 +245,7 @@ export function OrgSettingsProxiesPage() {
         rowKey={(p) => p.id}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         // No action of its own: the button above the table is the same one, and
         // it does not go away when the list is empty.
         empty={<EmptyState message={t("proxies.empty")} icon={Globe} compact />}
@@ -271,7 +269,6 @@ export function OrgSettingsProxiesPage() {
               },
               {
                 onSuccess: () => setProxyModalOpen(false),
-                onError: (error) => toast.error(getErrorMessage(error)),
               },
             );
           } else {
@@ -279,7 +276,6 @@ export function OrgSettingsProxiesPage() {
               { body: data },
               {
                 onSuccess: () => setProxyModalOpen(false),
-                onError: (error) => toast.error(getErrorMessage(error)),
               },
             );
           }
@@ -298,7 +294,6 @@ export function OrgSettingsProxiesPage() {
               { params: { path: { id: confirmState.id } } },
               {
                 onSuccess: () => setConfirmState(null),
-                onError: (error) => toast.error(getErrorMessage(error)),
               },
             );
           }

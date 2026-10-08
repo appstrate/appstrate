@@ -140,63 +140,37 @@ export const envSchema = z
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-    /**
-     * Active key id for the auth-secret map. Cookies and HMACs WE sign
-     * (e.g. `pending-client-cookie.ts`) include this kid so verifiers can
-     * pick the right secret from `BETTER_AUTH_SECRETS` during rotation.
-     */
-    BETTER_AUTH_ACTIVE_KID: z
-      .string()
-      .default("k1")
-      .refine((v) => /^[A-Za-z0-9_-]{1,32}$/.test(v), {
-        message: "BETTER_AUTH_ACTIVE_KID must match /^[A-Za-z0-9_-]{1,32}$/",
-      }),
-    /**
-     * JSON map of `{ kid: secret }` enumerating every secret a verifier
-     * should accept. Empty object (default) means "use BETTER_AUTH_SECRET
-     * under BETTER_AUTH_ACTIVE_KID" — fully backward compatible.
-     *
-     * Rotation pattern (online, no forced sign-out for cookies WE sign):
-     *   1. Add the new secret to BETTER_AUTH_SECRETS under a fresh kid.
-     *   2. Flip BETTER_AUTH_ACTIVE_KID to the fresh kid + restart.
-     *   3. Wait out the longest cookie TTL (10 min for pending-client).
-     *   4. Drop the old kid from BETTER_AUTH_SECRETS + restart.
-     *
-     * The Better Auth session cookie is signed with the active secret only;
-     * Better Auth itself does not (yet) accept a verification list, so
-     * rotating the session cookie still requires re-login.
-     */
+    /** Auth secret keyring `<version>:<secret>[,…]`, current first; see docs/ENV.md. */
     BETTER_AUTH_SECRETS: z
       .string()
-      .default("{}")
-      .transform((s, ctx) => {
-        // Empty string == unset (compose `${VAR:-}` defaults to ""); fall back
-        // to "{}" so the JSON parse below succeeds.
-        const raw = s === "" ? "{}" : s;
-        try {
-          const parsed = JSON.parse(raw) as unknown;
-          // ── Namespace-collision scrub ─────────────────────────────────────
-          // better-auth 1.6+ ships its own `BETTER_AUTH_SECRETS` env var with
-          // a different format (CSV `v1:secret,v2:secret`). It is read
-          // unconditionally inside `betterAuth()` regardless of whether we
-          // pass an explicit `secret:` option, so a non-CSV value (incl. our
-          // JSON `{}` default) crashes boot with `BetterAuthError: Invalid
-          // BETTER_AUTH_SECRETS entry`. We never want better-auth's own
-          // multi-secret rotation feature — `auth.ts` always passes `secret`
-          // explicitly via `env.BETTER_AUTH_SECRETS[…] ?? BETTER_AUTH_SECRET`
-          // — so unconditionally remove the raw env so better-auth falls back
-          // to its legacy single-secret path.
-          delete process.env.BETTER_AUTH_SECRETS;
-          return parsed;
-        } catch {
-          ctx.addIssue({
-            code: "custom",
-            message: "BETTER_AUTH_SECRETS must be valid JSON",
-          });
-          return z.NEVER;
+      .optional()
+      .transform((raw, ctx) => {
+        if (raw === undefined) return undefined;
+        const secrets: { version: number; value: string }[] = [];
+        const seen = new Set<number>();
+        for (const [i, entry] of raw.split(",").entries()) {
+          const match = /^(\d+):(.+)$/s.exec(entry.trim());
+          const value = match?.[2]?.trim();
+          const version = Number(match?.[1]);
+          if (!match || !value || !Number.isSafeInteger(version)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `BETTER_AUTH_SECRETS entry #${i + 1} must be "<version>:<secret>" (version a non-negative safe integer, secret non-empty)`,
+            });
+            return z.NEVER;
+          }
+          if (seen.has(version)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `BETTER_AUTH_SECRETS has duplicate version ${version}`,
+            });
+            return z.NEVER;
+          }
+          seen.add(version);
+          secrets.push({ version, value });
         }
-      })
-      .pipe(z.record(z.string(), z.string())),
+        return secrets;
+      }),
     // Dedicated HMAC secret for FS upload-sink tokens. Separate from
     // BETTER_AUTH_SECRET so the two can be rotated independently and a
     // compromise of one does not affect the other.
@@ -284,6 +258,11 @@ export const envSchema = z
       .pipe(z.record(z.string(), z.string())),
     SYSTEM_PROXIES: jsonEnv<unknown[]>("[]"),
     SYSTEM_PROVIDER_KEYS: jsonEnv<unknown[]>("[]"),
+    // The live model catalog's channel (`docs/ENV.md`). `off` disables the read:
+    // an empty value is unset before this schema sees it, so it means the default.
+    MODEL_CATALOG_URL: z
+      .union([z.literal("off"), z.url({ protocol: /^https?$/ })])
+      .default("https://get.appstrate.dev/model-catalog"),
     // System-level integrations offered by the deployment out of the box.
     // Membership = the "auto-active" policy (on by default until an org opts
     // out). Each entry MAY ship one or more shared OAuth clients
@@ -823,8 +802,8 @@ export const envSchema = z
     // AUTH_DISABLE_SIGNUP — when true, blocks brand-new account creation
     // (email/password, magic-link, social OIDC). Three exceptions always pass:
     //   1. Email matches a pending+non-expired invitation in `org_invitations`.
-    //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS.
-    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL (1st run only).
+    //   2. Email is in AUTH_PLATFORM_ADMIN_EMAILS, on proof of ownership.
+    //   3. Email matches AUTH_BOOTSTRAP_OWNER_EMAIL, on proof of ownership.
     AUTH_DISABLE_SIGNUP: z
       .string()
       .default("false")
@@ -888,10 +867,8 @@ export const envSchema = z
         message: "AUTH_PLATFORM_ADMIN_EMAILS must be a comma-separated list of valid emails",
       }),
     // AUTH_BOOTSTRAP_OWNER_EMAIL — declarative bootstrap path for fresh
-    // self-hosted instances in closed mode. When set, this email is allowed
-    // to sign up even with AUTH_DISABLE_SIGNUP=true, and an organization is
-    // auto-created with this user as owner on first signup. Idempotent: if
-    // the user already owns an org, the after-hook is a no-op.
+    // self-hosted instances in closed mode. An organization is auto-created
+    // with this account as owner when the account is, on proof of ownership.
     //
     // Empty is allowed (open mode); anything else must look like an email
     // so a typo (`AUTH_BOOTSTRAP_OWNER_EMAIL=admin`) is caught at boot
@@ -922,8 +899,7 @@ export const envSchema = z
     // logout, cross-device revocation, freshness gate, realm guard):
     // `apps/api/test/integration/auth/session-cookie-cache.test.ts`.
     AUTH_SESSION_COOKIE_CACHE_SECONDS: z.coerce.number().int().min(0).default(0),
-    // AUTH_BOOTSTRAP_TOKEN — one-shot redemption token for unattended
-    // installs that didn't supply a named owner email (#344 Layer 2b).
+    // AUTH_BOOTSTRAP_TOKEN — one-shot token that creates the owner account.
     // The CLI generates a 256-bit token at install time, writes it into
     // .env, and prints a banner with the redemption URL. The platform
     // reads it at boot, holds it in memory, and lets the first POST to

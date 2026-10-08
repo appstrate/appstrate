@@ -5,6 +5,7 @@ import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
+import { mayCreateOrganization } from "@appstrate/db/auth-policy";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { profiles, user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
@@ -53,7 +54,7 @@ const profileRouter = new Hono<AppEnv>();
 // dashboard-side email change. One indexed join on the user PK is cheap
 // versus maintaining a second email copy on `profiles`.
 async function getProfileResource(userId: string) {
-  const rows = await db
+  const [row] = await db
     .select({
       id: profiles.id,
       displayName: profiles.displayName,
@@ -66,7 +67,7 @@ async function getProfileResource(userId: string) {
     .where(eq(profiles.id, userId))
     .limit(1);
 
-  return rows[0] ?? null;
+  return row ? { ...row, can_create_org: mayCreateOrganization(row.email) } : null;
 }
 
 // Issue #172 (extension) — `/api/profile` is the dashboard user's own

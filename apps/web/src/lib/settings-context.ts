@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isSpaceEnterable } from "../hooks/use-current-space";
+
 export type SettingsScope = "organization" | "workspace";
 
 interface WorkspaceChoice {
   id: string;
   isDefault: boolean;
+  access: string;
 }
 
 const LAST_WORKSPACE_STORAGE_KEY = "appstrate_settings_last_workspace_by_org";
 
+/** Only a space the caller may enter: a listed closed one 403s every request. */
 export function pickWorkspaceForOrganization<T extends WorkspaceChoice>(
   workspaces: T[],
   lastWorkspaceId: string | null,
 ): T | null {
+  const enterable = workspaces.filter(isSpaceEnterable);
   return (
-    workspaces.find((workspace) => workspace.id === lastWorkspaceId) ??
-    workspaces.find((workspace) => workspace.isDefault) ??
-    workspaces[0] ??
+    enterable.find((workspace) => workspace.id === lastWorkspaceId) ??
+    enterable.find((workspace) => workspace.isDefault) ??
+    enterable[0] ??
     null
   );
 }

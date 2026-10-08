@@ -462,7 +462,7 @@ const oauthClientTiers = new Map<string, { space: LabOAuthClient[]; org: LabOAut
 /** The deployment's system client: the `drive` auth has one, the others none. */
 function systemClient(authKey: string): ClientDescriptor | null {
   return authKey === f.INTEGRATION_AUTH_KEY
-    ? (f.integrationClients.data.find((row) => row.source === "built-in") ?? null)
+    ? (f.integrationClients.data.find((row) => row.source === "system") ?? null)
     : null;
 }
 
@@ -485,7 +485,7 @@ function clientTiers(packageId: string, authKey: string) {
     });
     const rows = authKey === f.INTEGRATION_AUTH_KEY ? f.integrationClients.data : [];
     tiers = {
-      space: rows.filter((row) => row.source === "custom").map((row) => seeded("space", row)),
+      space: rows.filter((row) => row.source === "space").map((row) => seeded("space", row)),
       org: rows.filter((row) => row.source === "org").map((row) => seeded("org", row)),
     };
     oauthClientTiers.set(key, tiers);
@@ -536,7 +536,7 @@ function listOAuthClients(tier: "space" | "org", packageId: string, authKey: str
       ? { ...c, is_default: c.client_ref === defaultRef }
       : {
           client_ref: c.id,
-          source: c.tier === "org" ? "org" : "custom",
+          source: c.tier,
           client_id: c.client_id,
           is_default: c.id === defaultRef,
           auto_provisioned: false,
@@ -597,6 +597,36 @@ function clientWriteBody(body: unknown) {
   };
 }
 
+/**
+ * `updateIntegrationOAuthClient` on the server: a partial write. `client_id`
+ * cannot change and is ignored; an omitted field keeps its stored value, a
+ * `null` `redirect_uri` clears it, an empty `client_secret` clears the secret
+ * and is accepted only beside `token_endpoint_auth_method: "none"`.
+ */
+function clientPatchBody(stored: LabOAuthClient, body: unknown) {
+  const b = (body ?? {}) as {
+    client_secret?: unknown;
+    token_endpoint_auth_method?: OAuthClientRow["token_endpoint_auth_method"];
+    redirect_uri?: unknown;
+  };
+  const fields: Partial<
+    Pick<LabOAuthClient, "has_client_secret" | "token_endpoint_auth_method" | "redirect_uri">
+  > = {};
+  if (typeof b.client_secret === "string") {
+    if (b.client_secret === "" && b.token_endpoint_auth_method !== "none") return null;
+    fields.has_client_secret = b.client_secret.length > 0;
+  }
+  if (b.token_endpoint_auth_method !== undefined) {
+    fields.token_endpoint_auth_method = b.token_endpoint_auth_method;
+  } else if (fields.has_client_secret && stored.token_endpoint_auth_method === "none") {
+    // A new secret on a public client: the manifest's method applies again.
+    fields.token_endpoint_auth_method = null;
+  }
+  if (b.redirect_uri === null) fields.redirect_uri = null;
+  else if (typeof b.redirect_uri === "string") fields.redirect_uri = b.redirect_uri;
+  return fields;
+}
+
 const badClientRequest: LabResponse = {
   status: 400,
   body: { title: "Bad Request", status: 400, code: "validation_failed" },
@@ -638,13 +668,13 @@ const OAUTH_CLIENT_ROUTES: Array<{ method: string; pattern: RegExp; handler: Han
     },
   },
   {
-    method: "PUT",
+    method: "PATCH",
     pattern: /^\/api\/(org-)?integrations\/[^/]+\/[^/]+\/oauth-clients\/[^/]+$/,
     handler: (url, scenario, _headers, body) => {
       const { packageId, clientId } = clientIdPath(url);
       const found = findOAuthClient(packageId, clientId);
       if (!found || found.tier !== tierOf(url)) return { status: 404, body: {} };
-      const fields = clientWriteBody(body);
+      const fields = clientPatchBody(found.client, body);
       if (!fields) return badClientRequest;
       const rotated = { ...found.client, ...fields, updatedAt: new Date().toISOString() };
       if (scenario !== "error") Object.assign(found.client, rotated);
@@ -878,7 +908,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         status: 200,
         body: {
           ...detail,
-          ...(row ? { id: row.id, active: row.active } : {}),
+          ...(row
+            ? {
+                id: row.id,
+                active: row.active,
+                block_user_connections: row.block_user_connections ?? detail.block_user_connections,
+              }
+            : {}),
           manifest: technical
             ? {
                 ...detail.manifest,
@@ -1945,6 +1981,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/chat\/sessions\/[^/]+$/,
     handler: (url, s) => {
       const id = endUserId(url);
+      // A conversation that no longer exists (deleted, or another member's):
+      // the route's 404, which the chat renders as "Conversation introuvable".
+      // Any other unknown id still answers, so a fresh conversation opens.
+      // Open /chat/chat_gone to see it.
+      if (id === "chat_gone") {
+        return { status: 404, body: { title: "Not Found", status: 404, code: "not_found" } };
+      }
       const session = [...f.chatSessions.data, ...f.heavyChatSessions].find(
         (candidate) => candidate.id === id,
       ) ?? { ...f.chatSessions.data[0]!, id, title: null };

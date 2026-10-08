@@ -70,13 +70,13 @@ const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
 
 // Readable label + icon for an Appstrate API operation, by verb prefix — a
 // heuristic, not an exhaustive operationId map (which would rot). The first
-// match wins; unmatched ops fall back to the neutral "Opération".
-const OP_RULES: { re: RegExp; label: string; Icon: LucideIcon }[] = [
-  { re: /^(run|trigger|execute|start)/i, label: "Lancement", Icon: PlayIcon },
-  { re: /^(create|post|add|import|upload)/i, label: "Création", Icon: PlusIcon },
-  { re: /^(update|patch|put|set|rename|configure)/i, label: "Modification", Icon: PencilIcon },
-  { re: /^(delete|remove|cancel|archive)/i, label: "Suppression", Icon: Trash2Icon },
-  { re: /^(list|get|search|find|read)/i, label: "Lecture", Icon: SearchIcon },
+// match wins; unmatched ops fall back to the neutral `tool.op.other`.
+const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
+  { re: /^(run|trigger|execute|start)/i, labelKey: "tool.op.launch", Icon: PlayIcon },
+  { re: /^(create|post|add|import|upload)/i, labelKey: "tool.op.create", Icon: PlusIcon },
+  { re: /^(update|patch|put|set|rename|configure)/i, labelKey: "tool.op.update", Icon: PencilIcon },
+  { re: /^(delete|remove|cancel|archive)/i, labelKey: "tool.op.delete", Icon: Trash2Icon },
+  { re: /^(list|get|search|find|read)/i, labelKey: "tool.op.read", Icon: SearchIcon },
 ];
 
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
@@ -144,12 +144,13 @@ function hasContent(value: unknown): boolean {
   return true;
 }
 
-function DetailSection({ title, value }: { title: string; value: unknown }) {
+function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }) {
+  const { t } = useChatHost();
   if (!hasContent(value)) return null;
   return (
     <div className="space-y-1">
       <div className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
-        {title}
+        {t(titleKey)}
       </div>
       <JsonView value={value} />
     </div>
@@ -165,6 +166,7 @@ export function ToolCallCard({
   phase,
   Icon,
   label,
+  labelKey,
   idText,
   args,
   result,
@@ -174,7 +176,9 @@ export function ToolCallCard({
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
-  label: string;
+  /** Shown verbatim (a tool name); `labelKey` is translated instead. */
+  label?: string;
+  labelKey?: string;
   idText?: string;
   args: unknown;
   result: unknown;
@@ -182,6 +186,8 @@ export function ToolCallCard({
   toolCallId: string;
   timing?: unknown;
 }) {
+  const { t } = useChatHost();
+  const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
   // `unwrapResult` JSON-parses the tool payload. Unmemoized it re-parsed on
   // every render of this card — and during a stream the thread re-renders per
@@ -211,7 +217,7 @@ export function ToolCallCard({
       >
         <LeadIcon phase={phase} Icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-          <span className="font-medium">{label}</span>
+          <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
         <Meta phase={phase} status={status} durationMs={durationMs} />
@@ -224,16 +230,16 @@ export function ToolCallCard({
           title={
             <span className="flex items-center gap-2">
               <Icon className="size-4 shrink-0" />
-              {label}
+              {title}
               {idText ? <code className="text-muted-foreground text-xs">{idText}</code> : null}
             </span>
           }
           onClose={() => setOpen(false)}
         >
           <div className="space-y-4">
-            <DetailSection title="Entrée" value={args} />
-            <DetailSection title="Sortie" value={unwrapped} />
-            <DetailSection title="Métadonnées" value={meta} />
+            <DetailSection titleKey="tool.detail.input" value={args} />
+            <DetailSection titleKey="tool.detail.output" value={unwrapped} />
+            <DetailSection titleKey="tool.detail.metadata" value={meta} />
           </div>
         </Modal>
       ) : null}
@@ -305,9 +311,9 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
   const rawDetails = (
     <div className="space-y-4">
-      <DetailSection title="Entrée" value={props.args} />
-      <DetailSection title="Sortie" value={unwrapped} />
-      <DetailSection title="Métadonnées" value={meta} />
+      <DetailSection titleKey="tool.detail.input" value={props.args} />
+      <DetailSection titleKey="tool.detail.output" value={unwrapped} />
+      <DetailSection titleKey="tool.detail.metadata" value={meta} />
     </div>
   );
   const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
@@ -376,12 +382,15 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       return <RunLaunchCard {...props} />;
     }
 
-    const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
+    const rule = OP_RULES.find((r) => r.re.test(opId)) ?? {
+      Icon: ZapIcon,
+      labelKey: "tool.op.other",
+    };
     return (
       <ToolCallCard
         phase={phase}
         Icon={rule.Icon}
-        label={rule.label}
+        labelKey={rule.labelKey}
         idText={opId}
         args={args}
         result={result}
@@ -404,7 +413,7 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={SearchIcon}
-      label="Recherche d'opérations"
+      labelKey="tool.searchOperations"
       idText={stringArg(props.args, "query")}
       args={props.args}
       result={props.result}
@@ -421,7 +430,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={BookOpenIcon}
-      label="Description d'opération"
+      labelKey="tool.describeOperation"
       idText={stringArg(props.args, "operation_id")}
       args={props.args}
       result={props.result}

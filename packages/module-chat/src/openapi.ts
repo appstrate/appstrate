@@ -11,12 +11,14 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import { chatSkillModeValues } from "@appstrate/db/schema";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 
+const problem = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
 /** `enforced_skills_unavailable`, shared by the turn and the names read. */
 const enforcedSkillsUnavailableResponse = (description: string) => ({
   description: `\`enforced_skills_unavailable\` — ${description} RFC 9457 problem+json.`,
-  content: {
-    "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-  },
+  content: problem,
 });
 
 const stdHeaders = {
@@ -171,7 +173,10 @@ export const chatPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited (30/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (30/min per caller)",
+        },
       },
     },
   },
@@ -274,7 +279,10 @@ export const chatPaths = {
         "204": { description: "Session marked read" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "429": { description: "Rate limited (120/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (120/min per caller)",
+        },
       },
     },
   },
@@ -298,7 +306,10 @@ export const chatPaths = {
         },
         "204": { description: "No active stream to resume" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited (120/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (120/min per caller)",
+        },
       },
     },
   },
@@ -346,7 +357,10 @@ export const chatPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "429": { description: "Rate limited (120/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (120/min per caller)",
+        },
         "503": enforcedSkillsUnavailableResponse(
           "the space's enforced skills could not be loaded.",
         ),
@@ -422,18 +436,21 @@ export const chatPaths = {
           content: { "text/event-stream": { schema: { type: "string" } } },
         },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description:
             "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
         },
         "402": {
           description:
             "Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled.",
+          content: problem,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
             "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json.",
+          content: problem,
         },
         "429": {
           $ref: "#/components/responses/RateLimited",
@@ -462,7 +479,10 @@ export const chatPaths = {
         "204": { description: "Stop signal accepted" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "429": { description: "Rate limited (60/min per caller)" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (60/min per caller)",
+        },
       },
     },
   },

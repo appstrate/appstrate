@@ -68,7 +68,7 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1300px]">
-      {error && !isLoading ? <ErrorState message={error.message} compact /> : null}
+      {error && !isLoading ? <ErrorState error={error} compact /> : null}
       <DashboardContent
         {...{
           firstName,

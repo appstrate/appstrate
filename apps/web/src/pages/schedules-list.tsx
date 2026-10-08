@@ -9,7 +9,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
-import { EmptyState } from "../components/page-states";
+import { EmptyState, ErrorState } from "../components/page-states";
 import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
 import { ScheduleCard } from "../components/schedule-card";
 import { CardGrid } from "../components/card-grid";
@@ -28,7 +28,7 @@ export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
   const navigate = useNavigate();
-  const { data: schedules, isLoading, isError } = useAllSchedules();
+  const { data: schedules, isLoading, isError, error } = useAllSchedules();
   const { data: agents } = useAgents();
   const placeholder = useSearchPlaceholder(t("schedules.title"));
   const view = useScheduleViewStore((state) => state.view);
@@ -130,6 +130,7 @@ export function SchedulesListPage() {
           columnMode="scroll"
           isLoading={isLoading}
           isError={isError}
+          error={<ErrorState error={error} compact />}
           // A list nobody filtered and a filter that matched nothing are two
           // different sentences. The bar stays in either case.
           empty={emptyBody}
@@ -147,6 +148,7 @@ export function SchedulesListPage() {
           )}
           isLoading={isLoading}
           isError={isError}
+          error={<ErrorState error={error} compact />}
           empty={emptyBody}
         />
       )}

@@ -14,12 +14,23 @@ import {
   seedOrgModelProviderKey,
   seedOrgModel,
   seedOrgModelProviderOAuth,
+  seedPackage,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  orgModels,
+  organizations,
+  spacePackages,
+} from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import { listCatalogModels, lookupCatalogModel } from "../../../src/services/model-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogDialect,
+  lookupCatalogModel,
+} from "../../../src/services/model-catalog.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -52,6 +63,14 @@ describe("Models API", () => {
   });
 
   /** Helper: create a model provider key and return its ID (required for model creation). */
+  /** The first model of an org is its default, and the default cannot be switched off. */
+  async function releaseDefaultModel(): Promise<void> {
+    await db
+      .update(organizations)
+      .set({ defaultModelId: null })
+      .where(eq(organizations.id, ctx.orgId));
+  }
+
   async function createProviderKey(): Promise<string> {
     const res = await app.request("/api/model-provider-credentials", {
       method: "POST",
@@ -185,7 +204,7 @@ describe("Models API", () => {
       expect(row.credentialId).toBe(credentialId);
     });
 
-    it("exposes `pi_provider` — the Pi key of the credential's provider, null for a gateway, withheld for an alias", async () => {
+    it("exposes `pi_provider` and `pi_dialect` — the Pi key and the record's dialect, null for a gateway, withheld for an alias", async () => {
       const [kimi, kimiAlias] = listCatalogModels(getModelProvider("moonshot")!).map((m) => m.id);
       const moonshot = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
       const named = await seedOrgModel({
@@ -216,6 +235,13 @@ describe("Models API", () => {
       expect(projected(named.id).pi_provider).toBe("moonshotai");
       expect(projected(gateway.id).pi_provider).toBeNull();
       expect(projected(alias.id).pi_provider).toBeNull();
+      // The dialect a client builds its Pi model from is the registry record's.
+      const dialectOf = (id: string) =>
+        JSON.parse(JSON.stringify(lookupCatalogDialect(getModelProvider("moonshot")!, id)));
+      expect(dialectOf(kimi!)).toHaveProperty("name");
+      expect(projected(named.id).pi_dialect).toEqual(dialectOf(kimi!));
+      expect(projected(gateway.id).pi_dialect).toBeNull();
+      expect(projected(alias.id).pi_dialect).toBeNull();
 
       const loopback = mintLoopbackToken({
         userId: ctx.user.id,
@@ -229,6 +255,7 @@ describe("Models API", () => {
         "X-Org-Id": ctx.orgId,
       });
       expect(firstParty(alias.id).pi_provider).toBe("moonshotai");
+      expect(firstParty(alias.id).pi_dialect).toEqual(dialectOf(kimiAlias!));
     });
   });
 
@@ -474,7 +501,9 @@ describe("Models API", () => {
         body: JSON.stringify({ label: "Unknown", modelId: "no-such-catalog-model", credentialId }),
       });
       expect(res.status).toBe(400);
-      expect(((await res.json()) as { detail?: string }).detail).toContain("not offered");
+      const body = (await res.json()) as { code?: string; detail?: string };
+      expect(body.code).toBe("model_not_offered");
+      expect(body.detail).toContain("not offered");
     });
 
     it("accepts a lone maxTokens for a gateway model unknown to the catalog (nothing to compare)", async () => {
@@ -625,6 +654,25 @@ describe("Models API", () => {
       expect(res.status).toBe(204);
     });
 
+    it("clears the setting of an agent that used the deleted model", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      const agent = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/modelled` });
+      await seedSpacePackage(ctx.defaultSpaceId, agent.id, { modelId: model.id });
+
+      const del = await app.request(`/api/models/${model.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+
+      const [placement] = await db
+        .select({ modelId: spacePackages.modelId })
+        .from(spacePackages)
+        .where(eq(spacePackages.packageId, agent.id));
+      expect(placement!.modelId).toBeNull();
+    });
+
     it("clears the org default pointer when the default model is deleted", async () => {
       const credentialId = await createProviderKey();
       // First model for the org auto-promotes to the default (pointer set).
@@ -673,6 +721,8 @@ describe("Models API", () => {
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as any;
+
+      await releaseDefaultModel();
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",
@@ -923,6 +973,8 @@ describe("Models API", () => {
       });
       expect(createRes.status).toBe(201);
       const { id } = (await createRes.json()) as { id: string };
+
+      await releaseDefaultModel();
 
       const res = await app.request(`/api/models/${id}`, {
         method: "PATCH",
@@ -1359,6 +1411,54 @@ describe("Models API", () => {
         headers: authHeaders(ctx),
       });
       expect(delCred.status).toBe(204);
+    });
+
+    it("refuses to disable the current org default — 409 model_disabled", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: key.id });
+      await db
+        .update(organizations)
+        .set({ defaultModelId: model.id })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const res = await app.request(`/api/models/${model.id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_disabled");
+      const [row] = await db
+        .select({ enabled: orgModels.enabled })
+        .from(orgModels)
+        .where(eq(orgModels.id, model.id));
+      expect(row!.enabled).toBe(true);
+    });
+
+    it("refuses a disabled model as the org default — 409 model_disabled", async () => {
+      const key = await seedOrgModelProviderKey({ orgId: ctx.orgId, providerId: "moonshot" });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        enabled: false,
+      });
+
+      const res = await app.request("/api/models/default", {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ modelId: model.id }),
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("model_disabled");
+
+      const [org] = await db
+        .select({ defaultModelId: organizations.defaultModelId })
+        .from(organizations)
+        .where(eq(organizations.id, ctx.orgId))
+        .limit(1);
+      expect(org!.defaultModelId).toBeNull();
     });
 
     it("refuses a dead model as the org default — 409 model_needs_reconnection", async () => {
@@ -1852,7 +1952,13 @@ describe("Models API", () => {
       const listRes = await app.request("/api/models", { headers: authHeaders(ctx) });
       expect(listRes.status).toBe(200);
       const list = (await listRes.json()) as any;
-      expect(list.data.map((m: any) => m.id)).toContain(created.id);
+      const listed = list.data.find((m: any) => m.id === created.id);
+      expect(listed).toBeDefined();
+      // Declared without reasoning: Pi sends it no reasoning parameter, `off` only.
+      expect(listed.generation.reasoning).toMatchObject({
+        supported: "unsupported",
+        levels: { off: "supported", low: "unsupported", high: "unsupported" },
+      });
     });
 
     it("refuses a client-side sentinel as a providerId", async () => {

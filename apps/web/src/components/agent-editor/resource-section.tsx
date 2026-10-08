@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ChangeEvent, type ReactNode, useId, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
@@ -231,8 +230,8 @@ export function ResourceSection({
         if (prev.some((e) => e.id === newId)) return prev;
         return [...prev, { id: newId, version: caretRange(newVersion) }];
       });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("error.unknown"));
+    } catch {
+      // Reported by the mutation cache.
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -292,7 +291,7 @@ export function ResourceSection({
   const content = (
     <>
       {error ? (
-        <ErrorState message={String(error)} compact />
+        <ErrorState error={error} compact />
       ) : isLoading ? (
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
@@ -428,15 +427,7 @@ export function ResourceSection({
                   title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
                   onClick={() => {
                     if (!currentSpaceId || !canActivate) return;
-                    setActive.mutate(
-                      { spaceId: currentSpaceId, packageId: id, active: true },
-                      {
-                        onSuccess: () =>
-                          toast.success(t("integrations.activate.success", { ns: "settings" })),
-                        onError: () =>
-                          toast.error(t("integrations.activate.error", { ns: "settings" })),
-                      },
-                    );
+                    setActive.mutate({ spaceId: currentSpaceId, packageId: id, active: true });
                   }}
                 >
                   {setActive.isPending ? <Spinner /> : t("editor.activateIntegration")}
@@ -598,7 +589,7 @@ function SelectedResources({
       </div>
 
       {error ? (
-        <ErrorState message={String(error)} compact />
+        <ErrorState error={error} compact />
       ) : isLoading ? (
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />

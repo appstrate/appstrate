@@ -174,7 +174,7 @@ export interface paths {
         };
         /**
          * List storage-deletion outbox jobs
-         * @description Platform-operator surface. Requires an authentic first-party dashboard SESSION whose realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point). The listing is instance-global: rows carry the bucket + in-bucket key of objects belonging to ANY organization. Rate-limited to 60/min.
+         * @description Platform-operator surface. Requires an authentic first-party dashboard SESSION whose realm is `platform` AND whose email is in `AUTH_PLATFORM_ADMIN_EMAILS`; API keys and OIDC-issued bearer tokens are refused outright, whatever their scopes. Lists jobs from the transactional storage-deletion outbox, newest-first, keyset-paginated on `(created_at, id)`. `dead` = pending jobs past the dead-letter attempt threshold (still retrying — the threshold is a visibility line, not an abandon point). The listing is instance-global: rows carry the bucket + in-bucket key of objects belonging to ANY organization. **Does NOT require `X-Org-Id`**: the operator may belong to no organization. Rate-limited to 60/min.
          */
         get: operations["listStorageDeletionJobs"];
         put?: never;
@@ -196,7 +196,7 @@ export interface paths {
         put?: never;
         /**
          * Retry a storage-deletion job now
-         * @description Same platform-operator session gate as the listing above (session + `platform` realm + allowlisted email). Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job. Rate-limited to 30/min.
+         * @description Same platform-operator session gate as the listing above (session + `platform` realm + allowlisted email), and no `X-Org-Id` either. Resets a pending job's `next_attempt_at` to now so the next worker pass retries it immediately. No-op (404) on a completed or unknown job. Rate-limited to 30/min.
          */
         post: operations["retryStorageDeletionJob"];
         delete?: never;
@@ -1222,52 +1222,60 @@ export interface paths {
          * Proxy a GET request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         get: operations["credentialProxyGet"];
         /**
          * Proxy a PUT request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         put: operations["credentialProxyPut"];
         /**
          * Proxy a POST request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         post: operations["credentialProxyPost"];
         /**
          * Proxy a DELETE request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         delete: operations["credentialProxyDelete"];
         options?: never;
@@ -1276,13 +1284,15 @@ export interface paths {
          * Proxy a PATCH request to an integration with server-side credential injection
          * @description High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.
          *
-         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (NOT granted by default) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
+         *     Authentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
+         *
+         *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         patch: operations["credentialProxyPatch"];
         trace?: never;
@@ -1574,7 +1584,7 @@ export interface paths {
         };
         /**
          * List the OAuth clients registered for an integration auth
-         * @description Returns this space's own custom (BYO-app) clients (`custom`, oldest first) plus the ONE default it inherits — the org default (`org`), else the system client (`built-in`) — when that is not one of its own. Other org and system clients are not listed: a space either uses its own clients or inherits the org's choice. `is_default` marks the client new connections use (no per-connect picker). Secrets are never returned. Org-level clients are managed on `/api/org-integrations`.
+         * @description Returns this space's own custom (BYO-app) clients (`space`, oldest first) plus the ONE default it inherits — the org default (`org`), else the system client (`system`) — when that is not one of its own. Other org and system clients are not listed: a space either uses its own clients or inherits the org's choice. `is_default` marks the client new connections use (no per-connect picker). Secrets are never returned. Org-level clients are managed on `/api/org-integrations`.
          */
         get: operations["listIntegrationClients"];
         put?: never;
@@ -1722,7 +1732,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Unsharing a shared connection disables, in the same transaction, every enabled schedule of another actor than its owner whose `connection_overrides` name it (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -1780,20 +1790,20 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Rotate a custom OAuth client's credentials
-         * @description Rotates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
-         */
-        put: operations["rotateIntegrationOAuthClient"];
+        put?: never;
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of the connections it minted; a member pin does not block it. Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration is left empty is disabled); another member's pin keeps the id, and that member's next run fails with `pinned_connection_unavailable`. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of the connections it minted; a member pin does not block it. Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration is left empty is disabled); another member's pin keeps the id, and that member's next run fails with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a custom OAuth client (rotate its secret, change its redirect URI or method)
+         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
+         */
+        patch: operations["updateIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/integrations/{packageId}/oauth-clients/{clientId}/promote": {
@@ -2038,7 +2048,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins and schedules keep the id, and their next run fails (`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins keep the id, and their next run fails (`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Another actor's enabled schedules naming the connection are disabled in the same transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: while the connection stays unreachable, re-enabling one requires a new choice. Delete-impact counts them (`other_schedules_disabled_count`). Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -2055,7 +2065,7 @@ export interface paths {
         };
         /**
          * The caller's pins and schedules a connection delete would rewrite
-         * @description Lists the caller's own member pins and schedules whose connection set names this connection — exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees its bound organization (and space) only; an end user has no pins.
+         * @description Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's schedules inside it are listed, though the delete also rewrites the owner's schedules outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.
          */
         get: operations["getMyConnectionDeleteImpact"];
         put?: never;
@@ -2095,7 +2105,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -2118,9 +2128,25 @@ export interface paths {
          * @description Returns the caller's own integration → connection-set pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.
          */
         get: operations["listMyIntegrationPins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
@@ -2743,7 +2769,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`built-in`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -2802,11 +2828,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Rotate an org-level OAuth client's credentials
-         * @description Rotates one org-level client in place, by its id (a space client id is a 404 here). Requires `org-integrations:configure`, which is never granted to an API key.
-         */
-        put: operations["rotateOrgIntegrationOAuthClient"];
+        put?: never;
         post?: never;
         /**
          * Delete an org-level OAuth client
@@ -2815,7 +2837,11 @@ export interface paths {
         delete: operations["deleteOrgIntegrationOAuthClient"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update an org-level OAuth client (rotate its secret, change its redirect URI or method)
+         * @description Updates one org-level client in place, by its id (a space client id is a 404 here). Its `client_id` cannot change. Requires `org-integrations:configure`, which is never granted to an API key.
+         */
+        patch: operations["updateOrgIntegrationOAuthClient"];
         trace?: never;
     };
     "/api/orgs": {
@@ -2827,7 +2853,7 @@ export interface paths {
         };
         /**
          * List user organizations
-         * @description List organizations the current user is a member of.
+         * @description List organizations the current user is a member of, oldest membership first.
          */
         get: operations["listOrganizations"];
         put?: never;
@@ -4175,7 +4201,7 @@ export interface paths {
          * Create a remote-backed run (caller executes the agent)
          * @description Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{runId}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.
          *
-         *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 agent_not_ready` naming it: pick one with a member pin, or run the agent on the platform.
+         *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): pick one with a member pin (a set an admin pin or an enforced org default imposes is narrowed by an admin), or run the agent on the platform.
          *
          *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
@@ -4473,7 +4499,7 @@ export interface paths {
         };
         /**
          * List spaces
-         * @description List all spaces for the organization.
+         * @description List the spaces of the organization the caller reaches: the default space first, then personal spaces (the caller's own and, for an owner or admin, orphaned ones), then team spaces, each oldest first.
          */
         get: operations["listSpaces"];
         put?: never;
@@ -4935,7 +4961,7 @@ export interface paths {
         put?: never;
         /**
          * Send a test ping
-         * @description Send a synthetic test.ping event to verify webhook connectivity.
+         * @description Queue a synthetic `test.ping` event for delivery to the webhook URL, signed like a real event. The 200 confirms the delivery was queued, not that it was delivered: it is a single attempt (never retried), whose outcome `GET /api/webhooks/{id}/deliveries` lists. Sent whether or not the webhook is enabled or subscribed to any event.
          */
         post: operations["testWebhook"];
         delete?: never;
@@ -5015,9 +5041,29 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an active integration
-         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
+         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a connection's upstream-rejection streak
+         * @description Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.
+         */
+        post: operations["reportIntegrationUpstreamSuccess"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5253,9 +5299,12 @@ export interface components {
             /** @description True iff `POST /api/agents/{scope}/{name}/run` would refuse — a connection the resolver rejects (409), or the agent being switched off in this space (404 `agent_not_active_in_space`). Equivalently: `errors` is non-empty. */
             blocks_run: boolean;
             /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
-            errors: components["schemas"]["ResolutionFieldError"][];
+            errors: (components["schemas"]["ResolutionFieldError"] & {
+                /** @enum {string} */
+                code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "agent_not_active";
+            })[];
             integrations: {
-                integration_id: string;
+                integration_package_id: string;
                 /** @description True iff this integration is one of the run-blocking `errors`. */
                 run_blocking: boolean;
                 resolution: components["schemas"]["IntegrationAgentResolution"];
@@ -5890,9 +5939,13 @@ export interface components {
             expires_at_epoch_ms: {
                 [key: string]: number | null;
             };
+            /** @description Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak. */
+            rejection_streak?: number;
+            /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
+            credential_revision?: string;
         };
         IntegrationPin: {
-            packageId: string;
+            agent_package_id: string;
             integration_package_id: string;
             /** @description The whole pinned set, in the order it was written. A write replaces it. */
             connection_ids: string[];
@@ -5934,7 +5987,7 @@ export interface components {
             cacheRead: number;
             cacheWrite: number;
         };
-        /** @description Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
+        /** @description Normalized support facts derived from the model's record in Appstrate's pinned model registry, refined by stricter provider transport declarations. A model the registry has no record of (a gateway model) takes its reasoning levels from its declared `reasoning`: `off`, `low`, `medium` and `high` when it reasons, `off` alone otherwise. `unknown` keeps temperature forward-compatible, while reasoning levels are selectable only when explicitly supported; it remains distinct from an explicit upstream refusal. */
         ModelGenerationCapabilities: {
             /** @enum {string} */
             temperature: "supported" | "unsupported" | "unknown";
@@ -6090,8 +6143,12 @@ export interface components {
             providerId: string | null;
             /** @description The provider's human display name resolved from the model-provider registry by `providerId` (e.g. `OpenCode Go`, `OpenAI`). The authoritative label for grouping/badging a model by provider — `apiShape` is ambiguous (OpenCode Go and OpenAI both use `openai-completions`), so do NOT derive a provider label from it. `null` for managed models (binding not exposed) and for rows whose `providerId` has no registry entry. */
             provider_name: string | null;
-            /** @description Key of the Pi model-registry provider that describes this model (e.g. `moonshotai` for `moonshot`): a client builds its model record (limits, request dialect) from `pi_provider` + `modelId`. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed. */
+            /** @description Key of the Pi model-registry provider this model is served through (e.g. `moonshotai` for `moonshot`): the provider a client builds its Pi model under. `null` for a gateway (`openai-compatible`, `anthropic-compatible`), which has no registry record, and for managed models — binding not exposed. */
             pi_provider: string | null;
+            /** @description What the Pi model registry records about this model's request dialect, for a client that builds its own Pi model. Opaque: Pi's own vocabulary, handed to the Pi SDK as is. `null` for a model the registry does not record and for managed models — binding not exposed. */
+            pi_dialect: {
+                [key: string]: unknown;
+            } | null;
             /** @description Provider endpoint. `null` for managed models — binding not exposed. */
             base_url: string | null;
             /** @description Upstream model id. `null` for managed models — not exposed. */
@@ -6114,7 +6171,7 @@ export interface components {
             source: "built-in" | "custom";
             /** @description ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed. */
             credentialId: string | null;
-            /** @description Cost per million tokens */
+            /** @description Cost in USD per million tokens */
             cost?: {
                 input?: number;
                 output?: number;
@@ -6212,7 +6269,7 @@ export interface components {
         OrgProxy: {
             id: string;
             label: string;
-            /** @description Masked proxy URL for display */
+            /** @description Proxy URL for display, its username and password both masked */
             urlPrefix: string;
             enabled: boolean;
             is_default: boolean;
@@ -6415,6 +6472,7 @@ export interface components {
         };
         ResolutionFieldError: {
             field: string;
+            /** @description On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool` — the extras below are keyed on it — or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code. */
             code: string;
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
@@ -6550,9 +6608,12 @@ export interface components {
             proxy_label: string | null;
             /** @description Model label used at run time */
             model_label: string | null;
-            /** @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. */
-            model_source: string | null;
-            /** @description Run cost in dollars */
+            /**
+             * @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.
+             * @enum {string|null}
+             */
+            model_source: "system" | "org" | null;
+            /** @description Run cost in USD */
             cost: number | null;
             /**
              * @description How much of `cost` is backed by real per-token rates. `priced`: every token bucket that carried usage had a rate, so the figure is complete. `partial`: part of the consumption (cached input) had no rate and was priced at zero, so the figure is a FLOOR, not the full amount. `unpriced`: no rates were available for the model at all — a `cost` of 0 alongside this value means "not priced", NOT "free"; do not bill or display it as zero spend. `null` on runs finalized before this field existed and on runs that produced no usage rows; never read `null` as `priced`.
@@ -6619,7 +6680,7 @@ export interface components {
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
             modelCredentialId: string | null;
-            /** @description Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6627,12 +6688,18 @@ export interface components {
             dependency_overrides: {
                 [key: string]: string;
             } | null;
-            /** @description Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_id`. Null when the agent declares no integrations. */
+            /** @description Connections resolved for this run, projected from the internal snapshot for display — one entry per BOUND connection, so an integration bound to several contributes several entries sharing an `integration_package_id`. Null when the agent declares no integrations. */
             connections_used: {
-                integration_id: string;
-                label: string | null;
-                account_id: string | null;
-                source: string;
+                integration_package_id: string;
+                /** @description The connection's label, copied at kickoff. */
+                label: string;
+                /** @description Its account identifier, copied at kickoff. */
+                account_id: string;
+                /**
+                 * @description The cascade layer that bound the connection.
+                 * @enum {string}
+                 */
+                source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             }[] | null;
         };
         RunLog: {
@@ -6664,6 +6731,11 @@ export interface components {
             spaceId: string;
             name: string | null;
             enabled: boolean;
+            /**
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. Cleared by re-enabling.
+             * @enum {string|null}
+             */
+            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | null;
             cron_expression: string;
             timezone: string;
             input: {
@@ -6673,7 +6745,7 @@ export interface components {
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
-            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..20 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6921,6 +6993,8 @@ export interface components {
             /** Format: email */
             email: string;
             name: string;
+            /** @description Whether `POST /api/orgs` would accept this user: true on an open instance, and for platform admins alone when organization creation is disabled (`AUTH_DISABLE_ORG_CREATION`). */
+            can_create_org: boolean;
         };
         /** @description Webhook configuration object */
         WebhookObject: {
@@ -7466,19 +7540,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Invalid code format. */
+            /** @description Invalid code format (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description Code not found or already used. */
+            /** @description Code not found or already used (HTML error page). */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -7499,19 +7577,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Empty user_code. */
+            /** @description Empty user_code (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -7532,19 +7614,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Approval failed (expired, already processed, realm mismatch). */
+            /** @description Approval failed — expired, already processed, realm mismatch (HTML error page). */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -7565,12 +7651,14 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["ValidationError"];
-            /** @description CSRF check failed. */
+            /** @description CSRF check failed (HTML error page). */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -8389,7 +8477,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8772,7 +8860,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here. */
+                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..20 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8807,6 +8895,7 @@ export interface operations {
                      *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
+                     *       "disabled_reason": null,
                      *       "cron_expression": "0 9 * * 1-5",
                      *       "timezone": "Europe/Paris",
                      *       "input": {
@@ -8833,7 +8922,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8971,7 +9060,7 @@ export interface operations {
                         key?: string;
                         /** @description The `apst_` prefix and the first 8 characters after it, for identification */
                         keyPrefix?: string;
-                        /** @description Validated scopes granted to the key. Empty = full role access. */
+                        /** @description Validated scopes granted to the key. */
                         scopes?: string[];
                     };
                 };
@@ -9108,55 +9197,54 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             /** @description Invalid bootstrap token */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies. */
+            /** @description Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or account creation refused it, with the refusal's own code — `signup_domain_not_allowed` when AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP; the allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL), a module's sign-up refusal code, or `bootstrap_signup_rejected` when the refusal carries none. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL) */
+            /** @description No bootstrap token is currently redeemable (none configured, or already redeemed) */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Signup rejected (weak password, duplicate email) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -9188,12 +9276,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown or disabled client / unregistered grant type. */
+            /** @description `invalid_client` — unknown or disabled client, or one not registered for the CLI grant types. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9233,12 +9326,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9268,12 +9366,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9297,12 +9400,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
+            /** @description Authentication required (`unauthorized`). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9353,12 +9461,17 @@ export interface operations {
                     };
                 };
             };
-            /** @description Unknown or disabled client / unregistered grant type. */
+            /** @description `invalid_client` — unknown or disabled client, or one not registered for the CLI grant types. */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9440,6 +9553,18 @@ export interface operations {
                     } | null;
                 };
             };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
         };
     };
     oauth2Jwks: {
@@ -9502,16 +9627,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
+            /** @description Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
-                    "X-Retry-After"?: string;
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        error: "temporarily_unavailable";
+                        error_description: string;
+                    };
+                };
             };
         };
     };
@@ -9553,7 +9689,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9632,30 +9773,51 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
             /** @description Invalid client credentials (unknown client or secret mismatch). */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
-            /** @description Access denied — realm guard, signup gate, or resource mismatch. */
+            /** @description `access_denied` — realm guard, signup gate, or resource mismatch. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
-            /** @description Too many requests — Better Auth's per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation. */
+            /** @description Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1). */
             429: {
                 headers: {
                     /** @description Seconds until the current window resets. */
-                    "X-Retry-After"?: string;
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        error: "temporarily_unavailable";
+                        error_description: string;
+                    };
+                };
             };
         };
     };
@@ -9680,7 +9842,12 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        error?: string;
+                        error_description?: string;
+                    };
+                };
             };
         };
     };
@@ -9697,6 +9864,8 @@ export interface operations {
                     /** Format: email */
                     email: string;
                     password: string;
+                    /** @description Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`. */
+                    callbackURL?: string;
                 };
             };
         };
@@ -9720,6 +9889,7 @@ export interface operations {
                      */
                     "application/json": {
                         redirect?: boolean;
+                        url?: string;
                         user?: components["schemas"]["User"];
                         token?: string | null;
                     };
@@ -9730,7 +9900,36 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
         };
     };
@@ -9755,6 +9954,18 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
         };
     };
     signUpEmail: {
@@ -9771,6 +9982,8 @@ export interface operations {
                     email: string;
                     password: string;
                     name: string;
+                    /** @description Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`. */
+                    callbackURL?: string;
                 };
             };
         };
@@ -9802,14 +10015,48 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
-            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth. */
+            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        code?: string;
+                        message?: string;
+                    };
+                };
             };
         };
     };
@@ -10292,7 +10539,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Webhook processing error */
@@ -10301,7 +10548,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/plain": string;
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };
@@ -10353,18 +10600,15 @@ export interface operations {
                 };
             };
             /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -10373,7 +10617,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
@@ -10426,12 +10672,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
             /** @description `enforced_skills_unavailable` — the space's enforced skills could not be loaded. RFC 9457 problem+json. */
             503: {
                 headers: {
@@ -10518,12 +10759,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (30/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getChatSession: {
@@ -10646,12 +10882,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     stopChatStream: {
@@ -10680,12 +10911,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (60/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     resumeChatStream: {
@@ -10724,12 +10950,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (120/min per caller) */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            429: components["responses"]["RateLimited"];
         };
     };
     credentialProxyGet: {
@@ -10764,9 +10985,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10775,18 +10998,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10795,23 +11022,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10821,6 +11058,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10829,6 +11068,39 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
+                };
+            };
         };
     };
     credentialProxyPut: {
@@ -10868,9 +11140,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10879,18 +11153,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -10899,23 +11177,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10925,6 +11213,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -10933,6 +11223,39 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
+                };
+            };
         };
     };
     credentialProxyPost: {
@@ -10972,9 +11295,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -10983,18 +11308,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -11003,23 +11332,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11029,6 +11368,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11037,6 +11378,39 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
+                };
+            };
         };
     };
     credentialProxyDelete: {
@@ -11071,9 +11445,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -11082,18 +11458,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -11102,23 +11482,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11128,6 +11518,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11136,6 +11528,39 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
+                };
+            };
         };
     };
     credentialProxyPatch: {
@@ -11175,9 +11600,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. */
+            /** @description Upstream response (status code, headers, body forwarded verbatim, except `Set-Cookie`, which is never relayed: upstream cookies are kept in the server-side jar scoped by `X-Session-Id` and replayed on later calls). Buffered responses include `X-Truncated` when the body exceeded the platform truncation cap; streamed responses (when the upstream sends `Transfer-Encoding: chunked` or a `Content-Length` over `max_streamed_body_size`) do not carry this header. Any other upstream status is relayed the same way (`default`). */
             200: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Set to `true` when the buffered upstream body was truncated to `CREDENTIAL_PROXY_LIMITS.max_response_bytes`. Absent on streamed responses. */
                     "X-Truncated"?: "true";
                     [name: string]: unknown;
@@ -11186,18 +11613,22 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
-            /** @description Missing or malformed control header, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind — or `connection_not_in_org_default` — it names a connection outside the integration's enforced org default. */
+            /** @description Missing or malformed control header, `invalid_request` — a header the caller sent is no valid HTTP field value before any substitution (the detail names the header, never the value) —, a finished `X-Run-Id` run, `connection_not_in_run` — `X-Connection-Id` names a connection the `X-Run-Id` run did not bind —, `connection_not_in_org_default` — it names a connection outside the integration's enforced org default — or `unresolved_placeholder` — the target, a header or the substituted body names a `{{field}}` the connection does not hold. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Unauthorized. On a streaming-upload 401, the response carries `X-Auth-Refreshed: true` when credentials were refreshed server-side but the body could not be replayed — the caller must refresh and replay the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
             401: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
@@ -11206,23 +11637,33 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden — principal lacks `credential-proxy:call`, target not in `authorized_uris`, a credential templated into a call with no allowlist to check it against, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
+            /** @description Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts (`http_request_denied`); `forbidden` — principal lacks `credential-proxy:call`, session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description No credentials or connection for the requested integration — including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when `X-Run-Id` names no run of this space. */
+            /** @description `credential_not_found` — no credentials or connection for the requested integration, including when no connection of it is accessible to the caller, when the `X-Run-Id` run bound none, or when the integration has no published version; `not_found` when `X-Run-Id` names no run of this space, or when the integration is not active in this space. */
             404: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `must_choose_connection` — no `X-Connection-Id` and no single candidate: the `X-Run-Id` run bound several connections to the integration, or (no run) the org default holds several, or the caller owns several or only has other members' shared ones. `errors[0].candidate_connections` lists what the caller may name (the run's bound set, the default's set, else every own and shared connection), with `label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in `X-Connection-Id`. `pinned_connection_unavailable` — (no run) the org default names a connection the caller cannot reach (deleted or unshared); an admin must fix the default. `needs_reconnection` — the connection that would be bound (the run's bound one included), or a member of the org default, needs its owner to reconnect it. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11232,6 +11673,8 @@ export interface operations {
             /** @description Request body (streaming upload) exceeds MAX_STREAMED_BODY_SIZE (100 MB). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -11240,6 +11683,39 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream response relayed verbatim at the upstream's own status (a status listed above included) with its headers and body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. `Set-Cookie` is never relayed. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": unknown;
+                };
+            };
         };
     };
     getSwaggerUI: {
@@ -12124,21 +12600,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description Invalid, expired, or already-used token (HTML error page). */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             429: components["responses"]["RateLimited"];
             /** @description Integration cannot be connected / unexpected failure (HTML error page). Nothing was sent upstream, so the link stays reusable. */
@@ -12146,14 +12628,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
             /** @description Upstream provider failed to start the connection — transient (HTML error page). The link is burned; re-mint to retry. */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/html": string;
+                };
             };
         };
     };
@@ -12190,7 +12676,7 @@ export interface operations {
                         connection: {
                             /** Format: uuid */
                             id: string;
-                            packageId: string;
+                            integration_package_id: string;
                             auth_key: string;
                             account_id: string;
                             identity_claims: {
@@ -12310,7 +12796,7 @@ export interface operations {
                             connections: {
                                 /** Format: uuid */
                                 id: string;
-                                packageId: string;
+                                integration_package_id: string;
                                 auth_key: string;
                                 account_id: string;
                                 identity_claims: {
@@ -12434,11 +12920,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -12501,7 +12987,7 @@ export interface operations {
                     "application/json": {
                         /** Format: uuid */
                         id: string;
-                        packageId: string;
+                        integration_package_id: string;
                         auth_key: string;
                         account_id: string;
                         identity_claims: {
@@ -12725,11 +13211,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -12795,7 +13281,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -12853,7 +13339,7 @@ export interface operations {
                         data: {
                             /** Format: uuid */
                             id: string;
-                            packageId: string;
+                            integration_package_id: string;
                             auth_key: string;
                             account_id: string;
                             identity_claims: {
@@ -12912,6 +13398,7 @@ export interface operations {
                 "application/json": {
                     /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
                     label?: string;
+                    /** @description `true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`. */
                     shared_with_org?: boolean;
                 };
             };
@@ -12928,7 +13415,7 @@ export interface operations {
                     "application/json": {
                         /** Format: uuid */
                         id: string;
-                        packageId: string;
+                        integration_package_id: string;
                         auth_key: string;
                         account_id: string;
                         identity_claims: {
@@ -12963,7 +13450,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), or sharing it once its owner no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`) */
+            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it once its owning member no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13005,7 +13492,7 @@ export interface operations {
                         /** @enum {string} */
                         object: "list";
                         data: {
-                            packageId: string;
+                            agent_package_id: string;
                             display_name: string;
                         }[];
                         hasMore: boolean;
@@ -13108,10 +13595,10 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively). */
+            /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed. */
+            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed. */
             404: components["responses"]["NotFound"];
         };
     };
@@ -13142,78 +13629,6 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["Forbidden"];
-        };
-    };
-    rotateIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                /** @description Integration package id (e.g. `@official/gmail`). */
-                packageId: string;
-                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
-                clientId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    client_id: string;
-                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
-                    client_secret?: string;
-                    /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
-                     * @enum {string}
-                     */
-                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
-                    /** Format: uri */
-                    redirect_uri?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Rotated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
-                         */
-                        id: string;
-                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
-                        spaceId: string | null;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        /**
-                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
-                         * @enum {string|null}
-                         */
-                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     deleteIntegrationOAuthClient: {
@@ -13259,6 +13674,80 @@ export interface operations {
             };
         };
     };
+    updateIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /**
+                     * Format: uri
+                     * @description Omit to keep the stored value; `null` clears it (the platform callback applies).
+                     */
+                    redirect_uri?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     promoteIntegrationOAuthClient: {
         parameters: {
             query?: never;
@@ -13289,7 +13778,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -13372,7 +13861,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`. */
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it. */
                     connection_ids: string[];
                 };
             };
@@ -13389,10 +13878,10 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively). */
+            /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
+            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
             404: components["responses"]["NotFound"];
         };
     };
@@ -13476,7 +13965,7 @@ export interface operations {
                             connections: {
                                 /** Format: uuid */
                                 id: string;
-                                packageId: string;
+                                integration_package_id: string;
                                 auth_key: string;
                                 account_id: string;
                                 identity_claims: {
@@ -13719,8 +14208,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13730,24 +14221,57 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13757,17 +14281,48 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13798,8 +14353,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13809,24 +14366,57 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13836,17 +14426,48 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13877,8 +14498,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13888,24 +14511,57 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13915,17 +14571,48 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -13956,8 +14643,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13967,24 +14656,57 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). */
+            /** @description Validation error — malformed body, missing/empty `model`, model preset not enabled for this org, preset's protocol does not match this endpoint (use the corresponding endpoint for its protocol instead), the preset's provider is an OAuth subscription with no proxyable gateway (connect an API-key provider instead), or request body exceeds the per-call `LLM_PROXY_LIMITS.max_request_bytes` cap (default 10 MiB). `usage_context_required` — a platform-provided model called without a valid `X-Run-Id` or the first-party chat loopback while a metering module is loaded. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
-            /** @description Forbidden — principal lacks `llm-proxy:call`, or a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only). */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A metering module's `beforeUsage` hook refused the call for payment (e.g. credits exhausted); `code` is the module's. RFC 9457 problem+json. */
+            402: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Forbidden — principal lacks `llm-proxy:call`, a non-bearer auth method was used (cookie sessions and any unknown/unrecognized auth strategy are rejected; bearer only), or a metering module's `beforeUsage` hook refused the call on another ground (`code` is the module's). `blocked_target` — the model's upstream resolves into a blocked network range (`Proxy-Status` error `destination_ip_prohibited`). */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -13994,17 +14716,48 @@ export interface operations {
             /** @description Request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware). */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -14022,12 +14775,15 @@ export interface operations {
         responses: {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Method Not Allowed — stateless server has no GET stream. */
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
             405: {
                 headers: {
+                    Allow?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
         };
     };
@@ -14185,6 +14941,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description How many enabled schedules of actors other than the caller name the connection: the delete disables them (`connection_deleted`) and keeps their overrides. A count only — their names and actors are not the caller's to read. A bound credential counts those of its organization (and space) only. 0 whenever the lists are empty for an unknown, unowned or out-of-scope connection. */
+                        other_schedules_disabled_count: number;
                         pins: {
                             agent_package_id: string;
                             agent_display_name: string;
@@ -14200,7 +14958,7 @@ export interface operations {
                             integration_package_id: string;
                             /** @description Size of the schedule's override set for this integration before the delete. */
                             connection_count: number;
-                            /** @description True when the delete disables this schedule: it is enabled and this connection is the only one in its set for the integration. */
+                            /** @description True when the delete disables this schedule: it is enabled and one of its sets empties. */
                             disables: boolean;
                         }[];
                     };
@@ -14275,14 +15033,19 @@ export interface operations {
                      *         "name": "Acme",
                      *         "slug": "acme"
                      *       },
+                     *       "space": {
+                     *         "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                     *         "name": "Sales",
+                     *         "personal": false
+                     *       },
                      *       "connections": [
                      *         {
-                     *           "integration_id": "@appstrate/gmail",
+                     *           "integration_package_id": "@appstrate/gmail",
                      *           "name": "Gmail",
                      *           "source": "own"
                      *         },
                      *         {
-                     *           "integration_id": "@appstrate/clickup",
+                     *           "integration_package_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
                      *           "source": "shared"
                      *         }
@@ -14339,6 +15102,14 @@ export interface operations {
                             /** @description Organization slug. */
                             slug?: string | null;
                         };
+                        /** @description The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        space: {
+                            id: string;
+                            /** @description Human-readable space name. */
+                            name: string;
+                            /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
+                            personal: boolean;
+                        };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs: {
                             packageId: string;
@@ -14351,7 +15122,7 @@ export interface operations {
                         }[];
                         /** @description Integrations the caller could attach to an agent. */
                         connections: {
-                            integration_id: string;
+                            integration_package_id: string;
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
@@ -14408,7 +15179,7 @@ export interface operations {
     listMyIntegrationPins: {
         parameters: {
             query?: {
-                /** @description Agent package id whose pins to list. Omitted, the list is empty — the picker renders before it has an agent to ask about. The DELETE below requires it, because deleting nothing in particular is not a coherent request. */
+                /** @description Agent package id whose pins to list. Omitted, the list is empty — the picker renders before it has an agent to ask about. */
                 agent_package_id?: string;
             };
             header?: {
@@ -14453,14 +15224,17 @@ export interface operations {
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
-            path?: never;
+            path: {
+                /** @description Agent package id (e.g. `@acme/my-agent`). */
+                agentPackageId: string;
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                integrationPackageId: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": {
-                    agent_package_id: string;
-                    integration_package_id: string;
                     connection_ids: string[];
                 };
             };
@@ -14475,14 +15249,10 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
             403: components["responses"]["Forbidden"];
             /** @description A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
             404: components["responses"]["NotFound"];
@@ -14490,17 +15260,19 @@ export interface operations {
     };
     deleteMyIntegrationPin: {
         parameters: {
-            query: {
-                agent_package_id: string;
-                integration_package_id: string;
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
             };
-            path?: never;
+            path: {
+                /** @description Agent package id (e.g. `@acme/my-agent`). */
+                agentPackageId: string;
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                integrationPackageId: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -14512,14 +15284,8 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing required query param (agent_package_id or integration_package_id). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -14681,7 +15447,7 @@ export interface operations {
                     api_key: string;
                     /**
                      * Format: uri
-                     * @description Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
+                     * @description Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.
                      */
                     base_url_override?: string | null;
                 };
@@ -15275,6 +16041,9 @@ export interface operations {
                      *           "providerId": "openai",
                      *           "provider_name": "OpenAI",
                      *           "pi_provider": "openai",
+                     *           "pi_dialect": {
+                     *             "name": "GPT-4o"
+                     *           },
                      *           "apiShape": "openai-responses",
                      *           "base_url": "https://api.openai.com/v1",
                      *           "modelId": "gpt-4o",
@@ -15342,7 +16111,7 @@ export interface operations {
                     maxTokens?: number;
                     /** @description Whether the model supports reasoning */
                     reasoning?: boolean;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -15367,6 +16136,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -15415,7 +16185,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time. */
+            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15490,7 +16260,7 @@ export interface operations {
                             input?: ("text" | "image")[];
                             /** @description Whether model supports reasoning */
                             reasoning?: boolean;
-                            /** @description Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
+                            /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing */
                             cost?: {
                                 input?: number;
                                 output?: number;
@@ -15579,6 +16349,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when one of `model_ids` is outside the provider's catalog offer. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -15676,7 +16447,7 @@ export interface operations {
                     contextWindow?: number | null;
                     maxTokens?: number | null;
                     reasoning?: boolean | null;
-                    /** @description Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
+                    /** @description Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers) */
                     cost?: {
                         input?: number;
                         output?: number;
@@ -15701,11 +16472,20 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["ModelAlreadyAdded"];
+            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     testModel: {
@@ -15791,19 +16571,22 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: {
+                        data: ({
                             /**
                              * Format: uuid
                              * @description Notification id
                              */
                             id: string;
-                            /** @description Notification kind, e.g. run_completed */
-                            type: string;
+                            /** @constant */
+                            type: "run_completed";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
-                            /** @description Render-without-join data. `run_completed`: `packageId`, `status`. `package_shared`: `packageId`, `package_type`, `shared_by_name`. */
+                            /** @description Render-without-join data. */
                             payload: {
-                                [key: string]: unknown;
+                                /** @description The run's agent; null once the agent is deleted. */
+                                packageId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
                             } | null;
                             /**
                              * Format: date-time
@@ -15812,7 +16595,31 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                        }[];
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "package_shared";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                packageId: string;
+                                /** @enum {string} */
+                                package_type: "agent" | "skill" | "integration" | "mcp-server";
+                                shared_by_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
                     };
@@ -16103,12 +16910,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description The referenced space does not exist or is inaccessible. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             /** @description `referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`). */
             409: {
                 headers: {
@@ -16150,12 +16952,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16182,12 +16979,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16242,12 +17034,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16280,12 +17067,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             /** @description Client not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -16429,11 +17211,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -16495,11 +17277,11 @@ export interface operations {
                         data: {
                             client_ref: string;
                             /**
-                             * @description `custom` = the space's own client, `org` = an org-level client, `built-in` = a platform-provided system client.
+                             * @description The tier that owns the client: `space` = the space's own client, `org` = an org-level client, `system` = a platform-provided system client.
                              * @enum {string}
                              */
-                            source: "built-in" | "org" | "custom";
-                            /** @description For `custom` / `org` clients, the registered OAuth client_id. For `built-in` (system) clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
+                            source: "system" | "org" | "space";
+                            /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
                             /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
                             is_default: boolean;
@@ -16565,79 +17347,7 @@ export interface operations {
                     "application/json": {
                         /**
                          * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
-                         */
-                        id: string;
-                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
-                        spaceId: string | null;
-                        integration_package_id: string;
-                        auth_key: string;
-                        client_id: string;
-                        has_client_secret: boolean;
-                        /**
-                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
-                         * @enum {string|null}
-                         */
-                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
-                        redirect_uri: string | null;
-                        /** Format: date-time */
-                        createdAt: string;
-                        /** Format: date-time */
-                        updatedAt: string;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    rotateOrgIntegrationOAuthClient: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-            };
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
-                clientId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    client_id: string;
-                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. The rotate form submits an empty input whenever only the redirect URI changed, so the two must stay distinguishable. */
-                    client_secret?: string;
-                    /**
-                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omit to leave it undeclared, in which case the manifest's value applies.
-                     * @enum {string}
-                     */
-                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
-                    /** Format: uri */
-                    redirect_uri?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Rotated */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /**
-                         * Format: uuid
-                         * @description Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
                          */
                         id: string;
                         /** @description Owning space; `null` for an org-level client, inherited by every space. */
@@ -16705,6 +17415,80 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    updateOrgIntegrationOAuthClient: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+                /** @description Custom OAuth client id (`integration_oauth_clients.id`, UUID). */
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description OMIT to preserve the stored secret. An empty string CLEARS it and is accepted only together with `token_endpoint_auth_method: none`; alone it is rejected with 400. */
+                    client_secret?: string;
+                    /**
+                     * @description Explicit client-authentication method for this client, overriding the manifest's. Send `none` to declare a PUBLIC client (no secret at the provider). Omitted beside a new `client_secret`, the stored method is kept — except a public client's `none`, which gives way to the manifest's value; sent alone, it changes the method of the stored secret.
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "client_secret_post" | "client_secret_basic" | "none";
+                    /**
+                     * Format: uri
+                     * @description Omit to keep the stored value; `null` clears it (the platform callback applies).
+                     */
+                    redirect_uri?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: uuid
+                         * @description Row UUID — the `client_ref` handle passed to the update / delete / default-client routes.
+                         */
+                        id: string;
+                        /** @description Owning space; `null` for an org-level client, inherited by every space. */
+                        spaceId: string | null;
+                        integration_package_id: string;
+                        auth_key: string;
+                        client_id: string;
+                        has_client_secret: boolean;
+                        /**
+                         * @description Client-authentication method declared for THIS client, overriding the integration manifest's. `none` means a PUBLIC client: the app is registered at the provider without a secret and authenticates by `client_id` alone. `null` means undeclared — the manifest's value applies.
+                         * @enum {string|null}
+                         */
+                        token_endpoint_auth_method: "client_secret_post" | "client_secret_basic" | "none" | null;
+                        redirect_uri: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listOrganizations: {
@@ -16830,6 +17614,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
+            /** @description Forbidden. `code` is `org_creation_disabled` when the instance sets `AUTH_DISABLE_ORG_CREATION` and the caller is not a platform admin. */
             403: components["responses"]["Forbidden"];
         };
     };
@@ -16992,20 +17777,9 @@ export interface operations {
                     };
                 };
             };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is not an admin/owner of the org. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17028,27 +17802,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Authentication required. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            401: components["responses"]["Unauthorized"];
             /** @description Caller is not an admin/owner of the org. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            403: components["responses"]["Forbidden"];
             /** @description Session not found / not in this org / already revoked. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -17447,7 +18205,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -17923,7 +18681,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `name_collision` (system package or existing identifier owned by another org), `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17934,13 +18692,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what `force=true` would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs — one forced import overwrites both). */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -18012,7 +18777,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org). Error code: `bundle_conflict`. */
+            /** @description One or more embedded packages collide with existing ones (same identity + different integrity, or owned by another org): `bundle_conflict`. A root whose version is new but lower than the highest published one: `version_not_higher` (a dependency in that case is left as the org has it, with a warning). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18065,7 +18830,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`name_collision`, `type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
+            /** @description Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18076,13 +18841,20 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, or a skill already exists with identical content. RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, or `skill_unchanged`. */
+            /** @description Package has unpublished draft changes that would be overwritten, the version exists with different content, a skill already exists with identical content, the version is new but lower than the highest published one, or the identifier is taken (a system package, or a package owned by another organization). RFC 9457 problem+json with `code` one of `draft_overwrite`, `integrity_mismatch`, `skill_unchanged`, `version_not_higher`, or `name_collision`. `version_not_higher` has no override and is answered before the two overwrite checks: bump the version in the manifest. The first two name what the import would overwrite: `packageId`, plus `active_version` (`draft_overwrite`) and `version` (`integrity_mismatch`, and `draft_overwrite` when a published version of that number also differs). This operation has no force option: publish or discard the draft changes, or bump the version in the source manifest, then import again. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /** @description The existing package the import targets. */
+                        packageId?: string;
+                        /** @description `draft_overwrite` only: the version the unpublished draft declares, `null` when it declares none. */
+                        active_version?: string | null;
+                        /** @description The published version of the same number whose content differs: always on `integrity_mismatch`, and on `draft_overwrite` when the import would replace it too. */
+                        version?: string;
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -18166,7 +18938,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18650,6 +19422,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description A package with this name already exists (`code: name_collision`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             415: components["responses"]["UnsupportedMediaType"];
         };
     };
@@ -19152,7 +19933,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description A file operation refers to a missing file. */
             404: components["responses"]["NotFound"];
-            /** @description A package with this name already exists. */
+            /** @description A package with this name already exists (`code: name_collision`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19766,7 +20547,7 @@ export interface operations {
                     "application/json": components["schemas"]["AgentDetail"] | components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Already owned, name collision, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type), `name_collision` or `validation_failed` (`errors[].field` names the manifest key). */
+            /** @description Already owned, unsupported type, no published version, or a source manifest the type's write policy refuses (an integration's non-snake_case identity claim key). RFC 9457 problem+json with `code` one of `invalid_request` (already owned / no published version / unsupported type) or `validation_failed` (`errors[].field` names the manifest key). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19779,6 +20560,15 @@ export interface operations {
             /** @description Insufficient permissions — the source package type's read in its organization and its write in the destination space, or `package_copy_restricted` when the SOURCE organization sets `restrict_package_copy`, which narrows forking to callers holding the source package type's `share` in its HOME space. That is what the setting means — a fork is a COPY leaving the space that owns it, exactly as on `download` and on the agent `bundle` route. The setting read is the SOURCE organization's, since it is the source's content being protected. Skills and system packages are exempt. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A package with the fork's name already exists in the organization (`code: name_collision`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The SOURCE package's published artifact cannot be read: it expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`), or the source's latest published version exists but its archive is gone from storage (`version_artifact_unavailable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json. */
             422: {
                 headers: {
@@ -20129,7 +20919,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "fr",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20171,7 +20962,8 @@ export interface operations {
                      *       "displayName": "Alice Martin",
                      *       "language": "en",
                      *       "email": "alice@example.com",
-                     *       "name": "Alice Martin"
+                     *       "name": "Alice Martin",
+                     *       "can_create_org": true
                      *     }
                      */
                     "application/json": components["schemas"]["UserProfile"];
@@ -20324,7 +21116,7 @@ export interface operations {
                      *         {
                      *           "id": "cm6pqr678",
                      *           "label": "US Residential Proxy",
-                     *           "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *           "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *           "source": "custom",
                      *           "enabled": true,
                      *           "is_default": false,
@@ -20383,7 +21175,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
@@ -20431,7 +21223,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": true,
@@ -20518,7 +21310,7 @@ export interface operations {
                      * @example {
                      *       "id": "cm6pqr679",
                      *       "label": "US Residential Proxy",
-                     *       "urlPrefix": "http://user:****@us-proxy.example.com:8080",
+                     *       "urlPrefix": "http://***:***@us-proxy.example.com:8080",
                      *       "source": "custom",
                      *       "enabled": true,
                      *       "is_default": false,
@@ -21001,7 +21793,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -21328,7 +22120,7 @@ export interface operations {
             /** @description Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared with a member pin, since this body takes no `connection_overrides`. Or `agent_not_ready` — the connection cascade binds several connections to one integration (see above), or changed between the readiness check and the run's creation. */
+            /** @description `idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared with a member pin, since this body takes no `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above). */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -21686,26 +22478,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            /** @description missing_signature_headers | invalid_signature | invalid_timestamp | timestamp_out_of_tolerance */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired | sink_not_configured */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21747,7 +22545,7 @@ export interface operations {
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
                     };
-                    /** @description Authoritative terminal run cost written to the `runs` row. */
+                    /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;
                     /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
                     artifacts?: {
@@ -21776,26 +22574,32 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21831,26 +22635,32 @@ export interface operations {
                     };
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21887,33 +22697,41 @@ export interface operations {
                     };
                 };
             };
-            /** @description duplicate_file_name — the stored manifest has colliding workspace names */
+            /** @description `duplicate_file_name` — the stored manifest has colliding workspace names */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | no input files */
+            /** @description `not_found` — no run with this id, or it carries no input files. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -21979,49 +22797,63 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description storage_limit_exceeded */
+            /** @description `storage_limit_exceeded` — the write would overrun the organization's storage limit. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found */
+            /** @description `not_found` — no run with this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             /** @description `payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22051,26 +22883,32 @@ export interface operations {
                     "application/octet-stream": Blob;
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | file not found */
+            /** @description `not_found` — no run with this id, or no input file of that name. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22140,26 +22978,32 @@ export interface operations {
                     "application/zip": Blob;
                 };
             };
-            /** @description Signature verification failed */
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_not_found | no workspace provisioned */
+            /** @description `not_found` — no run with this id, or no workspace was provisioned for it. */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            /** @description run_sink_closed | run_sink_expired */
+            /** @description `run_sink_closed` | `run_sink_expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
         };
@@ -22232,6 +23076,7 @@ export interface operations {
                      *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
+                     *       "disabled_reason": null,
                      *       "cron_expression": "0 9 * * 1-5",
                      *       "timezone": "Europe/Paris",
                      *       "input": {
@@ -22322,7 +23167,7 @@ export interface operations {
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise. */
                     version_override?: string | null;
-                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. */
+                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     } | null;
@@ -22350,7 +23195,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`actor`). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -22363,7 +23208,7 @@ export interface operations {
             /** @description Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -22678,11 +23523,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
+            /** @description It is the organization's default space (`default_space_not_deletable`), runs are in progress in the space (`space_has_active_runs`), the space is the home of one or more packages (`space_homes_packages`; their ids are listed in the problem's `packages` extension), or it is a personal space the caller owns or administers as an orphan (`personal_space_not_deletable`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23059,20 +23903,10 @@ export interface operations {
                 };
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23112,20 +23946,10 @@ export interface operations {
                 };
             };
             /** @description Validation error (invalid host / SSRF block) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23148,20 +23972,10 @@ export interface operations {
                 content?: never;
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23198,12 +24012,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23229,20 +24038,10 @@ export interface operations {
                 };
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23275,21 +24074,10 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
-            /** @description Validation error */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -23313,20 +24101,10 @@ export interface operations {
                 content?: never;
             };
             /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -24103,6 +24881,7 @@ export interface operations {
                     };
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24250,6 +25029,7 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookObject"];
                 };
             };
+            /** @description Validation error. `code` is `blocked_url` (`param: "url"`) when the target resolves to a private or reserved network address. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24409,7 +25189,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Test event generated */
+            /** @description Test event queued for delivery (one attempt, outcome not yet known) */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -24566,7 +25346,7 @@ export interface operations {
     getIntegrationCredentials: {
         parameters: {
             query?: {
-                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
+                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 20 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
                 connection_id?: string;
             };
             header?: never;
@@ -24633,9 +25413,11 @@ export interface operations {
     };
     refreshIntegrationCredentials: {
         parameters: {
-            query?: {
-                /** @description Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no "the connection of this integration" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload. */
-                connection_id?: string;
+            query: {
+                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id: string;
+                /** @description The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential. */
+                credential_revision?: string;
             };
             header?: never;
             path: {
@@ -24657,7 +25439,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
                 };
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24688,7 +25470,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` rejections accumulate since it was last (re)connected. Not a streak: only a reconnect resets the count. */
+            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -24697,6 +25479,56 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    reportIntegrationUpstreamSuccess: {
+        parameters: {
+            query: {
+                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id: string;
+                /** @description The `credential_revision` of the credential the successful call carried. */
+                credential_revision: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Streak ended (or none to end on that credential). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing or malformed `credential_revision` is an `invalid_request` too. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
         };
     };
     runLlmProxyAnthropicMessages: {
@@ -24718,8 +25550,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24732,22 +25566,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24757,17 +25613,48 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24790,8 +25677,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24804,22 +25693,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24829,17 +25740,48 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24862,8 +25804,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24876,22 +25820,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24901,17 +25867,48 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -24934,8 +25931,10 @@ export interface operations {
             /** @description Upstream response forwarded verbatim. For streaming requests (`stream: true`), the response is `text/event-stream`; otherwise `application/json`. */
             200: {
                 headers: {
-                    /** @description Present only when the response cache is enabled (non-streaming 2xx responses). `MISS` when the upstream was hit and the result stored; `HIT` when served from cache. */
-                    "x-llm-proxy-cache-status"?: "HIT" | "MISS";
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    /** @description RFC 9211. This proxy's member is present only when the response cache is enabled (non-streaming 2xx responses): `appstrate-llm-proxy; hit` when served from cache, `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and the result stored — appended after any member an upstream cache set. */
+                    "Cache-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24948,22 +25947,44 @@ export interface operations {
             /** @description Validation error — malformed or empty body, a field the proxy cannot meter, or the run's model is not served by this endpoint. */
             400: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the provider refused the model's key (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). */
+            401: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    "WWW-Authenticate": components["headers"]["WWWAuthenticate"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/json": Record<string, never>;
+                };
+            };
             /** @description The run is not running, is remote-origin, or its model is not a platform-provided model pinned at launch. */
             403: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             404: components["responses"]["NotFound"];
             /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. RFC 9457 problem+json. */
             409: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -24973,17 +25994,48 @@ export interface operations {
             /** @description Request body exceeds `LLM_PROXY_LIMITS.max_request_bytes`. */
             413: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Upstream provider error — the upstream's status and body are forwarded verbatim (the documented status may be any non-2xx the upstream returns, e.g. 400/401/404/429/500/503). No usage recorded. */
+            500: components["responses"]["InternalServerError"];
+            /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
                 headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description An upstream provider error, relayed verbatim at the upstream's own status (any non-2xx, a status listed above included) with its body, marked `Proxy-Status: appstrate; received-status=<n>` — which is how a caller tells it from the proxy's own problem document. No usage recorded. */
+            default: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -25220,7 +26272,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs, with `role` set to the invitation role). */
+            /** @description Invitation accepted — returns the joined organization (same shape as the items in GET /api/orgs) plus `created`. For a new member `role` is the invitation's role. A caller who was already a member keeps their role: `created` is `false` and `role` is the one they hold, while the invitation's space assignments are still applied. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -25240,10 +26292,14 @@ export interface operations {
                      *         "spaces:read"
                      *       ],
                      *       "createdAt": "2026-01-10T08:00:00Z",
-                     *       "deleting_at": null
+                     *       "deleting_at": null,
+                     *       "created": true
                      *     }
                      */
-                    "application/json": components["schemas"]["Organization"];
+                    "application/json": components["schemas"]["Organization"] & {
+                        /** @description Whether the acceptance created the membership. `false` when the caller was already a member of the organization. */
+                        created: boolean;
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];

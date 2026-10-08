@@ -9,9 +9,9 @@
  *      on `_meta["dev.appstrate/upstream"]`, but `callToolResultToPi` keeps
  *      only `content` — so without this the agent never sees the status
  *      code and can't branch on 200/404/409/… Here we read it back and put
- *      it where the agent can act on it.
+ *      it where the agent can act on it, with the sidecar's code at status 0.
  *
- *      The status is ALL that survives. `_meta` carries allowlisted
+ *      The status (and that code) is ALL that survives. `_meta` carries allowlisted
  *      response headers too, and this shaper reads them and drops them:
  *      only the status reaches a content block, so `location`, `etag`,
  *      `retry-after` and the rest die here. That is deliberate — a raw
@@ -26,7 +26,7 @@
  *   2. Honour `responseMode.toFile`. The sidecar has no workspace mount, so
  *      (like `body.fromFile`) this is resolved runtime-side: materialise the
  *      response body to the requested workspace path and hand the agent a
- *      `{ kind: "file", path, size, status }` descriptor instead of the bytes
+ *      `{ kind: "file", path, size, status, code? }` descriptor instead of the bytes
  *      — keeping large responses out of the model context with a
  *      deterministic, agent-chosen path.
  *
@@ -49,8 +49,9 @@ import { mkdir, lstat, realpath, open } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
+import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import { spillResourcesToWorkspace, type RuntimeEventEmitter } from "@appstrate/runner-pi";
-import { readUpstreamMeta } from "./upstream-meta.ts";
+import { readApiCallErrorCode, readUpstreamMeta } from "./upstream-meta.ts";
 
 // Structural views — the sidecar's MCP `CallToolResult` carries these
 // shapes; we avoid importing the SDK type to keep the helper test-friendly.
@@ -189,29 +190,21 @@ async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Arr
  * the body to the chosen workspace path and returns a file descriptor; else
  * auto-spills large bodies and prepends the status line.
  *
- * KNOWN LIMITATION — redirects the sidecar returns unfollowed. On the
- * streaming path the credential proxy sets `redirect: "manual"` and hands
- * back the 30x itself (see `runtime-pi/sidecar/credential-proxy.ts`), so the
- * agent is the one that would have to re-issue. It cannot: the status line
- * below is `[api_call status=<n>]` and nothing else, `callToolResultToPi`
- * forwards only `content` blocks, and the `location` sitting on `_meta` is
- * read here and dropped. The agent sees a bare 30x and no next hop.
- *
- * The workaround is to re-issue with a BUFFERED body, which routes the call
- * through the sidecar's manual redirect follower — it walks the chain
- * server-side, re-applying the URL policy on every hop, and returns the
- * terminal response. That is the supported way to drive a redirect chain
- * today. Do not close the gap by rendering `location` into this line without
- * an explicit decision to widen what the model may see: an upstream redirect
- * URL is routinely credential-bearing (an authorize hop's `?code=`, a signed
- * `?X-Amz-Signature=`), and the same URL is already redacted to a bare host
- * before it reaches an operator log.
+ * A `location` on `_meta` is never rendered into the status line: an upstream
+ * redirect URL is routinely credential-bearing (an authorize hop's `?code=`, a
+ * signed `?X-Amz-Signature=`).
  */
 export async function shapeApiCallResponse(
   result: ToolResult,
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
   const status = safeStatus(result);
+  // The shared code describes an exchange the sidecar answered itself, so it is rendered only
+  // at status 0: next to a real upstream status it would contradict it.
+  const code =
+    status === 0
+      ? readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0])
+      : null;
 
   if (opts.toFile) {
     const bytes = await extractBodyBytes(result, opts.readResource);
@@ -222,6 +215,7 @@ export async function shapeApiCallResponse(
       path: opts.toFile,
       size: bytes.byteLength,
       ...(status !== null ? { status } : {}),
+      ...(code !== null ? { code } : {}),
     };
     // Descriptor rides twice, per the MCP spec recommendation: as
     // `structuredContent` (machine-readable, matches the tool's
@@ -252,6 +246,9 @@ export async function shapeApiCallResponse(
   // text/image content to the model (see module doc).
   return {
     ...spilled,
-    content: [{ type: "text", text: `[api_call status=${status}]` }, ...spilled.content],
+    content: [
+      { type: "text", text: apiCallStatusLine(status, code ?? undefined) },
+      ...spilled.content,
+    ],
   };
 }

@@ -15,8 +15,9 @@ v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 > Platform source of truth: `apps/api/src/services/connect/registry.ts` (`resolveStrategy`).
 
 All manifest field names below are **snake_case** — the AFPS wire convention.
-All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`,
-`{$outputs.<name>}` — NOT the 1.x `{{<field>}}` form.
+All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`.
+A `connect` block's outputs are the connection's credential fields, so they are
+referenced as `{$credential.<name>}` too.
 
 ```jsonc
 {
@@ -123,7 +124,9 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
-e.g. `{$credential.access_token}`, `{$outputs.token}`. No Handlebars, no `{{name}}`.
+e.g. `{$credential.access_token}`. Any other `{$…}` expression (`{$outputs.token}`, …)
+is refused when the manifest is saved or imported, since the platform does not evaluate
+it.
 
 ```jsonc
 // http — Bearer (OAuth2 / API key)
@@ -424,7 +427,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
           "method": "POST",
           "url": "https://example.com/login",
           "content_type": "application/json",
-          "body": "{\"email\":\"{$credential.email}\",\"password\":\"{$credential.password}\"}"
+          "body": "{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}"
         },
         "success_criteria": [
           { "condition": "$statusCode == 200", "type": "simple" }
@@ -434,7 +437,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
           "exp":   "$response.header.X-Expires-After",
           "user":  { "context": "$response.body", "selector": "$.profile.id", "type": "jsonpath" },
           "csrf":  { "from": "cookie", "name": "XSRF-TOKEN" },
-          "sub":   { "from": "jwt", "token": "{$outputs.token}", "path": "/sub" }
+          "sub":   { "from": "jwt", "token": "{$credential.token}", "path": "/sub" }
         },
         "expires_in_output": "exp",
         "identity_outputs": ["sub"]
@@ -446,7 +449,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
         "in": "header",
         "name": "Authorization",
         "prefix": "Bearer ",
-        "value": "{$outputs.token}"
+        "value": "{$credential.token}"
       }
     },
     "authorized_uris": ["https://api.example.com/**"]
@@ -456,14 +459,20 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
 
 Each `outputs` entry is one of:
 
-- **Arazzo runtime-expression string** (Arazzo §5.9) — `$statusCode`,
-  `$response.body#/{json-pointer}` (RFC 6901), `$response.header.{name}`,
-  `$outputs.{name}`;
+- **Arazzo runtime-expression string** (Arazzo §5.9) — `$statusCode`, `$response.body`,
+  `$response.body#/{json-pointer}` (RFC 6901), `$response.header.{name}`;
 - **Arazzo Selector Object** (Arazzo 1.1 §5.8.13) — `{ context, selector, type }` with
   `type ∈ "jsonpath" | "xpath" | "jsonpointer"` (resolved per RFC 9535 / XML Path 3.1 /
   RFC 6901);
 - **AFPS extractor object** — `{ from: "cookie", name }`, `{ from: "jwt", token, path }`,
-  `{ from: "regex", source, pattern, group }` (extensions Arazzo cannot express).
+  `{ from: "regex", source, pattern, group }` (extensions Arazzo cannot express). A jwt
+  `token` names another, non-jwt output as `{$credential.<name>}`; a regex `source` is
+  `$response.body` or `$response.header.<name>`.
+
+The login request's `url`, `body` and `headers` carry the user's login inputs as
+`{{name}}` (a field of `credentials.schema`); a `{$…}` expression there is refused at
+import, as is a runtime expression or selector `context` the login engine cannot
+evaluate.
 
 `success_criteria` is an array of Arazzo Criterion objects (`{ condition, context?, type? }`).
 When omitted, success defaults to HTTP 2xx (AFPS-defined; Arazzo leaves HTTP success
@@ -522,7 +531,7 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
       "http": {
         "in": "cookie",
         "name": "JSESSIONID",
-        "value": "{$outputs.JSESSIONID}"
+        "value": "{$credential.JSESSIONID}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]
@@ -541,7 +550,7 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
   session.
 - `outputs` (array of strings) — the authoritative set of injectable names the tool
   produces. These are the names you can reference in `delivery.*.value` as
-  `{$outputs.<name>}`.
+  `{$credential.<name>}`.
 
 > **Either-or form — but only one of the two is executed today.** The
 > spec-natural location `connect.tool.name` is where the name BELONGS, and it is
@@ -598,7 +607,7 @@ down.
       "http": {
         "in": "cookie",
         "name": "session",
-        "value": "{$outputs.session_cookie}"
+        "value": "{$credential.session_cookie}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]
@@ -615,8 +624,9 @@ under the host that set them and replayed there, winning by name over an injecte
 credential: a rotated session sticks, a deletion falls back to the injected value.
 Cookies are host-only: `Domain` and `Path` are ignored (a same-name cookie set for another
 path still shadows the injected one on that host), and two hosts share cookies only when
-both are literal `authorized_uris` entries. On a cross-origin redirect the platform proxy
-strips the Cookie credential; the sidecar keeps it inside the declared allowlist.
+both are literal `authorized_uris` entries. On a redirect to another origin, every path
+(platform proxy, sidecar, CLI) keeps the Cookie credential when the allowlist names that
+origin and strips it otherwise.
 
 ---
 
@@ -674,16 +684,21 @@ credentials to (§7.9):
   (single segment), `**` (multi-segment).
 - `allow_all_uris` (boolean, default `false`) — explicit override permitting any
   upstream URI. Treated as **security-sensitive** by consumers; surface a warning to
-  the user.
+  the user. Appstrate honours it only on a call that carries no credential (below).
 
 Consumers MUST NOT send credentials to URIs outside the authorized set unless
 `allow_all_uris` is explicitly `true`. URL-encoding bypass, fragment injection, and
 open-redirect chains MUST NOT cross the allowlist (§8.6).
 
-A caller that templates a credential field (`{{field}}`) into the target, a header or
-a substituted body loses `allow_all_uris`: the target and every redirect hop must
-match `authorized_uris`, and the call is refused when there is none. The sidecar, the
-CLI resolver and the platform proxy share this rule (`credentialUrlPolicy`).
+A call that carries a credential — one the caller templates (`{{field}}`) into the
+target, a header or a substituted body, or one the proxy injects itself
+(`injectsCredential`) — loses `allow_all_uris`: the target and every redirect hop must
+match `authorized_uris`, and the call is refused when there is none or when an entry
+lets the caller pick the host (`https://**`, `https://*.com/**`). The sidecar, the CLI
+resolver and the platform proxy share this rule (`credentialUrlPolicy`); the sidecar's
+MITM listener refuses the same calls. An auth that declares no `authorized_uris` and
+not `allow_all_uris` has every `api_call` refused, credential or not: an empty
+authorized set authorizes nothing.
 
 An integration whose endpoint is per-connection declares it as a URL-form entry
 instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
@@ -706,15 +721,16 @@ Rendered entries never exempt a host from the SSRF blocklist, and never share co
 What the guard covers is narrow. A templated credential cannot leave
 `authorized_uris`, which bound host and path, not tenant: an allowlisted multi-tenant
 API such as `https://discord.com/api/**` still reaches other tenants' endpoints on that
-path. The server-injected credential header (`delivery.http`) is not templated: under
-`allow_all_uris`, an untemplated call sends it to any public host, by design. Set
-`allow_all_uris` only when that is acceptable for the credential; the system
-catalogue refuses it on any auth that injects through `delivery.http`
-(`bun run build:system-packages:check`).
+path. An auth whose credential the proxy injects over HTTP (`delivery.http`, or its
+type's default header) must name its hosts: the platform refuses a manifest that gives
+it `allow_all_uris: true`, no `authorized_uris`, or a host-unbounded `authorized_uris`
+entry when it is written (`findUnboundedInjectedCredentials`,
+`@appstrate/core/integration`), and the proxies refuse such a call at run time.
 
 The runtime layer (sidecar MITM) enforces this on the wire, including across redirect
-hops (per-hop allowlist check, per-hop SSRF blocklist, hybrid credential-strip on
-cross-host hops). For a `source.kind: "local"` integration run in Docker, the same list is also the
+hops (per-hop allowlist check, per-hop SSRF gate with the connection pinned to the
+validated address, credential stripped on a hop to an origin the allowlist does not
+name). For a `source.kind: "local"` integration run in Docker, the same list is also the
 runner's whole network egress: a destination it does not grant is refused, and an
 auth that declares neither `authorized_uris` nor `allow_all_uris` gives its runner no
 way out at all. Only patterns with a `scheme://` count for raw TCP traffic: a pattern

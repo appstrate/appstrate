@@ -173,7 +173,14 @@ export function useModelColumns({
               {!m.is_default && (
                 <DropdownMenuItem
                   onSelect={() => onSetDefault(m)}
-                  disabled={m.needs_reconnection || settingDefaultId !== null}
+                  // `PUT /api/models/default` answers 409 for these rows; a
+                  // switched-off system model stays eligible, the server
+                  // refuses only a disabled custom one.
+                  disabled={
+                    m.needs_reconnection ||
+                    (m.source !== "built-in" && !m.enabled) ||
+                    settingDefaultId !== null
+                  }
                   data-testid={`set-default-model-${m.id}`}
                 >
                   <CheckCircle2 />

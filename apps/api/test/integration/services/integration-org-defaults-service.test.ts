@@ -91,11 +91,12 @@ describe("integration-org-defaults-service", () => {
     const connId = await seedSharedConnection();
 
     // upsert
-    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { previous, orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connId],
       enforce: true,
       createdBy: ctx.user.id,
     });
+    expect(previous).toBeNull();
     expect(created.connection_ids).toEqual([connId]);
     expect(created.enforce).toBe(true);
     expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION_ID)).toBe(true);
@@ -112,13 +113,13 @@ describe("integration-org-defaults-service", () => {
 
     // delete
     const del = await deleteOrgDefault(scope, INTEGRATION_ID);
-    expect(del.deleted).toBe(true);
+    expect(del.previous).toMatchObject({ connection_ids: [connId], enforce: true });
     expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
     expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, INTEGRATION_ID)).toBe(false);
 
     // delete is idempotent — second delete reports nothing removed.
     const del2 = await deleteOrgDefault(scope, INTEGRATION_ID);
-    expect(del2.deleted).toBe(false);
+    expect(del2.previous).toBeNull();
   });
 
   it("upsert replaces the existing default on the (app, integration) unique index", async () => {
@@ -130,11 +131,12 @@ describe("integration-org-defaults-service", () => {
       enforce: false,
       createdBy: ctx.user.id,
     });
-    const replaced = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { previous, orgDefault: replaced } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connB],
       enforce: true,
       createdBy: ctx.user.id,
     });
+    expect(previous).toMatchObject({ connection_ids: [connA], enforce: false });
     expect(replaced.connection_ids).toEqual([connB]);
     expect(replaced.enforce).toBe(true);
 
@@ -149,7 +151,7 @@ describe("integration-org-defaults-service", () => {
     const c = await seedSharedConnection(ctx.defaultSpaceId, "c");
     const expected = [c, a, b];
 
-    const created = await upsertOrgDefault(scope, INTEGRATION_ID, {
+    const { orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: expected,
       enforce: true,
       createdBy: ctx.user.id,

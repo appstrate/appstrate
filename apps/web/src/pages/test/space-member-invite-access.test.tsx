@@ -27,6 +27,7 @@ function pageFor(
     rolesError?: boolean;
     orgPermissions?: string[];
     invitations?: components["schemas"]["OrgInvitationInfo"][];
+    personal?: boolean;
   } = {},
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
@@ -45,11 +46,11 @@ function pageFor(
     id: "spc_inviter",
     orgId: org.id,
     name: "Inviter space",
-    isDefault: true,
+    isDefault: !options.personal,
     settings: {},
-    visibility: options.visibility ?? "open",
+    visibility: options.visibility ?? (options.personal ? "private" : "open"),
     default_role: "viewer",
-    personal: false,
+    personal: options.personal ?? false,
     access: "member",
     role: null,
     permissions,
@@ -170,6 +171,19 @@ describe("invite-only space member access", () => {
     expect(result.html).toContain("Attribué");
     expect(result.queryEnabled).toBe(true);
     expect(result.html).not.toContain("data-page-actions-trigger");
+  });
+
+  it("does not mount the member page in a personal space, whatever its owner holds", () => {
+    // The owner holds the admin preset there; the server still answers 409
+    // `personal_space_has_no_members` to every member write.
+    const result = pageFor(
+      ["space-members:read", "space-members:invite", "space-members:change-role"],
+      true,
+      { personal: true },
+    );
+    expect(result.html).not.toContain('data-testid="add-space-member-button"');
+    expect(result.html).not.toContain("Private cached member");
+    expect(result.queryEnabled).toBeUndefined();
   });
 
   it("refuses a caller holding neither permission before mounting the member page", () => {

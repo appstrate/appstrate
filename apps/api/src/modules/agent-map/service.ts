@@ -442,7 +442,7 @@ export async function buildAgentMap(
   });
 
   const connectionByIntegration = new Map(
-    (connectionReadiness?.integrations ?? []).map((i) => [i.integration_id, i]),
+    (connectionReadiness?.integrations ?? []).map((i) => [i.integration_package_id, i]),
   );
 
   const diagnostics = [...readinessErrors, ...(connectionReadiness?.errors ?? [])].map(

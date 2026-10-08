@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CredentialSource } from "@appstrate/db/schema";
 import type { AppstrateRunPlan, FileReference } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../types/index.ts";
@@ -15,7 +16,7 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { clampToBackingLevel, resolveModel } from "./org-models.ts";
+import { clampToBackingLevel, resolveModelCascade } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog, modelSourceOf } from "./state/runs.ts";
@@ -128,7 +129,7 @@ export async function buildRunContext(params: {
   versionRef: string;
   proxyLabel: string | null;
   modelLabel: string;
-  modelSource: string | null;
+  modelSource: CredentialSource;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
   /**
@@ -143,6 +144,8 @@ export async function buildRunContext(params: {
    * these — see {@link recordDroppedGenerationSettings}.
    */
   droppedGenerationSettings: DroppedGenerationSetting[];
+  /** The model pin this run fell back from — see {@link recordModelFallback}. */
+  unavailablePinnedModelId: string | null;
 }> {
   const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
@@ -206,14 +209,15 @@ export async function buildRunContext(params: {
   const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
   const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
-  const [proxyResult, modelResult] = await Promise.all([
+  const [proxyResult, modelCascade] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
-    resolveModel(orgId, agent.id, effectiveModelId),
+    resolveModelCascade(orgId, agent.id, effectiveModelId),
   ]);
 
-  if (!modelResult) {
+  if (!modelCascade) {
     throw new ModelNotConfiguredError();
   }
+  const modelResult = modelCascade.model;
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
@@ -223,6 +227,10 @@ export async function buildRunContext(params: {
   if (!modelCredentialIsPresent(modelResult)) {
     throw new ModelCredentialMissingError(modelResult.label);
   }
+
+  // Not an id comparison: the pin is free text, and a differently-cased UUID resolves.
+  const unavailablePinnedModelId =
+    effectiveModelId && !modelCascade.fromExplicit ? effectiveModelId : null;
 
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
@@ -356,6 +364,7 @@ export async function buildRunContext(params: {
     generationConfig,
     droppedIntegrations,
     droppedGenerationSettings,
+    unavailablePinnedModelId,
   };
 }
 
@@ -450,6 +459,26 @@ export async function recordDroppedGenerationSettings(
       { setting, value, model, reason: "refused_by_model" },
     );
   }
+}
+
+export const MODEL_FALLBACK_EVENT = "model_fallback";
+
+/** Same marker as {@link recordDroppedGenerationSettings}, for a model pin that no longer loads. */
+export async function recordModelFallback(
+  scope: OrgScope,
+  runId: string,
+  model: string,
+  unavailablePinnedModelId: string | null,
+): Promise<void> {
+  if (!unavailablePinnedModelId) return;
+  await appendDropMarker(
+    scope,
+    runId,
+    MODEL_FALLBACK_EVENT,
+    `the model set for this run ('${unavailablePinnedModelId}') is no longer usable — ` +
+      `the run uses the default model '${model}' instead`,
+    { pinnedModelId: unavailablePinnedModelId, model, reason: "pinned_model_unavailable" },
+  );
 }
 
 /** Best-effort `warn` system row: a failed write is logged, never thrown. */

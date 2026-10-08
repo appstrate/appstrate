@@ -17,7 +17,6 @@ import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { PageActionsMenu } from "@/components/page-actions-menu";
 import { ErrorState, EmptyState } from "@/components/page-states";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
@@ -87,7 +86,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         rowKey={(client) => client.clientId}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={<EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound} />}
       />
 

@@ -64,6 +64,7 @@ export const profile: Json200<"/api/profile", "get"> = {
   language: "fr",
   email: "olivier@tractr.net",
   name: "Olivier Tarbès",
+  can_create_org: true,
 };
 
 /** better-auth's own wire shape — it is not described by the OpenAPI spec. */
@@ -181,6 +182,10 @@ export const connectionDeleteImpact: Json200<
   "/api/me/connections/{connectionId}/delete-impact",
   "get"
 > = {
+  // Schedules the delete switches off that the caller cannot see (someone
+  // else's, bound to a connection shared with them): the line exists only
+  // when this is above 0.
+  other_schedules_disabled_count: 2,
   pins: [
     {
       agent_package_id: "@tractr/compta-trimestrielle",
@@ -285,6 +290,15 @@ export const spacesByOrg: Record<string, Space[]> = {
     },
     makeSpace("app_lab_default", ORG_ID, "Default", true),
     makeSpace("app_lab_sandbox", ORG_ID, "Bac à sable"),
+    // Closed and not a member: listed, never enterable. The switcher shows it
+    // disabled with "Sur demande".
+    {
+      ...makeSpace("app_lab_rh", ORG_ID, "Ressources humaines"),
+      visibility: "closed",
+      access: "none",
+      role: null,
+      permissions: [],
+    },
     // Every member has one (#1437): private, reached by its owner alone, and
     // named by the reader rather than by the French the server stored. Without
     // it in this list the whole notion was invisible here.
@@ -710,7 +724,7 @@ export const runs: Run[] = [
     runner_kind: "docker",
     connections_used: [
       {
-        integration_id: "@appstrate/google-drive",
+        integration_package_id: "@appstrate/google-drive",
         label: "Drive Finance Tractr",
         account_id: "olivier@tractr.net",
         source: "admin_pin",
@@ -812,6 +826,7 @@ export const runs: Run[] = [
     status: "cancelled",
     packageId: "@tractr/analyse-recurrence-articles-tastet",
     agent_name: "analyse-recurrence-articles-tastet",
+    error: "Annulé par Olivier Tarbès.",
     duration: 8_000,
     cost: 0.01,
     result: {
@@ -1052,6 +1067,7 @@ function makeSchedule(over: Partial<Schedule> & Pick<Schedule, "id" | "packageId
     spaceId: APP_ID,
     name: null,
     enabled: true,
+    disabled_reason: null,
     cron_expression: "0 7 * * *",
     timezone: "America/Toronto",
     input: null,
@@ -1114,14 +1130,16 @@ export const schedules: Json200<"/api/schedules", "get"> = {
       unread_count: 3,
       running_runs: 1,
     }),
-    // Paused: the database still holds a `next_run_at`, which is exactly the
-    // row that catches a table promising a run that is not coming.
+    // Switched off by the platform (its connection stopped being shared): the
+    // database still holds a `next_run_at`, which is exactly the row that
+    // catches a table promising a run that is not coming.
     makeSchedule({
       id: "sch_03",
       packageId: "@tractr/analyse-recurrence-articles-tastet",
       name: "Veille hebdomadaire",
       cron_expression: "30 6 * * 1",
       enabled: false,
+      disabled_reason: "connection_unshared",
       last_run_at: ago(11_000),
       next_run_at: ago(-3_000),
       last_run_number: 11,
@@ -2600,7 +2618,7 @@ export const agentConnectionReadiness: Json200<
   errors: [],
   integrations: [
     {
-      integration_id: "@appstrate/google-drive",
+      integration_package_id: "@appstrate/google-drive",
       run_blocking: false,
       resolution: {
         // Two usable accounts and nothing naming one: the member has to pick.
@@ -3550,6 +3568,10 @@ export const integrations: Json200<"/api/integrations", "get"> = {
       orgId: "org_tractr",
       source: "system",
       active: true,
+      // Members may not connect their own account: switch the lab to a role
+      // without `integrations:configure` and the connections table shows the
+      // admin gate instead of "Connecter".
+      block_user_connections: true,
       manifest: {
         display_name: "Gmail",
         description: "Chercher, lire et envoyer des courriels au nom de l'employé connecté.",
@@ -3678,7 +3700,7 @@ type Connection = IntegrationAuth["connections"][number];
 const driveConnections: Connection[] = [
   {
     id: "conn_lab_1",
-    packageId: INTEGRATION_ID,
+    integration_package_id: INTEGRATION_ID,
     auth_key: "drive",
     account_id: "108453099102",
     identity_claims: { email: "olivier@tractr.net" },
@@ -3702,7 +3724,7 @@ const driveConnections: Connection[] = [
   },
   {
     id: "conn_lab_2",
-    packageId: INTEGRATION_ID,
+    integration_package_id: INTEGRATION_ID,
     auth_key: "drive",
     account_id: "114820071553",
     identity_claims: { email: "olivier@appstrate.com" },
@@ -3720,7 +3742,7 @@ const driveConnections: Connection[] = [
   },
   {
     id: "conn_lab_3",
-    packageId: INTEGRATION_ID,
+    integration_package_id: INTEGRATION_ID,
     auth_key: "drive",
     account_id: "119003471228",
     identity_claims: { email: "compta@tractr.net" },
@@ -3913,7 +3935,7 @@ export const integrationClients: Json200<
   data: [
     {
       client_ref: "sys_a91f2c",
-      source: "built-in",
+      source: "system",
       client_id: "sys_a91f2c4d",
       is_default: false,
       auto_provisioned: false,
@@ -3933,7 +3955,7 @@ export const integrationClients: Json200<
     },
     {
       client_ref: "cli_lab_custom",
-      source: "custom",
+      source: "space",
       client_id: "884012773901-h9v2c1k8s0m4.apps.googleusercontent.com",
       is_default: true,
       auto_provisioned: false,
@@ -3943,7 +3965,7 @@ export const integrationClients: Json200<
     },
     {
       client_ref: "cli_lab_second",
-      source: "custom",
+      source: "space",
       client_id: "884012773901-p3t7d5j1a2f6.apps.googleusercontent.com",
       is_default: false,
       auto_provisioned: false,
@@ -4056,8 +4078,8 @@ export const integrationConsumingAgents: Json200<
   object: "list",
   hasMore: false,
   data: [
-    { packageId: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" },
-    { packageId: "@tractr/wiki-brain", display_name: "Wiki-brain" },
+    { agent_package_id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" },
+    { agent_package_id: "@tractr/wiki-brain", display_name: "Wiki-brain" },
   ],
 };
 
@@ -4084,14 +4106,14 @@ export const integrationPins: Json200<"/api/integrations/{packageId}/pins", "get
   hasMore: false,
   data: [
     {
-      packageId: "@tractr/compta-trimestrielle",
+      agent_package_id: "@tractr/compta-trimestrielle",
       integration_package_id: INTEGRATION_ID,
       connection_ids: ["conn_lab_3"],
       createdAt: ago(20_000),
       updatedAt: ago(1_000),
     },
     {
-      packageId: "@tractr/wiki-brain",
+      agent_package_id: "@tractr/wiki-brain",
       integration_package_id: INTEGRATION_ID,
       connection_ids: ["conn_lab_gone"],
       createdAt: ago(9_000),
@@ -4160,6 +4182,7 @@ export const models: Json200<"/api/models", "get"> = {
       providerId: "anthropic",
       provider_name: "Anthropic",
       pi_provider: "anthropic",
+      pi_dialect: null,
       generation: null,
       credentialId: "cred_builtin",
       created_by: null,
@@ -4181,6 +4204,7 @@ export const models: Json200<"/api/models", "get"> = {
       providerId: "anthropic",
       provider_name: "Anthropic",
       pi_provider: "anthropic",
+      pi_dialect: null,
       generation: null,
       credentialId: "cred_openai",
       created_by: "Olivier Tarbès",
@@ -4202,6 +4226,7 @@ export const models: Json200<"/api/models", "get"> = {
       providerId: null,
       provider_name: null,
       pi_provider: null,
+      pi_dialect: null,
       generation: null,
       credentialId: null,
       created_by: "Pierre",

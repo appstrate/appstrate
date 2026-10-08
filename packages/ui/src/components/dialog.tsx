@@ -5,6 +5,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "../cn.ts";
+import { captureDialogOpener, restoreDialogOpener } from "../dialog-focus.ts";
+import { useUiLabels } from "./ui-labels.ts";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -29,44 +31,76 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * Returns focus to the control that opened a state-opened dialog (Radix only
+ * knows its own `DialogTrigger`). Mounted only while open, so the initializer
+ * captures the opener before any `autoFocus` inside moves focus.
+ *
+ * Limits: a tooltip-wrapped opener shows its tooltip on refocus; a dialog that
+ * replaces another captures a control inside the first one, gone at close.
+ */
+const DialogSurface = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ onCloseAutoFocus, ...props }, ref) => {
+  const [opener] = React.useState(() => captureDialogOpener(document));
+  return (
+    <DialogPrimitive.Content
+      ref={ref}
+      onCloseAutoFocus={(event) => {
+        onCloseAutoFocus?.(event);
+        if (event.defaultPrevented) return;
+        if (restoreDialogOpener(opener, document)) event.preventDefault();
+      }}
+      {...props}
+    />
+  );
+});
+DialogSurface.displayName = "DialogSurface";
+
 interface DialogContentProps extends React.ComponentPropsWithoutRef<
   typeof DialogPrimitive.Content
 > {
   hideCloseButton?: boolean;
+  /** Overrides the translated default from `UiLabelsContext`. */
   closeLabel?: string;
 }
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton = false, closeLabel = "Close", ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay>
-      <div className="flex min-h-full items-center justify-center p-4">
-        <DialogPrimitive.Content
-          data-slot="dialog-content"
-          ref={ref}
-          className={cn(
-            "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 ease-surface data-[state=open]:duration-base data-[state=closed]:duration-fast relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg",
-            className,
-          )}
-          {...props}
-        >
-          {children}
-          {!hideCloseButton && (
-            <DialogPrimitive.Close
-              aria-label={closeLabel}
-              className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
-            >
-              <X className="h-4 w-4" />
-              <span className="sr-only">{closeLabel}</span>
-            </DialogPrimitive.Close>
-          )}
-        </DialogPrimitive.Content>
-      </div>
-    </DialogOverlay>
-  </DialogPortal>
-));
+>(({ className, children, hideCloseButton = false, closeLabel, ...props }, ref) => {
+  const labels = useUiLabels();
+  const close = closeLabel ?? labels.close;
+  return (
+    <DialogPortal>
+      <DialogOverlay>
+        <div className="flex min-h-full items-center justify-center p-4">
+          <DialogSurface
+            data-slot="dialog-content"
+            ref={ref}
+            className={cn(
+              "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 ease-surface data-[state=open]:duration-base data-[state=closed]:duration-fast relative z-50 grid w-full max-w-lg gap-4 rounded-lg border p-6 shadow-lg",
+              className,
+            )}
+            {...props}
+          >
+            {children}
+            {!hideCloseButton && (
+              <DialogPrimitive.Close
+                aria-label={close}
+                className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">{close}</span>
+              </DialogPrimitive.Close>
+            )}
+          </DialogSurface>
+        </div>
+      </DialogOverlay>
+    </DialogPortal>
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

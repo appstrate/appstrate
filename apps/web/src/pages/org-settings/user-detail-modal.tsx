@@ -12,7 +12,6 @@
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import {
   Select,
   SelectContent,
@@ -61,8 +60,6 @@ export function UserDetailModal({
 
   const changeSpaceRole = (membership: SpaceMembership, value: string) => {
     const body = spaceRoleAssignment(value);
-    const onError = (err: unknown) =>
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
     const onSuccess = () =>
       toast.success(
         t("spaceMembers.roleUpdated", {
@@ -73,7 +70,7 @@ export function UserDetailModal({
     if (membership.member.source === "explicit") {
       updateMember.mutate(
         { params: { path: { id: membership.space.id, userId: member.userId } }, body },
-        { onError, onSuccess },
+        { onSuccess },
       );
       return;
     }
@@ -82,7 +79,7 @@ export function UserDetailModal({
         params: { path: { id: membership.space.id } },
         body: { userId: member.userId, ...body },
       },
-      { onError, onSuccess },
+      { onSuccess },
     );
   };
 

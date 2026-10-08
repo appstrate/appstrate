@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
  * These three guards read every source file of three workspaces on each run.
@@ -179,10 +180,11 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
-  "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
+  "integration.auth.type.", // components/integration-connect/{inline-connect-button,connection-picker-menu}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
   "integration.admin.usage.",
@@ -221,12 +223,14 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx, run-execution-tab.tsx
   "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
+  "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
   "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
   "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
+  "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
 
@@ -286,4 +290,20 @@ describe("declared keys", () => {
     },
     SCAN_TIMEOUT_MS,
   );
+});
+
+describe("schedule disabled reasons", () => {
+  it("each have a sentence", () => {
+    // A Record, so a reason added to the enum without an entry here fails the typecheck.
+    const reasons = Object.keys({
+      actor_invalid: true,
+      actor_left_org: true,
+      connection_deleted: true,
+      connection_unshared: true,
+    } satisfies Record<NonNullable<ScheduleWireDto["disabled_reason"]>, true>);
+
+    expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
+      [],
+    );
+  });
 });

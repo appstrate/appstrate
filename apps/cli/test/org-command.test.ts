@@ -195,7 +195,7 @@ describe("org current", () => {
   it("exits 1 when the profile is unconfigured", async () => {
     const { io, stderr } = createMemoryIO();
     await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
-    expect(stderr()).toContain("Not logged in");
+    expect(stderr()).toContain('Profile "default" not configured');
   });
 });
 

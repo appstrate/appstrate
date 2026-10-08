@@ -18,7 +18,7 @@ import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { RunsTable, useRunColumns } from "./runs-table";
 import { RunCard } from "./run-card";
 import { CardGrid } from "./card-grid";
-import { EmptyState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
 import { columnMenu, visibleColumns } from "./data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
@@ -109,7 +109,7 @@ export function RunList({
   const page = paging.signature === signature ? paging.page : 0;
   const setPage = (next: number) => setPaging({ signature, page: next });
 
-  const { data, isLoading, isError } = usePaginatedRuns({
+  const { data, isLoading, isError, error } = usePaginatedRuns({
     packageId,
     scheduleId,
     user,
@@ -129,6 +129,9 @@ export function RunList({
   // Only the first page shows a placeholder; paging keeps the previous rows.
   const showLoading = isLoading && page === 0;
 
+  // A refused or failed listing is not "no runs": the body says the refusal.
+  const errorBody = <ErrorState error={error} compact />;
+
   return (
     <div>
       {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
@@ -140,6 +143,7 @@ export function RunList({
           agentName={agentName}
           isLoading={showLoading}
           isError={isError}
+          error={errorBody}
           empty={emptyState}
           banner={page === 0 ? firstPageBanner : undefined}
           columnMode={tableColumnMode}
@@ -152,6 +156,7 @@ export function RunList({
           renderCard={(run) => <RunCard run={run} agentName={agentName(run)} />}
           isLoading={showLoading}
           isError={isError}
+          error={errorBody}
           empty={
             emptyState ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />
           }

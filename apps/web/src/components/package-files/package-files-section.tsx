@@ -14,7 +14,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { FolderOpen } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   Table,

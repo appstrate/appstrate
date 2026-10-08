@@ -159,7 +159,7 @@ const PI_BETAS: ReadonlySet<string> = new Set([
   "interleaved-thinking-2025-05-14",
   "mid-conversation-output-config-2026-07-01",
   "thinking-binding-controls-2026-08-01",
-  "mid-conversation-tool-changes-2026-07-01",
+  "inline-tools-2026-09-15",
 ]);
 
 /**

@@ -15,6 +15,7 @@ import { EmptyState, ErrorState, LoadingState } from "../page-states";
 import { ActorBadge } from "./actor-badge";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
+import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import {
@@ -25,6 +26,7 @@ import {
   useRunPinned,
 } from "../../hooks/use-persistence";
 import { useDeleteMemory } from "../../hooks/use-mutations";
+import { usePermissions } from "../../hooks/use-permissions";
 
 interface MemoryPanelProps {
   packageId: string;
@@ -67,6 +69,10 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
 
   const deleteMemory = useDeleteMemory(packageId);
   const deletePinned = useDeletePinnedSlot(packageId);
+  const { can } = usePermissions();
+  const canDelete = !isRunView && can("persistence:delete");
+  const [toDelete, setToDelete] = useState<{ kind: "pinned" | "memory"; id: number } | null>(null);
+  const deletion = toDelete?.kind === "pinned" ? deletePinned : deleteMemory;
 
   const pinnedCount = pinned?.length ?? 0;
   const memoriesCount = memories?.length ?? 0;
@@ -91,19 +97,32 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   }
 
   return (
-    <AgentMemoryCollection
-      pinned={pinned ?? []}
-      memories={memories ?? []}
-      pinnedLoading={pinnedQ.isLoading}
-      memoriesLoading={memoriesQ.isLoading}
-      pinnedError={pinnedQ.isError}
-      memoriesError={memoriesQ.isError}
-      onDeletePinned={isRunView ? undefined : (id) => deletePinned.mutate(id)}
-      onDeleteMemory={isRunView ? undefined : (id) => deleteMemory.mutate(id)}
-      isDeleting={deletePinned.isPending || deleteMemory.isPending}
-      embedded={isRunView}
-      initialTypes={initialTypes}
-    />
+    <>
+      <AgentMemoryCollection
+        pinned={pinned ?? []}
+        memories={memories ?? []}
+        pinnedLoading={pinnedQ.isLoading}
+        memoriesLoading={memoriesQ.isLoading}
+        pinnedError={pinnedQ.isError}
+        memoriesError={memoriesQ.isError}
+        onDeletePinned={canDelete ? (id) => setToDelete({ kind: "pinned", id }) : undefined}
+        onDeleteMemory={canDelete ? (id) => setToDelete({ kind: "memory", id }) : undefined}
+        isDeleting={deletePinned.isPending || deleteMemory.isPending}
+        embedded={isRunView}
+        initialTypes={initialTypes}
+      />
+      <ConfirmModal
+        open={toDelete !== null}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (toDelete) deletion.mutate(toDelete.id, { onSuccess: () => setToDelete(null) });
+        }}
+        title={t("detail.memoryDeleteTitle")}
+        description={t("detail.memoryDeleteConfirm")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={deletion.isPending}
+      />
+    </>
   );
 }
 

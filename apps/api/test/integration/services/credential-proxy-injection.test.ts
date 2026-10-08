@@ -22,7 +22,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { proxyCall, ProxySubstitutionError } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -79,6 +79,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -90,6 +91,62 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     expect(res.status).toBe(200);
     expect(captured?.authorization).toBe("Bearer ya29.live-token");
+  });
+
+  it("keeps the credential on a cross-origin redirect the allowlist names (Dropbox api. -> content.)", async () => {
+    const packageId = "@cpinjectorg/dropbox";
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Dropbox",
+        description: "Dropbox integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+            }),
+          },
+        },
+      }),
+    );
+    const connectionId = await seedProxyConnection(ctx, packageId, "api", { api_key: "sl.tok" });
+
+    const hops: Array<{ url: string; authorization: string | null }> = [];
+    const fakeFetch = ((url: string, init: RequestInit) => {
+      hops.push({ url, authorization: new Headers(init.headers).get("authorization") });
+      return Promise.resolve(
+        hops.length === 1
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "https://content.dropboxapi.com/2/files/download" },
+            })
+          : new Response("bytes", { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "POST",
+      target: "https://api.dropboxapi.com/2/files/download",
+      headers: {},
+      fetch: fakeFetch,
+      resolveHost: async () => ["162.125.1.1"],
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.connectionId).toBe(connectionId);
+    expect(hops).toEqual([
+      { url: "https://api.dropboxapi.com/2/files/download", authorization: "Bearer sl.tok" },
+      { url: "https://content.dropboxapi.com/2/files/download", authorization: "Bearer sl.tok" },
+    ]);
   });
 
   it("injects X-Api-Key without prefix when the plan declares it", async () => {
@@ -121,6 +178,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -165,6 +223,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -206,6 +265,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -261,6 +321,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
@@ -279,7 +340,128 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     expect(connection?.needsReconnection).toBe(false);
   });
 
-  it("throws ProxySubstitutionError (fail-closed) when the target references an unresolved {{field}}", async () => {
+  // `intranet.corp` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+  it.each([
+    ["names it literally", "https://intranet.corp/**", true],
+    ["takes it from the connection", "https://{$credential.host}/**", false],
+  ])(
+    "reaches an operator-listed internal host only when authorized_uris %s",
+    async (_label, pattern, reached) => {
+      const packageId = `@cpinjectorg/internal-${reached ? "literal" : "rendered"}`;
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({
+          name: packageId,
+          displayName: "Internal",
+          description: "Internal API",
+          auths: {
+            api: {
+              type: "api_key",
+              authorizedUris: [pattern],
+              credentialFields: ["api_key", "host"],
+              requiredCredentialFields: ["api_key", "host"],
+              delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, packageId, "api", { api_key: "k", host: "intranet.corp" });
+
+      let sent = 0;
+      const call = proxyCall({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: "GET",
+        target: "https://intranet.corp/api/x",
+        headers: {},
+        fetch: (() => {
+          sent++;
+          return Promise.resolve(new Response("{}"));
+        }) as unknown as typeof fetch,
+        resolveHost: async () => ["10.0.0.5"],
+      });
+
+      if (reached) expect((await call).status).toBe(200);
+      else await expect(call).rejects.toMatchObject({ code: "blocked_target" });
+      expect(sent).toBe(reached ? 1 : 0);
+    },
+  );
+
+  /**
+   * An api_key integration injecting `Authorization: Bearer <api_key>`, caller override allowed.
+   * No DNS: `api.example.com` is in the test preload's EGRESS_ALLOW_INTERNAL_HOSTS.
+   */
+  async function seedOverridable(
+    packageId: string,
+    credentials = { api_key: "platform", alt: "other" },
+  ): Promise<void> {
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: packageId,
+        displayName: "Overridable",
+        description: "Overridable integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key", "alt"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+              allowServerOverride: true,
+            }),
+          },
+        },
+      }),
+    );
+    await seedProxyConnection(ctx, packageId, "api", credentials);
+  }
+
+  it("repairs `Bearer{{field}}` in a caller Authorization the manifest lets override", async () => {
+    const packageId = "@cpinjectorg/repair";
+    await seedOverridable(packageId);
+    const authorization: Array<string | null> = [];
+    await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/x",
+      headers: { authorization: "Bearer{{alt}}" },
+      fetch: ((_url: string, init: RequestInit) => {
+        authorization.push(new Headers(init.headers).get("authorization"));
+        return Promise.resolve(new Response("{}"));
+      }) as unknown as typeof fetch,
+    });
+    expect(authorization).toEqual(["Bearer other"]);
+  });
+
+  it("reports a request defect ahead of a credential no header can carry", async () => {
+    const packageId = "@cpinjectorg/defect-first";
+    await seedOverridable(packageId, { api_key: "platform", alt: "a\nb" });
+    const call = proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/x",
+      // `X-Key` alone is a 502 `credential_unusable`.
+      headers: { "X-Key": "{{alt}}", "X-Other": "{{nope}}" },
+      fetch: (() => Promise.resolve(new Response("{}"))) as unknown as typeof fetch,
+    });
+    await expect(call).rejects.toMatchObject({
+      code: "unresolved_placeholder",
+      message: 'Unresolved placeholders in header "X-Other": {{nope}}',
+    });
+  });
+
+  it("refuses with unresolved_placeholder (fail-closed) when the target references an unresolved {{field}}", async () => {
     const packageId = "@cpinjectorg/failclosed";
     await seedProxyIntegration(
       ctx,
@@ -310,6 +492,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await expect(
       proxyCall({
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
@@ -318,7 +501,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
         headers: {},
         fetch: fakeFetch,
       }),
-    ).rejects.toBeInstanceOf(ProxySubstitutionError);
+    ).rejects.toMatchObject({ code: "unresolved_placeholder" });
 
     // Fail-closed: the upstream fetch must never be issued.
     expect(upstreamHit).toBe(false);

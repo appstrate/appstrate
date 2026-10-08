@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
+import { findUnboundedInjectedCredentials } from "@appstrate/core/integration";
+import { defaultIntegrationManifest } from "../../agent-editor/utils";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -46,6 +48,34 @@ describe("integration-editor source", () => {
     expect((m.source as any).kind).toBe("local");
     expect((m.source as any).server.name).toBe("@scope/srv");
     expect(getSource(m).serverVersion).toBe("^1.0.0");
+  });
+
+  const remote = (remoteUrl: string) => ({
+    kind: "remote" as const,
+    remoteUrl,
+    remoteTransport: "streamable-http" as const,
+    serverName: "",
+    serverVersion: "",
+  });
+
+  it("gives a new integration's auth the source host as its allowlist, once the URL names one", () => {
+    const typed = ["https://", "https://exa", "https://example.com/mcp"].reduce(
+      (m, url) => setSource(m, remote(url)),
+      defaultIntegrationManifest("acme"),
+    );
+    expect((typed.auths as any).primary.authorized_uris).toEqual(["https://example.com/**"]);
+    expect(findUnboundedInjectedCredentials(typed)).toEqual([]);
+  });
+
+  it("leaves an allowlist the author wrote", () => {
+    const authored = {
+      source: { kind: "remote", remote: { url: "https://a.test/mcp" } },
+      auths: {
+        own: { type: "api_key", authorized_uris: ["https://api.a.test/**"] },
+        open: { type: "custom", allow_all_uris: true },
+      },
+    };
+    expect(setSource(authored, remote("https://b.test/mcp")).auths).toEqual(authored.auths);
   });
 });
 
@@ -163,6 +193,25 @@ describe("integration-editor auths", () => {
     expect(a.delivery.env).toEqual({ MY_TOKEN: { value: "{$credential.api_key}" } });
     // credential property description preserved.
     expect(a.credentials.schema.properties.api_key.description).toBe("key");
+  });
+
+  it("keeps an mtls auth mtls across an edit", () => {
+    // A type the form does not know is read back as `api_key` and SAVED as one.
+    const imported = {
+      auths: {
+        cert: {
+          type: "mtls",
+          authorized_uris: ["https://x.test/**"],
+          delivery: { files: { "client.pem": { value: "{$credential.cert}" } } },
+        },
+      },
+    };
+    const auths = getAuths(imported);
+    expect(auths[0]!.type).toBe("mtls");
+    auths[0]!.authorizedUris = ["https://y.test/**"];
+    const a = (setAuths(imported, auths).auths as any).cert;
+    expect(a.type).toBe("mtls");
+    expect(a.delivery).toEqual({ files: { "client.pem": { value: "{$credential.cert}" } } });
   });
 });
 

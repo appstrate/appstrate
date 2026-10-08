@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { NextRunPreview } from "./next-run-preview";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
-import { useTranslation } from "react-i18next";
 import { formatDateField } from "../lib/format-date";
 
 interface ScheduleCardProps {
@@ -28,9 +28,7 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
   const unreadCount = schedule.unread_count;
   const lastRunNumber = schedule.last_run_number;
 
-  const isActive = schedule.enabled ?? true;
-
-  const statusBadge = <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
+  const statusBadge = <ScheduleStatusBadge schedule={schedule} />;
   const activityBadges = (
     <>
       {unreadCount > 0 && (
@@ -50,7 +48,9 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
       >
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium">{schedule.name || schedule.id}</h2>
+            <h2 className="truncate text-sm font-medium">
+              {schedule.name || t("schedule.unnamed")}
+            </h2>
             <p className="text-muted-foreground mt-1 truncate text-xs">
               {agentName ?? schedule.packageId}
             </p>
@@ -71,7 +71,9 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
           <div className="min-w-0">
             <dt className="text-muted-foreground">{t("schedules.column.next")}</dt>
             <dd className="mt-1 truncate">
-              {isActive && schedule.next_run_at ? formatDateField(schedule.next_run_at) : "—"}
+              {schedule.enabled && schedule.next_run_at
+                ? formatDateField(schedule.next_run_at)
+                : "—"}
             </dd>
           </div>
         </dl>
@@ -95,7 +97,7 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
       }
     >
       <div className="flex items-center gap-2 p-3">
-        <span className="truncate font-medium">{schedule.name || schedule.id}</span>
+        <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
         {statusBadge}
         {activityBadges}
         <ActorLabel
@@ -106,11 +108,11 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
       </div>
 
       {/* Next run preview -- flush to card edges */}
-      {isActive && schedule.next_run_at && (
+      {schedule.enabled && schedule.next_run_at && (
         <NextRunPreview
           runNumber={lastRunNumber + 1}
           agentName={agentName}
-          schedule_name={schedule.name || schedule.id}
+          schedule_name={schedule.name || t("schedule.unnamed")}
           next_run_at={schedule.next_run_at}
           className="border-border border-t border-dashed"
         />

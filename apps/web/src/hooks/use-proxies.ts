@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -14,13 +12,13 @@ import { agentProxyKeys, packageKeys } from "../lib/query-keys";
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
 
-export function useProxies() {
+export function useProxies(enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
     "get",
     "/api/proxies",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: enabled && scope.enabled, select: (e) => e.data },
   );
 }
 
@@ -49,14 +47,13 @@ export function useDeleteProxy() {
 
 export function useSetDefaultProxy() {
   const invalidate = useInvalidateProxies();
-  return $api.useMutation("put", "/api/proxies/default", {
-    onSuccess: invalidate,
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
+  return $api.useMutation("put", "/api/proxies/default", { onSuccess: invalidate });
 }
 
 export function useTestProxy() {
-  return $api.useMutation("post", "/api/proxies/{id}/test");
+  return $api.useMutation("post", "/api/proxies/{id}/test", {
+    meta: { errorHandledByCaller: true },
+  });
 }
 
 /** `agents:read` alone: unlike the agent detail, `agents:run` does not open it. */

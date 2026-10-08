@@ -94,12 +94,12 @@ describe("formatCallerContext", () => {
         org: { role: "member" },
         connections: [
           {
-            integration_id: "@appstrate/gmail",
+            integration_package_id: "@appstrate/gmail",
             name: "Gmail",
             source: "own",
             default_tools: ["api_call"],
           },
-          { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+          { integration_package_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
         ],
       },
       BASE_OPTS,
@@ -124,9 +124,19 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [
-          { integration_id: "@acme/all", name: "AllTools", source: "own", default_tools: "*" },
+          {
+            integration_package_id: "@acme/all",
+            name: "AllTools",
+            source: "own",
+            default_tools: "*",
+          },
           // An explicit empty default also reads as "no default" (must select).
-          { integration_id: "@acme/none", name: "NoneTools", source: "own", default_tools: [] },
+          {
+            integration_package_id: "@acme/none",
+            name: "NoneTools",
+            source: "own",
+            default_tools: [],
+          },
         ],
       },
       BASE_OPTS,
@@ -910,7 +920,7 @@ describe("formatCallerContext", () => {
     const ctx = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
       agents: [{ packageId: "@appstrate/triage", takes_input: false }],
       skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
     };
@@ -943,7 +953,7 @@ describe("buildCallerContextBlock", () => {
     const payload = {
       user: { name: "Ada", email: "ada@acme.com" },
       org: { role: "member", name: "Acme", slug: "acme" },
-      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
       agents: [{ packageId: "@appstrate/triage", takes_input: false }],
     };
     const { deps, lastRequest } = fakeDeps(() => Response.json(payload));

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
+import { BASE_ERROR_CODES, betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
-import { renderEmail } from "@appstrate/emails";
+import { renderEmail, type RenderedEmail } from "@appstrate/emails";
 import { createLogger } from "@appstrate/core/logger";
 
 const logger = createLogger("info");
@@ -18,12 +19,18 @@ import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,
+  evaluateUnprivilegedSignup,
   isAllowedSignupDomain,
   isBootstrapOwner,
+  isOperatorNamedEmail,
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
+import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./credential-change.ts";
+import { hookSlot } from "./hook-slot.ts";
+
+export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -67,11 +74,11 @@ export interface PostBootstrapOrgInfo {
   userEmail: string;
 }
 
-let _postBootstrapOrgHook: ((info: PostBootstrapOrgInfo) => Promise<void>) | null = null;
+type PostBootstrapOrgHook = (info: PostBootstrapOrgInfo) => Promise<void>;
 
-export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Promise<void>): void {
-  _postBootstrapOrgHook = hook;
-}
+const postBootstrapOrgHook = hookSlot<PostBootstrapOrgHook>();
+
+export const setPostBootstrapOrgHook = postBootstrapOrgHook.set;
 
 /**
  * Auto-create the bootstrap organization when the freshly-signed-up user
@@ -104,12 +111,13 @@ async function maybeBootstrapOrgForOwner(
       orgId: result.orgId,
       slug: result.slug,
     });
-    if (_postBootstrapOrgHook) {
+    const postBootstrap = postBootstrapOrgHook.get();
+    if (postBootstrap) {
       // Side effects (event emit, default space, default agent) run in
       // apps/api. Failures here are logged but never break signup — the
       // org itself is already committed.
       try {
-        await _postBootstrapOrgHook({
+        await postBootstrap({
           orgId: result.orgId,
           slug: result.slug,
           userId,
@@ -148,18 +156,18 @@ async function maybeBootstrapOrgForOwner(
 // state (e.g. the OIDC pending-client cookie in `auth/signup-guard.ts`)
 // can do so without adding a parallel hook channel.
 
-let _beforeSignupHook: ((email: string, ctx: BeforeSignupContext) => void | Promise<void>) | null =
-  null;
+type BeforeSignupHook = (email: string, ctx: BeforeSignupContext) => void | Promise<void>;
 
-let _afterSignupHook:
-  ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>) | null =
-  null;
+type AfterSignupHook = (
+  user: { id: string; email: string },
+  ctx: AfterSignupContext,
+) => void | Promise<void>;
 
-export function setBeforeSignupHook(
-  hook: (email: string, ctx: BeforeSignupContext) => void | Promise<void>,
-): void {
-  _beforeSignupHook = hook;
-}
+const beforeSignupHook = hookSlot<BeforeSignupHook>();
+const afterSignupHook = hookSlot<AfterSignupHook>();
+
+export const setBeforeSignupHook = beforeSignupHook.set;
+export const setAfterSignupHook = afterSignupHook.set;
 
 // ─── Realm resolver (injected at boot, typically by the OIDC module) ───
 //
@@ -199,28 +207,49 @@ export interface RealmResolutionContext {
   query: Record<string, unknown> | null;
 }
 
-/**
- * Parameter type of the exported `setRealmResolver` injection slot; the OIDC
- * module passes a function literal and never names the type, so this is part
- * of that function's contract rather than an independent export.
- */
-export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
+/** What `setRealmResolver` installs; the OIDC module passes a function literal. */
+type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
-let _realmResolver: RealmResolver | null = null;
+const realmResolver = hookSlot<RealmResolver>();
 
-export function setRealmResolver(resolver: RealmResolver): void {
-  _realmResolver = resolver;
+export const setRealmResolver = realmResolver.set;
+
+// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
+async function assertMagicLinkAudience(
+  userId: string,
+  context: GenericEndpointContext | null,
+): Promise<void> {
+  const resolver = realmResolver.get();
+  if (context?.path !== "/magic-link/verify" || !resolver) return;
+  const [account] = await db
+    .select({ realm: user.realm })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!account) return;
+  const query = (context.query ?? {}) as Record<string, unknown>;
+  const expected = await resolver({
+    headers: context.headers ?? null,
+    path: context.path,
+    query,
+  });
+  if (account.realm === expected) return;
+  logger.warn("auth: refused a magic link for an account outside its audience", { expected });
+  const raw = query.errorCallbackURL ?? query.callbackURL;
+  const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
+  throw refusalRedirect(context, callback, "signup_disabled");
 }
 
 // ─── Magic-link issued hook (injected at boot by the OIDC module) ───
 //
 // Fired from the magic-link plugin's `sendMagicLink` callback BEFORE the
-// email leaves the transport, with the freshly minted single-use token and
-// the request headers of the `sign-in/magic-link` call. The OIDC module
-// uses it to persist a server-side `(token → OAuth client)` binding so the
-// later `/magic-link/verify` leg — driven entirely by Better Auth — can
-// resolve the user's realm from state the browser cannot strip or forge
-// (CRIT-15).
+// email leaves the transport, with the freshly minted single-use token, the
+// verify URL Better Auth built for it and the request headers of the
+// `sign-in/magic-link` call. The OIDC module uses it to persist a server-side
+// `(token → OAuth client)` binding so the later `/magic-link/verify` leg —
+// driven entirely by Better Auth — can resolve the user's realm from state
+// the browser cannot strip or forge (CRIT-15), and to return the URL of its
+// own confirmation page, which is the one the email then carries.
 //
 // FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
 // surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
@@ -231,15 +260,29 @@ export interface MagicLinkIssuedInfo {
   token: string;
   /** Normalized (lowercased/trimmed) recipient email. */
   email: string;
+  /** Better Auth's verify URL for this token. */
+  url: string;
   /** Headers of the `sign-in/magic-link` request — `null` outside HTTP. */
   headers: Headers | null;
 }
 
-let _magicLinkIssuedHook: ((info: MagicLinkIssuedInfo) => Promise<void>) | null = null;
+/** Returns the URL to put in the email. */
+type MagicLinkIssuedHook = (info: MagicLinkIssuedInfo) => Promise<string>;
 
-export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Promise<void>): void {
-  _magicLinkIssuedHook = hook;
-}
+const magicLinkIssuedHook = hookSlot<MagicLinkIssuedHook>();
+
+export const setMagicLinkIssuedHook = magicLinkIssuedHook.set;
+export const setCredentialChangeHook = credentialChangeHook.set;
+
+/** Test-only: every injection slot, each with its `swapForTesting` (null = no module). */
+export const _authHookSlotsForTesting = {
+  postBootstrapOrg: postBootstrapOrgHook,
+  beforeSignup: beforeSignupHook,
+  afterSignup: afterSignupHook,
+  realmResolver,
+  magicLinkIssued: magicLinkIssuedHook,
+  credentialChange: credentialChangeHook,
+};
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
@@ -258,6 +301,7 @@ export interface SmtpOverride {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
+  tenantRealm?: string;
 }
 
 const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
@@ -272,16 +316,31 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 // scoped to the redeem route's call to `auth.api.signUpEmail()` is the
 // minimum-blast-radius primitive — same shape as `withSmtpOverride`.
 
-const bootstrapTokenRedemptionStore = new AsyncLocalStorage<boolean>();
+const bootstrapTokenRedemptionStore = new AsyncLocalStorage<{ refusal?: string }>();
 
-/** Run `fn` with the bootstrap-token bypass active for any signup-gate eval downstream. */
-export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T> {
-  return bootstrapTokenRedemptionStore.run(true, fn);
+/** Run `fn` under the bootstrap-token bypass; `refusal` is the code of a 403 the create hook threw, which Better Auth answers as a success under mail verification. */
+export async function withBootstrapTokenRedemption<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; refusal: string | undefined }> {
+  const redemption: { refusal?: string } = {};
+  const result = await bootstrapTokenRedemptionStore.run(redemption, fn);
+  return { result, refusal: redemption.refusal };
 }
 
-/** True when the current async context is inside `withBootstrapTokenRedemption`. */
-function isBootstrapTokenRedemptionActive(): boolean {
-  return bootstrapTokenRedemptionStore.getStore() === true;
+function recordingRedemptionRefusal<A extends unknown[], R>(
+  hook: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  return async (...args) => {
+    try {
+      return await hook(...args);
+    } catch (err) {
+      const redemption = bootstrapTokenRedemptionStore.getStore();
+      if (redemption && isAPIError(err) && err.statusCode === 403) {
+        redemption.refusal = err.body?.code ?? "bootstrap_signup_rejected";
+      }
+      throw err;
+    }
+  };
 }
 
 /** Run `fn` with `override` as the active SMTP context for any BA mail callback fired downstream. */
@@ -360,12 +419,6 @@ export function getSocialOverride(): SocialOverride | undefined {
   return socialOverrideStore.getStore();
 }
 
-export function setAfterSignupHook(
-  hook: (user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>,
-): void {
-  _afterSignupHook = hook;
-}
-
 /**
  * Better Auth plugin list type. Exported so modules can strongly type their
  * `betterAuthPlugins()` return value without going through the `unknown[]`
@@ -421,59 +474,99 @@ export interface CreateAuthOptions {
   clientIpHeader: string;
 }
 
-/**
- * BA's OAuth callback endpoint path. Exposed as a constant so the create
- * hook and its unit tests reference the same string (if BA ever renames
- * the route, both sides fail together).
- */
-export const BA_OAUTH_CALLBACK_PATH = "/callback/:id";
+// How long each emailed link stays valid: enforced by Better Auth, stated in the email.
+export const MAGIC_LINK_TTL_SECONDS = 15 * 60;
+const EMAIL_VERIFICATION_TTL_SECONDS = 60 * 60;
+const RESET_PASSWORD_TTL_SECONDS = 60 * 60;
+
+export const BA_MAGIC_LINK_VERIFY_PATH = "/api/auth/magic-link/verify";
 
 /**
- * Decide whether a `databaseHooks.user.create.before` invocation should
- * auto-verify the user's email.
+ * Better Auth's verify URL, re-pointed at a confirmation page that keeps its
+ * query. The verify endpoint spends the token on its first GET and mail
+ * scanners open the links they see, so the email carries a page that is inert
+ * until its reader presses the button leading to the verify endpoint.
  *
- * SECURITY: this must ONLY confirm verification the provider actually
- * asserted — never grant it unconditionally. BA already computes
- * `user.emailVerified` from the provider's real signal (Google's
- * `email_verified` id_token claim; GitHub's `/user/emails` verified flag).
- * We therefore auto-verify only when BOTH the request ran under BA's OAuth
- * callback endpoint AND the provider asserted the email is verified
- * (`providerAssertsVerified`). Blanket-verifying every OAuth callback let
- * an attacker link an UNVERIFIED GitHub email onto a victim's account
- * (pre-account-takeover), so the provider assertion is load-bearing.
- *
- * Returns `{ data: { emailVerified: true } }` (the shape BA's
- * `createWithHooks` merges into the row about to be inserted) when both
- * conditions hold, `undefined` otherwise — falling through to BA's own
- * `emailVerified` value for OAuth (which stays `false` for an unverified
- * provider email) and for email/password, magic-link, and seed paths.
- *
- * Exported for unit testing; the `databaseHooks.user.create.before` hook
- * inside `buildAuth()` is the only production caller.
+ * `null` when `verifyUrl` is not the verify endpoint (a Better Auth upgrade
+ * moved it): the caller emails the direct link, and the warning says so.
  */
-export function shouldAutoVerifyEmailOnCreate(
-  context: { path?: string } | null | undefined,
-  providerAssertsVerified: boolean,
-): { data: { emailVerified: true } } | undefined {
-  if (context?.path === BA_OAUTH_CALLBACK_PATH && providerAssertsVerified) {
-    return { data: { emailVerified: true } };
+export function magicLinkConfirmPageUrl(verifyUrl: string, pagePath: string): URL | null {
+  const url = new URL(verifyUrl);
+  if (url.pathname !== BA_MAGIC_LINK_VERIFY_PATH) {
+    logger.warn("auth: unexpected magic-link verify path, emailing the direct link", {
+      pathname: url.pathname,
+    });
+    return null;
   }
-  return undefined;
+  url.pathname = pagePath;
+  return url;
 }
 
-function buildBasePlugins(
+/** A named address (owner, platform admin) that no account holds yet. */
+async function isUnclaimedReservedEmail(email: string): Promise<boolean> {
+  if (!isOperatorNamedEmail(email)) return false;
+  const [holder] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.email, normalizeEmail(email)))
+    .limit(1);
+  return !holder;
+}
+
+function warnReservedEmailRefused(): void {
+  logger.warn(
+    "auth: refused to move an account onto an address named in " +
+      "AUTH_BOOTSTRAP_OWNER_EMAIL / AUTH_PLATFORM_ADMIN_EMAILS",
+  );
+}
+
+function refusalRedirect(context: GenericEndpointContext, callback: string, code: string) {
+  const target = new URL(callback, context.context.baseURL);
+  target.searchParams.set("error", code);
+  return context.redirect(target.toString());
+}
+
+/** An account of the tenant's realm, or an address with no account the environment does not name. */
+async function isTenantRecipient(email: string, tenantRealm: string): Promise<boolean> {
+  const [holder] = await db
+    .select({ realm: user.realm })
+    .from(user)
+    .where(eq(user.email, normalizeEmail(email)))
+    .limit(1);
+  return holder ? holder.realm === tenantRealm : !isOperatorNamedEmail(email);
+}
+
+/** Send an auth email through the tenant transport when one is active, else the instance one. */
+async function sendAuthMail(
   env: ReturnType<typeof getEnv>,
-  smtpTransport: ReturnType<typeof createTransport> | null,
-) {
-  const smtpEnabled = !!smtpTransport;
+  smtpTransport: Transporter,
+  to: string,
+  { subject, html }: RenderedEmail,
+): Promise<void> {
+  const override = getSmtpOverride();
+  if (override?.tenantRealm && !(await isTenantRecipient(to, override.tenantRealm))) {
+    logger.warn(
+      "auth: withheld an auth e-mail from a tenant transport, recipient not of its realm",
+      {
+        tenantRealm: override.tenantRealm,
+      },
+    );
+    return;
+  }
+  const transport = override?.transport ?? smtpTransport;
+  const from = override ? formatFrom(override) : env.SMTP_FROM;
+  await transport.sendMail({ from, to, subject, html });
+}
+
+function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transporter | null) {
   return [
-    ...(smtpEnabled
+    ...(smtpTransport
       ? [
           magicLink({
             // Signup via magic-link is allowed. The `databaseHooks.user.create.before`
             // chain still enforces per-context policy: the OIDC module's
-            // `oidcBeforeSignupGuard` blocks creation for org-level clients with
-            // `allowSignup: false` (via the signed `oidc_pending_client` cookie),
+            // `oidcBeforeSignupGuard` blocks creation for an OIDC client with
+            // `allowSignup: false` (the client the link's token is bound to),
             // and the ee module's free-tier hook applies its own gate. Outside an OIDC
             // flow, magic-link signup is as open as email/password signup.
             disableSignUp: false,
@@ -482,81 +575,43 @@ function buildBasePlugins(
             // recipient's inbox (forwarded mail, shared/compromised mailbox,
             // mail-archive breach) replay the link and take over the account.
             // 15 minutes is enough for a human to click through immediately
-            // while closing the replay window. `allowedAttempts` still lets
-            // email prefetchers hit the URL without burning the token early.
-            expiresIn: 15 * 60, // 15 minutes
-            allowedAttempts: 5, // Browsers may hit verify multiple times (prefetch, preconnect)
+            // while closing the replay window.
+            expiresIn: MAGIC_LINK_TTL_SECONDS,
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
               try {
                 const normalizedEmail = email.toLowerCase().trim();
 
-                // Give the OIDC module a chance to persist the server-side
-                // `(token → OAuth client)` transaction binding BEFORE the
-                // email is sent (see `setMagicLinkIssuedHook`). A throw here
-                // aborts the send via the surrounding catch — fail closed:
-                // an OIDC magic link must never leave without its binding,
-                // otherwise the verify leg would fall back to forgeable
-                // browser state for realm resolution (CRIT-15).
-                if (_magicLinkIssuedHook) {
-                  // `EndpointContext.headers` is typed `HeadersInit` — copy
-                  // into a real `Headers` so the hook contract stays uniform
-                  // with the other signup-hook channels.
-                  const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
-                  await _magicLinkIssuedHook({
-                    token,
-                    email: normalizedEmail,
-                    headers: rawHeaders ? new Headers(rawHeaders) : null,
-                  });
-                }
-
-                // Rewrite the verify URL to route through the OIDC module's
-                // confirmation interstitial so that one-shot token consumption
-                // is gated behind an explicit click. Without this, email
-                // clients (Resend click-tracking, Outlook SafeLinks, Gmail
-                // preview, Apple Mail preview, corporate URL scanners)
-                // prefetch the `GET` link and burn the token before the user
-                // clicks — producing a `session_expired` on the relying-party
-                // callback. Mirrors Slack/Notion/Linear/Supabase.
-                //
-                // The confirm page lives in the OIDC module but is generic
-                // (falls back to platform branding when the callbackURL has
-                // no client_id, e.g. invitation flows).
-                const rewritten = new URL(rawUrl);
-                if (rewritten.pathname === "/api/auth/magic-link/verify") {
-                  rewritten.pathname = "/api/oauth/magic-link/confirm";
-                  // Surface the recipient email on the confirm interstitial
-                  // ("You are signing in as foo@bar.com") to match SOTA UX
-                  // (Slack/Linear). Safe: the recipient already owns the
-                  // email, and the URL is only delivered to their inbox.
-                  rewritten.searchParams.set("email", normalizedEmail);
-                } else {
-                  // Defense against a silent BA path change in future upgrades.
-                  // If the path ever moves, the rewrite above becomes a no-op
-                  // and we'd regress to prefetch-vulnerable behavior — log
-                  // loudly so the drift is caught in ops before it reaches
-                  // users.
-                  logger.warn(
-                    "oidc: magic-link URL rewrite skipped — unexpected BA path, falling back to direct verify",
-                    { pathname: rewritten.pathname },
-                  );
-                }
-                const url = rewritten.toString();
+                // `EndpointContext.headers` is typed `HeadersInit` — copy
+                // into a real `Headers` so the hook contract stays uniform
+                // with the other signup-hook channels.
+                const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
+                // A throw aborts the send via the surrounding catch — fail closed.
+                const issued = magicLinkIssuedHook.get();
+                const url = issued
+                  ? await issued({
+                      token,
+                      email: normalizedEmail,
+                      url: rawUrl,
+                      headers: rawHeaders ? new Headers(rawHeaders) : null,
+                    })
+                  : (magicLinkConfirmPageUrl(rawUrl, "/magic-link/confirm")?.toString() ?? rawUrl);
 
                 // Magic-link is now a pure passwordless-login channel. The
                 // invitation flow no longer rides on magic-link: an invited
                 // user opens the `/invite/{token}` page and authenticates
                 // through the standard login/signup path, then accepts. So a
                 // single generic template covers every magic-link send.
-                const { subject, html } = renderEmail("magic-link", {
-                  email: normalizedEmail,
-                  url,
-                  locale: "fr",
-                });
-
-                const override = getSmtpOverride();
-                const transport = override?.transport ?? smtpTransport!;
-                const from = override ? formatFrom(override) : env.SMTP_FROM;
-                await transport.sendMail({ from, to: email, subject, html });
+                await sendAuthMail(
+                  env,
+                  smtpTransport,
+                  email,
+                  renderEmail("magic-link", {
+                    email: normalizedEmail,
+                    url,
+                    expiresInMinutes: MAGIC_LINK_TTL_SECONDS / 60,
+                    locale: "fr",
+                  }),
+                );
               } catch {
                 // Fire-and-forget
               }
@@ -609,7 +664,7 @@ function buildAuth(options: CreateAuthOptions) {
   // provider's own guard throw `CLIENT_ID_AND_SECRET_REQUIRED` — the BA
   // error surfaced to the UI when a tenant hasn't configured creds).
   //
-  // `anySocialEnabled` still gates account-linking + trusted providers on
+  // `anySocialEnabled` still gates account-linking on
   // env-configured providers only: per-space social applies exclusively to
   // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
@@ -619,7 +674,6 @@ function buildAuth(options: CreateAuthOptions) {
     {
       clientId: string;
       clientSecret: string;
-      mapProfileToUser?: (profile: unknown) => { emailVerified?: boolean };
     }
   > = {
     google: {
@@ -629,24 +683,6 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.google?.clientSecret ?? env.GOOGLE_CLIENT_SECRET ?? "";
       },
-      // Google asserts `email_verified` in its OIDC id_token and BA maps it
-      // onto `user.emailVerified` (see `@better-auth/core` google provider).
-      // Google never issues a token for an email the user hasn't proven
-      // ownership of, so treating a successful Google round-trip as
-      // verified is safe. We keep the explicit override only for Google.
-      //
-      // SECURITY: we do NOT do the same for GitHub. GitHub lets a user add
-      // an UNVERIFIED email to their account, and BA already computes the
-      // real per-email verified flag from `/user/emails`
-      // (`emails.find(e => e.email === profile.email)?.verified ?? false`).
-      // Blanket-setting `emailVerified: true` there clobbered that real
-      // signal and opened a pre-account-takeover: an attacker adds the
-      // victim's email (unverified) to a GitHub account, signs in, and —
-      // because the email is (falsely) "verified" — BA account-links it to
-      // the victim's existing user (trusted provider + matching email),
-      // handing the attacker the account. Leaving GitHub without an
-      // override lets BA's genuine verified flag decide linking.
-      mapProfileToUser: () => ({ emailVerified: true }),
     },
     github: {
       get clientId() {
@@ -655,13 +691,23 @@ function buildAuth(options: CreateAuthOptions) {
       get clientSecret() {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
-      // No `mapProfileToUser` override on purpose — see the GitHub note above.
-      // BA sets `emailVerified` from GitHub's real `/user/emails` verified
-      // flag; forcing it true here would defeat the takeover guard.
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
-  return betterAuth({
+  const notifyPasswordChanged = async (email: string): Promise<void> => {
+    if (!smtpTransport) return;
+    try {
+      await sendAuthMail(
+        env,
+        smtpTransport,
+        email,
+        renderEmail("password-changed", { locale: "fr" }),
+      );
+    } catch {
+      // Fire-and-forget — the password is already changed
+    }
+  };
+  const auth = betterAuth({
     database: drizzleAdapter(db, {
       provider: "pg",
       schema: { ...schema },
@@ -669,10 +715,9 @@ function buildAuth(options: CreateAuthOptions) {
 
     baseURL: env.APP_URL,
     basePath: "/api/auth",
-    // Resolve the secret through the kid map so a deployment that has
-    // already populated `BETTER_AUTH_SECRETS` for cookie rotation feeds
-    // Better Auth the active secret (not the legacy single-value var).
-    secret: env.BETTER_AUTH_SECRETS[env.BETTER_AUTH_ACTIVE_KID] ?? env.BETTER_AUTH_SECRET,
+    // `secrets` signs and encrypts; `secret` decrypts data written before it.
+    secret: env.BETTER_AUTH_SECRET,
+    secrets: env.BETTER_AUTH_SECRETS,
 
     // Route Better Auth's internal logs through our structured pino logger
     // instead of its default console writer (repo rule: no console.*). Only
@@ -728,7 +773,17 @@ function buildAuth(options: CreateAuthOptions) {
       // generic `bootstrap_signup_rejected` 400, which names no length.
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
-      requireEmailVerification: smtpEnabled,
+      requireEmailVerification: !!smtpTransport,
+      // Every reset path lands here. Revoke before the mail, so a slow
+      // transport cannot widen the window.
+      onPasswordReset: async ({ user }): Promise<void> => {
+        try {
+          const { internalAdapter } = await auth.$context;
+          await endOtherAccessAfterCredentialChange(internalAdapter, user, null);
+        } finally {
+          await notifyPasswordChanged(user.email);
+        }
+      },
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
       // most tests sign up a real user per `beforeEach`. When the test harness
@@ -752,41 +807,63 @@ function buildAuth(options: CreateAuthOptions) {
               new Bun.CryptoHasher("sha256").update(password).digest("hex") === hash,
           },
         }),
-      ...(smtpEnabled && {
+      ...(smtpTransport && {
+        resetPasswordTokenExpiresIn: RESET_PASSWORD_TTL_SECONDS,
         sendResetPassword: async ({ user, url }) => {
           try {
-            const { subject, html } = renderEmail("reset-password", {
-              email: user.email,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("reset-password", {
+                email: user.email,
+                url,
+                expiresInMinutes: RESET_PASSWORD_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block reset flow if email fails
+          }
+        },
+        // The signup answer is the same as for a free address, so the SPA
+        // announces an email: this is it, sent to the account's owner.
+        onExistingUserSignUp: async ({ user }) => {
+          try {
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("existing-account", { locale: "fr" }),
+            );
+          } catch {
+            // Fire-and-forget — the signup response must not depend on it
           }
         },
       }),
     },
 
-    ...(smtpEnabled && {
+    ...(smtpTransport && {
       emailVerification: {
         sendOnSignUp: true,
         sendOnSignIn: true,
         autoSignInAfterVerification: true,
+        expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
         sendVerificationEmail: async ({ user, url }) => {
+          // An address with no account is the target of an e-mail change.
+          if (await isUnclaimedReservedEmail(user.email)) return warnReservedEmailRefused();
           try {
-            const { subject, html } = renderEmail("verification", {
-              user,
-              url,
-              locale: "fr",
-            });
-            const override = getSmtpOverride();
-            const transport = override?.transport ?? smtpTransport!;
-            const from = override ? formatFrom(override) : env.SMTP_FROM;
-            await transport.sendMail({ from, to: user.email, subject, html });
+            await sendAuthMail(
+              env,
+              smtpTransport,
+              user.email,
+              renderEmail("verification", {
+                user,
+                url,
+                expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                locale: "fr",
+              }),
+            );
           } catch {
             // Fire-and-forget — don't block signup if email fails
           }
@@ -794,15 +871,33 @@ function buildAuth(options: CreateAuthOptions) {
       },
     }),
 
+    // Server-side rather than the client's `revokeOtherSessions`, so every caller gets it.
+    hooks: {
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/change-password") return;
+        if (isAPIError(ctx.context.returned)) return;
+        const caller = ctx.context.session;
+        if (!caller) throw new Error("/change-password succeeded without a session in context");
+        // With `revokeOtherSessions`, Better Auth swapped the caller's session for a new one.
+        const kept = ctx.context.newSession ?? caller;
+        try {
+          await endOtherAccessAfterCredentialChange(
+            ctx.context.internalAdapter,
+            caller.user,
+            kept.session.id,
+          );
+        } finally {
+          await notifyPasswordChanged(caller.user.email);
+        }
+      }),
+    },
+
     socialProviders,
 
     account: {
       accountLinking: {
         enabled: anySocialEnabled,
-        trustedProviders: [
-          ...(googleEnvEnabled ? ["google" as const] : []),
-          ...(githubEnvEnabled ? ["github" as const] : []),
-        ],
+        // No trusted provider: linking takes the provider's assertion that the e-mail is verified.
         allowDifferentEmails: true,
       },
     },
@@ -861,7 +956,30 @@ function buildAuth(options: CreateAuthOptions) {
       },
       changeEmail: {
         enabled: true,
-        updateEmailWithoutVerification: !smtpEnabled,
+        updateEmailWithoutVerification: !smtpTransport,
+        // The owner is told at the current address, and must approve there,
+        // before anything is sent to the new one.
+        ...(smtpTransport && {
+          sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+            // Answered like a taken address; `user.update.before` refuses a link issued earlier.
+            if (await isUnclaimedReservedEmail(newEmail)) return warnReservedEmailRefused();
+            try {
+              await sendAuthMail(
+                env,
+                smtpTransport,
+                user.email,
+                renderEmail("email-change-confirmation", {
+                  newEmail,
+                  url,
+                  expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
+                  locale: "fr",
+                }),
+              );
+            } catch {
+              // Fire-and-forget — same as every other auth email
+            }
+          },
+        }),
       },
     },
 
@@ -921,7 +1039,7 @@ function buildAuth(options: CreateAuthOptions) {
     databaseHooks: {
       user: {
         create: {
-          before: async (user, context) => {
+          before: recordingRedemptionRefusal(async (user, context) => {
             const ctx = context as
               | {
                   headers?: Headers;
@@ -956,18 +1074,40 @@ function buildAuth(options: CreateAuthOptions) {
             // gate (`AUTH_DISABLE_SIGNUP`). An active domain allowlist
             // (`AUTH_ALLOWED_SIGNUP_DOMAINS`) remains load-bearing
             // because the operator explicitly chose to lock down which
-            // emails can register; the bootstrap owner must satisfy
-            // that policy too. A pending invitation also overrides
+            // emails can register — except for the address the operator
+            // named as owner. A pending invitation also overrides
             // both gates (Infisical-style breakage avoidance), matching
             // the non-bypass evaluator's logic.
-            const bootstrapTokenBypass = isBootstrapTokenRedemptionActive();
+            const bootstrapTokenBypass = bootstrapTokenRedemptionStore.getStore() !== undefined;
+            // A named account takes proof: the bootstrap token, or a row born verified.
+            const bornVerified = (user as { emailVerified?: boolean }).emailVerified === true;
+            if (isOperatorNamedEmail(user.email) && !bootstrapTokenBypass && !bornVerified) {
+              logger.warn(
+                "auth: refused to create an account named in AUTH_BOOTSTRAP_OWNER_EMAIL / " +
+                  "AUTH_PLATFORM_ADMIN_EMAILS without proof of ownership — see " +
+                  "examples/self-hosting/AUTH_MODES.md",
+              );
+              const unprivileged = evaluateUnprivilegedSignup(user.email);
+              if (!unprivileged.allowed) {
+                throw new APIError("FORBIDDEN", {
+                  message: unprivileged.reason,
+                  code: unprivileged.reason,
+                });
+              }
+              // Under mail verification Better Auth answers a 403 as it does a taken address.
+              throw smtpEnabled
+                ? new APIError("FORBIDDEN", { message: "signup_disabled", code: "signup_disabled" })
+                : APIError.from(
+                    "UNPROCESSABLE_ENTITY",
+                    BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+                  );
+            }
             // A pending invitation for this exact email overrides the signup
             // gate (Infisical-style breakage avoidance) so an invited user can
             // complete signup even when signup is locked down. It is matched on
             // EMAIL ALONE — the invitation token is not available at signup —
             // so it is NOT proof of inbox ownership (it only means an org admin
-            // typed this address) and must NEVER auto-verify the email. See the
-            // `emailVerified` decision below. The lookup is index-covered
+            // typed this address) and must NEVER verify the email. The lookup is index-covered
             // (`idx_org_invitations_email`); signups are infrequent, so the
             // unconditional query is negligible.
             const invited = await hasPendingInvitationByEmail(user.email);
@@ -975,7 +1115,11 @@ function buildAuth(options: CreateAuthOptions) {
               envForGate.AUTH_DISABLE_SIGNUP || envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0;
             if (gateActive) {
               if (bootstrapTokenBypass) {
-                if (envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 && !invited) {
+                if (
+                  envForGate.AUTH_ALLOWED_SIGNUP_DOMAINS.length > 0 &&
+                  !invited &&
+                  !isBootstrapOwner(user.email)
+                ) {
                   if (!isAllowedSignupDomain(user.email)) {
                     logger.info("auth: bootstrap-token bypass blocked by domain allowlist", {
                       email: user.email,
@@ -1010,49 +1154,25 @@ function buildAuth(options: CreateAuthOptions) {
               path: string | null;
               query: Record<string, unknown> | null;
             } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
-            if (_beforeSignupHook) {
-              await _beforeSignupHook(user.email, signupHookCtx);
+            const beforeSignup = beforeSignupHook.get();
+            if (beforeSignup) {
+              await beforeSignup(user.email, signupHookCtx);
             }
-            // Merge realm resolution + email auto-verify into a single data
-            // patch returned to BA. The realm resolver falls back to
-            // "platform" when no OIDC module is loaded (OSS mode).
-            //
-            // Bootstrap-token redeem (#344) FORCES "platform": the redeem
-            // route forwards `c.req.raw.headers` to BA, and a stray
-            // `oidc_pending_client` cookie on that request would otherwise
-            // route the bootstrap owner into an end-user realm — wrong
-            // audience for an instance-owner row, and unrecoverable once
-            // committed. Bypass the resolver entirely on this path.
+            // No resolver (no OIDC module) means "platform". A bootstrap-token
+            // redeem is "platform" whatever the request carries: an
+            // instance-owner row in another realm is unrecoverable.
+            const resolver = realmResolver.get();
             const realm = bootstrapTokenBypass
               ? "platform"
-              : _realmResolver
-                ? await _realmResolver({
+              : resolver
+                ? await resolver({
                     headers,
                     path: ctx?.path ?? null,
                     query: ctx?.query ?? null,
                   })
                 : "platform";
-            // Auto-verify ONLY when a trusted social provider produced the row
-            // (the BA OAuth callback path) AND the provider itself asserted the
-            // email is verified. BA has already set `user.emailVerified` from
-            // the provider's real signal (Google `email_verified` claim /
-            // GitHub `/user/emails` verified flag), so we pass that through as
-            // the gate — we never upgrade an unverified provider email to
-            // verified (which would enable GitHub-unverified-email account
-            // takeover). A pending invitation is likewise NOT a verification
-            // signal: it is matched on email alone, so granting `emailVerified`
-            // here would let anyone mint a verified account for any unclaimed
-            // address (create org → self-invite that email → sign up) AND would
-            // defeat the OIDC end-user adopter's `emailVerified === true`
-            // takeover guard. Invited users verify their inbox through the
-            // normal flow, like everyone else.
-            const providerAssertsVerified =
-              (user as { emailVerified?: boolean }).emailVerified === true;
-            const autoVerify = shouldAutoVerifyEmailOnCreate(ctx, providerAssertsVerified);
-            const data: Record<string, unknown> = { realm };
-            if (autoVerify) data.emailVerified = true;
-            return { data };
-          },
+            return { data: { realm } };
+          }),
           after: async (user, context) => {
             await db.insert(profiles).values({
               id: user.id,
@@ -1077,7 +1197,8 @@ function buildAuth(options: CreateAuthOptions) {
                 error: err instanceof Error ? err.message : String(err),
               });
             }
-            if (_afterSignupHook) {
+            const afterSignup = afterSignupHook.get();
+            if (afterSignup) {
               const ctx = context as
                 | {
                     headers?: Headers;
@@ -1095,8 +1216,32 @@ function buildAuth(options: CreateAuthOptions) {
                 path: string | null;
                 query: Record<string, unknown> | null;
               } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
-              await _afterSignupHook({ id: user.id, email: user.email }, afterCtx);
+              await afterSignup({ id: user.id, email: user.email }, afterCtx);
             }
+          },
+        },
+        update: {
+          // No account moves onto a named address; every writer of `user.email` passes here.
+          before: async (data, context) => {
+            const next = (data as { email?: unknown }).email;
+            if (typeof next !== "string") return;
+            if (!(await isUnclaimedReservedEmail(next))) return;
+            warnReservedEmailRefused();
+            const callbackURL: unknown = context?.query?.callbackURL;
+            if (context?.path === "/verify-email" && typeof callbackURL === "string") {
+              throw refusalRedirect(context, callbackURL, "email_change_refused");
+            }
+            throw new APIError("FORBIDDEN", {
+              message: "email_change_refused",
+              code: "email_change_refused",
+            });
+          },
+        },
+      },
+      account: {
+        delete: {
+          before: async (account, context) => {
+            await assertMagicLinkAudience(account.userId, context);
           },
         },
       },
@@ -1107,7 +1252,8 @@ function buildAuth(options: CreateAuthOptions) {
           // reject mismatched audiences without an extra user-table lookup
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
-          before: async (sess) => {
+          before: async (sess, context) => {
+            await assertMagicLinkAudience(sess.userId, context);
             const [row] = await db
               .select({ realm: user.realm })
               .from(user)
@@ -1124,6 +1270,7 @@ function buildAuth(options: CreateAuthOptions) {
       },
     },
   });
+  return auth;
 }
 
 // ─── Factory + lazy singleton ────────────────────────────
@@ -1149,7 +1296,7 @@ export function createAuth(options: CreateAuthOptions): void {
 /**
  * Test-only: rebuild the Better Auth singleton with the CURRENT env. Lets
  * tests flip SMTP / social / cookie-domain flags at runtime and verify the
- * resulting behavior (email-verification flow, social auto-verify hook,
+ * resulting behavior (email-verification flow, social provider config,
  * …). The plugin factory passed to `createAuth()` is re-invoked so modules
  * don't need to re-register — and so the rebuild gets plugin instances of
  * its own rather than re-initializing the ones the previous build already

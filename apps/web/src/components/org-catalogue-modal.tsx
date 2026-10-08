@@ -51,7 +51,6 @@ import {
   LibraryBig,
   Wrench,
 } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
@@ -343,7 +342,6 @@ export function OrgCatalogueModal({
           void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
           toast.success(t("catalogue.revoked", { space: spaceNameOf(targetSpaceId) }));
         },
-        onError: (err: unknown) => toast.error(getErrorMessage(err)),
       },
     );
 
@@ -416,21 +414,18 @@ export function OrgCatalogueModal({
     onChange: list.setValues("origin"),
   };
 
-  const activateOne = (item: { id: string; displayName: string }) => {
+  const activateOne = (item: { id: string }) => {
     if (!spaceId) return;
-    const target = item;
     activate.mutate(
-      { spaceId, packageId: target.id, active: true },
+      { spaceId, packageId: item.id, active: true },
       {
-        onSuccess: () => {
+        // The mutation says it worked; the row only leaves the selection.
+        onSuccess: () =>
           setSelected((prev) => {
             const next = new Set(prev);
             next.delete(item.id);
             return next;
-          });
-          toast.success(t("packages.installed", { name: target.displayName }));
-        },
-        onError: (err: unknown) => toast.error(getErrorMessage(err)),
+          }),
       },
     );
   };
@@ -553,24 +548,11 @@ export function OrgCatalogueModal({
   });
   /**
    * Every switch, menu item and button that changes where a package runs
-   * lands here, and each one SAYS what it did: a switch that flips is its own
-   * feedback, but a menu that closes on a click, or a row that leaves a list,
-   * is not — the reader was left wondering whether anything happened.
+   * lands here. What it did, and why it failed, are said by the mutation
+   * itself (`useSetPackageActive`), once for every surface.
    */
   const setActive = (item: CardItem, targetSpaceId: string, next: boolean) =>
-    activate.mutate(
-      { spaceId: targetSpaceId, packageId: item.id, active: next },
-      {
-        onSuccess: () =>
-          toast.success(
-            t(next ? "catalogue.nowActiveIn" : "catalogue.noLongerActiveIn", {
-              name: item.displayName,
-              space: spaceNameOf(targetSpaceId),
-            }),
-          ),
-        onError: (err: unknown) => toast.error(getErrorMessage(err)),
-      },
-    );
+    activate.mutate({ spaceId: targetSpaceId, packageId: item.id, active: next });
 
   /**
    * Switching a package on, with the one question worth asking first.
@@ -989,10 +971,7 @@ export function OrgCatalogueModal({
             // refusal must not take the others down.
             setActive(closure.item, closure.spaceId, true);
             for (const entry of closure.missing) {
-              activate.mutate(
-                { spaceId: closure.spaceId, packageId: entry.id, active: true },
-                { onError: (err: unknown) => toast.error(getErrorMessage(err)) },
-              );
+              activate.mutate({ spaceId: closure.spaceId, packageId: entry.id, active: true });
             }
             setClosure(null);
           }}

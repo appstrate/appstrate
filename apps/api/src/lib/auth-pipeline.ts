@@ -29,7 +29,7 @@ import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
-import { clearStaleAuthCookies } from "./auth-cookies.ts";
+import { appendSetCookies, clearStaleAuthCookies, readSessionWithCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
@@ -84,6 +84,25 @@ const AUTH_CONDITIONAL_HEADERS: ReadonlyArray<{
 ];
 
 /**
+ * Better Auth's limiter answers `{ message }` under `X-Retry-After`, untyped; on the OAuth
+ * endpoints it is restated as an RFC 6749 JSON error under `Retry-After`, with the
+ * `temporarily_unavailable` code RFC 6749 §4.1.2.1 defines for the authorization endpoint.
+ */
+function oauthRateLimitResponse(path: string, res: Response): Response {
+  const retryAfter = res.headers.get("X-Retry-After");
+  if (res.status !== 429 || retryAfter === null || !path.startsWith("/api/auth/oauth2/")) {
+    return res;
+  }
+  return Response.json(
+    {
+      error: "temporarily_unavailable",
+      error_description: `Too many requests. Retry after ${retryAfter}s.`,
+    },
+    { status: 429, headers: { "Retry-After": retryAfter, "Cache-Control": "no-store" } },
+  );
+}
+
+/**
  * Mount the Better Auth handler and install the full auth middleware chain
  * on the given Hono app. Behavior must stay byte-identical between the
  * production and test harness callers — any change here must preserve the
@@ -114,7 +133,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // middleware), and both rewrites below copy the inbound headers, so the
     // address Better Auth reads survives them.
     const req = withPublicAppOrigin(await maybeTransformDeviceFlowFormBody(c.req.raw));
-    return getAuth().handler(req);
+    return oauthRateLimitResponse(c.req.path, await getAuth().handler(req));
   });
 
   // Auth middleware: module strategies → Bearer API key → session cookie.
@@ -268,7 +287,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     }
 
     // Fallback: cookie session
-    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const { session, setCookies } = await readSessionWithCookies(c);
     if (!session?.user) {
       // Bury the stale BA cookie before bouncing the request. Without this,
       // a cookie left behind by a redeploy (rotated `BETTER_AUTH_SECRET`,
@@ -321,7 +340,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       if (userRow) c.set("sessionRealm", userRow.realm);
     }
 
-    return next();
+    // After `next()`, so the cookie also lands on a hand-built response.
+    try {
+      await next();
+    } finally {
+      appendSetCookies(c, setCookies);
+    }
   });
 
   // Auth-conditional header policy (see AUTH_CONDITIONAL_HEADERS). A known
@@ -574,5 +598,9 @@ function skipOrgContext(path: string): boolean {
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
   // spaceId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
+  // Instance-wide operator routes: an operator may belong to no organization.
+  // Listed by exact family, so a new `/api/admin/*` route stays org-gated
+  // until it is added here with a guard of its own.
+  if (/^\/api\/admin\/storage-deletion-jobs(\/|$)/.test(path)) return true;
   return false;
 }

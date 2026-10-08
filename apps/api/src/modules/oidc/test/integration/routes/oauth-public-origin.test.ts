@@ -7,11 +7,13 @@
  * stay pinned to APP_URL rather than inherit the internal request scheme.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { _rebuildAuthForTesting } from "@appstrate/db/auth";
-import { _resetCacheForTesting } from "@appstrate/env";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { createTestContext, createTestUser } from "../../../../../../test/helpers/auth.ts";
+import { useAuthEnv } from "../../../../../../test/helpers/auth-env.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import oidcModule from "../../../index.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
@@ -75,7 +77,7 @@ async function openCsrfForm(url: string): Promise<{ cookie: string; csrf: string
   return { cookie, csrf };
 }
 
-async function setupSpaceClient(): Promise<{ clientId: string }> {
+async function setupSpaceClient(): Promise<{ clientId: string; spaceId: string }> {
   const ctx = await createTestContext();
   const client = await createClient({
     level: "space",
@@ -92,7 +94,7 @@ async function setupSpaceClient(): Promise<{ clientId: string }> {
     fromAddress: "no-reply@app.example.test",
     fromName: "Public Origin Test",
   });
-  return { clientId: client.clientId };
+  return { clientId: client.clientId, spaceId: ctx.defaultSpaceId };
 }
 
 async function requestMagicLink(clientId: string, email: string): Promise<void> {
@@ -121,34 +123,9 @@ async function requestMagicLink(clientId: string, email: string): Promise<void> 
 }
 
 describe("OIDC public URLs behind a TLS-terminating proxy", () => {
-  const savedEnv: Record<keyof typeof TEST_ENV, string | undefined> = {
-    APP_URL: undefined,
-    TRUSTED_ORIGINS: undefined,
-    SMTP_HOST: undefined,
-    SMTP_PORT: undefined,
-    SMTP_USER: undefined,
-    SMTP_PASS: undefined,
-    SMTP_FROM: undefined,
-  };
   let mails: SpiedSmtpSend[] = [];
 
-  beforeAll(() => {
-    for (const [key, value] of Object.entries(TEST_ENV)) {
-      savedEnv[key as keyof typeof TEST_ENV] = process.env[key];
-      process.env[key] = value;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
-
-  afterAll(() => {
-    for (const [key, value] of Object.entries(savedEnv)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
-  });
+  useAuthEnv(TEST_ENV);
 
   beforeEach(async () => {
     await truncateAll();
@@ -214,8 +191,13 @@ describe("OIDC public URLs behind a TLS-terminating proxy", () => {
   });
 
   it("sends password-reset links on the canonical HTTPS origin", async () => {
-    const { clientId } = await setupSpaceClient();
+    const { clientId, spaceId } = await setupSpaceClient();
     const user = await createTestUser({ emailVerified: true });
+    // The space's transport writes to the space's own accounts only.
+    await db
+      .update(userTable)
+      .set({ realm: `end_user:${spaceId}` })
+      .where(eq(userTable.id, user.id));
     const query = new URLSearchParams({
       client_id: clientId,
       state: "public-origin-reset-state",

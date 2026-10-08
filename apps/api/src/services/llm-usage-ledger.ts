@@ -47,13 +47,10 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage, runs } from "@appstrate/db/schema";
+import { llmUsage, runs, type CredentialSource } from "@appstrate/db/schema";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
-
-/** Credential set that reached the upstream provider for a ledger row. */
-export type CredentialSource = "system" | "org";
 
 /**
  * One `llm_usage` row to append. Covers every producer's needs; unset optional

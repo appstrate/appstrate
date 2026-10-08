@@ -18,7 +18,7 @@ import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";

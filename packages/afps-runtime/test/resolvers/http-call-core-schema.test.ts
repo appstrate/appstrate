@@ -34,7 +34,7 @@ function makeCtx(workspace = "/tmp/ws"): ToolContext {
   };
 }
 
-const allowAllMeta: ApiCallMeta = { name: "@acme/p", allowAllUris: true };
+const meta: ApiCallMeta = { name: "@acme/p" };
 
 /** A no-op call fn that returns 200 JSON. */
 function noopCall(): Promise<ApiCallResponse> {
@@ -46,7 +46,7 @@ function noopCall(): Promise<ApiCallResponse> {
 }
 
 function makeTool() {
-  return makeApiCallTool(allowAllMeta, noopCall, { emitApiCallEvent: false });
+  return makeApiCallTool(meta, noopCall, { emitApiCallEvent: false });
 }
 
 // ─── Schema parse tests ───────────────────────────────────────────────────────

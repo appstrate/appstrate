@@ -19,6 +19,8 @@ import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
 import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
+import { errorMessage, toastError } from "../../lib/mutation-error";
+import { ApiError } from "../../api/errors";
 
 // Shape as `listAccounts()` returns it. `id` is Better Auth's `account` row
 // primary key — the value `unlinkAccount()` takes. `accountId` is the id AT
@@ -134,7 +136,7 @@ function LinkedAccountsSection({
                     } else {
                       // Surface the failure — previously a rejection here was
                       // silently swallowed and the button just stopped spinning.
-                      toast.error(err instanceof Error ? err.message : String(err));
+                      toastError(err);
                     }
                   } finally {
                     setUnlinking(false);
@@ -184,7 +186,7 @@ function LinkedAccountsSection({
             toast.success(t("preferences.unlinked"));
           } catch (err: unknown) {
             // The retry can still fail (last account, unlinked in another tab).
-            toast.error(err instanceof Error ? err.message : String(err));
+            toastError(err);
             setPendingUnlink(null);
           }
         }}
@@ -226,8 +228,10 @@ function PasswordChangeForm() {
       setSuccess(t("preferences.passwordChanged"));
       reset();
     } catch (err: unknown) {
+      // The new password is written: the form's "current password" no longer is.
+      if (err instanceof ApiError && err.code === "credential_change_revocation_failed") reset();
       setError("root", {
-        message: err instanceof Error ? err.message : t("login.error"),
+        message: errorMessage(err),
       });
     }
   };
@@ -339,7 +343,7 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
       await onPasswordSet();
     } catch (err: unknown) {
       setError("root", {
-        message: err instanceof Error ? err.message : t("login.error"),
+        message: errorMessage(err),
       });
     }
   };

@@ -6,8 +6,343 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **`BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>[,…]` format;
+  a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
+  (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
+  secret that was active. Rotation procedure: `docs/ENV.md`.
+- **Before the deploy, run the pre-flight in the header of
+  `scripts/migration/0036-unshare-end-user-connections.sql`** (#1775). The
+  database must be at `0078` (beta.65 deployed); on an older one, deploy
+  beta.65 first. With its first three counts at 0 there is nothing to do.
+  Otherwise stop the app
+  container (`docker stop`), `pg_dump`, run
+  `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql`,
+  deploy: it removes end users' connections from admin pins and org defaults,
+  unshares them and lists them. Migration `0080` refuses the boot, naming the
+  script, while an end user's connection is shared or named by an admin pin
+  or an org default. The pre-flight also counts admin pins and org defaults
+  naming an id left dangling by earlier deletions; they are not rewritten and
+  fail with `pinned_connection_unavailable` until an admin edits them.
+
 ### Changed
 
+- **Changing or resetting a password ends the account's other sessions and
+  sign-in tokens.** A change ends the account's other sessions and invalidates
+  its stored password-reset links, magic links, in-progress social-account links
+  and unredeemed model-provider pairing tokens; with the OIDC module, also its
+  OAuth refresh and access tokens (`offline_access` included), CLI sessions
+  (`revoked_reason: password_changed`) and device codes. The session that made
+  the change stays signed in; a reset (`/api/auth/reset-password` or the hosted
+  `/api/oauth/reset-password` page) ends every session. If revoking fails once
+  the password is written, the request answers
+  `500 credential_change_revocation_failed`. What is deliberately not ended
+  (API keys, linked accounts, …) is listed in `SECURITY.md`.
+- **A run binds up to 20 connections per integration** (was 10). The cap
+  holds on every connection set: admin and member pins, space defaults, launch
+  and schedule overrides. Migration `0079` widens the two `connection_ids`
+  CHECKs; the sidecar's `connection` argument description grows to match.
+
+- **BREAKING (API): `POST /api/runs/remote` no longer answers
+  `409 agent_not_ready`** (#1783). A connection cascade that changed between
+  the readiness check and the run's creation answers
+  `409 missing_integration_connection` with its `errors[]`, like the readiness
+  check. A cascade binding several connections to one integration answers the
+  same 409 with one `remote_binds_one_connection` item per integration
+  (`field: integrations.<id>`). A client matching on the `agent_not_ready`
+  code breaks; no known consumer reads it (the CLI prints the status and body).
+- **BREAKING (API): an end user's connection cannot be shared** (#1775):
+  `shared_with_org: true` on one answers
+  `409 end_user_connection_not_shareable`. Deleting an end user can no longer
+  leave an admin pin or an org default naming a deleted connection. On
+  existing data, `0036` unshares the end users' connections already shared and
+  removes them from admin pins and org defaults, which shrink or disappear; a
+  member pin, a schedule or a run override of another actor naming one fails
+  (`pinned_connection_unavailable` / `override_connection_unavailable`) until
+  a new pick.
+- **A schedule naming another member's connection that is deleted or stops
+  being shared is disabled instead of failing at every fire** (#1767). In the
+  same transaction as the delete or the unshare (by the owner or an
+  `integrations:configure` holder, or when the owner loses access to the
+  space), every enabled schedule of another actor whose `connection_overrides`
+  name the connection gets `enabled: false` and a `disabled_reason`,
+  `connection_deleted` or the new `connection_unshared`; its overrides are
+  kept, and while the connection stays unreachable, re-enabling it requires a
+  new choice. Neither act is refused because of these schedules, and the owner's
+  own schedules and other members' pins behave as before. A schedule already
+  broken this way before the upgrade stays as it is.
+  `GET /api/me/connections/{id}/delete-impact` gains the required
+  `other_schedules_disabled_count`, which the delete dialog shows without
+  names. Not a breaking API change: one enum value and one response field are
+  added.
+- **One vocabulary of `api_call` failure codes on the platform proxy, the
+  sidecar and the CLI** (#1761). An agent sees a refused or failed call as
+  `[api_call status=0 code=<code>]` with
+  `_meta["dev.appstrate/api-call-error"]`, whichever path served it.
+  `appstrate run --integrations=local` reports the same codes; its retired
+  codes are listed in `packages/afps-runtime/CHANGELOG.md`.
+
+### Fixed
+
+- **A `400 validation_failed` response reports a missing body field with
+  `errors[].code: "required"`** (#1790), as documented, instead of
+  `invalid_type`, `invalid_value` or `invalid_union`. The dashboard now shows
+  its "field is required" message for it. A missing coerced numeric field,
+  such as `size` on `POST /api/uploads`, still reports `invalid_type`.
+- **A cookie is no longer sent once its `Max-Age` or `Expires` has passed**
+  (#1778). The sidecar and the platform credential proxy kept sending a
+  cookie set with a positive `Max-Age` or a future `Expires` after it
+  expired, so a short-lived cookie could keep masking the connection's
+  credential; it is now dropped and the call falls back to the credential.
+  On deploy, in-flight platform proxy sessions lose their upstream cookies
+  once.
+- **A JWT can still be signed after an auth-secret rotation** (#1769): CLI
+  token issuance and OIDC tokens no longer fail once the secret changes.
+- **A session stays alive while it is used** instead of expiring 7 days after
+  sign-in.
+
+## [1.0.0-beta.65] - 2026-10-07
+
+### Operators
+
+- **An account named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or
+  `AUTH_PLATFORM_ADMIN_EMAILS` that does not exist yet is no longer created
+  by the sign-up form** (#1707). On an instance with no organization yet, set
+  `AUTH_BOOTSTRAP_TOKEN`, restart and claim it at `<APP_URL>/claim`; remove
+  the token from `.env` once claimed. Once an organization exists the token
+  is dead (`/claim` answers 410): a newly named address then gets its account
+  only through a magic link (SMTP) or a Google/GitHub sign-in whose provider
+  asserts the address verified, and without either it cannot get one while
+  it is named (recovery under Pitfalls in the doc below). Check that you can
+  sign in to the account of every named address: an existing one is not
+  re-examined. Recipes and known limits: `examples/self-hosting/AUTH_MODES.md`.
+- **The API reads a live model catalog from `get.appstrate.dev`** (#1717,
+  #1732, #1735). A new variable, `MODEL_CATALOG_URL` (default
+  `https://get.appstrate.dev/model-catalog`), names a signed file listing the
+  models a later Pi registry records and this build can serve, so a new model
+  becomes selectable without a release. Each API process reads it in the
+  background when it starts and every hour (two anonymous GETs) and holds it in
+  memory; nothing about the instance is sent, nothing is stored and boot never
+  waits on it. Set the variable to `off` to run on the bundled registry alone;
+  an empty value is the default channel, not a switch.
+  On a Docker install the variable reaches the container only when the
+  `appstrate` service lists it under `environment:`. The shipped compose files
+  now do; an install that keeps an older compose file adds
+  `- MODEL_CATALOG_URL` there before setting it.
+  Until a file is published for a Pi version the read answers 404 and nothing
+  changes. Reference: `docs/architecture/MODEL_CATALOG.md`.
+- **The Pi SDK moves to 1.0.4 and the model offer moves with it** (#1705).
+  Run `bun run verify:system-models` with the platform env before the deploy:
+  a `SYSTEM_PROVIDER_KEYS` model the new registry no longer records refuses
+  boot. Removed from the offer: OpenCode Go `glm-5.1`, `kimi-k2.6`,
+  `qwen3.6-plus`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.8-max`; Together AI
+  `deepseek-ai/DeepSeek-V4-Pro`, `google/gemma-4-31B-it`,
+  `moonshotai/Kimi-K2.6`, `moonshotai/Kimi-K2.7-Code`, `openai/gpt-oss-20b`;
+  Fireworks `accounts/fireworks/models/glm-5p2` and
+  `accounts/fireworks/routers/glm-5p2-fast`; Mistral `magistral-small`;
+  OpenRouter `inclusionai/ling-3.0-flash-fin:free`,
+  `inclusionai/ling-3.0-flash-vl:free`, `nex-agi/nex-n2.5-mini:free`,
+  `nex-agi/nex-n2.5-pro:free`, `qwen/qwen3.8-27b:free`. An
+  existing `org_models` row on one of them keeps its stored values and loses
+  the catalog defaults (label, limits, capabilities, price); it can no longer
+  be created.
+- **Log levels and messages changed; update any alert that matches them**
+  (#1679). `LOG_LEVEL=debug` now writes one `request` line per request
+  (method, matched route pattern, status, duration, `Request-Id`). No longer at
+  `error`: a refused organization delete (no line), a subprocess the platform
+  stopped itself (`Subprocess stopped`, info), a chat turn the model failed
+  (`chat turn failed on a model error`, warn; it used to be logged as
+  `chat ui stream processing failed`), and an LLM upstream timeout
+  (`llm-proxy: upstream fetch failed`, warn). The three draft-lookup lines
+  about a referenced mcp-server are now `debug`.
+- **An integration calling an internal API needs its host in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1657). In a run, an `api_call` used to
+  reach a private, loopback or link-local address as soon as the
+  integration's `authorized_uris` named the host literally. It is now refused
+  (403 `URL targets a blocked network range`; the sidecar logs
+  `Target refused (SSRF)` with the host) until the operator lists that host.
+  Before the deploy, add the internal hosts your integrations name; a listed
+  host is trusted by every egress site that reads the variable and by every
+  organization's integrations that name it. Through the platform credential
+  proxy the reverse tightening applies: a listed host is reached only when
+  `authorized_uris` names it literally, no longer through `allow_all_uris`,
+  a wildcard entry or a host taken from a connection value. A run's sidecar
+  now resolves an `api_call` host itself (a literal host used to skip the
+  lookup), so it needs working DNS even when it sends through `PROXY_URL`:
+  without it the call is a 502 `Target host could not be resolved`. An
+  exempt internal host (listed in `EGRESS_ALLOW_INTERNAL_HOSTS` and named
+  literally in `authorized_uris`) is the exception: it is not looked up. The
+  local resolver of `appstrate run` is unchanged.
+- **Pre-flight the stored integration manifests before the deploy**:
+  `DATABASE_URL=… bun scripts/migration/0035-verify-manifest-expressions.ts`
+  lists every draft or version holding a template or runtime expression the
+  platform does not evaluate, or a `{{field}}` in a delivery template
+  (`[expression]`: its connect or its delivery fails, or the placeholder is
+  sent as literal text) and every auth whose injected credential runs will now refuse as exfiltration
+  (`[exfiltration]`: no `authorized_uris`, with or without `allow_all_uris`,
+  or an entry that does not bound the host); it exits 1 while any draft or
+  published version of an org integration has one, not only `latest`: a range
+  such as `^1.0.0` still runs an older version. Replace a broken version by a
+  fixed one every range reaching it accepts, then delete it
+  (`scripts/migration/README.md` § 0035). `allow_all_uris` beside a bounded
+  list is not listed (a run drops it and serves the list), but the next draft
+  save refuses it: fix it when convenient. System packages are skipped: the
+  image ships them (#1641).
+- **Magic links and OAuth sign-ins in flight at the deploy cannot finish**
+  (Better Auth 1.7.7, GHSA-965c-763c-88jm). Their stored identifiers now carry
+  a purpose prefix: a link mailed before the restart is refused, and a Google
+  or GitHub sign-in or account link started before it has to be started again.
+  No data is rewritten. Upgrade every replica in the same cutover.
+- **Migration `0078` rewrites `runs` under an exclusive lock** (the
+  `model_source` column becomes the `credential_source` enum) and adds three
+  CHECKs and the nullable `package_schedules.disabled_reason`. It writes no
+  row. Before the deploy each of these must return no row, else the migration
+  fails and the release does not boot:
+  `SELECT type FROM notifications WHERE type NOT IN ('run_completed', 'package_shared') LIMIT 1;`
+  `SELECT 1 FROM runs WHERE model_source IS NOT NULL AND model_source NOT IN ('system', 'org') LIMIT 1;`
+  `SELECT 1 FROM runs WHERE run_origin = 'remote' AND (model_source IS NOT NULL OR model_id IS NOT NULL OR inference_route IS NOT NULL) LIMIT 1;`
+  (#1641).
+- **A run's connection snapshot is parsed on read** (#1641): every element of
+  `runs.resolved_connections` must carry a string `label` and `accountId`,
+  which the platform has written since connections are labelled at creation.
+  This must return no row before the deploy; a run it names fails to load
+  until its snapshot elements are given both strings:
+  `SELECT r.id FROM runs r, jsonb_each(r.resolved_connections) e(k, v), jsonb_array_elements(CASE WHEN jsonb_typeof(v) = 'array' THEN v ELSE jsonb_build_array(v) END) el WHERE jsonb_typeof(el->'label') IS DISTINCT FROM 'string' OR jsonb_typeof(el->'accountId') IS DISTINCT FROM 'string' LIMIT 1;`
+- **Rotating `CONNECTION_ENCRYPTION_KEY` can now finish**:
+  `scripts/rekey-encrypted-columns.ts` re-encrypts, under the active key,
+  every live ciphertext a retired kid wrote in the seven encrypted columns (a
+  closed or expired run sink's secret is never read again and is skipped); its
+  dry run is the per-kid inventory and exits 0 only when nothing live is left
+  outside the active kid. Procedure: `docs/ENV.md` § "Rotating
+  `CONNECTION_ENCRYPTION_KEY`" (#1641).
+- **Billing pins the Stripe API version `2026-09-30.endive`** (stripe-node 23,
+  #1738). A webhook endpoint renders its payloads at the version it was
+  created with and that version cannot be changed: before the deploy, the
+  billing endpoint (`<APP_URL>/api/billing/webhooks`) must be one created at
+  `2026-09-30.endive`, with its signing secret in `STRIPE_WEBHOOK_SECRET`. Never
+  leave two endpoints active on the same URL: the module does not deduplicate
+  events. Only instances that load `@appstrate/module-ee` are concerned.
+
+### Changed
+
+- **BREAKING (CLI): `appstrate run` with an API key reads the org and space
+  only from `APPSTRATE_ORG_ID` / `APPSTRATE_SPACE_ID`** (#1752), never from
+  the active profile, whose pins could contradict the key's and answer 403. A
+  remote run needs neither; a local run still requires `APPSTRATE_SPACE_ID`,
+  and one with a preset model now also requires `APPSTRATE_ORG_ID`.
+- **BREAKING (CLI): `appstrate api` uses an API key when one is set** (#1720):
+  `--api-key` or `APPSTRATE_API_KEY`, the pair `appstrate run` already reads,
+  with `APPSTRATE_INSTANCE` (else the profile's instance). **This changes
+  behaviour for a shell that already exports `APPSTRATE_API_KEY` for
+  `appstrate run`**: every `appstrate api` call there now goes out as the key
+  instead of the logged-in user — another principal, no `X-Org-Id` /
+  `X-Space-Id` (the key's own org and space apply), and the instance
+  `APPSTRATE_INSTANCE` names. Unset the variable to keep the login. The keyring
+  is not read and no profile is required. `--api-key ""` and a key with
+  whitespace or non-ASCII characters are refused, for `run` as well, and `run`
+  now treats an empty `APPSTRATE_INSTANCE` / `_SPACE_ID` / `_ORG_ID` as unset.
+- **`appstrate install` with a named owner writes `AUTH_BOOTSTRAP_TOKEN` and
+  sends the operator to `/claim`** (#1707), instead of opening a `/register`
+  form pre-filled and locked to the owner's address. Every fresh closed
+  install now writes the token, and with `AUTH_BOOTSTRAP_OWNER_EMAIL` set the
+  claim accepts that address only (403 `bootstrap_owner_email_mismatch`); an
+  upgrade mints no token. `bootstrapOwnerEmail` is gone from
+  `window.__APP_CONFIG__`.
+- **In a run, `api_call` forwards a header named like a credential proxy
+  control header instead of refusing the call** (#1670). `X-Integration-Id`,
+  `X-Target`, `X-Substitute-Body`, `X-Stream-Response`,
+  `X-Max-Response-Size`, `X-Truncated`, `X-Truncated-Size` and
+  `X-Auth-Refreshed` were the request controls and response markers of the
+  sidecar's HTTP proxy route. That route is retired and nothing in the sidecar
+  reads them: they now reach the upstream like any other header, and the tool
+  description no longer mentions them. The platform credential proxy, which
+  still reads some of them, is unchanged. The sidecar also stops re-checking
+  the type of `target` and the case of `method`: the agent runtime validates
+  a model's arguments against the tool's schema before it calls.
+- **BREAKING (API): models, proxies and endpoint URLs refuse three states they
+  used to accept** (#1681). A disabled model cannot be the organization default:
+  `PUT /api/models/default` naming one, and `PATCH /api/models/{id}` with
+  `enabled: false` on the current default, answer 409 `model_disabled` (move or
+  clear the default first). `base_url_override` / `base_url` on
+  `POST /api/model-provider-credentials`, `/discover` and `/test` must be
+  http(s), else 400. A proxy's `urlPrefix` masks the username as well as the
+  password. Deleting a model or a proxy now also clears the per-space agent
+  settings naming it; settings left dangling by earlier deletions are not
+  rewritten.
+- **Changing a verified email address is approved from the current address
+  first** (#1673). With SMTP configured, `change-email` used to send its one
+  link to the new address. It now emails the current address; once approved
+  there, the verification link goes to the new one, and the address changes
+  when that second link is opened. An account whose current mailbox is no
+  longer reachable cannot change its address on its own any more.
+- **Three account e-mails are new** (#1673, SMTP only): a notice after every
+  password change or reset, a notice to the owner when a sign-up is attempted
+  on an address that already has an account (the sign-up screen announced an
+  e-mail that was never sent), and the approval e-mail above. The
+  verification, magic-link and password-reset e-mails state how long their
+  link stays valid (1 hour, 15 minutes, 1 hour). `@appstrate/module-ee` has no
+  branded version of the three new ones: they go out in the plain template.
+  On a hosted (OIDC) password reset the notice leaves through the space's own
+  SMTP transport, as does the verification e-mail re-sent at hosted sign-in.
+- **`POST /api/webhooks/{id}/test` sends a real request** (#1683): one signed
+  `test.ping` to the webhook URL, single attempt, listed in its deliveries and
+  recorded as a `webhook.test_sent` audit event. A delivery whose hostname does
+  not resolve is retried up to its third attempt
+  (`Delivery target hostname could not be resolved`) instead of failing for
+  good on the first. Without Redis, cron schedules now fire on the minute
+  rather than up to 30 s late.
+- **BREAKING (API): deleting the default space answers
+  `409 default_space_not_deletable`** (#1680), was `400 invalid_request`.
+  Every refusal of `DELETE /api/spaces/{id}` that is about the space's state
+  is now a named 409.
+- **`GET /api/orgs` and `GET /api/spaces` have a defined order** (#1680).
+  Organizations are listed oldest membership first (there was no order: a
+  rename moved an organization). Spaces are listed default first, then
+  personal spaces, then team spaces, each oldest first (a personal space was
+  ranked by its creation date, a different place for each member).
+- **BREAKING (API): six refusals answer with their own problem `code`, and a
+  taken package identifier is always a 409** (#1677). A client that branches on the old
+  value must follow; `detail`, `param` and the other statuses are unchanged.
+  - `POST /api/orgs` with `AUTH_DISABLE_ORG_CREATION` set, for a caller who
+    is not a platform admin: 403 `forbidden` → 403 `org_creation_disabled`.
+  - Schedule create/update with an invalid cron expression: 400
+    `invalid_request` → 400 `invalid_cron_expression`; with a timezone that
+    cannot be scheduled against: → 400 `invalid_timezone`; with an actor who
+    cannot fire it: → 400 `schedule_actor_invalid`.
+  - Model create/update/seed with a model outside its provider's catalog
+    offer: 400 `invalid_request` → 400 `model_not_offered`.
+  - Webhook create/update with a target on a private or reserved network:
+    400 `invalid_request` → 400 `blocked_url` (the code `/api/proxies`
+    already used).
+  - `name_collision` was a 400 or a 409 depending on which check met the
+    taken identifier. It is now **409** everywhere: package create
+    (`POST /api/packages/{type}`), fork, and the import routes (a system
+    package's identifier, or one owned by another organization).
+  - A model or proxy connection test that is refused at the TCP level
+    answers `TestResult.error: "CONNECTION_REFUSED"` (was `NETWORK_ERROR`).
+- **BREAKING (CLI): one process reads the Pi model registry, the API** (#1706).
+  It hands every model builder the record's _dialect_ (`name`,
+  `thinkingLevelMap`, `compat`) next to the limits, modalities, reasoning and
+  price it already resolved. The agent container reads it from `MODEL_DIALECT`,
+  the sidecar from `PI_MODEL_SWAP_JSON` (`backing.dialect`), the chat and the
+  CLI from `pi_dialect` on `GET /api/models` (opaque, `null` for a gateway and
+  for an alias). None of them looks a model up, so a model's dialect does not
+  depend on which Pi registry an image or a CLI was built with; the request is
+  still serialized by each one's own Pi code. The field is required wherever a
+  Pi provider is named (`null` when Pi keeps no record), and a consumer handed a
+  provider without it refuses instead of building the model bare: the container
+  and the sidecar at boot, `appstrate run --model-source preset` before any
+  call. A preset run therefore needs the CLI and the instance at the same
+  version. `ModelSwapBacking.dialect` is a required field of `@appstrate/core`:
+  its next release is a major. Plan: `docs/plans/live-model-catalog.md`, step 1.
+- **`claude-sonnet-5-5` replaces `claude-sonnet-5` among the featured models**
+  of the `anthropic` and `claude-code` providers (#1705), now that the pinned
+  Pi registry (`@earendil-works/pi-ai` 1.0.4) records it; existing
+  `org_models` rows are untouched and `claude-sonnet-5` stays in the offer.
+  OpenCode Go no longer features `kimi-k2.6`, `glm-5.1`, `qwen3.7-max`,
+  `qwen3.7-plus` and `qwen3.6-plus`, which left its offer. The registry also
+  adds `gpt-6.1-sol` (`openai`, `codex`).
 - **`claude-opus-5-5` replaces `claude-opus-5` among the featured models** of
   the `anthropic` and `claude-code` providers (#1642), now that the pinned Pi
   registry (`@earendil-works/pi-ai` 0.87.1) records it. Featured ids are
@@ -15,6 +350,628 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becoming the default of an org that has none, so a first Claude Code
   connection now defaults to Opus 5.5. Existing `org_models` rows are untouched; `claude-opus-5` stays in
   the offer.
+- **BREAKING (API): the credential and LLM proxies answer their own failures
+  with stable problem codes** (#1641). Credential proxy:
+  `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`
+  (403), `credential_not_found` (404), `unresolved_placeholder` (400). LLM
+  proxy: a model whose upstream resolves into a blocked range is
+  `403 blocked_target` (was `400 invalid_request`). Both: an upstream that
+  cannot be resolved or reached (on the credential proxy, the target or a
+  redirect hop) is a 502 (`upstream_unresolvable`, `upstream_unreachable`), a
+  timeout a 504 (`upstream_timeout`); was a 500.
+- **BREAKING (API): the credential and LLM proxies mark every response with
+  RFC 9209 `Proxy-Status`** (#1641): `appstrate; received-status=<n>` on a relayed
+  upstream response, `appstrate; error=<type>` on the proxy's own. A relayed
+  upstream 401 no longer carries the platform's `invalid_token` challenge.
+- **BREAKING (OpenAPI): the LLM proxies document a relayed upstream error as
+  `default`, not `502`** (#1641). They relay a provider error at the
+  provider's own status, told apart from the proxy's own problem document by
+  `Proxy-Status: appstrate; received-status=<n>`, and document the 402 a
+  metering module's `beforeUsage` hook can answer.
+- **BREAKING (API): the LLM proxy reports its cache outcome as RFC 9211
+  `Cache-Status`** (#1641): `appstrate-llm-proxy; hit` on a cached reply,
+  `appstrate-llm-proxy; fwd=uri-miss; stored` on a stored miss.
+  `x-llm-proxy-cache-status` is gone.
+- **BREAKING (API): the three api_call paths share one outbound
+  implementation** (#1641).
+  The platform credential proxy, the sidecar and `appstrate run` follow
+  redirects under one rule: an origin the `authorized_uris` allowlist names
+  keeps the credential (Dropbox `api.` to `content.`), any other origin change
+  strips it, and an https→http hop never carries it. Every hop is SSRF-checked
+  and connected to its DNS-validated address, except a host exempt from the
+  SSRF gate (#1657, under Security). One 30 s deadline bounds every
+  call (`appstrate run` had none), and the sidecar answers a timeout 504 like
+  the platform proxy (was 502). A streaming upload's redirect is returned
+  unfollowed.
+- **BREAKING (manifests): one template grammar per concept, and nothing
+  unrendered reaches an upstream** (#1641). Every delivery template (`http`,
+  `env`, `files`) renders `{$credential.<field>}` and nothing else: the
+  `{$outputs.*}` or any other `{$…}` there is refused when the manifest is
+  written and throws at render, so `appstrate run` on a bundle that skipped
+  validation fails instead of sending it as text. `authorized_uris` likewise
+  refuses, when written, any `{$…}` but `{$credential.<field>}`. A stored
+  manifest holding one still loads. A
+  connect output is referenced as `{$credential.<name>}`, the jwt extractor's
+  `token` included; login inputs are `{{name}}`.
+- **BREAKING (API): an integration OAuth client is updated with `PATCH`, and
+  its `client_id` can no longer change** (#1641). `PATCH` replaces the `PUT`
+  of `/api/integrations/{packageId}/oauth-clients/{clientId}` and of
+  `/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}`
+  (`updateIntegrationOAuthClient`, `updateOrgIntegrationOAuthClient`); an
+  absent field is left unchanged (`null` clears `redirect_uri`), a `client_id`
+  is a 400. The audit action `integration.oauth_client.rotated` is now
+  `integration.oauth_client.updated`; create/update/delete rows record the
+  client before and after (never its secret).
+- **BREAKING (API): OAuth clients name their owning tier** (#1641).
+  `GET …/auths/{authKey}/clients` returns `source: "system" | "org" | "space"`
+  instead of `"built-in" | "org" | "custom"`, where `custom` meant the space.
+- **BREAKING (API): member pins are addressed by path, like admin pins**
+  (#1641). `PUT` and `DELETE`
+  `/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`
+  take both ids in the path; the PUT body is `{ connection_ids }` alone.
+  `GET /api/me/integration-pins?agent_package_id=` is unchanged. A member-pin
+  write by an end-user, which has no member pins, is a 403 `forbidden`, not a
+  401 with an `invalid_token` challenge: its key is valid.
+- **BREAKING (API): one name per role across the pin and connection family**
+  (#1641). The agent is `agent_package_id` and the integration
+  `integration_package_id` on `IntegrationPin`, `IntegrationConnection`,
+  consuming agents, connection readiness, the `connections[]` of
+  `GET /api/me/context` (was `integration_id`) and the run's
+  `connections_used`, whose `label` and `account_id` are always strings and
+  `source` the cascade layer enum.
+- **BREAKING (MCP): `read_skill` returns a binary file as an embedded
+  resource** (#1641). The `content_base64` field is gone; the bytes arrive as
+  a `resource` content block with `blob`, whose `uri` is the file's REST
+  content URL.
+- **BREAKING (API): the Stripe webhook receiver answers its refusals as RFC
+  9457 problem documents** (#1641). `POST /api/billing/webhooks` answers
+  `400 invalid_request` for a missing or invalid `stripe-signature` and
+  `500 internal_error` instead of plain text; Stripe reads only the status.
+- **BREAKING (API): the OAuth endpoints' 429 is a standard OAuth error**
+  (#1641):
+  `/api/auth/oauth2/*` answers `Retry-After` and a JSON body with
+  `"error": "temporarily_unavailable"` instead of Better Auth's
+  `X-Retry-After` and untyped `{message}`. The code is the one RFC 6749
+  §4.1.2.1 defines for the authorization endpoint, reused on the token
+  endpoint.
+- **Notification kinds are a declared union** (#1641). `GET /api/notifications`
+  items are a `oneOf` on `type` (`run_completed`, `package_shared`) with a
+  typed payload each, and the database refuses any other kind.
+- **`runs.model_source` is the `credential_source` enum** (#1641): the
+  column, the run DTO and OpenAPI accept only `system`, `org` or `null`, and
+  the CHECK `runs_remote_has_no_platform_model` forbids a model source, model
+  id or inference route on a remote-origin run. The runner ledger no longer
+  coerces an unknown source to `null`, which silently switched a run to
+  pass-through pricing.
+- **The sidecar refuses a malformed `RUNTIME_TOOLS_JSON` or `OUTPUT_SCHEMA`
+  at boot** (#1641) instead of silently dropping the runtime tools or the
+  output schema; a connect run without a 32-byte `CONNECT_RESULT_KEY` fails
+  its env validation.
+- **BREAKING (API): the retired `X-Integration` header is no longer
+  stripped** by the credential proxy or the sidecar (#1641); it reaches the upstream like any
+  other header.
+- **An integration cannot name itself as its MCP server** (#1675): a manifest
+  write refuses an integration whose `source.server.name` is the integration
+  itself, which could never resolve and failed every run with
+  `mcp_server_unresolved`. A stored manifest holding one still loads.
+- **The import 409s `draft_overwrite` and `integrity_mismatch` name what the
+  import would overwrite** (#1675), as RFC 9457 extension members:
+  `packageId`, plus `active_version` on `draft_overwrite` (`null` when the
+  draft declares none) and `version` on `integrity_mismatch`, or on a
+  `draft_overwrite` whose published version of that number also differs.
+- **An OIDC client's `https://<x>.localhost` redirect URI is refused**
+  (#1748), like `https://localhost` already was, now that every `*.localhost`
+  name is a blocked host. `http://<x>.localhost` is still accepted as
+  loopback (RFC 8252 §7.3).
+- **The repository requires Bun 1.3.14 or later** (#1654): the root
+  `engines.bun` moves from `>=1.3.9` to `>=1.3.14`, the version CI, the
+  Dockerfile and `packageManager` pin, and the root test preload refuses an
+  older Bun. Published packages keep their own `>=1.3.9`.
+- **`@appstrate/afps-runtime`, `@appstrate/runner-pi` and
+  `@appstrate/module-chat` are private workspace packages** (#1641). No
+  release of them was ever published (npm holds only a
+  `@appstrate/afps-runtime@0.0.0` placeholder); the dead `publishConfig` is
+  removed.
+
+### Added
+
+- **`GET /api/profile` reports `can_create_org`** (#1680): whether
+  `POST /api/orgs` would accept the user — true on an open instance, and for
+  platform admins alone under `AUTH_DISABLE_ORG_CREATION`. The dashboard
+  routes on it, so the `orgCreationDisabled` flag is gone from
+  `window.__APP_CONFIG__`.
+- **`GET /api/me/context` names the space it resolved** (#1721): the payload
+  (the MCP `get_me` tool) carries `space: { id, name, personal }`, the space
+  every list in it is scoped to. An agent holding a key bound to an empty space
+  could not tell an empty space from the wrong one. The descriptions also say
+  an empty list can mean the caller's permissions do not cover it. Run and
+  model `cost` descriptions in the OpenAPI spec now state USD instead of
+  "dollars" or no currency; no wire field changes.
+- **Live model catalog, read side** (#1717, #1732): a process accepts a file
+  only on its Ed25519 signature (public key in the source), its exact Pi SDK
+  version, a strict shape and a `serial` not lower than the one it holds, then
+  keeps the records whose dialect the pinned Pi code already knows (provider
+  and API shape together, compat keys, non-boolean compat values, thinking
+  levels and their effort words). It only adds models an organization can bind
+  with its own credentials: bundled ids, featured ids and system models (boot
+  rules, price, limits and dialect) read the bundled registry, and a
+  subscription provider is offered no model with a price tier one request can
+  reach. The file lives in memory: a model bound from it runs without its
+  catalog defaults until a restarted process has read the channel. The channel
+  cannot forge a file or roll a running process back; it can withhold a newer
+  one. Plan: `docs/plans/live-model-catalog.md`, step 2.
+- **Live model catalog, producer** (#1731): `scripts/build-model-catalog.ts`
+  and `.github/workflows/publish-model-catalog.yml` build, every six hours and
+  per Pi version in use, the file instances read. Of the latest Pi package
+  only JSON data is read. A record is published when an instance would keep it,
+  every field and endpoint Pi gave it is one a bundled sibling has, and the
+  pinned code builds its request at every thinking level; the signed file is
+  read back as an instance reads it before anything is pushed. The workflow
+  signs with the repository secret `MODEL_CATALOG_SIGNING_KEY`, the seed of
+  the key pinned in `model-catalog-overlay.ts`.
+- **A schedule the system disabled says why** (#1641). `disabled_reason`
+  (`actor_invalid`, `actor_left_org`, `connection_deleted`) is set by the
+  system act, cleared on re-enable and `NULL` otherwise: on an enabled
+  schedule (CHECK) and on one a person paused. It is on the schedule DTO and
+  shown on the schedule badge and detail page. Deleting a connection a
+  schedule overrides disables only an enabled schedule; one already disabled
+  keeps its reason.
+- **Credential-proxy use of another member's connection is audited** (#1641).
+  The first call of an `X-Session-Id` through a connection the caller does not
+  own writes one `integration.connection.proxied` row per acting principal
+  (`principalType`, `principalId` in `after`); the call log names the
+  connection used. A call that fails after the credential may have left
+  (timeout, unreachable upstream, refused redirect) is audited like one that
+  returns; one refused before sending is not.
+- **Platform MCP tools return structured output** (#1641). Every JSON result
+  carries `structuredContent` beside its text block (MCP 2025-06-18); an error
+  carries the text only.
+
+### Fixed
+
+- **A failed connection-use audit write is retried on the session's next
+  call** (#1753): the dedupe key is released when the write fails.
+- **Byte sizes render in English on a malformed locale tag** (#1753) instead
+  of failing the page.
+- **Disabling the default model and making a disabled model the default can
+  no longer both succeed** (#1749): the two writes take the same row lock, so
+  one of them answers 409 `model_disabled`.
+- **A refused mutation shows one error toast, not two** (#1752), and detail
+  pages no longer show an error state while a retry is in flight. The
+  connection delete confirmation waits for its impact before it can be
+  confirmed.
+- **The chat interface is translated** (#1752): its remaining French-only
+  strings follow the interface language.
+- **The chat no longer re-creates a deleted conversation** (#1682). Its URL
+  showed the empty welcome screen with a live composer, and the first message
+  sent there re-created the conversation under its old id; a conversation
+  that is deleted or not the caller's now reads as not found. The model
+  picker no longer stores the organization's default as the user's pick, so
+  a changed default reaches everyone who never chose a model. Deleting a
+  conversation asks for confirmation, a reader (`chat:read` only) is no
+  longer offered "New conversation", and every failed turn carries a request
+  id, the chat request's own when the upstream named none.
+- **The self-hosting compose files forward the variables the docs and the
+  installer set** (#1726). `AUTH_BOOTSTRAP_TOKEN`, which the installer writes
+  to `.env`, and `EGRESS_ALLOW_INTERNAL_HOSTS` reached no container, so `/claim`
+  could not find the token. The tier templates also dropped SMTP, Google and
+  GitHub sign-in, run limits, proxies and a few others the root file forwards.
+  All are bare passthroughs: an unset variable stays unset.
+  `deploy/docker-compose.yml`, which loads `.env` whole, is not affected.
+- **A subscription pairing token minted on a `*.localhost` instance is
+  accepted** (#1648), as loopback (RFC 6761 §6.3). It needs
+  `@appstrate/connect-helper` 0.3.1.
+- **A gateway model declared reasoning takes a reasoning level** (#1736). An
+  `openai-compatible` or `anthropic-compatible` model created with
+  `reasoning: true` offered no level, not even `off`: every one was refused
+  with `reasoning_level_unsupported`, and its runs always reasoned at
+  `medium`. It now takes `off`, `low`, `medium` and `high`, the set every
+  reasoning backend accepts; `minimal`, which OpenAI's o-series and gpt-5.1+
+  refuse, and `xhigh`/`max` stay refused, and an alias over it sends `low`
+  for `minimal`. The default stays `medium`. On an `openai-compatible` model,
+  `off` sends no reasoning parameter: the server keeps its own behaviour, and
+  the level control says so.
+- **The space authentication tab no longer offers to keep a stored secret**
+  (#1725). With SMTP or a social provider already configured, the password
+  or client secret field read "leave empty to keep the current one" and was
+  optional, while saving always replaces the secret: an empty field failed
+  with a raw validation error in a toast. The field is now required on every
+  save, and its hint says the stored value is never displayed and has to be
+  entered again.
+- **An import no longer answers 201 for a version it does not create**
+  (#1699). Importing a new version lower than the highest published one
+  replaced the draft, published nothing and still answered 201. It is now
+  refused before anything is written, with `409 version_not_higher`, forced
+  or not. A bundle import refuses such a root the same way, and leaves such
+  a dependency as the organization has it, with a warning.
+- **A re-import onto an existing version no longer leaves the draft dirty**
+  (#1675). Importing a version that already exists, identical or forced,
+  kept the draft marked as holding unpublished changes, so every later import
+  answered a spurious 409 `draft_overwrite`. When that version is the latest
+  published one, the draft is now settled against it.
+- **`/api/admin/storage-deletion-jobs` no longer asks for `X-Org-Id`**
+  (#1713). The routes are instance-wide, so a platform administrator who
+  belongs to no organization got a 400. A header that is sent is ignored.
+  The operator guard is unchanged.
+- **An aliased run backed by OpenAI keeps its output cap and temperature**
+  (#1705). Pi 1.0 reads a credential that is not `sk-`-shaped as a ChatGPT
+  sign-in and drops `max_output_tokens`, `temperature` and the cache
+  retention; the sidecar's placeholder key matched.
+- **Run guard-rails** (#1674). A double click on Run created two runs: the
+  launcher now lets one launch through at a time. An agent whose `output` call
+  is refused five times (an output schema no value satisfies, typically) is
+  stopped and its run fails, instead of retrying one paid turn at a time until
+  the run timeout — this ships in the runtime image. A run that falls back to
+  a default model because the one pinned on its agent or schedule is no longer
+  usable now says so in its log (`model_fallback`), and the run form and the
+  agent's model setting warn about the unusable pin.
+  On the agent page the two Run buttons share one verdict (the empty-list one
+  stayed live for an agent switched off or without a model), a caller with
+  `agents:run` but not `agents:read` no longer reads "the prompt is empty",
+  "no default model" is told apart from "no model", and the reason a button is
+  disabled shows on hover. The API tab documents the real response (201 and
+  the run, field `id`). Timed-out and cancelled runs show their cause on the
+  run page; an unnamed schedule no longer reads as its raw id; memory rows are
+  deleted behind a confirmation and only by a caller holding
+  `persistence:delete`; integer launch fields are numeric inputs and the
+  duplicated error summary of the launch form is gone.
+- **The magic-link e-mail works on an instance that does not load the `oidc`
+  module** (#1673). Its link always pointed at the module's confirmation page
+  and answered 401 without it; it now points at a confirmation page of the
+  dashboard (`/magic-link/confirm`), whose button is what spends the one-time
+  link — a mail scanner that opens the link does not. A spent or expired link
+  returns to `/magic-link` with a message. The `allowedAttempts` option, which
+  the installed Better Auth ignores, is gone; the hosted "check your inbox"
+  page announced a 7-day validity for a link that lives 15 minutes.
+- **Sign-up from an invitation returns to the invitation after e-mail
+  verification** (#1673): the verification link carried `/`, and the invitee
+  landed on "create your organization"; the link re-sent when an unverified
+  account signs in from the invitation carries it too. Also in the built-in
+  sign-in pages:
+  signing in to an unverified account opens the "check your inbox" screen
+  instead of a raw `Email not verified`; a verification link that is invalid
+  or expired says so; `/verify-email` opened on its own redirects to
+  `/login`; and changing one's e-mail to an address already in use no longer
+  reports success. Signing in from an invitation reloads the invitation page
+  (Better Auth's client follows the `callbackURL` it is given).
+- **The dashboard no longer offers what the server refuses around spaces**
+  (#1680). In a personal space the Members, API keys, end-user OAuth clients
+  and End-Users pages are not there (each write behind them was a 409), and a
+  personal space is no longer listed in an invitation's or an OAuth signup
+  policy's space assignments (400). The space selector of the space settings
+  listed closed spaces the caller cannot enter and fell back silently; it now
+  shows the same list as the sidebar. On an instance where organization
+  creation is disabled, `/onboarding/create` and "create organization" are
+  shown only to those who may create one, and a platform admin without an
+  organization lands on the creation form. The last space used in each
+  organization is restored after an organization switch and after sign-out.
+- **Accepting an invitation says whether it created the membership**
+  (#1676). `POST /invite/{token}/accept` now returns `created`. For a caller
+  who was already a member it is `false`, and `role` / `permissions` are those
+  of the role they keep; the response used to echo the invitation's role, so
+  the dashboard told an existing member they had been promoted.
+- **The dashboard no longer hides a failure** (#1676). An expired session
+  lands on the login screen instead of rendering empty lists, every refused
+  write produces one message, a 4xx is no longer retried behind a spinner, a
+  changed role or a lost space is picked up without a reload, and a resource
+  the caller cannot read shows one "not found or not accessible" panel.
+- **An `api_call`'s target, headers and body templates are checked the same
+  way on the three paths** (#1660). The platform proxy, the sidecar and the
+  local resolver of `appstrate run` each checked and substituted them in
+  their own order; one function now does it (`prepareApiCallRequest`,
+  `@appstrate/afps-runtime`). What a caller sees:
+  - `appstrate run --integrations=local` repairs an `Authorization` header
+    written `Bearer{{field}}` (no space after the scheme), as the sidecar
+    does; it was sent as `Bearerghp_…` and answered 401. Only a manifest
+    that lets the caller override `Authorization` keeps that header.
+  - One wording for a refused request, naming the first defect:
+    `Unresolved placeholders in target|header "X"|body: {{a,b}}` (each key
+    once) or `Header "X" is not a valid HTTP field value`. The sidecar said
+    `in URL`; the local resolver listed every unresolved key of the call.
+  - A defect of the request (an unresolved placeholder, a caller header
+    value that is no HTTP field value) is reported ahead of a refusal by the
+    URL policy. On the platform proxy it is also reported ahead of a
+    credential no header can carry, when that credential sits in an earlier
+    header or the defect is in the body (was 502 `credential_unusable`).
+  - The local resolver judges a caller header value as written, first, as
+    the two other paths do: `RESOLVER_HEADER_INVALID` ahead of the URL
+    policy, of an unresolved placeholder elsewhere and of a body error, and
+    also for a header it then replaces (the injected one, a `Content-Type`
+    the body sets): that call used to go out without the caller's value.
+  - In a run, a 401 is not replayed when the refreshed credentials no longer
+    hold a field the call names, in its target, a header or the body: the
+    replay used to send a header or a body with the literal `{{field}}`.
+    The 401 is returned.
+- **An OAuth refresh keeps the connection's other outputs** (#1629).
+  Refreshing an integration connection rewrote its credential with
+  `access_token` and `refresh_token` only, so a manifest reading
+  `token_type`, `id_token` or `scope` worked after the connect and failed
+  with an unresolved placeholder after the first refresh. A refresh now
+  starts from the stored outputs and replaces what the provider returns.
+- **The integration editor's default auth allowlist is the source host**
+  (#1641): a new integration's `authorized_uris` starts empty and takes the
+  remote source's host (`https://<host>/**`) as the URL is typed, until the
+  author edits it. The former default, `https://**`, is what the host-bound
+  rule refuses.
+- **An upstream verdict is credited to the credential that earned it**
+  (#1641). The sidecar reports a 401 or 2xx against the
+  `credential_revision` its request carried, not the one held when the
+  answer arrived. A response a redirect hop stripped the credential from
+  (including a chain that comes back to the origin) is neither counted nor
+  credited, on the sidecar and the platform proxy alike. A BYOK key is
+  flagged only while its row still holds the rejected key. A count and the
+  platform proxy's reset apply only while the caller still reaches the
+  connection. `credential_revision` must be 16 hex digits (empty or malformed
+  → `400`).
+- **Credential proxy: two failures no longer end as a 500 or a spurious
+  400** (#1641). A `{{word}}` inside a credential value was reported as an
+  unresolved placeholder: placeholders are now looked up in the template. A
+  relayed body that breaks off after its headers answers
+  `502 upstream_unreachable` (or `504 upstream_timeout`) naming the target
+  host.
+- **A rejection or a success counts against the credential that saw it**
+  (#1641). The integration credentials payload carries `credential_revision`,
+  a short digest of the stored ciphertext, which the sidecar sends back on
+  `/refresh` and `/upstream-success`: a 401 on a credential the connection no
+  longer holds is not counted and gets the current credential back (`200`),
+  and a success on a replaced credential no longer ends the new one's streak.
+  A connection already flagged keeps its count; `/upstream-success`
+  refuses a connect run (`409 connect_run_no_refresh`); and the remote-HTTP
+  transport no longer reports a success from an origin a redirect took the
+  request to.
+- **An upstream that keeps rejecting an API key flags it; 401s between
+  successful calls no longer do** (#1641). A credential that cannot refresh
+  (api_key, basic, custom, OAuth2 with no refresh client) is flagged
+  `needs_reconnection` at the `INTEGRATION_REFRESH_MAX_FAILURES`-th
+  CONSECUTIVE upstream 401, however far apart; an OAuth2 connection holding
+  no refresh token is not counted, and its first 401 flags it (`410`), as
+  before. Any successful (2xx) call
+  through a non-OAuth2 connection ends the streak; an OAuth2 connection's
+  count is cleared only by a credential write (a reconnect, or a successful
+  refresh), never by a 2xx. Two counts therefore run until a reconnect: an
+  OAuth2 connection whose refresh cannot run (no resolvable client or token
+  endpoint), and a local MCP server reporting rejections through the
+  `dev.appstrate/credential: rejected` tool-result meta (e.g. `@appstrate/ssh`),
+  which has no success signal. Every path counts and resets: the platform
+  credential proxy (CLI, GitHub Action), which counted none before and
+  flagged an OAuth2 connection without a refresh client on its first 401, and
+  the sidecar's `api_call`, MITM egress and remote-HTTP sinks, which report
+  the first success after a counted rejection to
+  `POST /internal/integration-credentials/{scope}/{name}/upstream-success`
+  (the credentials GET payload announces a pending streak as
+  `rejection_streak`). For an API-key integration connection that replaces a count since the last
+  reconnect; a revoked BYOK model key, never flagged before, is counted the
+  same way through the LLM proxy, which a 2xx resets, and stops inference
+  until it is re-entered. An OAuth2 subscription keeps its own counter, the
+  refresh streak, which a successful refresh resets. The refresh `502` now
+  reads `N/M consecutive upstream rejections before it is flagged`.
+- **An OAuth client update that sends a new `client_secret` without
+  `token_endpoint_auth_method` keeps the stored method** (#1641); it reset
+  the client to the manifest's method. A public client (`none`) given a
+  secret takes the manifest's method.
+- **BREAKING (API): a `connection_overrides` key the agent does not declare
+  is a 400** (#1641). It was dropped without a trace, and a schedule froze it onto its
+  row, so the run bound a lower cascade layer instead of the account asked
+  for. It is refused on the agent run, the inline run and `/inline/validate`,
+  on schedule create, and on a schedule update that changes
+  `connection_overrides` or `version_override`.
+- **Audit rows record the whole change** (#1641). `schedule.created` records
+  every override; `schedule.updated` records before and after of only the
+  fields the write changed, including the connection-override reset an actor
+  change implies, and a write that changes nothing records no row. A
+  placement `PATCH` writes `package.placement.updated` for `modelId`,
+  `proxyId` and `generationConfig`. Pin and org-default writes record
+  `before`; admin and member pin rows share one `resourceId`.
+- **BREAKING (manifests): `connect.login` reads the regex extractor's
+  `source`** (#1641):
+  `$response.body` or `$response.header.<name>`; it was ignored. An
+  expression, selector or criterion context the engine cannot evaluate is
+  refused when the manifest is written and fails the login as `invalid_config` instead of
+  silently not matching.
+- **BREAKING (config): a UUID-shaped system id is refused** (#1641). Such an
+  id would take precedence over an organization's own row with the same id.
+  A system OAuth
+  client with one fails boot; a `SYSTEM_PROVIDER_KEYS` entry whose key or
+  model id is UUID-shaped is skipped and logged, like any other invalid entry.
+- **Every error response in the OpenAPI document declares its body**
+  (#1641), and `verify:openapi` §6b enforces it: `application/problem+json`
+  (`ProblemDetail`), or the media type a reviewed exemption names (Better
+  Auth's OAuth endpoints, HTML pages, the health report, proxied upstream
+  responses).
+- **The root `zod` override no longer pins below the declared floor** (#1641).
+  `overrides.zod` moves from 4.5.4 to 4.6.5, the version every workspace
+  declares; `verify:overrides` (in `bun run check`) fails when an override
+  does not satisfy a declared range.
+
+### Security
+
+- **A bundle import cannot take a dependency another organization owns**
+  (#1749): a package created by another organization after the import's
+  preflight is a 409 `bundle_conflict`, never a "reused" dependency naming
+  that organization's latest version.
+- **A connect-login secret is bound like an injected credential** (#1751):
+  the MITM listener refuses (403) a login request a secret would be
+  substituted into when the auth's `authorized_uris` leaves the host to the
+  caller.
+- **Every `*.localhost` name is a blocked host** (#1748), like `localhost`
+  itself (RFC 6761 §6.3); `EGRESS_ALLOW_INTERNAL_HOSTS` still lifts it.
+- **The sidecar's forward proxy logs a request target as origin + path**
+  (#1751), never its query string.
+- **A cookie captured over https is never sent to a non-https URL** (#1753).
+  After an https → http redirect on a host the allowlist names for both
+  schemes, the sticky-cookie jar re-added the session cookies the downgrade
+  had stripped.
+- **A bundle import whose root is below its highest published version is
+  refused before anything is written** (#1753): the 409 `version_not_higher`
+  came after the dependencies ordered ahead of the root were inserted.
+- **An invalid `PROXY_URL` is not logged** (#1753): it can carry credentials.
+- **No session manages OAuth clients through Better Auth's client endpoints**
+  (#1754). `/api/auth/oauth2/create-client`, `get-client(s)`,
+  `update-client`, `client/rotate-secret` and `delete-client` answer 401 to
+  every session; platform clients are managed through the org and space
+  OAuth client routes. Unauthenticated dynamic registration is unchanged.
+- **The chat's Pi runtime no longer reads the host's Pi CLI credentials**
+  (#1646). Without a credential store of its own it opened the default one
+  (`~/.pi/agent/auth.json`), where a credential outranks the key the platform
+  registers: a `pi` login on the API host answered in place of the
+  organization's subscription. Each turn now gets an empty in-memory store.
+- **Dependency advisories**: `proxy-addr` and `source-map-js` patched (#1696);
+  the `braces` advisory accepted for the dev tree only, until 2026-12-31
+  (#1654).
+- **Better Auth 1.7.7** (GHSA-965c-763c-88jm, critical; #1734, #1743, #1742).
+  Before it, an OAuth sign-in state value was accepted as a magic-link token:
+  anyone who knew an address could start a Google or GitHub sign-in for it and
+  finish a magic-link sign-in to that account without reading its mail, or
+  create it marked verified. The platform enables the magic link whenever the
+  instance `SMTP_*` variables are set and keeps OAuth state in the database,
+  so an instance with them and working Google or GitHub credentials (the
+  instance's or a space's) was exposed. `better-auth`, `@better-auth/core`,
+  `@better-auth/oauth-provider` and `@better-auth/cimd` move together, as the
+  advisory requires. Better Auth's rate limiter now answers its 429 as JSON,
+  declared on the four Better Auth routes of the spec.
+- **MCP TypeScript SDK 1.32.1** (GHSA-6qxp-vccf-f47h). The SDK's OAuth
+  client could send credentials to an authorization server chosen by the MCP
+  server. The platform does not use that client; the bump clears the audit.
+- **An account the environment names needs proof of ownership** (#1707).
+  The account of `AUTH_BOOTSTRAP_OWNER_EMAIL` or of an
+  `AUTH_PLATFORM_ADMIN_EMAILS` address is created by the bootstrap token, a
+  provider-verified social sign-in or a magic link, never by the sign-up
+  form, and no existing account can change its e-mail to such an address.
+- **A space's own SMTP server carries auth e-mails only to that space's
+  accounts** (#1707), or to an address with no account that the environment
+  does not name. Any other mail is withheld; the page answers as before.
+- **A magic link signs in an account of the audience it was issued for**
+  (#1707): the client's when a hosted sign-in page issued it, else the
+  platform's. A refusal redirects with `error=signup_disabled` and leaves the
+  account untouched; a link whose client was deleted or disabled is refused
+  too.
+- **A pending-client cookie left in the browser binds nothing** (#1707): a
+  magic link or a sign-up asked from the dashboard creates a platform
+  account.
+- **A Google or GitHub identity is attached to an existing account only
+  when the provider asserts its e-mail as verified** (#1707), and a new
+  Google account is created verified only on that same assertion.
+- **`/claim` answers a refused account creation as a `403` with the
+  refusal's code** (#1707), with or without SMTP, instead of a `500`.
+- **An `api_call` reaches an internal host only when the manifest and the
+  operator both allow it** (#1657). The three paths disagreed: a run's
+  sidecar skipped the SSRF gate for any host `authorized_uris` named
+  literally, so a manifest's author chose which addresses of the operator's
+  network a run reached, and a public name made to resolve there passed
+  unchecked; the platform proxy skipped it for any
+  `EGRESS_ALLOW_INTERNAL_HOSTS` host, including one picked by the agent
+  under `allow_all_uris` or by a redirect. One rule now lives in
+  `fetchApiCall`: the manifest names the host literally (never
+  `allow_all_uris`, a wildcard or a rendered entry) AND the operator of the
+  network allows it — `EGRESS_ALLOW_INTERNAL_HOSTS` on the sidecar and the
+  platform proxy, always on the local resolver of `appstrate run`, where the
+  network is the caller's own. `internalHost` is required: a new caller
+  cannot inherit an exemption by omission.
+- **The MITM listener connects each upstream request to the address it
+  validated** (#1658). It checked the address the SNI host resolved to at
+  CONNECT, then let `fetch` resolve the name again: a name answering a public
+  address first and an internal one next reached the internal one. Each
+  request now goes through `guardedFetch`, which resolves, checks and
+  connects to that address, the name kept on `Host` and the TLS identity. A
+  host resolving into a blocked range at request time is a 403
+  (`target blocked by SSRF policy`); one that no longer resolves, a 502.
+- **A credential no HTTP header can carry is refused, never quoted** (#1641).
+  A stored or rendered credential holding CR, LF, NUL, another control
+  character or a character above U+00FF made `Headers` throw an error quoting
+  the value. Every path now checks the value first (`isHttpFieldValue`): the
+  platform proxy answers `502 credential_unusable`
+  (`Proxy-Status: …; error=proxy_configuration_error`) naming the header
+  only, the sidecar a 502 (a caller's own invalid header a 400), the CLI
+  `RESOLVER_HEADER_INVALID`, the MITM listener a fixed 403. The proxy route
+  logs an unexpected error's name only; the MITM listener answers any
+  unexpected throw with a fixed 500, never serves the runtime's development
+  error page, emits error classes instead of messages, and its events name
+  the path before login substitution, without the query.
+- **The target host an `api_call` message names is read from the target
+  template** (#1641). Messages show the template's host with `{{field}}` in
+  place of each rendered part (`<templated>` when it does not parse); a
+  literal host is shown as written. Redirect hops keep the value scrub.
+- **A process-mode sidecar binds loopback only** (#1641). Its MCP server and
+  the agent's forward proxy listened on every interface; the process
+  orchestrator now sets the sidecar env `LISTEN_HOST=127.0.0.1` and probes
+  its ports there. Container and VM sidecars keep binding all interfaces.
+- **`/upstream-success` resets a streak only while the run can still reach
+  the connection** (#1641). The reset is one UPDATE scoped by integration,
+  space and the run actor's own-or-shared access; a run with no actor, or
+  whose actor lost access, resets nothing.
+- **The CLI's `api_call` hop to the platform applies the same caller-header
+  rule as every other path** (#1641). The agent's `Host`, hop-by-hop,
+  `Connection`-named and `Content-Length` headers no longer ride on the CLI's
+  request to `/api/credential-proxy/proxy` beside its bearer token; a streamed
+  `{ fromFile }` upload always carries its real size, and the transport hints
+  (`X-Stream-Request`, `X-Stream-Response`, `X-Max-Response-Size`) are set by
+  the CLI, never by the agent.
+- **An `api_call` tells the caller's input apart from the credential**
+  (#1641). The sidecar, like the platform proxy, looks for unresolved
+  placeholders in the template, so a `{{word}}` inside a credential value is
+  no longer named in a 400. The platform proxy answers a caller header value
+  that is no HTTP field value `400 invalid_request` (was
+  `502 credential_unusable`) and no longer forwards the caller's `X-Org-Id`
+  upstream. A streamed body's `Content-Length` never comes from a caller
+  header.
+- **The MITM listener applies the host-bound credential rule to its replay
+  too** (#1641). A request replayed after a credential refresh or a
+  `connect.tool` re-login is checked like the first attempt: a credential
+  whose auth leaves the host to the caller is never injected.
+- **BREAKING (API): `api_call` forwards only end-to-end caller headers**
+  (#1641). The shared
+  outbound engine drops, on every path (platform proxy, sidecar, CLI), a
+  caller's `Host`, the RFC 9110 connection-specific headers (`Connection`,
+  `Keep-Alive`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`,
+  `Upgrade`, and any header `Connection` names, except the credential),
+  `Proxy-Authorization`/`Proxy-Authenticate`, and `Content-Length`. The
+  upstream's virtual host follows the target URL; the request framing is the
+  one fetch computes, and a streamed upload is sent with the length of the
+  platform request that carries it, else chunked.
+- **The SSRF blocklist judges IPv4 addresses embedded in NAT64 and 6to4 IPv6
+  addresses** (#1641): `64:ff9b::/96` and `2002::/16` are checked against the
+  IPv4 blocklist like IPv4-mapped ones; the local-use `64:ff9b:1::/48` prefix
+  is blocked. The SIIT IPv4-translated form `::ffff:0:0:0/96` is judged as its
+  IPv4, and site-local `fec0::/10`, multicast `ff00::/8` and an IPv6
+  literal that does not expand to eight groups are blocked.
+- **BREAKING: an auth whose credential the proxy injects must name its
+  hosts** (#1641). Manifest writes and imports refuse, on such an auth,
+  `allow_all_uris`, no `authorized_uris`, or an entry that leaves the host to
+  the caller; the platform proxy, the sidecar, its MITM egress and
+  `appstrate run` refuse the same calls. One parser
+  (`parseAuthorizedUriPattern`) reads an entry for this rule, the URL matcher,
+  the runner egress policy and the literal-host pin that skips the SSRF gate.
+  An entry is malformed when its authority (after `scheme://`, up to the
+  first `/`) is empty, is not spelled as WHATWG serialises it (only case and
+  a default port may differ), or holds `%`, `\`, `@`, `?`, `#`, whitespace, a
+  control or non-ASCII character (`https://%2A%2A\**`, `https://@x:y@**/**`):
+  it matches, grants and pins nothing, and counts as leaving the host to the
+  caller. Otherwise an entry names its host only with a literal scheme, a
+  non-empty host and no wildcard in its last two labels (not `https://**`,
+  `https://*.com./**`, `**://…`), nor anywhere in an IP literal or an
+  IPv4-shaped host, whose last label is numeric (not `https://[::**/**`,
+  `https://*.0.1/**`, which matches `https://0x2d210001/`); a public suffix
+  (`https://*.co.uk/**`) is not detected. List the hosts instead.
+- **An `authorized_uris` scheme glob matches scheme characters only**
+  (#1641): `**://api.example.com/**` no longer matches a URL on another host
+  whose query holds `://api.example.com/`.
+- **BREAKING (API): an `api_call` whose auth declares no `authorized_uris`
+  and not `allow_all_uris` is refused on every path** (#1641). The sidecar used to
+  relay it anywhere the SSRF gate allowed; the platform proxy answers
+  `403 unauthorized_target`. An empty authorized set authorizes nothing (AFPS
+  §7.9).
+- **BREAKING (API): the credential proxy authorizes a call against the
+  published integration manifest** (#1641). A call naming a run (`X-Run-Id`) reads the version that
+  run froze at kickoff; any other call reads the `latest` published version,
+  never the editable draft. An integration that was never published is
+  refused: publish it before calling it through the proxy (`appstrate run`
+  without `--report` included).
+- **OAuth client secrets and upstream session cookies no longer sit in
+  plaintext in Redis** (#1641). The OAuth connect state stores only the client
+  reference, re-resolved at the callback like token refresh does; the
+  credential-proxy cookie jar is encrypted with the connection-credential
+  keyring. A connect started before the deploy fails at its callback and must
+  be retried; a cookie jar written before it reads as empty.
 
 ## [1.0.0-beta.64] - 2026-09-30
 

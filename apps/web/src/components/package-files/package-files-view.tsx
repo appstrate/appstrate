@@ -59,8 +59,7 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import type { PackageType } from "@appstrate/core/validation";
-import { formatBytes } from "@appstrate/core/format";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { client, $api, ApiError } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -86,6 +85,7 @@ import {
   uploadedFileOperation,
   type DraftFile,
 } from "../../lib/package-file-drafts";
+import { errorMessage } from "../../lib/mutation-error";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { ConfirmModal } from "../confirm-modal";
@@ -331,7 +331,7 @@ export function PackageFilesView({
       toast.success(t("files.saved"));
     } catch (error) {
       const key = packageFilesErrorKey(error);
-      setSaveError(key ? t(key, { limit }) : getErrorMessage(error));
+      setSaveError(key ? t(key, { limit }) : errorMessage(error));
       throw error;
     } finally {
       setBusy(false);
@@ -824,21 +824,19 @@ export function PackageFilesView({
           }}
         />
       )}
-      <ConfirmModal
-        open={dialog?.kind === "delete"}
-        onClose={() => setDialog(null)}
-        title={t("files.delete")}
-        description={t("files.deleteConfirm", {
-          path: dialog?.kind === "delete" ? dialog.path : "",
-        })}
-        confirmLabel={t("files.delete")}
-        isPending={busy}
-        onConfirm={() => {
-          if (dialog?.kind === "delete" && stage([{ op: "delete", path: dialog.path }])) {
-            setSelected(null);
-          }
-        }}
-      />
+      {dialog?.kind === "delete" && (
+        <ConfirmModal
+          open
+          onClose={() => setDialog(null)}
+          title={t("files.delete")}
+          description={t("files.deleteConfirm", { path: dialog.path })}
+          confirmLabel={t("files.delete")}
+          isPending={busy}
+          onConfirm={() => {
+            if (stage([{ op: "delete", path: dialog.path }])) setSelected(null);
+          }}
+        />
+      )}
       {editing && editingFile.value !== null && (
         <Modal
           open

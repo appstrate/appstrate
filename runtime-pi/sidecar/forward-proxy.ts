@@ -11,8 +11,7 @@ import type {
 import {
   isBlockedHost,
   resolveAndCheckHost,
-  OUTBOUND_TIMEOUT_MS,
-  HOP_BY_HOP_HEADERS,
+  API_CALL_TIMEOUT_MS,
   peerAddress,
   peerAdmitted,
   type HostResolver,
@@ -26,6 +25,8 @@ import {
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
+import { redactUrlForLog } from "./redact.ts";
+import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -93,7 +94,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           : null,
       };
     } catch {
-      logger.warn("Invalid proxy URL, ignoring", { proxyUrl: config.proxyUrl });
+      // The value is not logged: a proxy URL can carry `user:pass`.
+      logger.warn("Invalid proxy URL, ignoring");
       return null;
     }
   }
@@ -205,8 +207,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       });
 
       // Timeout — abort if the target or upstream proxy hangs
-      proxyReq.setTimeout(OUTBOUND_TIMEOUT_MS, () => {
-        proxyReq.destroy(new Error(`Request timeout after ${OUTBOUND_TIMEOUT_MS}ms`));
+      proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
+        proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
       });
 
       // Clean up if either side breaks
@@ -217,7 +219,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         proxyReq.destroy();
       });
       proxyReq.on("error", (err) => {
-        logger.error("Forward proxy HTTP error", { target: targetUrl, error: err.message });
+        logger.error("Forward proxy HTTP error", {
+          target: redactUrlForLog(targetUrl),
+          error: err.message,
+        });
         if (!res.headersSent) res.writeHead(502);
         res.end("Proxy error");
       });
@@ -392,7 +397,8 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
     void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
       if (ok) return handleRequest(req, res);
-      refusePeer("request-refused", req.url ?? "", req.socket);
+      // The absolute target may carry a secret in its query: origin + path only.
+      refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
       res.writeHead(403);
       res.end("Blocked: peer not allowed");
     });

@@ -272,7 +272,7 @@ describe("model-providers runtime registry", () => {
         fakeDef("public-ok", {
           publicModelListing: true,
           catalogProviderId: CATALOG,
-          featuredModels: ["kimi-k2.6"],
+          featuredModels: ["kimi-k2.7-code"],
         }),
       );
       expect(getModelProvider("public-ok")?.publicModelListing).toBe(true);

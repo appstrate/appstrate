@@ -5,8 +5,6 @@ import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Label } from "@appstrate/ui/components/label";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { toast } from "sonner";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -33,7 +31,7 @@ export function OrgSettingsOAuthPage() {
   const { can } = usePermissions();
   if (!features.oidc) return <NavigateKeepingState to="/org-settings/general" />;
 
-  if (failureReason) return <ErrorState message={getErrorMessage(failureReason)} />;
+  if (failureReason) return <ErrorState error={failureReason} />;
   if (isLoading) return <LoadingState />;
 
   return (
@@ -55,16 +53,11 @@ export function OrgSettingsOAuthPage() {
             disabled={!currentOrg || !can("org:settings") || updateSettingsMutation.isPending}
             onCheckedChange={(checked) => {
               if (!currentOrg) return;
-              updateSettingsMutation.mutate(
-                {
-                  params: { path: { orgId: currentOrg.id } },
-                  body: { dashboard_sso_enabled: checked === true },
-                },
-                {
-                  onError: (error) =>
-                    toast.error(t("error.prefix", { message: getErrorMessage(error) })),
-                },
-              );
+              // A refusal is said once, by the global mutation toast.
+              updateSettingsMutation.mutate({
+                params: { path: { orgId: currentOrg.id } },
+                body: { dashboard_sso_enabled: checked === true },
+              });
             }}
           />
         </SettingRow>

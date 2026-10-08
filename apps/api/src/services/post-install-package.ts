@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
-import { createVersionAndUpload, finalizeDraftPublication } from "./package-versions.ts";
+import {
+  assertVersionNotLower,
+  createVersionAndUpload,
+  finalizeDraftPublication,
+  getVersionForDownload,
+  replaceVersionContent,
+} from "./package-versions.ts";
+import { computeIntegrity } from "@appstrate/core/integrity";
 import { createPackageDraft, mutatePackageDraftFiles } from "./package-files.ts";
 import { isValidVersion } from "@appstrate/core/semver";
 import type { PackageType } from "@appstrate/core/validation";
@@ -30,6 +37,8 @@ export async function postInstallPackage(params: {
   lockVersion?: number;
   /** Override version instead of auto-detecting from manifest or auto-bumping. */
   version?: string;
+  /** A forced import: an existing version with different bytes is replaced by `zipBuffer`. */
+  replaceExistingVersion?: boolean;
 }): Promise<void> {
   const { packageType, packageId, orgId, userId, content, files, zipBuffer } = params;
 
@@ -43,6 +52,9 @@ export async function postInstallPackage(params: {
     throw new Error(`Package ${packageId}: missing or invalid version in manifest`);
   }
   const version: string = rawVersion;
+
+  // Before the draft is replaced: a refused version must leave it untouched.
+  if (!params.create) await assertVersionNotLower(packageId, version);
 
   const draft = params.create
     ? await createPackageDraft({
@@ -95,12 +107,25 @@ export async function postInstallPackage(params: {
     zipBuffer,
     manifest,
   });
-  if (published?.outcome === "created") {
-    await finalizeDraftPublication({
-      packageId,
-      orgId,
-      lockVersion: draft.lockVersion,
-      versionId: published.id,
-    });
+  if (!published) {
+    // A concurrent publish raised the highest version after the check above.
+    await assertVersionNotLower(packageId, version);
+    throw new Error(`Package ${packageId}: version ${version} was not created`);
   }
+  if (published.outcome === "exists") {
+    // A concurrent publish can land after the importer's own check: only the
+    // stored row says whether the draft matches this version.
+    const stored = await getVersionForDownload(packageId, version);
+    if (stored?.integrity !== computeIntegrity(new Uint8Array(zipBuffer))) {
+      if (!params.replaceExistingVersion) return;
+      await replaceVersionContent({ packageId, version, zipBuffer, manifest });
+    }
+  }
+  // The draft holds what that version holds. A non-latest version is left alone by the callee.
+  await finalizeDraftPublication({
+    packageId,
+    orgId,
+    lockVersion: draft.lockVersion,
+    versionId: published.id,
+  });
 }

@@ -14,6 +14,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
+import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
@@ -21,18 +22,18 @@ import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-/** Group/button label for a managed model — provider-neutral, binding not exposed. */
-const MANAGED_LABEL = "Géré";
-
-function providerLabel(model: { provider_name?: string | null; aliased?: boolean }): string {
+function providerLabel(
+  model: { provider_name?: string | null; aliased?: boolean },
+  managedLabel: string,
+): string {
   // Managed models don't expose their binding — group/badge them neutrally (their
   // `provider_name` is nulled server-side anyway).
-  if (model.aliased) return MANAGED_LABEL;
+  if (model.aliased) return managedLabel;
   // `provider_name` is the server's registry-resolved display name (`providerId`
   // → `displayName`) — the single source for provider labels. We deliberately do
   // NOT fall back to `apiShape`: it's ambiguous (OpenCode Go and OpenAI both use
   // `openai-completions`), which is the bug this replaced.
-  return model.provider_name || MANAGED_LABEL;
+  return model.provider_name || managedLabel;
 }
 
 interface Props {
@@ -49,10 +50,10 @@ interface ProviderGroup {
 }
 
 /** Stable, deterministic grouping by provider label (insertion order). */
-function groupByProvider(models: OrgModelOption[]): ProviderGroup[] {
+function groupByProvider(models: OrgModelOption[], managedLabel: string): ProviderGroup[] {
   const groups = new Map<string, OrgModelOption[]>();
   for (const m of models) {
-    const provider = providerLabel(m);
+    const provider = providerLabel(m, managedLabel);
     const bucket = groups.get(provider);
     if (bucket) bucket.push(m);
     else groups.set(provider, [m]);
@@ -71,7 +72,8 @@ export function ModelSelect({
   const [tab, setTab] = useState<"models" | "configuration">("models");
   const { t } = useChatHost();
   const active = models.find((m) => m.id === selectedId);
-  const groups = groupByProvider(models);
+  // Group/button label for a managed model — provider-neutral, binding not exposed.
+  const groups = groupByProvider(models, t("model.managed"));
   const hasOverrides = generation.temperature != null || generation.reasoning_level != null;
   const hasNoGenerationControls =
     active?.generation?.temperature === "unsupported" &&
@@ -92,7 +94,9 @@ export function ModelSelect({
         <Tabs
           value={tab}
           onValueChange={(value) => setTab(value as "models" | "configuration")}
-          className="flex max-h-[min(18rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
+          // Tall enough for the reasoning levels on their two rows (the popover
+          // is narrower than their one-row width) without an inner scroll.
+          className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2"
         >
           <TabsList className="grid h-8 w-full shrink-0 grid-cols-2">
             <TabsTrigger value="models" className="h-6 px-2 text-xs">
@@ -178,7 +182,11 @@ export function ModelSelect({
                     // `settings:` — the shared label family lives in the
                     // settings bundle (a boot namespace, so already loaded);
                     // the host binds `t` to `chat`.
-                    labels={buildGenerationLabels((key, options) => t(`settings:${key}`, options))}
+                    labels={buildGenerationLabels(
+                      (key, options) => t(`settings:${key}`, options),
+                      active.generation,
+                      reasoningOffSendsNothing(active),
+                    )}
                   />
                 )}
               </>

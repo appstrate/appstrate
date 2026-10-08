@@ -53,6 +53,7 @@ import { Badge } from "./status-badge";
 import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
+import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -317,7 +318,7 @@ export function LogViewer({
   const positionedRef = useRef(false);
 
   const [autoScroll, setAutoScroll] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [showTools, setShowTools] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -491,9 +492,7 @@ export function LogViewer({
         return `${ts}${e.message}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copy(text);
   };
 
   const clearJournalFilters = () => {

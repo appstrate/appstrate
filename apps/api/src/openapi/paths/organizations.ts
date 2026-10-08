@@ -20,7 +20,7 @@ export const organizationsPaths = {
       operationId: "listOrganizations",
       tags: ["Organizations"],
       summary: "List user organizations",
-      description: "List organizations the current user is a member of.",
+      description: "List organizations the current user is a member of, oldest membership first.",
       parameters: [{ $ref: "#/components/parameters/XViewAs" }],
       responses: {
         "200": {
@@ -118,7 +118,11 @@ export const organizationsPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "Forbidden. `code` is `org_creation_disabled` when the instance sets `AUTH_DISABLE_ORG_CREATION` and the caller is not a platform admin.",
+        },
       },
     },
   },

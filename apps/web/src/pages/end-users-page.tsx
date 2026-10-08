@@ -3,10 +3,8 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { Plus, SearchX, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
@@ -179,7 +177,7 @@ function EndUsersPageContent() {
         }
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           search.trim() ? (
             <EmptyState message={t("applications.noMatchingEndUsers")} icon={SearchX} compact />
@@ -229,7 +227,7 @@ function EndUsersPageContent() {
           {selectedUserLoading ? (
             <LoadingState />
           ) : (
-            <ErrorState message={getErrorMessage(selectedUserError)} compact />
+            <ErrorState error={selectedUserError} compact />
           )}
         </Modal>
       )}
@@ -247,8 +245,8 @@ function EndUsersPageContent() {
             await deleteMutation.mutateAsync({ params: { path: { id: user.id } } });
             hideDeletedUser(user.id);
             setPendingDelete(null);
-          } catch (error) {
-            toast.error(getErrorMessage(error));
+          } catch {
+            // The mutation cache toasts the refusal and the dialog closes on it.
           }
         }}
       />

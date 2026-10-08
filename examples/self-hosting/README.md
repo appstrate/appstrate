@@ -94,15 +94,14 @@ ships the instance with `AUTH_DISABLE_SIGNUP=true`, and prints a banner
 with the redemption URL. Open `<APP_URL>/claim`, paste the token plus
 your owner email/password — the instance is yours.
 
-Want to skip the redemption step entirely? Pre-set the bootstrap email:
+Want to decide at install time which address owns the instance? Pre-set
+the bootstrap email:
 
 ```bash
-APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com \
-  curl -fsSL https://get.appstrate.dev | bash -s -- --yes
+curl -fsSL https://get.appstrate.dev | APPSTRATE_BOOTSTRAP_OWNER_EMAIL=admin@example.com bash -s -- --yes
 ```
 
-The installer opens `/register` in your browser and the bootstrap owner
-signs up there (form pre-fills + locks the email field) — see
+The token then claims that address and no other — see
 [AUTH_MODES.md](./AUTH_MODES.md) for the full matrix of closed-mode options.
 
 Overrides: `APPSTRATE_VERSION=v1.2.3` (env var pins a specific release
@@ -372,11 +371,12 @@ AUTH_PLATFORM_ADMIN_EMAILS=admin@your-domain.com
 AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com         # optional — restrict invitee domains
 AUTH_BOOTSTRAP_OWNER_EMAIL=admin@your-domain.com
 AUTH_BOOTSTRAP_ORG_NAME=Acme
+AUTH_BOOTSTRAP_TOKEN=<openssl rand -base64 32 | tr '+/' '-_' | tr -d '='>
 ```
 
-Sign up once as the bootstrap email — the root organization is created
-automatically. Invite teammates from the dashboard; invitations bypass the
-signup lock.
+Open `<APP_URL>/claim` once and claim the instance as the bootstrap email
+with the token — the root organization is created automatically. Invite
+teammates from the dashboard; invitations bypass the signup lock.
 
 Full guide, recipes, and pitfalls: [`AUTH_MODES.md`](./AUTH_MODES.md).
 

@@ -9,11 +9,15 @@
  *  2. the schedule CARD fetching a schedule's runs to count three numbers
  *     (N cards → N requests);
  *  3. the notification queries polling every 30s, which is only safe to slow
- *     down while the realtime stream reconciles them on (re)connect — the SSE
+ *     down while the realtime stream reconciles them on reconnect — the SSE
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
- *  4. the run caches, reconciled on the same reconnect for the same reason, and
- *     on RE-connects only (the first one races the mount's own queries).
+ *  4. the reconciliation running on the FIRST connect too, which issued every
+ *     notification and chat-session query twice on every page load;
+ *  5. the agent page fetching the agent's runs a second time, unpaginated and
+ *     under a key of its own, to learn whether there is any;
+ *  6. a launch refetching the run lists of the page it is leaving;
+ *  7. a skill or MCP-server page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -23,7 +27,30 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { broadRunKeys } from "../../hooks/use-global-run-sync.ts";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { broadRunKeys, trackStreamGaps } from "../../hooks/use-global-run-sync.ts";
+import { removeOrgScopedQueries } from "../../lib/query-keys.ts";
+
+type InvalidateCall = { queryKey: readonly unknown[] } | { predicate: unknown };
+
+/** A real cache whose invalidations are recorded instead of run. */
+function recordingReconciler() {
+  const calls: InvalidateCall[] = [];
+  const qc = new QueryClient();
+  qc.invalidateQueries = ((filters: InvalidateCall) => {
+    calls.push(filters);
+    return Promise.resolve();
+  }) as QueryClient["invalidateQueries"];
+  return {
+    qc,
+    calls,
+    /** Every key-addressed call, serialized. */
+    keys: () =>
+      calls.flatMap((call) => ("queryKey" in call ? [JSON.stringify(call.queryKey)] : [])),
+    /** Open a stream over `scope`, as one run of the hook's effect does. */
+    open: (scope = "org_1/spc_1") => trackStreamGaps(() => qc, "org_1", scope),
+  };
+}
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8");
 
@@ -45,6 +72,8 @@ const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
 const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
+const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
+const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
   it("renders the rows it already holds, not a second fetching list", () => {
@@ -86,6 +115,36 @@ describe("schedule cards read their counters from the schedule", () => {
   });
 });
 
+describe("agent page", () => {
+  it("reads whether the agent has runs off the detail it already holds", () => {
+    expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(AGENT_ACTIONS).toContain("hasRuns={detail.last_run !== null}");
+  });
+
+  it("marks the run lists stale on launch without refetching the page being left", () => {
+    const launch = MUTATIONS.slice(
+      MUTATIONS.indexOf("function useRunAgent("),
+      MUTATIONS.indexOf("export function useRunLauncher("),
+    );
+    const invalidations = [...code(launch).matchAll(/invalidateQueries\(([^)]*)\)/g)].map(
+      (m) => m[1]!,
+    );
+    expect(invalidations).toEqual(['{ queryKey: paginatedRunsKeys.all, refetchType: "none" }']);
+  });
+});
+
+describe("package pages other than an agent's", () => {
+  // A skill page loaded the org's models and proxies, which only the
+  // agent's settings show. The page itself reads neither now: the agent
+  // settings view and the model alert (agents only) each read their own.
+  it("do not read the model and proxy lists", () => {
+    const detail = read("../../pages/unified-package-detail.tsx");
+    expect(detail).not.toContain("useProxies(");
+    expect(detail).not.toContain("useModels(");
+    expect(detail).toContain('{type === "agent" && <ModelRequiredAlert');
+  });
+});
+
 describe("notification freshness", () => {
   it("polls as a backstop (5 min), on every notification query", () => {
     expect(NOTIFICATIONS).toContain("const NOTIFICATION_POLL_INTERVAL_MS = 300_000;");
@@ -98,14 +157,14 @@ describe("notification freshness", () => {
 
   // The load-bearing half: without this, slowing the poll down means a missed
   // terminal event leaves the badge wrong for five minutes.
-  it("reconciles the badges on every SSE (re)connect, before reading frames", () => {
-    const connectStart = GLOBAL_SYNC.indexOf("const connectOnce = async () => {");
-    const readerStart = GLOBAL_SYNC.indexOf("const reader = res.body.getReader();");
-    expect(connectStart).toBeGreaterThan(-1);
-    expect(readerStart).toBeGreaterThan(connectStart);
-
-    const onConnect = GLOBAL_SYNC.slice(connectStart, readerStart);
-    expect(onConnect).toContain("invalidateNotificationQueries(qcRef.current)");
+  it("reconciles the badges on every SSE reconnect", () => {
+    const { keys, open } = recordingReconciler();
+    const stream = open();
+    stream.connected(0);
+    stream.connected(1_000);
+    expect(keys()).toContain('["get","/api/notifications"]');
+    expect(keys()).toContain('["get","/api/notifications/unread-count"]');
+    expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
   });
 
   it("still invalidates them on a terminal run seen live", () => {
@@ -118,20 +177,124 @@ describe("run cache reconciliation on reconnect", () => {
   // Same protocol gap as the badges, run side: `run_update` frames missed while
   // the stream was down left the page reading "running" under a bell that said
   // "finished".
-  it("reconciles on RE-connect only, before reading frames", () => {
-    const connectStart = GLOBAL_SYNC.indexOf("const connectOnce = async () => {");
-    const readerStart = GLOBAL_SYNC.indexOf("const reader = res.body.getReader();");
-    expect(connectStart).toBeGreaterThan(-1);
-    expect(readerStart).toBeGreaterThan(connectStart);
+  const BADGE = '["get","/api/notifications/unread-count"]';
 
-    // The guard: the FIRST connect races the mount's own queries, so
-    // reconciling there would double every one of them. Matched on the
-    // identifiers, not a formatted line — prettier reflows the latter.
-    const onConnect = GLOBAL_SYNC.slice(connectStart, readerStart);
-    expect(onConnect).toContain("hasConnectedOnce");
-    expect(onConnect).toContain("reconcileRunQueries(qcRef.current, orgId)");
-    expect(onConnect).toContain("handleConnectionUpdate(qcRef.current)");
-    expect(GLOBAL_SYNC).toContain("let hasConnectedOnce = false;");
+  it("reconciles nothing on the first connect, which opens beside the mount's own queries", () => {
+    const { calls, open } = recordingReconciler();
+    open().connected(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  // A switch of org, space or persona creates its caches beside the new
+  // stream, exactly as a page load does: reconciling there refetched everything
+  // the switch had just fetched.
+  it("reconciles nothing on the first connect over a scope no stream covered yet", () => {
+    const { calls, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    open("org_1/spc_2").connected(1_000);
+    expect(calls).toHaveLength(0);
+  });
+
+  // Back on a scope within `staleTime`, its caches are served as they were
+  // left, and no stream listened for them meanwhile.
+  it("reconciles a scope a stream covered, left, and comes back to", () => {
+    const { keys, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    open("org_1/spc_2").connected(1_000);
+    open("org_1/spc_1").connected(2_000);
+    expect(keys()).toContain(BADGE);
+  });
+
+  // The memory must outlive the cache's own collection delay: a stream that
+  // stayed up longer than that still leaves a gap behind when it reopens.
+  it("still knows a covered scope after the cache's collection delay", async () => {
+    const calls: unknown[] = [];
+    const qc = new QueryClient({ defaultOptions: { queries: { gcTime: 5 } } });
+    qc.invalidateQueries = (filters) => {
+      calls.push(filters);
+      return Promise.resolve();
+    };
+    trackStreamGaps(() => qc, "org_1", "org_1/spc_1").connected(0);
+    expect(qc.getQueryDefaults(["realtime-covered", "org_1/spc_1"]).gcTime).toBe(Infinity);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    trackStreamGaps(() => qc, "org_1", "org_1/spc_1").connected(1_000);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  // StrictMode's first effect run, or a switch faster than the round trip.
+  it("keeps no trace of a stream aborted before it connected", () => {
+    const { calls, open } = recordingReconciler();
+    open("org_1/spc_1");
+    open("org_1/spc_1").connected(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  // The memory lives in the cache it speaks for: an org switch or a role
+  // preview removes every query, and the scope is new again.
+  it("forgets a scope whose caches were wiped", () => {
+    const { qc, calls, open } = recordingReconciler();
+    open("org_1/spc_1").connected(0);
+    removeOrgScopedQueries(qc);
+    open("org_1/spc_1").connected(1_000);
+    expect(calls).toHaveLength(0);
+  });
+
+  // Seen in the browser on a switch back to a space: the mount read of each
+  // badge was cancelled by the reconciliation and issued a second time.
+  it("lets a read already in flight finish instead of issuing it again", async () => {
+    const qc = new QueryClient();
+    const key = ["get", "/api/notifications/unread-count", { params: {} }];
+    let fetches = 0;
+    let settle: (count: number) => void = () => {};
+    new QueryObserver(qc, {
+      queryKey: key,
+      queryFn: () => {
+        fetches++;
+        return new Promise<number>((resolve) => (settle = resolve));
+      },
+    }).subscribe(() => {});
+    const reopen = () => {
+      const stream = trackStreamGaps(() => qc, "org_1", "org_1/spc_1");
+      stream.missed();
+      stream.connected(0);
+    };
+
+    reopen();
+    expect(fetches).toBe(1);
+
+    // Once that read has landed, the next gap does refetch it.
+    settle(3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    reopen();
+    expect(fetches).toBe(2);
+  });
+
+  // The mount's queries are as old as the whole backoff by the time a stream
+  // finally opens: that first SUCCESSFUL connect is not the first attempt.
+  it("reconciles on the first successful connect when an attempt failed before it", () => {
+    const { keys, open } = recordingReconciler();
+    const stream = open();
+    stream.missed();
+    stream.connected(0);
+    expect(keys()).toContain(BADGE);
+  });
+
+  it("reconciles the run families on a reconnect, at most once per interval", () => {
+    const { keys, calls, open } = recordingReconciler();
+    const stream = open();
+    stream.connected(0);
+    stream.connected(20_000);
+    for (const key of broadRunKeys("org_1")) expect(keys()).toContain(JSON.stringify(key));
+    expect(keys()).toContain('["run"]');
+
+    // A stream dropped again within the interval still owes the signal-only
+    // families (badges, chat), not a second sweep of the run caches.
+    const afterFirst = calls.length;
+    stream.connected(21_000);
+    const second = calls.slice(afterFirst);
+    expect(second.length).toBeGreaterThan(0);
+    expect(second.some((call) => "queryKey" in call && call.queryKey[0] === "run")).toBe(false);
   });
 
   it("covers every run family except the logs, identically on both paths", () => {

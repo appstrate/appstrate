@@ -387,7 +387,7 @@ describe("integration multi-client", () => {
       expect(clients).toHaveLength(1);
       expect(clients[0]).toMatchObject({
         client_ref: "gmail-system",
-        source: "built-in",
+        source: "system",
         is_default: true,
       });
       // The real system client_id (a deployment secret) must NEVER leak — the
@@ -401,8 +401,8 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("org-client", "org-secret");
       const clients = await listIntegrationClients(scope, INTEGRATION, AUTH_KEY);
       expect(clients).toHaveLength(2);
-      const custom = clients.find((c) => c.source === "custom");
-      const system = clients.find((c) => c.source === "built-in");
+      const custom = clients.find((c) => c.source === "space");
+      const system = clients.find((c) => c.source === "system");
       expect(custom).toMatchObject({
         client_ref: customId,
         is_default: true,
@@ -470,7 +470,7 @@ describe("integration multi-client", () => {
 
   describe("resolveConnectClient honours the default flag", () => {
     const LOCAL_MANIFEST = {
-      source: { kind: "local", server: { name: INTEGRATION, version: "^0.1.0" } },
+      source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
     } as unknown as IntegrationManifest;
 
     function customClient(isDefault: boolean): ResolvedOAuthConnect {

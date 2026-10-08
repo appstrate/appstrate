@@ -29,10 +29,8 @@ import {
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
-import {
-  renderAuthorizedUris,
-  renderCredentialTemplate as renderCredentialTemplateCore,
-} from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
+import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
 /**
  * AFPS `delivery.http` block (snake_case). The sidecar's canonical

@@ -21,7 +21,8 @@
 #     --socket /run/appstrate-runner/runner.sock
 #
 # Env overrides (mirror scripts/bootstrap.sh):
-#   APPSTRATE_VERSION        Pin a release tag (default: pinned or "latest").
+#   APPSTRATE_VERSION        Pin a release, `1.2.3` or `v1.2.3` (default:
+#                            pinned or "latest").
 #   APPSTRATE_BIN_DIR        CLI install location (default: /usr/local/bin —
 #                            system-wide, since the runner host is root-managed).
 #   APPSTRATE_SKIP_VERIFY=1  Skip signature/checksum verification (CI debug,
@@ -70,6 +71,9 @@ _appstrate_runner_bootstrap() {
   _DEFAULT_VERSION="__APPSTRATE_VERSION__"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
+  # A release is `v1.2.3` as a git tag but `1.2.3` everywhere an operator
+  # reads it (image tags, `.env`, `appstrate --version`): accept both (#1788).
+  if [ "$VERSION" != "latest" ]; then VERSION="v${VERSION#v}"; fi
   BIN_DIR="${APPSTRATE_BIN_DIR:-/usr/local/bin}"
   DEST="${BIN_DIR}/appstrate"
   ASSET="appstrate-${OS}-${ARCH}"

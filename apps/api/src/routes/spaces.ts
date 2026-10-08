@@ -81,8 +81,9 @@ import {
 } from "../lib/space-role-assignment.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
-import { recordAuditFromContext } from "../services/audit.ts";
+import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { listSpaceRoles } from "../services/space-roles.ts";
+import { removeScheduleJobs } from "../services/scheduler.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
@@ -509,12 +510,13 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const { space, unsharedConnectionIds } = await updateSpace(
+        const { space, unsharedConnectionIds, disabledScheduleIds } = await updateSpace(
           orgId,
           spaceId,
           { ...rest, defaultRole: default_role },
           current,
         );
+        await removeScheduleJobs(disabledScheduleIds);
         await recordAuditFromContext(c, {
           action: "space.updated",
           resourceType: "space",
@@ -742,13 +744,15 @@ export function createSpacesRouter() {
     // a concurrent promotion can move between the read and the DELETE (#1439),
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter, unsharedConnectionIds } = await removeSpaceMember({
-      orgId: c.get("orgId"),
-      space,
-      userId,
-      actorPermissions: c.get("permissions"),
-    });
+    const { removed, accessAfter, unsharedConnectionIds, disabledScheduleIds } =
+      await removeSpaceMember({
+        orgId: c.get("orgId"),
+        space,
+        userId,
+        actorPermissions: c.get("permissions"),
+      });
     if (!removed) throw notFound("Space member not found");
+    await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "space.member_removed",
       resourceType: "space_member",
@@ -971,6 +975,21 @@ export function createSpacesRouter() {
       });
     }
     const updated = await getSpacePackage(scope, packageId);
+    // One event for every setting the write moved (`chat_enforced` keeps its own pair above).
+    const diff = auditDiff({
+      modelId: [placement?.modelId, updated?.modelId ?? null],
+      proxyId: [placement?.proxyId, updated?.proxyId ?? null],
+      generationConfig: [placement?.generation_config, updated?.generation_config ?? null],
+    });
+    if (diff) {
+      await recordAuditFromContext(c, {
+        action: "package.placement.updated",
+        resourceType: "package",
+        resourceId: packageId,
+        before: { spaceId, ...diff.before },
+        after: { spaceId, ...diff.after },
+      });
+    }
     return c.json({ object: "space_package", ...updated });
   });
 

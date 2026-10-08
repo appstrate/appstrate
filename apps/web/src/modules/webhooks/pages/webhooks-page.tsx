@@ -12,8 +12,8 @@ import { SettingsPageActions } from "@/components/settings/settings-page-actions
 import { PageActionsMenu } from "@/components/page-actions-menu";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { usePermissions } from "@/hooks/use-permissions";
+import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
   const location = useLocation();
@@ -24,9 +24,16 @@ export function WebhooksPage() {
   const { data: webhooks, isLoading, error } = useWebhooks();
   const columns = useWebhookColumns();
 
+  // One grant per level (`webhooks` in the space, `org-webhooks` across the
+  // org); the modal offers the levels the caller holds.
+  const createLevels = (["space", "org"] as const).filter((level) =>
+    can(`${webhookResource(level)}:write`),
+  );
+  const canCreate = createLevels.length > 0;
+
   return (
     <div>
-      {can("webhooks:write") && (
+      {canCreate && (
         <SettingsPageActions>
           <PageActionsMenu>
             <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
@@ -47,14 +54,18 @@ export function WebhooksPage() {
         rowLabel={(wh) => wh.url}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           // The button above is the same one, and it stays.
           <EmptyState message={t("settings:webhooks.empty")} icon={Webhook} />
         }
       />
 
-      <WebhookCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <WebhookCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        levels={createLevels}
+      />
     </div>
   );
 }

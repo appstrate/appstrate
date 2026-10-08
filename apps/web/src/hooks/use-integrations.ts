@@ -58,10 +58,10 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
-import { onMutationError } from "../lib/mutation-error";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
+import { invalidateSchedules } from "./use-schedules";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -266,9 +266,38 @@ export function useIntegrationAgentResolution(
   return useQuery({
     ...options,
     enabled: options.enabled && !!integrationId,
-    select: (data) =>
-      data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
+    select: (data) => resolutionOf(data, integrationId),
   });
+}
+
+type AgentConnectionReadiness =
+  paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
+
+/** One integration's verdict out of the bulk readiness payload. */
+function resolutionOf(data: AgentConnectionReadiness, integrationId: string | undefined) {
+  return (
+    data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
+  );
+}
+
+/**
+ * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * it NOW, for a handler running after something already awaited the readiness
+ * refetch (the connect popup does): the fresh value, without a second request.
+ * Throws when that refetch failed — the cache then still holds the old verdict.
+ */
+export function useReadIntegrationResolution(
+  integrationId: string,
+  agentPackageId: string,
+  version?: string,
+) {
+  const qc = useQueryClient();
+  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version);
+  return () => {
+    const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
+    if (state?.status === "error") throw state.error;
+    return state?.data ? resolutionOf(state.data, integrationId) : null;
+  };
 }
 
 /**
@@ -286,7 +315,8 @@ export function useIntegrationRunBlocking(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
+      data.integrations.find((i) => i.integration_package_id === integrationId)?.run_blocking ??
+      false,
   });
 }
 
@@ -298,8 +328,8 @@ export function useIntegrationRunBlocking(
  * — scope-union + reconnect semantics are identical.
  */
 export function useInitiateIntegrationConnect() {
-  const { t } = useTranslation("settings");
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (vars: {
       params: { path: { packageId: string; authKey: string } };
       body: {
@@ -315,7 +345,6 @@ export function useInitiateIntegrationConnect() {
       if (!data) throw new Error("empty response");
       return data;
     },
-    onError: () => toast.error(t("integration.connect.error")),
   });
 }
 
@@ -340,8 +369,8 @@ function orgClientPath({ packageId, clientId }: ClientPath["path"]) {
 }
 type CreateOAuthClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/oauth-clients"]["post"]["requestBody"]["content"]["application/json"];
-type RotateOAuthClientBody =
-  paths["/api/integrations/{packageId}/oauth-clients/{clientId}"]["put"]["requestBody"]["content"]["application/json"];
+type UpdateOAuthClientBody =
+  paths["/api/integrations/{packageId}/oauth-clients/{clientId}"]["patch"]["requestBody"]["content"]["application/json"];
 type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
@@ -414,26 +443,24 @@ export function useCreateIntegrationOAuthClient(tier: IntegrationClientTier) {
       return data;
     },
     onSuccess,
-    onError: onMutationError,
   });
 }
 
-/** Rotate one custom client's credentials in place, by its id. */
-export function useRotateIntegrationOAuthClient(tier: IntegrationClientTier) {
+/** Update one custom client in place, by its id (its `client_id` is immutable). */
+export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
   const onSuccess = useClientMutationSuccess("integration.oauthClient.save.success");
   return useMutation({
-    mutationFn: async (vars: { params: ClientPath; body: RotateOAuthClientBody }) => {
+    mutationFn: async (vars: { params: ClientPath; body: UpdateOAuthClientBody }) => {
       const { data } =
         tier === "space"
-          ? await client.PUT("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
-          : await client.PUT("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
+          ? await client.PATCH("/api/integrations/{packageId}/oauth-clients/{clientId}", vars)
+          : await client.PATCH("/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}", {
               params: { path: orgClientPath(vars.params.path) },
               body: vars.body,
             });
       return data;
     },
     onSuccess,
-    onError: onMutationError,
   });
 }
 
@@ -458,7 +485,6 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
       return data;
     },
     onSuccess,
-    onError: onMutationError,
   });
 }
 
@@ -477,13 +503,13 @@ export function usePromoteIntegrationOAuthClient() {
       return data;
     },
     onSuccess,
-    onError: onMutationError,
   });
 }
 
 /** Also deletes the connections it minted — in every space for an org client. */
 export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess();
+  const qc = useQueryClient();
+  const clientsChanged = useClientMutationSuccess();
   return useMutation({
     mutationFn: async (vars: { params: ClientPath }) => {
       if (tier === "space") {
@@ -494,8 +520,11 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
         });
       }
     },
-    onSuccess,
-    onError: onMutationError,
+    onSuccess: () => {
+      clientsChanged();
+      // Deleting the connections it minted disables schedules naming them.
+      invalidateSchedules(qc);
+    },
   });
 }
 
@@ -579,7 +608,6 @@ export function useUpsertIntegrationPin() {
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -598,7 +626,6 @@ export function useDeleteIntegrationPin() {
       toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -641,7 +668,6 @@ export function useUpsertIntegrationOrgDefault() {
       // invalidate every integrations read, not just the default itself.
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -658,7 +684,6 @@ export function useDeleteIntegrationOrgDefault() {
       toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -677,10 +702,11 @@ export function useUpdateIntegrationConnection() {
       );
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       // A label shows on every picker and readiness view, not just the connection list.
       void invalidateIntegrationQueries(qc);
+      // Unsharing disables other people's schedules naming the connection.
+      if (vars.body.shared_with_org === false) invalidateSchedules(qc);
     },
-    onError: onMutationError,
   });
 }

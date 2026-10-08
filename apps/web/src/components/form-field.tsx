@@ -34,6 +34,8 @@ interface FormFieldProps {
   placeholder?: string;
   description?: string;
   enumValues?: string[];
+  /** Display label of an enum option; the raw value when omitted. */
+  enumLabel?: (value: string) => string;
   disabled?: boolean;
   min?: number;
 }
@@ -49,6 +51,7 @@ export function FormField({
   placeholder,
   description,
   enumValues,
+  enumLabel,
   disabled,
   min,
 }: FormFieldProps) {
@@ -64,7 +67,7 @@ export function FormField({
           <SelectContent>
             {enumValues.map((opt) => (
               <SelectItem key={opt} value={opt}>
-                {opt}
+                {enumLabel ? enumLabel(opt) : opt}
               </SelectItem>
             ))}
           </SelectContent>

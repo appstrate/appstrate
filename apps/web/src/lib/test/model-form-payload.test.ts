@@ -11,7 +11,9 @@ import { describe, it, expect } from "bun:test";
 import {
   buildModelFormPayload,
   buildModelsBatchPayload,
+  modelFormRefusals,
   toCreateModelBody,
+  type ModelFormData,
   type ModelFormFields,
   type ModelFormModelEntry,
   type ModelFormPayloadInput,
@@ -62,8 +64,10 @@ function ok<T>(result: { ok: true; data: T } | { ok: false }): T {
   return result.data;
 }
 
-function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields }) {
-  return buildModelFormPayload({
+function build(
+  input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields },
+): { ok: true; data: ModelFormData } | { ok: false } {
+  const data = buildModelFormPayload({
     dirtyFields: {},
     provider: ANTHROPIC,
     capabilities: "auto",
@@ -71,6 +75,7 @@ function build(input: Partial<ModelFormPayloadInput> & { fields: ModelFormFields
     selectedCredentialId: input.fields.credentialId || null,
     ...input,
   });
+  return data ? { ok: true, data } : { ok: false };
 }
 
 /** A catalogued row: the fields describe it, but none of it is the operator's. */
@@ -350,22 +355,12 @@ describe("buildModelFormPayload — the model's name", () => {
 
 describe("buildModelFormPayload — missing credential", () => {
   it.each([
-    [
-      "an OAuth provider with no connection selected",
-      CLAUDE_CODE,
-      "models.form.connectionRequired",
-    ],
-    [
-      "an api-key provider with neither a selection nor an inline key",
-      ANTHROPIC,
-      "models.form.apiKeyRequired",
-    ],
-  ])("refuses %s", (_name, provider, messageKey) => {
-    expect(build({ provider, fields: fields({ modelId: "claude-sonnet-4-5-20250929" }) })).toEqual({
-      ok: false,
-      field: "credentialId",
-      messageKey,
-    });
+    ["an OAuth provider with no connection selected", CLAUDE_CODE],
+    ["an api-key provider with neither a selection nor an inline key", ANTHROPIC],
+  ])("builds nothing for %s", (_name, provider) => {
+    expect(build({ provider, fields: fields({ modelId: "claude-sonnet-4-5-20250929" }) }).ok).toBe(
+      false,
+    );
   });
 
   it("ignores a credential the form cannot match (provider switched after the pick), creating one instead", () => {
@@ -400,7 +395,7 @@ describe("buildModelFormPayload — missing credential", () => {
         }),
         selectedCredentialId: null,
       }),
-    ).toEqual({ ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" });
+    ).toEqual({ ok: false });
   });
 
   it("refuses an inline key typed before any provider is picked", () => {
@@ -620,5 +615,53 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
       field: "credentialId",
       messageKey: "models.form.apiKeyRequired",
     });
+  });
+});
+
+describe("modelFormRefusals", () => {
+  const base = {
+    modelId: "",
+    manual: false,
+    provider: ANTHROPIC,
+    selectedCredentialId: "cred_1",
+    inlineApiKey: "",
+    offeredIds: null,
+  };
+
+  it("names the missing key on the key row, not the endpoint steps", () => {
+    expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
+      credentialId: "settings:models.form.apiKeyRequired",
+      modelId: null,
+    });
+    expect(
+      modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
+    ).toEqual({ credentialId: "settings:models.form.connectionRequired", modelId: null });
+    // A typed key answers it; with no provider there is no key row to say it on.
+    expect(
+      modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,
+    ).toBeNull();
+    expect(modelFormRefusals({ ...base, provider: undefined, selectedCredentialId: null })).toEqual(
+      { credentialId: null, modelId: "settings:models.form.modelStepRequired" },
+    );
+  });
+
+  it("names the model step once the endpoint is answered and no id is set", () => {
+    expect(modelFormRefusals(base)).toEqual({
+      credentialId: null,
+      modelId: "settings:models.form.modelStepRequired",
+    });
+    expect(modelFormRefusals({ ...base, manual: true }).modelId).toBe("common:validation.required");
+  });
+
+  it("refuses a typed id a catalog provider does not offer — the server does, edit included", () => {
+    const catalog = { ...base, manual: true, offeredIds: ["deepseek-v4-flash"] };
+    expect(modelFormRefusals({ ...catalog, modelId: "deepseek-chat" }).modelId).toBe(
+      "settings:models.form.modelNotOffered",
+    );
+    expect(modelFormRefusals({ ...catalog, modelId: " deepseek-v4-flash " }).modelId).toBeNull();
+  });
+
+  it("leaves a free-form provider's id alone", () => {
+    expect(modelFormRefusals({ ...base, manual: true, modelId: "anything" }).modelId).toBeNull();
   });
 });

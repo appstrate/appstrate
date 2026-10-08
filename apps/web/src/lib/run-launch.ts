@@ -38,6 +38,50 @@ export interface RunLaunch {
   dependencyOverrides?: Record<string, string>;
 }
 
+/**
+ * Lets one launch through at a time. A mutation's `isPending` cannot: it is
+ * render state, so two clicks in one frame both read it `false`. The slot
+ * follows the request's promise, so it is freed whatever became of its
+ * listeners, and `onBusyChange` is the launcher's pending flag.
+ */
+export function launchFlight(onBusyChange: (busy: boolean) => void): {
+  /** Starts the launch; a call while one is in flight is dropped. */
+  run: (
+    start: () => Promise<unknown>,
+    handlers: { onSuccess?: () => void; onError?: (error: Error) => void },
+  ) => void;
+  /** Stops reporting the launch in flight. It keeps the slot until it settles. */
+  forget: () => void;
+} {
+  let busy = false;
+  let reported: object | null = null;
+  return {
+    run: (start, handlers) => {
+      if (busy) return;
+      busy = true;
+      onBusyChange(true);
+      const flight = {};
+      reported = flight;
+      void start()
+        .then(
+          () => {
+            if (reported === flight) handlers.onSuccess?.();
+          },
+          (error: Error) => {
+            if (reported === flight) handlers.onError?.(error);
+          },
+        )
+        .finally(() => {
+          busy = false;
+          onBusyChange(false);
+        });
+    },
+    forget: () => {
+      reported = null;
+    },
+  };
+}
+
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
 const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
 
@@ -99,4 +143,18 @@ export function launchFromOptions({
     ...(connectionOverrides ? { connectionOverrides } : {}),
     ...(Object.keys(dependencyOverrides).length > 0 ? { dependencyOverrides } : {}),
   };
+}
+
+/**
+ * What a launch with no override resolves to: the agent's own setting, else the
+ * org default — also past a setting that is gone or not `usable`, as the server does.
+ */
+export function inheritedEntry<T extends { id: string }>(
+  entries: readonly T[] | undefined,
+  agentSettingId: string | null,
+  orgDefault: T | undefined,
+  usable: (entry: T) => boolean,
+): T | undefined {
+  const setting = entries?.find((entry) => entry.id === agentSettingId);
+  return setting && usable(setting) ? setting : orgDefault;
 }

@@ -24,7 +24,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
-import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
+import { nothingUnshared, unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -169,6 +169,8 @@ async function listVisibleSpaces(
   /** `null` joins no row: a preview's overlay replaces them. */
   userId: string | null,
 ) {
+  // Default, then personal, then team spaces, each oldest first; display order
+  // only — the SPA picks by kind (`enterableSpaceId`).
   return db
     .select({ space: spaces, ...MEMBERSHIP_COLUMNS })
     .from(spaces)
@@ -184,7 +186,12 @@ async function listVisibleSpaces(
         ),
       ),
     )
-    .orderBy(desc(spaces.isDefault), asc(spaces.createdAt));
+    .orderBy(
+      desc(spaces.isDefault),
+      asc(isNull(spaces.ownerUserId)),
+      asc(spaces.createdAt),
+      asc(spaces.id),
+    );
 }
 
 /** Get a single space by ID, verifying org ownership. Throws 404 if not found. */
@@ -226,7 +233,8 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4). Returns the connections a close unshared, for the audit.
+ * (RBAC spec §4.4). Returns the connections a close unshared, for the audit, and the schedules
+ * that disabled, whose jobs the caller removes.
  */
 export async function updateSpace(
   orgId: string,
@@ -259,7 +267,7 @@ export async function updateSpace(
       );
     }
   }
-  const { space, unsharedConnectionIds } = await db.transaction(async (tx) => {
+  const { space, unshared } = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(spaces)
       .set({
@@ -285,11 +293,17 @@ export async function updateSpace(
     const unshared =
       updated && changesAccess
         ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
-        : [];
-    return { space: updated, unsharedConnectionIds: unshared };
+        : nothingUnshared();
+    return { space: updated, unshared };
   });
 
-  if (space) return { space, unsharedConnectionIds };
+  if (space) {
+    return {
+      space,
+      unsharedConnectionIds: unshared.connectionIds,
+      disabledScheduleIds: unshared.disabledScheduleIds,
+    };
+  }
   if (changesAccess) {
     await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
     throw conflict(
@@ -323,7 +337,7 @@ function spaceHasActiveRuns() {
 }
 
 /**
- * Delete a space. Throws 400 if default, 404 if not found, 409 if it is the
+ * Delete a space. Throws 404 if not found, 409 if it is the default space, the
  * home of any package (RBAC spec §6.9) or if it is a personal space and the
  * caller is not the sweeper (§3.6).
  *
@@ -383,7 +397,12 @@ async function deleteSpaceInTx(
     .limit(1)
     .for("update");
   if (!space) throw notFound("Space not found");
-  if (space.isDefault) throw invalidRequest("Cannot delete default space");
+  if (space.isDefault) {
+    throw conflict(
+      "default_space_not_deletable",
+      "The default space cannot be deleted: every organization member lands there.",
+    );
+  }
   if (space.ownerUserId !== null && actor !== "sweeper") {
     throw personalSpaceNotDeletable();
   }
@@ -416,7 +435,7 @@ async function deleteSpaceInTx(
       "space_homes_packages",
       `Cannot delete this space: it is the home of ${homed.length} package(s) — ${homed
         .map((row) => row.id)
-        .join(", ")}. Move them to another space first.`,
+        .join(", ")}.`,
       { packages: homed.map((row) => row.id) },
     );
   }

@@ -141,6 +141,7 @@ function buildRunPlan(timeout = 60): AppstrateRunPlan {
     llmConfig: {
       providerId: "anthropic",
       piProvider: "anthropic",
+      dialect: null,
       apiShape: "anthropic-messages",
       // Allowlisted in the test preload: the launch-time egress check resolves no DNS.
       baseUrl: "https://api.anthropic.test",

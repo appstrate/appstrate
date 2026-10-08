@@ -5,27 +5,45 @@ import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 /**
  * 429 for the `/api/auth/oauth2/*` endpoints, which Better Auth's own limiter
  * guards (the budgets are the `rateLimit` block of `oauthProvider()` in
- * `auth/plugins.ts`). Its refusal is NOT the platform shape: a bare
- * `{ message }` body under `X-Retry-After`, where
- * `#/components/responses/RateLimited` is a ProblemDetail under `Retry-After`.
- * Spelled out here rather than $ref'd so the spec states which one a caller
- * gets.
- *
- * No `content`: the limiter hands the runtime a string body and names no media
- * type (`rateLimitResponse`, `better-auth/dist/api/rate-limiter`), so the
- * response carries no `Content-Type` at all. A media type here would state a
- * header the caller never receives; the body shape is in the description.
+ * `auth/plugins.ts`); the mount restates its refusal (`oauthRateLimitResponse`)
+ * as an RFC 6749 `{ error, error_description }` body, not ProblemDetail: OAuth
+ * clients parse `{ error }`.
  */
 const providerRateLimited = {
   description:
-    'Too many requests — Better Auth\'s per-IP limiter refused the call. The body is JSON, `{ "message": string }` (e.g. `{"message":"Too many requests. Please try again later."}`), served with NO `Content-Type` header — parse it as JSON without content negotiation.',
+    "Too many requests — the per-IP limiter refused the call (`temporarily_unavailable`, RFC 6749 §4.1.2.1).",
   headers: {
-    "X-Retry-After": {
+    "Retry-After": {
       description: "Seconds until the current window resets.",
-      schema: { type: "string" },
+      schema: { type: "integer", minimum: 0 },
+    },
+  },
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["error", "error_description"],
+        properties: {
+          error: { type: "string", const: "temporarily_unavailable" },
+          error_description: { type: "string" },
+        },
+      },
     },
   },
 };
+
+/** RFC 6749 §5.2 error body: Better Auth's (`/api/auth/*`) errors, not ProblemDetail. */
+const oauthError = {
+  "application/json": {
+    schema: {
+      type: "object",
+      properties: { error: { type: "string" }, error_description: { type: "string" } },
+    },
+  },
+} as const;
+
+/** The device-activation pages answer every refusal with a rendered HTML page. */
+const htmlPage = { "text/html": { schema: { type: "string" } } } as const;
 
 const clientListResponse = {
   type: "object",
@@ -204,7 +222,10 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "The referenced space does not exist or is inaccessible." },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "The referenced space does not exist or is inaccessible.",
+        },
         "409": {
           description:
             "`referencedSpaceId` names a personal space (`personal_space_takes_no_oauth_clients`).",
@@ -255,7 +276,10 @@ export const oidcPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Client not found." },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Client not found.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -285,7 +309,10 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Client not found." },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Client not found.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -300,7 +327,10 @@ export const oidcPaths = {
       responses: {
         "204": { description: "Client deleted." },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Client not found." },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Client not found.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -354,7 +384,10 @@ export const oidcPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Client not found." },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Client not found.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -421,6 +454,7 @@ export const oidcPaths = {
         "400": {
           description:
             "Answered in place, never redirected: the client cannot be resolved (`invalid_client` — unknown `client_id`, or a CIMD `client_id` URL the server's fetch policy refuses) or its `redirect_uri` does not match.",
+          content: oauthError,
         },
         "429": providerRateLimited,
       },
@@ -487,9 +521,18 @@ export const oidcPaths = {
             },
           },
         },
-        "400": { description: "`invalid_grant`, `invalid_request`, or RFC 8707 mismatch." },
-        "401": { description: "Invalid client credentials (unknown client or secret mismatch)." },
-        "403": { description: "Access denied — realm guard, signup gate, or resource mismatch." },
+        "400": {
+          description: "`invalid_grant`, `invalid_request`, or RFC 8707 mismatch.",
+          content: oauthError,
+        },
+        "401": {
+          description: "Invalid client credentials (unknown client or secret mismatch).",
+          content: oauthError,
+        },
+        "403": {
+          description: "`access_denied` — realm guard, signup gate, or resource mismatch.",
+          content: oauthError,
+        },
         "429": providerRateLimited,
       },
     },
@@ -506,7 +549,10 @@ export const oidcPaths = {
         "Returns claims for the end-user identified by the `Authorization: Bearer ey…` OIDC access token (JWT).",
       responses: {
         "200": { description: "UserInfo claims." },
-        "401": { description: "Missing/invalid Bearer token." },
+        "401": {
+          description: "Missing/invalid Bearer token.",
+          content: oauthError,
+        },
       },
     },
   },
@@ -554,7 +600,10 @@ export const oidcPaths = {
             },
           },
         },
-        "400": { description: "Malformed request (missing/invalid `token` parameter)." },
+        "400": {
+          description: "Malformed request (missing/invalid `token` parameter).",
+          content: oauthError,
+        },
       },
     },
   },
@@ -704,11 +753,15 @@ export const oidcPaths = {
           },
         },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description:
             "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -757,9 +810,15 @@ export const oidcPaths = {
             },
           },
         },
-        "400": { description: "Validation error (invalid host / SSRF block)" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error (invalid host / SSRF block)",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -773,11 +832,15 @@ export const oidcPaths = {
       responses: {
         "204": { description: "Deleted" },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description:
             "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -823,7 +886,10 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -856,11 +922,15 @@ export const oidcPaths = {
           },
         },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description:
             "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -916,9 +986,12 @@ export const oidcPaths = {
             },
           },
         },
-        "400": { description: "Validation error" },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -940,11 +1013,15 @@ export const oidcPaths = {
       responses: {
         "204": { description: "Deleted" },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description:
             "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Space or configuration not found" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Space or configuration not found",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1099,7 +1176,11 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Unknown or disabled client / unregistered grant type." },
+        "401": {
+          description:
+            "`invalid_client` — unknown or disabled client, or one not registered for the CLI grant types.",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1138,7 +1219,11 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Unknown or disabled client / unregistered grant type." },
+        "401": {
+          description:
+            "`invalid_client` — unknown or disabled client, or one not registered for the CLI grant types.",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1194,7 +1279,10 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Authentication required." },
+        "401": {
+          description: "Authentication required (`unauthorized`).",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1230,7 +1318,10 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Authentication required." },
+        "401": {
+          description: "Authentication required (`unauthorized`).",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1254,7 +1345,10 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Authentication required." },
+        "401": {
+          description: "Authentication required (`unauthorized`).",
+          content: oauthError,
+        },
       },
     },
   },
@@ -1286,8 +1380,14 @@ export const oidcPaths = {
       responses: {
         "200": { description: "HTML page rendered." },
         "302": { description: "Redirect to `/auth/login` when unauthenticated." },
-        "400": { description: "Invalid code format." },
-        "404": { description: "Code not found or already used." },
+        "400": {
+          description: "Invalid code format (HTML error page).",
+          content: htmlPage,
+        },
+        "404": {
+          description: "Code not found or already used (HTML error page).",
+          content: htmlPage,
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1297,8 +1397,14 @@ export const oidcPaths = {
       summary: "Normalize a submitted user_code and redirect to the consent panel",
       responses: {
         "303": { description: "Redirect to `GET /activate?user_code=...`." },
-        "400": { description: "Empty user_code." },
-        "403": { description: "CSRF check failed." },
+        "400": {
+          description: "Empty user_code (HTML error page).",
+          content: htmlPage,
+        },
+        "403": {
+          description: "CSRF check failed (HTML error page).",
+          content: htmlPage,
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1312,8 +1418,15 @@ export const oidcPaths = {
         "Delegates to Better Auth's `/api/auth/device/approve`. The realm/level guard registered by `oidcGuardsPlugin` enforces that the approving user's realm matches the target client's level — a cross-audience approval is rejected with 403.",
       responses: {
         "200": { description: "Approved — renders the success page." },
-        "400": { description: "Approval failed (expired, already processed, realm mismatch)." },
-        "403": { description: "CSRF check failed." },
+        "400": {
+          description:
+            "Approval failed — expired, already processed, realm mismatch (HTML error page).",
+          content: htmlPage,
+        },
+        "403": {
+          description: "CSRF check failed (HTML error page).",
+          content: htmlPage,
+        },
       },
     },
   },
@@ -1325,7 +1438,10 @@ export const oidcPaths = {
       responses: {
         "200": { description: "Denied — renders the refusal page." },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "403": { description: "CSRF check failed." },
+        "403": {
+          description: "CSRF check failed (HTML error page).",
+          content: htmlPage,
+        },
       },
     },
   },
@@ -1401,8 +1517,11 @@ export const oidcPaths = {
             },
           },
         },
-        "401": { description: "Authentication required." },
-        "403": { description: "Caller is not an admin/owner of the org." },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description: "Caller is not an admin/owner of the org.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1431,9 +1550,15 @@ export const oidcPaths = {
       ],
       responses: {
         "204": { description: "Revoked." },
-        "401": { description: "Authentication required." },
-        "403": { description: "Caller is not an admin/owner of the org." },
-        "404": { description: "Session not found / not in this org / already revoked." },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description: "Caller is not an admin/owner of the org.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "Session not found / not in this org / already revoked.",
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

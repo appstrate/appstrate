@@ -11,20 +11,20 @@
  * space signup), and the single global cookie is clobbered by a
  * concurrent flow in a second tab.
  *
- * These tests drive `oidcRealmResolver` / `enforceMagicLinkSignupPolicy`
- * directly with the synthesized hook context Better Auth passes on the
- * verify leg (`path: "/magic-link/verify"`, `query.token`) — the same
- * pattern `signup-guard.test.ts` and `magic-link-signup-redirect.test.ts`
- * use, because the magic-link plugin only mounts its endpoints when SMTP is
- * configured and the test preload strips SMTP env.
+ * These tests drive `oidcRealmResolver` / `oidcBeforeSignupGuard` directly
+ * with the synthesized hook context Better Auth passes on the verify leg
+ * (`path: "/magic-link/verify"`, `query.token`) — the same pattern
+ * `signup-guard.test.ts` uses, because the magic-link plugin only mounts its
+ * endpoints when SMTP is configured and the test preload strips SMTP env.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { APIError } from "better-auth/api";
 import { db } from "@appstrate/db/client";
 import { verification } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../../test/helpers/auth.ts";
-import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
+import { headersWithAuthoritativePendingClient } from "../../../services/pending-client-cookie.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { oidcRealmResolver } from "../../../services/oidc-realm-resolver.ts";
 import {
@@ -32,14 +32,11 @@ import {
   resolvePendingClientBinding,
   MAGIC_LINK_VERIFY_PATH,
 } from "../../../services/oauth-transaction-binding.ts";
-import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
+import { oidcBeforeSignupGuard } from "../../../auth/signup-guard.ts";
 
-/** Signed pending-client cookie, mirroring `services/pending-client-cookie.ts`. */
+/** A valid signed pending-client cookie for `clientId`. */
 function pendingClientCookie(clientId: string): string {
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  return `oidc_pending_client=${payload}.${sig}`;
+  return headersWithAuthoritativePendingClient(new Headers(), clientId).get("cookie")!;
 }
 
 function verifyLegCtx(token: string, cookie?: string) {
@@ -148,7 +145,7 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
     expect(realm).toBe("platform");
   });
 
-  it("closed-signup gate fires from the binding alone (no cookie) on the verify pre-check", async () => {
+  it("closed-signup gate fires from the binding alone (no cookie) on the verify leg", async () => {
     const closed = await createClient({
       level: "space",
       name: "Closed Binding App",
@@ -159,33 +156,15 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
     const token = `ml_${crypto.randomUUID()}`;
     await persistMagicLinkClientBinding(token, closed.clientId);
 
-    const baseURL = "http://localhost:3000";
-    let redirectedTo: string | null = null;
-    try {
-      await enforceMagicLinkSignupPolicy({
-        // No cookie header at all — the old cookie-based gate no-oped here.
-        request: new Request(`${baseURL}/api/auth/magic-link/verify`),
-        query: { token, callbackURL: `${baseURL}/cb` },
-        context: {
-          baseURL,
-          internalAdapter: {
-            findVerificationValue: async () => ({
-              value: JSON.stringify({ email: "fresh-binding@example.com" }),
-              expiresAt: new Date(Date.now() + 60_000),
-            }),
-            findUserByEmail: async () => null,
-          },
-        },
-        redirect: (url: string) => {
-          const sentinel: { redirectTo: string } = { redirectTo: url };
-          throw sentinel;
-        },
-      });
-    } catch (err) {
-      redirectedTo = (err as { redirectTo?: string }).redirectTo ?? null;
-    }
+    // No cookie header at all — the binding alone names the client.
+    const refusal = await oidcBeforeSignupGuard({
+      user: { email: "fresh-binding@example.com" },
+      ...verifyLegCtx(token),
+    }).catch((err: unknown) => err);
 
-    expect(redirectedTo).not.toBeNull();
-    expect(new URL(redirectedTo!).searchParams.get("error")).toBe("signup_disabled");
+    expect(refusal).toBeInstanceOf(APIError);
+    expect(((refusal as APIError).body as { code?: string } | undefined)?.code).toBe(
+      "signup_disabled",
+    );
   });
 });

@@ -23,6 +23,7 @@ import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
+import { isSpaceEnterable } from "../../hooks/use-current-space";
 
 export interface ApplicationRow {
   id: string;
@@ -31,7 +32,7 @@ export interface ApplicationRow {
   createdAt: string;
   personal: boolean;
   orphaned_at?: string | null;
-  access?: string;
+  access: string;
 }
 
 export function useSpaceColumns({
@@ -137,9 +138,13 @@ export function useSpaceColumns({
             // A `closed` space is listed so the caller knows it exists, not so
             // they can be dropped into it: pinning one 403s every space-scoped
             // request. Same rule as the org switcher.
-            disabled={orphaned || (app.access !== undefined && app.access !== "member")}
+            disabled={orphaned || !isSpaceEnterable(app)}
             onClick={() => onOpen(app.id)}
-            title={t("nav.appSettings", { ns: "common" })}
+            title={
+              isSpaceEnterable(app)
+                ? t("nav.appSettings", { ns: "common" })
+                : t("spaces.requestAccess")
+            }
             aria-label={t("nav.appSettings", { ns: "common" })}
             data-testid={`application-settings-${app.id}`}
           >

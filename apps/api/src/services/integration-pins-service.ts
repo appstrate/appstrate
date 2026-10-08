@@ -15,6 +15,7 @@
  */
 
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
   spacePackages,
@@ -46,7 +47,7 @@ import {
 import { notFound, conflict } from "../lib/errors.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
+import { actorFromIds, actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -54,7 +55,8 @@ import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integ
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
-import { assertOwnerReachesSpaceForShare } from "./space-members.ts";
+import { assertConnectionShareable } from "./space-members.ts";
+import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -133,9 +135,19 @@ export async function setBlockUserConnections(
 
 // ─────────────────────────── Pin CRUD ─────────────────────────────────────────
 
+/** A pin's audit `resourceId`: one format for admin and member rows; `action` tells them apart. */
+export function pinAuditResourceId(agentPackageId: string, integrationPackageId: string): string {
+  return `${integrationPackageId}#${agentPackageId}`;
+}
+
+/** A pin's audited `before`/`after`: its set, or `null` for no row. */
+export function pinAudit(connectionIds: string[] | null): AuditPayload | null {
+  return connectionIds ? { connectionIds } : null;
+}
+
 function toPinSummary(pin: PinRow): PinSummary {
   return {
-    packageId: pin.packageId,
+    agent_package_id: pin.packageId,
     integration_package_id: pin.integrationId,
     connection_ids: pin.connectionIds,
     createdAt: pin.createdAt.toISOString(),
@@ -201,7 +213,7 @@ export async function listAgentsConsumingIntegration(
     .orderBy(packages.id);
 
   return rows.map((r) => ({
-    packageId: r.id,
+    agent_package_id: r.id,
     display_name: getPackageDisplayName(r),
   }));
 }
@@ -223,7 +235,7 @@ export async function upsertIntegrationPin(
   scope: SpaceScope,
   integrationId: string,
   input: SetPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -235,9 +247,30 @@ export async function upsertIntegrationPin(
   });
 }
 
+/** A pin write: the set it replaced (`null` when there was none) and the stored pin. */
+interface PinWrite {
+  previous: string[] | null;
+  pin: PinSummary;
+}
+
+/** The one pin row of (space, agent, integration, owner) — `userId: null` is the admin pin. */
+function pinKey(
+  scope: SpaceScope,
+  agentPackageId: string,
+  integrationId: string,
+  userId: string | null,
+) {
+  return and(
+    eq(integrationPins.spaceId, scope.spaceId),
+    eq(integrationPins.packageId, agentPackageId),
+    eq(integrationPins.integrationId, integrationId),
+    userId === null ? isNull(integrationPins.userId) : eq(integrationPins.userId, userId),
+  );
+}
+
 /**
- * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`. One
- * statement writes and returns, mapped by drizzle's column mappers (drivers differ).
+ * Raw SQL: `onConflictDoUpdate` cannot target the index's `coalesce`; the
+ * returned row goes through drizzle's column mappers (drivers differ).
  */
 async function upsertPin(args: {
   scope: SpaceScope;
@@ -247,7 +280,7 @@ async function upsertPin(args: {
   userIdValue: string | null;
   validateOpts: { allowOwnedBy?: string };
   createdBy: string | null;
-}): Promise<PinSummary> {
+}): Promise<PinWrite> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
   await assertAgentActiveHere(scope, agentPackageId);
 
@@ -256,6 +289,11 @@ async function upsertPin(args: {
     sql`, `,
   )}]::uuid[]`;
   await validatePinTargets(scope, integrationId, connectionIds, args.validateOpts);
+  const [previous] = await db
+    .select({ connectionIds: integrationPins.connectionIds })
+    .from(integrationPins)
+    .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
+    .limit(1);
   const [row] = toRows<{
     connection_ids: string | unknown[];
     created_at: string | Date;
@@ -274,37 +312,38 @@ async function upsertPin(args: {
   `),
   );
   return {
-    packageId: agentPackageId,
-    integration_package_id: integrationId,
-    connection_ids: integrationPins.connectionIds.mapFromDriverValue(
-      row!.connection_ids,
-    ) as string[],
-    createdAt: (
-      integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
-    ).toISOString(),
-    updatedAt: (
-      integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
-    ).toISOString(),
+    previous: previous?.connectionIds ?? null,
+    pin: {
+      agent_package_id: agentPackageId,
+      integration_package_id: integrationId,
+      connection_ids: integrationPins.connectionIds.mapFromDriverValue(
+        row!.connection_ids,
+      ) as string[],
+      createdAt: (
+        integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
+      ).toISOString(),
+      updatedAt: (
+        integrationPins.updatedAt.mapFromDriverValue(row!.updated_at) as Date
+      ).toISOString(),
+    },
   };
 }
 
-export async function deleteIntegrationPin(
+/**
+ * Delete one pin row — the admin pin for `userId: null`, else that member's; `previous` is the
+ * set it held, `null` when there was none.
+ */
+export async function deletePin(
   scope: SpaceScope,
-  integrationId: string,
   agentPackageId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
+  integrationId: string,
+  userId: string | null,
+): Promise<{ previous: string[] | null }> {
+  const [row] = await db
     .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.packageId, agentPackageId),
-        isNull(integrationPins.userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
+    .where(pinKey(scope, agentPackageId, integrationId, userId))
+    .returning({ connectionIds: integrationPins.connectionIds });
+  return { previous: row?.connectionIds ?? null };
 }
 
 /**
@@ -376,7 +415,7 @@ interface UpsertMemberPinInput {
 export async function upsertMemberPin(
   scope: SpaceScope,
   input: UpsertMemberPinInput,
-): Promise<PinSummary> {
+): Promise<PinWrite> {
   return upsertPin({
     scope,
     agentPackageId: input.agentPackageId,
@@ -386,26 +425,6 @@ export async function upsertMemberPin(
     validateOpts: { allowOwnedBy: input.userId },
     createdBy: input.userId,
   });
-}
-
-export async function deleteMemberPin(
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationId: string,
-  userId: string,
-): Promise<{ deleted: boolean }> {
-  const result = await db
-    .delete(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, scope.spaceId),
-        eq(integrationPins.packageId, agentPackageId),
-        eq(integrationPins.integrationId, integrationId),
-        eq(integrationPins.userId, userId),
-      ),
-    )
-    .returning({ id: integrationPins.id });
-  return { deleted: result.length > 0 };
 }
 
 /**
@@ -451,15 +470,18 @@ interface UpdateConnectionMetadataInput {
  * is enforced in the route: the owner or an `integrations:configure` holder
  * may edit, but only the owner may share (sharing is consent).
  *
- * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, and a label
- * another connection of the (space, integration) holds (409
- * `connection_label_taken`, raised by the unique index). A rename takes the
- * insert's label lock, so it cannot land between an insert's pick and its write.
+ * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, sharedWithOrg=true per
+ * `assertConnectionShareable`, and a label another connection of the (space, integration)
+ * holds (409 `connection_label_taken`, raised by the unique index). A rename takes the insert's
+ * label lock, so it cannot land between an insert's pick and its write.
+ *
+ * Unsharing disables other actors' schedules naming the connection (`connection_unshared`);
+ * returns their ids, whose jobs the caller removes once committed.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
   input: UpdateConnectionMetadataInput,
-): Promise<ConnectionRow> {
+): Promise<{ connection: ConnectionRow; disabledScheduleIds: string[] }> {
   const updates: { label?: string; sharedWithOrg?: boolean; updatedAt: Date } = {
     updatedAt: new Date(),
   };
@@ -469,7 +491,7 @@ export async function updateConnectionMetadata(
   const result = await db
     .transaction(async (tx) => {
       // Lock order: the label advisory lock, then (a share) the owner's membership and the space
-      // row (`lockSpaceRow`, space-members.ts).
+      // row (`lockSpaceRow`, space-members.ts), or (an unshare) the connection row, then schedules.
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({
@@ -479,22 +501,37 @@ export async function updateConnectionMetadata(
           .from(integrationConnections)
           .where(eq(integrationConnections.id, connectionId))
           .limit(1);
-        if (!conn) return [];
+        if (!conn) return null;
         await lockConnectionLabels(tx, conn.spaceId, conn.integrationId);
       }
+      let unshares = false;
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
+        // Under the row lock: of two concurrent unshares, only the first sees the share.
+        const [row] = await tx
+          .select({ shared: integrationConnections.sharedWithOrg })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, connectionId))
+          .for("update");
+        unshares = row?.shared ?? false;
       }
-      // The owner may have lost the space since the route checked; the unshare that loss ran
-      // could not see this share yet.
       if (input.sharedWithOrg === true) {
-        await assertOwnerReachesSpaceForShare(tx, connectionId);
+        await assertConnectionShareable(tx, connectionId);
       }
-      return tx
+      const [connection] = await tx
         .update(integrationConnections)
         .set(updates)
         .where(eq(integrationConnections.id, connectionId))
         .returning();
+      if (!connection) return null;
+      const disabledScheduleIds = unshares
+        ? await disableForeignSchedules(
+            tx,
+            [{ id: connection.id, owner: actorFromIds(connection.userId, connection.endUserId)! }],
+            "connection_unshared",
+          )
+        : [];
+      return { connection, disabledScheduleIds };
     })
     .catch((err: unknown) => {
       if (input.label === undefined || !isUniqueViolation(err)) throw err;
@@ -503,8 +540,8 @@ export async function updateConnectionMetadata(
         `Another connection of this integration is already named '${input.label}'`,
       );
     });
-  if (result.length === 0) throw notFound(`Connection '${connectionId}' not found`);
-  return result[0]!;
+  if (!result) throw notFound(`Connection '${connectionId}' not found`);
+  return result;
 }
 
 /** Used by route handlers to enforce ownership before metadata edits. */
@@ -649,7 +686,7 @@ async function resolveAgentIntegrationPick(args: {
   ]);
 
   const adminPinnedConnectionIds =
-    adminPins.find((p) => p.packageId === agentPackageId)?.connection_ids ?? [];
+    adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? [];
   const memberPinnedConnectionIds =
     memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? [];
   const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
@@ -713,7 +750,7 @@ interface AgentConnectionReadiness {
   errors: ValidationFieldError[];
   /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
-    integration_id: string;
+    integration_package_id: string;
     run_blocking: boolean;
     resolution: IntegrationAgentResolution;
   }>;
@@ -858,7 +895,7 @@ export async function resolveAgentConnectionReadiness(args: {
     blocks_run: errors.length > 0,
     errors,
     integrations: declared.map((e, i) => ({
-      integration_id: e.id,
+      integration_package_id: e.id,
       run_blocking: blockingIds.has(e.id),
       resolution: resolutions[i]!,
     })),

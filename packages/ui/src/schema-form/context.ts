@@ -9,7 +9,16 @@ import type { UploadFn } from "./upload-client.ts";
  * widgets. Templates should read it via `registry.formContext as SchemaFormContext`
  * rather than re-declaring ad-hoc types.
  */
+export interface SchemaFormLabels extends FileWidgetLabels {
+  addItem?: string;
+  removeItem?: string;
+  moveItemUp?: string;
+  moveItemDown?: string;
+  /** Sentence for a failed JSON Schema keyword and its Ajv `params`; `undefined` keeps Ajv's. */
+  validationError?: (keyword: string, params: Record<string, unknown>) => string | undefined;
+}
+
 export interface SchemaFormContext {
   upload?: UploadFn;
-  labels?: FileWidgetLabels & { addItem?: string };
+  labels?: SchemaFormLabels;
 }

@@ -26,6 +26,7 @@ import {
   arrayOverlaps,
   asc,
   eq,
+  gt,
   inArray,
   isNull,
   or,
@@ -89,11 +90,12 @@ import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import type { Actor } from "@appstrate/connect";
+import type { Actor, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   resolveIntegrationToolSurface,
   readDefaultTools,
   type ConnectionCandidate,
+  type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
   type IntegrationToolInspection,
@@ -106,6 +108,13 @@ import {
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
+import {
+  disableSchedules,
+  isForeignNaming,
+  scheduleActorIs,
+  scheduleOverridesName,
+  schedulesNamingAny,
+} from "./schedules-naming-connection.ts";
 import {
   actorIdentityOf,
   candidateOf,
@@ -196,6 +205,7 @@ interface ActorConnectionRow {
    * resolution so refresh uses the SAME credentials that minted the tokens.
    */
   clientRef: string | null;
+  refreshFailureCount: number;
 }
 
 /**
@@ -212,6 +222,39 @@ const PLACEHOLDER_ACCOUNT_ID = "default";
 
 export function displayAccountId(accountId: string | null | undefined): string | null {
   return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
+}
+
+/**
+ * {@link loadAccessibleConnectionById}'s reach: the connection, of `integrationId`, in the
+ * space, the actor's own or shared.
+ */
+function reachableConnection(
+  connectionId: string,
+  integrationId: string,
+  context: { spaceId: string; actor: Actor },
+): SQL {
+  return and(
+    eq(integrationConnections.id, connectionId),
+    eq(integrationConnections.integrationId, integrationId),
+    eq(integrationConnections.spaceId, context.spaceId),
+    actorOrSharedFilter(context.actor, integrationConnections),
+  )!;
+}
+
+/**
+ * Short, non-reversible digest of the stored ciphertext: any credential write changes it, so a
+ * caller holding a superseded credential can say which one it holds without seeing the current one.
+ */
+const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
+
+/** The connection's current {@link credentialRevision}; `null` once the row is gone. */
+export async function readCredentialRevision(connectionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ credentialRevision })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.credentialRevision ?? null;
 }
 
 /**
@@ -234,26 +277,24 @@ export async function loadAccessibleConnectionById(
   integrationId: string,
   expectedAuthKey: string | null,
   context: { spaceId: string; actor: Actor },
-): Promise<ResolvedConnectionRow | null> {
-  const accessible = actorOrSharedFilter(context.actor, integrationConnections);
+): Promise<(ResolvedConnectionRow & { credentialRevision: string }) | null> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      credentialRevision,
       expiresAt: integrationConnections.expiresAt,
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
+      refreshFailureCount: integrationConnections.refreshFailureCount,
     })
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.integrationId, integrationId),
+        reachableConnection(connectionId, integrationId, context),
         ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
-        eq(integrationConnections.spaceId, context.spaceId),
-        accessible,
       ),
     )
     .limit(1);
@@ -398,8 +439,24 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
 type SelectableRow = typeof integrationConnections.$inferSelect;
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
-  const { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef } = row;
-  return { id, authKey, credentialsEncrypted, expiresAt, scopesGranted, clientRef };
+  const {
+    id,
+    authKey,
+    credentialsEncrypted,
+    expiresAt,
+    scopesGranted,
+    clientRef,
+    refreshFailureCount,
+  } = row;
+  return {
+    id,
+    authKey,
+    credentialsEncrypted,
+    expiresAt,
+    scopesGranted,
+    clientRef,
+    refreshFailureCount,
+  };
 }
 
 function mustChoose(
@@ -962,7 +1019,7 @@ export async function createIntegrationOAuthClient(
 }
 
 /**
- * Rotate an existing custom client's credentials in place, by its id. Scoped to
+ * Update an existing custom client in place, by its id; an absent field is unchanged. Scoped to
  * `owner`'s tier and `packageId` (escalation guard) — any other client id is a 404.
  * `is_default` / `auto_provisioned` are not touched here
  * (default selection is `setDefaultIntegrationClient`'s job).
@@ -977,26 +1034,20 @@ export async function updateIntegrationOAuthClient(
   packageId: string,
   clientId: string,
   input: {
-    clientId: string;
     /** Omit to PRESERVE the stored secret; `""` declares the client public. */
     clientSecret?: string;
-    redirectUri?: string;
+    /** Omit to keep, `null` to clear. */
+    redirectUri?: string | null;
     /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
     tokenEndpointAuthMethod?: string;
   },
-): Promise<IntegrationOAuthClientWithSecret> {
+): Promise<{
+  previous: IntegrationOAuthClientWithSecret;
+  client: IntegrationOAuthClientWithSecret;
+}> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const byId = clientByIdFilter(owner, packageId, clientId);
-  const [existing] = await db
-    .select({
-      autoProvisioned: integrationOauthClients.autoProvisioned,
-      // Read to decide whether a method-only change has a secret to attach
-      // itself to — see the `methodOnly` block below.
-      clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
-    })
-    .from(integrationOauthClients)
-    .where(byId)
-    .limit(1);
+  const [existing] = await db.select().from(integrationOauthClients).where(byId).limit(1);
   if (!existing) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
@@ -1010,7 +1061,15 @@ export async function updateIntegrationOAuthClient(
   // `null` = the secret field was not submitted → keep the stored credential
   // and its declared method exactly as they are. Rotating only the redirect URI
   // must not silently clear the secret (nor flip a confidential client public).
-  const clientAuth = encodeClientAuthForStorage(input);
+  // A new secret alone keeps the stored secret-based method (not a public client's `"none"`).
+  const keptMethod =
+    input.clientSecret && existing.tokenEndpointAuthMethod !== "none"
+      ? (existing.tokenEndpointAuthMethod ?? undefined)
+      : undefined;
+  const clientAuth = encodeClientAuthForStorage({
+    ...input,
+    tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? keptMethod,
+  });
 
   // …with one exception, which the preserve sentinel alone gets wrong. An
   // ABSENT secret alongside an EXPLICITLY declared secret-based method is not
@@ -1044,7 +1103,6 @@ export async function updateIntegrationOAuthClient(
   const [row] = await db
     .update(integrationOauthClients)
     .set({
-      clientId: input.clientId,
       ...(clientAuth
         ? {
             clientSecretEncrypted: clientAuth.clientSecretEncrypted,
@@ -1053,7 +1111,7 @@ export async function updateIntegrationOAuthClient(
         : methodOnly !== undefined
           ? { tokenEndpointAuthMethod: methodOnly }
           : {}),
-      redirectUri: input.redirectUri ?? null,
+      ...(input.redirectUri !== undefined ? { redirectUri: input.redirectUri } : {}),
       updatedAt: new Date(),
     })
     .where(byId)
@@ -1061,7 +1119,7 @@ export async function updateIntegrationOAuthClient(
   if (!row) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
-  return projectClientWithSecret(row);
+  return { previous: projectClientWithSecret(existing), client: projectClientWithSecret(row) };
 }
 
 /** Move a space client to its org tier; same id, so pinned connections keep refreshing. */
@@ -1120,38 +1178,18 @@ function moveClientToOrg(
  */
 interface ResolvedConnectClient {
   clientId: string;
-  clientSecret: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
   clientRef: string;
-  /**
-   * Client-authentication method this client actually uses, already reconciled
-   * with the secret: `"none"` with an empty secret for a public client, the
-   * declared method with a non-empty one otherwise. `undefined` means the
-   * client declares none and the manifest's value applies.
-   *
-   * Travels WITH the credentials so no caller has to pair a manifest-declared
-   * method with a separately-resolved secret — the mismatch that sent
-   * `client_secret=` (present but empty) to providers that reject it.
-   */
-  tokenEndpointAuthMethod: string | undefined;
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
 function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
   return {
     clientId: def.clientId,
-    // `?? ""` is reachable only for a DECLARED public client: the registry
-    // schema refuses an absent secret under any other method (boot crash), so
-    // the blank never stands in for one the operator meant to supply.
-    clientSecret: def.clientSecret ?? "",
     // System clients use the platform default redirect URI (no per-client override).
     redirectUri: null,
     clientRef: def.id,
-    // The entry's own declaration; `undefined` defers to the manifest. NOT
-    // derived from the secret's emptiness — that inference is what sent
-    // `client_secret=` (present but empty) to providers that reject it.
-    tokenEndpointAuthMethod: def.tokenEndpointAuthMethod,
   };
 }
 
@@ -1197,12 +1235,8 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
   assertConnectClientUsable(client);
   return {
     clientId: client.client_id,
-    clientSecret: client.clientSecret,
     redirectUri: client.redirect_uri ?? null,
     clientRef: client.id,
-    // The guard above leaves only coherent rows: a declared `"none"` with no
-    // secret, or a readable secret with the row's (or the manifest's) method.
-    tokenEndpointAuthMethod: client.token_endpoint_auth_method ?? undefined,
   };
 }
 
@@ -1276,7 +1310,7 @@ export function resolveConnectClient(
  * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
  * explicit declaration) wins over `manifestAuthMethod`, which is the
  * manifest's `auths.{key}.token_endpoint_auth_method` and stands in when the
- * row does not declare one.
+ * row does not declare one; `toSupportedTokenEndpointAuthMethod` narrows it as on the callback.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
  * cross-scope) and for a ciphertext that will not open — the caller skips the
@@ -1288,11 +1322,15 @@ export async function resolveIntegrationClientById(
   integrationId: string,
   authKey: string,
   manifestAuthMethod: string | undefined,
-): Promise<{
-  clientId: string;
-  clientSecret: string;
-  tokenEndpointAuthMethod: string | undefined;
-} | null> {
+): Promise<ResolvedOAuthClient | null> {
+  const resolved = (clientId: string, clientSecret: string, method: string | undefined) => {
+    const tokenEndpointAuthMethod = toSupportedTokenEndpointAuthMethod(method);
+    return {
+      clientId,
+      clientSecret,
+      ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
+    };
+  };
   // 1) System client (env), validated against this (integrationId, authKey).
   const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
   if (sys) {
@@ -1302,11 +1340,7 @@ export async function resolveIntegrationClientById(
     // that omits its secret without declaring `"none"`, so emptiness here is
     // always a declaration, never a gap.
     const method = sys.tokenEndpointAuthMethod ?? manifestAuthMethod;
-    return {
-      clientId: sys.clientId,
-      clientSecret: method === "none" ? "" : (sys.clientSecret ?? ""),
-      tokenEndpointAuthMethod: method,
-    };
+    return resolved(sys.clientId, method === "none" ? "" : (sys.clientSecret ?? ""), method);
   }
 
   // A custom client id is the row's UUID PK. Anything else — a since-removed
@@ -1348,7 +1382,7 @@ export async function resolveIntegrationClientById(
   // with any other declared method unrepresentable, so emptiness here always
   // arrives as `"none"`.
   if (method === "none") {
-    return { clientId: row.clientId, clientSecret: "", tokenEndpointAuthMethod: "none" };
+    return resolved(row.clientId, "", "none");
   }
 
   let clientSecret: string;
@@ -1370,7 +1404,7 @@ export async function resolveIntegrationClientById(
   // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
   // so a secret-based (or unstated) method with no secret throws
   // `ClientAuthInvariantError` before anything reaches the wire.
-  return { clientId: row.clientId, clientSecret, tokenEndpointAuthMethod: method };
+  return resolved(row.clientId, clientSecret, method);
 }
 
 /**
@@ -1381,11 +1415,11 @@ export async function resolveIntegrationClientById(
 interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
   client_ref: string;
-  /** `"built-in"` (env system client), `"org"` (org-level) or `"custom"` (space). */
-  source: "built-in" | "org" | "custom";
+  /** The owning tier: `"system"` (env system client), `"org"` (org-level) or `"space"`. */
+  source: "system" | "org" | "space";
   /**
-   * For `"custom"` / `"org"` clients, the OAuth `client_id` the admin registered.
-   * For `"built-in"` (system) clients, a stable opaque FINGERPRINT (truncated
+   * For `"space"` / `"org"` clients, the OAuth `client_id` the admin registered.
+   * For `"system"` clients, a stable opaque FINGERPRINT (truncated
    * SHA-256) — never the real `SYSTEM_INTEGRATIONS` client_id, which is a
    * deployment secret and must not leak to the front. It is display-only; the
    * connect/refresh keyspace is `client_ref`, not this field.
@@ -1451,7 +1485,7 @@ function describeClient(
   if (!("isDefault" in client)) {
     return {
       client_ref: client.id,
-      source: "built-in",
+      source: "system",
       // Never expose the real system client_id (deployment secret) — only an
       // opaque, stable fingerprint for the UI to show/diff.
       client_id: fingerprintSystemClientId(client.clientId),
@@ -1467,7 +1501,7 @@ function describeClient(
   }
   return {
     client_ref: client.id,
-    source: client.spaceId === null ? "org" : "custom",
+    source: client.spaceId === null ? "org" : "space",
     client_id: client.client_id,
     is_default: isDefault,
     auto_provisioned: client.autoProvisioned,
@@ -1961,7 +1995,11 @@ export async function deleteIntegrationOAuthClient(
   owner: ClientOwner,
   packageId: string,
   clientId: string,
-): Promise<{ deletedConnections: number; disabledScheduleIds: string[] }> {
+): Promise<{
+  client: IntegrationOAuthClient;
+  deletedConnections: number;
+  disabledScheduleIds: string[];
+}> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
@@ -1982,11 +2020,11 @@ export async function deleteIntegrationOAuthClient(
       minted.map((c) => c.id),
       "A connection this OAuth client minted cannot be deleted",
     );
-    const deleted = await tx
+    const [deleted] = await tx
       .delete(integrationOauthClients)
       .where(clientByIdFilter(owner, packageId, clientId))
-      .returning({ id: integrationOauthClients.id });
-    if (deleted.length === 0) {
+      .returning();
+    if (!deleted) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
     // Cascade: every connection pinned to this client is now dead — the
@@ -2011,11 +2049,45 @@ export async function deleteIntegrationOAuthClient(
               ),
             )
             .returning(deletedConnectionOwner);
+    // Each forget below locks its connection's rows: the owner's member pins naming it, then every
+    // schedule naming it. Locked here first for all of them, in the plan's order, so two batches
+    // cannot each hold a row the other waits on.
+    const forgotten = deletedConns.map((c) => c.id);
+    const owners = [...new Set(deletedConns.flatMap((c) => (c.userId ? [c.userId] : [])))];
+    if (owners.length > 0) {
+      await tx
+        .select({ id: integrationPins.id })
+        .from(integrationPins)
+        .where(
+          and(
+            inArray(integrationPins.userId, owners),
+            arrayOverlaps(integrationPins.connectionIds, forgotten),
+          ),
+        )
+        .orderBy(
+          asc(integrationPins.packageId),
+          asc(integrationPins.integrationId),
+          asc(integrationPins.id),
+        )
+        .for("update");
+    }
+    if (forgotten.length > 0) {
+      await tx
+        .select({ id: schedules.id })
+        .from(schedules)
+        .where(schedulesNamingAny(forgotten))
+        .orderBy(asc(schedules.id))
+        .for("update");
+    }
     const disabledScheduleIds: string[] = [];
     for (const row of deletedConns) {
       disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
     }
-    return { deletedConnections: deletedConns.length, disabledScheduleIds };
+    return {
+      client: toPublicClient(projectClientWithSecret(deleted)),
+      deletedConnections: deletedConns.length,
+      disabledScheduleIds,
+    };
   });
 }
 
@@ -2519,41 +2591,119 @@ export async function markIntegrationConnectionNeedsReconnection(
     .where(eq(integrationConnections.id, connectionId));
 }
 
+/** How {@link recordIntegrationRefreshFailure} counts a failure toward `maxFailures`. */
+type RefreshFailureGate =
+  /** A transient OAuth refresh failure: escalates only once the token expired `graceSeconds` ago. */
+  | { graceSeconds: number }
+  /** An upstream 401 on an unrefreshable credential, counted only while `reachable` holds. */
+  | { reachable: SQL };
+
 /**
  * Record a failure on a connection's credential: a transient OAuth refresh
- * failure (with `graceSeconds`; `invalid_grant` goes through
+ * failure (`invalid_grant` goes through
  * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
- * of an unrefreshable credential (`graceSeconds: null`). Increment and
- * escalation are one statement, so concurrent failures cannot lose a count.
- *
- * Escalates once the count reaches `maxFailures` AND, with `graceSeconds`,
- * the token expired more than `graceSeconds` ago — so an outage on a valid
- * token never bricks the connection. `needsReconnection` is OR'd, never cleared.
- * Only a credential write resets the count, so for an unrefreshable auth it is
- * cumulative since the last reconnect, not a streak.
+ * of an unrefreshable credential. Increment and escalation are one statement,
+ * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
+ * never cleared, and a credential write resets the count.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
-  graceSeconds: number | null,
+  gate: RefreshFailureGate,
 ): Promise<{ failures: number; needsReconnection: boolean }> {
-  const expired =
-    graceSeconds === null
-      ? sql`TRUE`
-      : sql`${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds})`;
+  const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
+  const escalates =
+    "reachable" in gate
+      ? sql`${failures} >= ${maxFailures}`
+      : sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
   const [row] = await db
     .update(integrationConnections)
     .set({
-      refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${expired})`,
+      refreshFailureCount: failures,
+      needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
     })
-    .where(eq(integrationConnections.id, connectionId))
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        "reachable" in gate ? gate.reachable : undefined,
+      ),
+    )
     .returning({
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
     });
   return row ?? { failures: 0, needsReconnection: false };
+}
+
+/**
+ * Count an upstream rejection of a credential nothing can refresh toward
+ * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection.
+ */
+export async function recordUnrefreshableRejection(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
+  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+  const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
+    reachable: reachableConnection(connectionId, integrationId, reach),
+  });
+  return { ...counted, maxFailures };
+}
+
+/**
+ * A successful upstream call ends the rejection streak of the connection `connection` selects.
+ * Only a non-OAuth2 connection (`client_ref IS NULL`): an OAuth2 count tracks refreshes, which a
+ * call does not prove. A flagged connection keeps its count.
+ */
+async function clearRejections(connection: SQL): Promise<void> {
+  await db
+    .update(integrationConnections)
+    .set({ refreshFailureCount: 0 })
+    .where(
+      and(
+        connection,
+        gt(integrationConnections.refreshFailureCount, 0),
+        isNull(integrationConnections.clientRef),
+        eq(integrationConnections.needsReconnection, false),
+      ),
+    );
+}
+
+/** {@link clearRejections} after a 2xx the platform relayed for a caller with `reach`. */
+export function clearUpstreamRejections(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+): Promise<void> {
+  return clearRejections(reachableConnection(connectionId, integrationId, reach));
+}
+
+/**
+ * {@link clearRejections} on a run's report of a 2xx with credential `revision`, while the run's
+ * actor can still reach the connection ({@link loadAccessibleConnectionById}'s reach).
+ */
+export function clearReachableUpstreamRejections(
+  connectionId: string,
+  integrationId: string,
+  context: { spaceId: string; actor: Actor },
+  revision: string,
+): Promise<void> {
+  return clearRejections(
+    and(
+      reachableConnection(connectionId, integrationId, context),
+      eq(credentialRevision, revision),
+    )!,
+  );
+}
+
+/** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */
+export function upstreamRejectionStreak(connection: {
+  clientRef: string | null;
+  refreshFailureCount: number;
+}): number {
+  return connection.clientRef === null ? connection.refreshFailureCount : 0;
 }
 
 /**
@@ -2658,7 +2808,7 @@ export async function listIntegrationConnections(
 
 /** One integration the actor could attach to an agent (own and/or org-shared). */
 interface UsableIntegration {
-  integration_id: string;
+  integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
   /**
@@ -2754,7 +2904,7 @@ export async function listUsableIntegrationsForActor(
     const { own, shared } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
     return {
-      integration_id: integrationId,
+      integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
       version: versionMap.get(integrationId),
@@ -2875,76 +3025,162 @@ const deletedConnectionOwner = {
 };
 
 /**
- * Drop a deleted connection from its OWNER's member pins and schedule overrides; other members'
- * keep the id and fail loudly. Returns the schedules it disabled, whose jobs the caller removes
- * once committed (importing the scheduler here would close a cycle).
+ * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
+ * actors' schedules naming it ({@link planConnectionForget}). Returns the schedules it disabled,
+ * whose jobs the caller removes once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
   row: { id: string; userId: string | null; endUserId: string | null },
 ): Promise<string[]> {
-  if (row.userId) await dropFromOwnMemberPins(tx, row.id, row.userId);
   // `integration_connections` holds exactly one owner id.
-  return dropConnectionFromOwnSchedules(tx, row.id, actorFromIds(row.userId, row.endUserId)!);
-}
-
-async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: string): Promise<void> {
-  const holding = and(
-    eq(integrationPins.userId, userId),
-    arrayContains(integrationPins.connectionIds, [connectionId]),
-  );
-  // Delete before update: `cardinality BETWEEN 1 AND 10` refuses an emptied set.
-  await tx
-    .delete(integrationPins)
-    .where(and(holding, sql`cardinality(${integrationPins.connectionIds}) = 1`));
-  await tx
-    .update(integrationPins)
-    .set({
-      connectionIds: sql`array_remove(${integrationPins.connectionIds}, ${connectionId}::uuid)`,
-      updatedAt: new Date(),
-    })
-    .where(holding);
-}
-
-/** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
-export function scheduleOverridesName(connectionId: string): SQL {
-  return sql`jsonb_path_exists(
-    ${schedules.connectionOverrides}, '$.*[*] ? (@ == $id)', jsonb_build_object('id', ${connectionId}::text)
-  )`;
-}
-
-/**
- * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables the
- * schedule (a fallback would silently change its account). Returns the disabled ids.
- */
-async function dropConnectionFromOwnSchedules(
-  tx: Tx,
-  connectionId: string,
-  actor: Actor,
-): Promise<string[]> {
-  const held = await tx
-    .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
-    .from(schedules)
-    .where(and(actorFilter(actor, schedules), scheduleOverridesName(connectionId)))
-    .for("update");
-  const disabled: string[] = [];
-  for (const { id, connectionOverrides } of held) {
-    const kept = Object.entries(connectionOverrides ?? {}).flatMap(([integrationId, ids]) => {
-      const rest = ids.filter((c) => c !== connectionId);
-      return rest.length > 0 ? [[integrationId, rest] as const] : [];
-    });
-    const emptiedASet = kept.length < Object.keys(connectionOverrides ?? {}).length;
+  const owner = actorFromIds(row.userId, row.endUserId)!;
+  const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
+  for (const pin of plan.pins) {
+    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    if (pin.nextConnectionIds.length === 0) {
+      await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
+    } else {
+      await tx
+        .update(integrationPins)
+        .set({ connectionIds: pin.nextConnectionIds, updatedAt: new Date() })
+        .where(eq(integrationPins.id, pin.id));
+    }
+  }
+  for (const schedule of plan.schedules) {
     await tx
       .update(schedules)
       .set({
-        connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        ...(emptiedASet ? { enabled: false, nextRunAt: null } : {}),
+        connectionOverrides: schedule.nextOverrides,
+        ...(schedule.disables
+          ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
+          : {}),
         updatedAt: new Date(),
       })
-      .where(eq(schedules.id, id));
-    if (emptiedASet) disabled.push(id);
+      .where(eq(schedules.id, schedule.id));
   }
-  return disabled;
+  await disableSchedules(tx, plan.foreignScheduleIds, "connection_deleted");
+  return [...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])), ...plan.foreignScheduleIds];
+}
+
+/** One of the owner's member pins naming the connection. */
+interface PinForget {
+  id: string;
+  agentPackageId: string;
+  integrationId: string;
+  connectionIds: string[];
+  /** `connectionIds` without the connection; empty drops the pin. */
+  nextConnectionIds: string[];
+}
+
+/** One of the owner's schedules whose `connection_overrides` name the connection. */
+interface ScheduleForget {
+  id: string;
+  name: string | null;
+  agentPackageId: string;
+  /** The integrations whose set names the connection, by id, with that set's size today. */
+  entries: { integrationId: string; connectionCount: number }[];
+  /** Without the connection: an emptied set drops its integration, an emptied map is `null`. */
+  nextOverrides: ConnectionOverrides | null;
+  /** Enabled and a set empties: an unattended run must never fall back to another account. */
+  disables: boolean;
+}
+
+/** What forgetting a connection rewrites: the delete applies it, the delete-impact preview shows it. */
+interface ConnectionForgetPlan {
+  pins: PinForget[];
+  schedules: ScheduleForget[];
+  /** Other actors' enabled schedules naming the connection: disabled, their overrides kept. */
+  foreignScheduleIds: string[];
+}
+
+/**
+ * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
+ * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
+ * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
+ * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
+ * lists: a schedule may name a connection of another space.
+ */
+export async function planConnectionForget(
+  executor: DbOrTx,
+  connection: { id: string; owner: Actor },
+  { lock = false, scheduleFilter }: { lock?: boolean; scheduleFilter?: SQL } = {},
+): Promise<ConnectionForgetPlan> {
+  const { id, owner } = connection;
+  const pinQuery = executor
+    .select({
+      id: integrationPins.id,
+      agentPackageId: integrationPins.packageId,
+      integrationId: integrationPins.integrationId,
+      connectionIds: integrationPins.connectionIds,
+    })
+    .from(integrationPins)
+    .where(
+      and(eq(integrationPins.userId, owner.id), arrayContains(integrationPins.connectionIds, [id])),
+    )
+    .orderBy(
+      asc(integrationPins.packageId),
+      asc(integrationPins.integrationId),
+      asc(integrationPins.id),
+    );
+  // Every actor's schedules in one id-ordered statement (`schedules-naming-connection.ts`), split
+  // below: the owner's are rewritten, the others' disabled.
+  const scheduleQuery = executor
+    .select({
+      id: schedules.id,
+      name: schedules.name,
+      agentPackageId: schedules.packageId,
+      createdAt: schedules.createdAt,
+      userId: schedules.userId,
+      endUserId: schedules.endUserId,
+      enabled: schedules.enabled,
+      connectionOverrides: schedules.connectionOverrides,
+    })
+    .from(schedules)
+    .where(and(scheduleOverridesName(id), scheduleFilter))
+    .orderBy(asc(schedules.id));
+  const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
+  const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const ownRows = scheduleRows
+    .filter((row) => scheduleActorIs(row, owner))
+    .sort(
+      (a, b) =>
+        compareBinary(a.agentPackageId, b.agentPackageId) ||
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        compareBinary(a.id, b.id),
+    );
+  return {
+    pins: pinRows.map((pin) => ({
+      ...pin,
+      nextConnectionIds: pin.connectionIds.filter((c) => c !== id),
+    })),
+    schedules: ownRows.map((row) => {
+      const overrides = row.connectionOverrides ?? {};
+      const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        const rest = ids.filter((c) => c !== id);
+        return rest.length > 0 ? [[integrationId, rest] as const] : [];
+      });
+      return {
+        id: row.id,
+        name: row.name,
+        agentPackageId: row.agentPackageId,
+        entries: Object.entries(overrides)
+          .filter(([, ids]) => ids.includes(id))
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([integrationId, ids]) => ({ integrationId, connectionCount: ids.length })),
+        nextOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
+        disables: row.enabled && kept.length < Object.keys(overrides).length,
+      };
+    }),
+    foreignScheduleIds: scheduleRows
+      .filter((row) => isForeignNaming(row, connection))
+      .map((row) => row.id),
+  };
+}
+
+/** Code-unit order: the same on every host, where `localeCompare` follows a locale. */
+function compareBinary(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**
@@ -2961,7 +3197,7 @@ export function serializeIntegrationConnection(
   }
   return {
     id: row.id,
-    packageId: row.integrationId,
+    integration_package_id: row.integrationId,
     auth_key: row.authKey,
     account_id: row.accountId,
     identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,

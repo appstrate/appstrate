@@ -60,6 +60,7 @@ function hostWith(granted: string[]): ChatHost {
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
+    formatBytes: String,
   };
 }
 
@@ -88,7 +89,7 @@ describe("chat page session scope", () => {
     // `t`, so the rendered label is the KEY. Counting it is what proves the
     // marker is derived from the same scoped query as the rows beside it —
     // `chat_active` is excluded because looking at a thread reads it.
-    expect(html.match(/aria-label="list\.unread"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="threads\.unread"/g)).toHaveLength(1);
   });
 });
 
@@ -98,11 +99,11 @@ describe("chat surfaces held to the caller's grants", () => {
     qc.setQueryData(sessionsQueryKey("spc_a"), cache([]));
 
     const readOnly = renderConversationList(qc, (p) => p === "chat:read");
-    expect(readOnly).toContain("list.emptyReadOnly");
-    expect(readOnly).not.toContain("list.empty<");
+    expect(readOnly).toContain("threads.emptyReadOnly");
+    expect(readOnly).not.toContain("threads.empty<");
 
     const writer = renderConversationList(qc, (p) => p === "chat:read" || p === "chat:write");
-    expect(writer).toContain("list.empty<");
+    expect(writer).toContain("threads.empty<");
   });
 
   it("offers no preview, download or thumbnail of a file without files:read", () => {

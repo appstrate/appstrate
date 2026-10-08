@@ -28,7 +28,6 @@ import { invalidRequest } from "../../lib/errors.ts";
 import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
-import { toSupportedTokenEndpointAuthMethod } from "../integration-manifest-helpers.ts";
 import {
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
@@ -122,10 +121,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // same credentials.
     const {
       clientId,
-      clientSecret,
       redirectUri: clientRedirectUri,
       clientRef,
-      tokenEndpointAuthMethod: clientAuthMethod,
     } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
@@ -134,14 +131,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     const resource = resolved.resource ?? auth.resource;
-    // The registered client's own declaration wins over the manifest's: an
-    // admin who registered a PUBLIC client (no secret at the provider) has
-    // said something the manifest cannot know. `resolveConnectClient` returns
-    // the method already reconciled with the secret it hands back, so the two
-    // cannot disagree.
-    const tokenAuthMethod = toSupportedTokenEndpointAuthMethod(
-      clientAuthMethod ?? auth.token_endpoint_auth_method,
-    );
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -149,9 +138,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(authorizationEndpoint ? { authorizationEndpoint } : {}),
       ...(tokenEndpoint ? { tokenEndpoint } : {}),
       clientId,
-      clientSecret,
       clientRef,
-      ...(tokenAuthMethod ? { tokenEndpointAuthMethod: tokenAuthMethod } : {}),
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
       ...(resource ? { resource } : {}),
@@ -386,7 +373,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-      ...(result.clientRef ? { clientRef: result.clientRef } : {}),
+      clientRef: result.clientRef,
     });
   }
 }

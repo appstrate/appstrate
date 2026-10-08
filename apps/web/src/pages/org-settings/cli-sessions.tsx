@@ -4,9 +4,7 @@ import { useState } from "react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Laptop } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -39,7 +37,6 @@ export function OrgSettingsCliSessionsPage() {
         queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
       });
     },
-    onError: (mutationError) => toast.error(getErrorMessage(mutationError)),
   });
 
   const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
@@ -70,7 +67,7 @@ export function OrgSettingsCliSessionsPage() {
         label={t("orgCliSessions.tableLabel")}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           <EmptyState
             icon={Laptop}

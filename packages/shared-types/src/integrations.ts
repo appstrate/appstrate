@@ -42,7 +42,7 @@ export interface IntegrationSummary {
 
 export interface IntegrationConnection {
   id: string;
-  packageId: string;
+  integration_package_id: string;
   auth_key: string;
   /** Multi-account discriminator extracted at connect time. */
   account_id: string;
@@ -199,7 +199,7 @@ export interface AccessibleIntegrationConnection {
  * `/api/integrations/:packageId/pins` surface.
  */
 export interface IntegrationPin {
-  packageId: string;
+  agent_package_id: string;
   integration_package_id: string;
   connection_ids: string[];
   createdAt: string;
@@ -224,7 +224,7 @@ export interface IntegrationOrgDefault {
  * deployment's default — that declares a given integration as a dependency.
  */
 export interface ConsumingAgentSummary {
-  packageId: string;
+  agent_package_id: string;
   display_name: string;
 }
 
@@ -269,7 +269,7 @@ export interface IntegrationAgentResolution {
   member_pinned_connection_ids: string[];
   /**
    * Org-wide default connection set for this integration (all agents),
-   * empty when unset. `orgDefaultEnforced` distinguishes a hard lock
+   * empty when unset. `org_default_enforced` distinguishes a hard lock
    * (members can't override — surfaced like an admin pin) from a soft
    * default the member can still override with their own pick.
    */

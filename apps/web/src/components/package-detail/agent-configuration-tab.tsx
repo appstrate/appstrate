@@ -23,8 +23,10 @@ import {
   useSetAgentModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
-import { isModelSelectable } from "../../lib/model-selectability";
+import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
+import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
+import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
@@ -276,15 +278,13 @@ function ModelSectionEditor({
     { value: "1", label: t("detail.configuration.temperature.exploratory", { ns: "agents" }) },
   ];
 
-  const reasoningLabel = (level: ModelReasoningLevel) => {
-    if (level === "off") return t("models.generation.levels.off", { ns: "settings" });
-    if (level === "minimal") return t("models.generation.levels.minimal", { ns: "settings" });
-    if (level === "low") return t("models.generation.levels.low", { ns: "settings" });
-    if (level === "medium") return t("models.generation.levels.medium", { ns: "settings" });
-    if (level === "high") return t("models.generation.levels.high", { ns: "settings" });
-    if (level === "xhigh") return t("models.generation.levels.xhigh", { ns: "settings" });
-    return t("models.generation.levels.max", { ns: "settings" });
-  };
+  // The level names, the default level and the `off` of a model that sends
+  // nothing for it, worded once for every surface that offers the choice.
+  const generationLabels = buildGenerationLabels(
+    t,
+    resolvedModel?.generation,
+    !!resolvedModel && reasoningOffSendsNothing(resolvedModel),
+  );
 
   const withoutTemperature = () => {
     const { temperature: _temperature, ...rest } = generation;
@@ -307,7 +307,16 @@ function ModelSectionEditor({
     <>
       <SettingRow
         label={t("detail.configuration.modelChoice", { ns: "agents" })}
-        description={t("detail.configuration.modelDescription", { ns: "agents" })}
+        description={
+          <>
+            {t("detail.configuration.modelDescription", { ns: "agents" })}
+            {isModelPinUnavailable(orgModels, modelId) && (
+              <span className="text-warning block" data-testid="agent-model-pin-unavailable">
+                {t("input.modelPinUnavailable", { ns: "agents" })}
+              </span>
+            )}
+          </>
+        }
       >
         <Select
           value={modelId ?? "__inherit__"}
@@ -407,7 +416,7 @@ function ModelSectionEditor({
         description={
           reasoningUnsupported
             ? t("models.generation.unsupported", { ns: "settings" })
-            : t("models.generation.reasoningHint", { ns: "settings" })
+            : generationLabels.reasoningHint
         }
       >
         <Select
@@ -437,12 +446,10 @@ function ModelSectionEditor({
               </SelectItem>
             ) : (
               <>
-                <SelectItem value="__inherit__">
-                  {t("models.generation.inherit", { ns: "settings" })}
-                </SelectItem>
+                <SelectItem value="__inherit__">{generationLabels.reasoningInherit}</SelectItem>
                 {supportedReasoningLevels.map((level) => (
                   <SelectItem key={level} value={level}>
-                    {reasoningLabel(level)}
+                    {generationLabels.levels[level]}
                   </SelectItem>
                 ))}
               </>

@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { sameActor, scheduleOverridePayload } from "../schedule-payload.ts";
+import { withDeclaredConnections } from "../connection-set.ts";
 
 const ALICE = { userId: "usr_alice" };
 const BOB = { userId: "usr_bob" };
@@ -64,6 +65,28 @@ describe("scheduleOverridePayload — edit", () => {
       currentActor: ALICE,
     });
     expect(moved.version_override).toBeNull();
+  });
+});
+
+describe("scheduleOverridePayload — edit after the agent dropped an integration", () => {
+  // The form holds the whole stored map; the picker shows only the fired version's integrations.
+  const stored = { ...PICKS, "@acme/retired": ["conn_9"] };
+  const save = (declared: string[]) =>
+    scheduleOverridePayload({
+      isEdit: true,
+      overrides: withDeclaredConnections({ connection_overrides: stored }, declared),
+      versionOverride: undefined,
+      versionOverrideChanged: false,
+      actor: ALICE,
+      currentActor: ALICE,
+    });
+
+  it("sends only the declared keys, so the stale one is cleared instead of refused", () => {
+    expect(save(["@acme/gmail"]).connection_overrides).toEqual(PICKS);
+  });
+
+  it("clears the map when none of its keys is declared any more", () => {
+    expect(save([]).connection_overrides).toBeNull();
   });
 });
 

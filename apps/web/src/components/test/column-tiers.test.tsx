@@ -226,7 +226,7 @@ const SETS = {
         pendingClientRef: null,
         onUseHere: () => {},
         onUseForOrg: () => {},
-        onRotate: () => {},
+        onEdit: () => {},
         onPromote: () => {},
         onDelete: () => {},
       }),

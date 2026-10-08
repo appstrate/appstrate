@@ -45,7 +45,7 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage, runs, type InferenceRoute } from "@appstrate/db/schema";
+import { llmUsage, runs, type CredentialSource, type InferenceRoute } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
@@ -94,7 +94,7 @@ async function waitFor<T>(
 async function seedSinkRun(
   ctx: TestContext,
   overrides: {
-    modelSource?: string | null;
+    modelSource?: CredentialSource | null;
     modelId?: string | null;
     inferenceRoute?: InferenceRoute | null;
     runOrigin?: "platform" | "remote";
@@ -110,18 +110,26 @@ async function seedSinkRun(
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const runOrigin = overrides.runOrigin ?? "platform";
+  // A platform run defaults to an OAuth run: its sidecar serves it, so its runner
+  // row is its ledger. A remote run records no platform model.
+  const platform = runOrigin === "platform";
   await db.insert(runs).values({
     id: runId,
     packageId: AGENT,
     orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     status: "running",
-    runOrigin: overrides.runOrigin ?? "platform",
-    // An OAuth run: its sidecar serves it, so its runner row is its ledger (a
-    // proxy-served run's is the proxy's per-call rows).
-    modelSource: overrides.modelSource ?? "org",
+    runOrigin,
+    modelSource:
+      overrides.modelSource !== undefined ? overrides.modelSource : platform ? "org" : null,
     modelId: overrides.modelId ?? null,
-    inferenceRoute: overrides.inferenceRoute === undefined ? "sidecar" : overrides.inferenceRoute,
+    inferenceRoute:
+      overrides.inferenceRoute !== undefined
+        ? overrides.inferenceRoute
+        : platform
+          ? "sidecar"
+          : null,
     modelCost: overrides.modelCost ?? null,
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),

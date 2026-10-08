@@ -25,9 +25,9 @@ const SAVE_MODEL_SETTINGS = "Enregistrer les réglages du modèle";
 /** `models.generation.levels.high` — the toggle's aria-label. */
 const HIGH = "Élevé";
 /**
- * `models.generation.reasoningInherit` interpolated with
- * `models.generation.levels.medium` (`DEFAULT_MODEL_REASONING_LEVEL`) —
- * aria-label of the reasoning "Auto" toggle.
+ * `models.generation.reasoningInherit` interpolated with the level an unset
+ * one resolves to on the selected model (`defaultReasoningLevel`) — here
+ * `models.generation.levels.medium`. Aria-label of the reasoning "Auto" toggle.
  */
 const REASONING_INHERIT = "Par défaut (Moyen)";
 

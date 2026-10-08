@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Plus } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -25,8 +24,6 @@ import {
   deduplicateLabel,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { ApiError } from "../../api/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { ModelFormModal } from "../../components/model-form-modal";
@@ -104,7 +101,7 @@ function ModelsList({
         rowKey={(m) => m.id}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         // No action of its own: the button above is the same one, and it stays.
         empty={<EmptyState message={t("models.empty")} icon={BrainCircuit} compact />}
       />
@@ -174,7 +171,7 @@ function CredentialsSection({
         rowKey={(pk) => pk.id}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           <EmptyState
             message={t("credentials.empty")}
@@ -217,14 +214,6 @@ export function OrgSettingsModelsPage() {
       : 0;
 
   const closeConfirm = () => setConfirmState(null);
-  const reportDeleteFailure = (err: unknown) => {
-    toast.error(
-      err instanceof ApiError && err.code === "credential_in_use"
-        ? t("credentials.deleteRefused")
-        : t("error.prefix", { ns: "common", message: getErrorMessage(err) }),
-    );
-    closeConfirm();
-  };
   const deleteModelMutation = useDeleteModel();
   const setDefaultModelMutation = useSetDefaultModel();
   const modelForm = useModelFormHandler({
@@ -302,16 +291,12 @@ export function OrgSettingsModelsPage() {
           onDelete={(pk) =>
             setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
+          // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
           onRename={async (pk, newLabel) => {
-            try {
-              await updatePkMutation.mutateAsync({
-                params: { path: { id: pk.id } },
-                body: { label: newLabel },
-              });
-            } catch (error) {
-              toast.error(getErrorMessage(error));
-              throw error;
-            }
+            await updatePkMutation.mutateAsync({
+              params: { path: { id: pk.id } },
+              body: { label: newLabel },
+            });
           }}
           onConnectOAuth={(credential) => {
             setEditPk(credential);
@@ -347,7 +332,6 @@ export function OrgSettingsModelsPage() {
               },
               {
                 onSuccess: () => setPkModalOpen(false),
-                onError: (error) => toast.error(getErrorMessage(error)),
               },
             );
           } else {
@@ -363,7 +347,6 @@ export function OrgSettingsModelsPage() {
               },
               {
                 onSuccess: () => setPkModalOpen(false),
-                onError: (error) => toast.error(getErrorMessage(error)),
               },
             );
           }
@@ -390,12 +373,11 @@ export function OrgSettingsModelsPage() {
         isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
         onConfirm={() => {
           if (!confirmState) return;
-          const options = { onSuccess: closeConfirm, onError: reportDeleteFailure };
           const params = { path: { id: confirmState.id } };
           if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate({ params }, options);
+            deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
           } else {
-            deletePkMutation.mutate({ params }, options);
+            deletePkMutation.mutate({ params }, { onSuccess: closeConfirm });
           }
         }}
       />

@@ -4,8 +4,18 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
-import { listCatalogModels, lookupCatalogModel, piProviderOf } from "./model-catalog.ts";
-import { buildPiModel, clampPiReasoningLevel } from "@appstrate/runner-pi/pi-model";
+import {
+  type CatalogScope,
+  listCatalogModels,
+  lookupCatalogDialect,
+  lookupCatalogModel,
+  piProviderOf,
+} from "./model-catalog.ts";
+import {
+  buildPiModel,
+  clampPiReasoningLevel,
+  piReasoningLevels,
+} from "@appstrate/runner-pi/pi-model";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   MODEL_INPUT_MODALITIES,
@@ -20,7 +30,7 @@ import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
 import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
-import type { ModelApiShape } from "@appstrate/core/sidecar-types";
+import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import { invalidateResolvedModel, resolveModelCached } from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
 import {
@@ -36,9 +46,9 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { listedModelIds } from "./model-providers/model-listing.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import {
+  MODEL_REASONING_LEVELS,
   ModelGenerationError,
   resolveModelGenerationSettings,
-  UNKNOWN_MODEL_GENERATION_CAPABILITIES,
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
   type ModelReasoningLevel,
@@ -192,6 +202,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     providerId: null,
     provider_name: null,
     pi_provider: null,
+    pi_dialect: null,
     base_url: null,
     modelId: null,
     credentialId: null,
@@ -275,53 +286,55 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   return mergeSystemAndDb<ModelDefinition, (typeof renderableRows)[number], OrgModelInfo>({
     system,
     rows: renderableRows,
-    mapSystem: (id, def): OrgModelInfo => ({
-      id,
-      ...resolveModelMetadata(
-        def,
-        def.modelId,
-        resolveCatalogDefaults(def.providerId, def.modelId),
-      ),
-      generation: generationOf(
-        resolveCatalogDefaults(def.providerId, def.modelId),
-        def.aliased === true,
-      ),
-      apiShape: def.apiShape,
-      providerId: def.providerId,
-      provider_name: getModelProvider(def.providerId)?.displayName ?? null,
-      pi_provider: resolvePiProvider(def.providerId),
-      base_url: def.baseUrl,
-      modelId: def.modelId,
-      enabled: def.enabled !== false,
-      is_default: pointer !== null ? id === pointer : def.isDefault === true,
-      // System (env) models read their key from `SYSTEM_PROVIDER_KEYS` — no
-      // stored blob to be revoked or to stop decrypting, so never "dead".
-      needs_reconnection: false,
-      aliased: def.aliased === true,
-      iconUrl: def.iconUrl ?? null,
-      source: "built-in",
-      credentialId: def.credentialId,
-      created_by: null,
-      createdAt: now,
-      updatedAt: now,
-    }),
+    mapSystem: (id, def): OrgModelInfo => {
+      const defaults = resolveCatalogDefaults(def.providerId, def.modelId, "bundled");
+      const metadata = resolveModelMetadata(def, def.modelId, defaults);
+      return {
+        id,
+        ...metadata,
+        generation: generationOf(defaults, {
+          apiShape: def.apiShape,
+          reasoning: metadata.reasoning,
+          aliased: def.aliased === true,
+        }),
+        apiShape: def.apiShape,
+        providerId: def.providerId,
+        provider_name: getModelProvider(def.providerId)?.displayName ?? null,
+        pi_provider: resolvePiProvider(def.providerId),
+        pi_dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
+        base_url: def.baseUrl,
+        modelId: def.modelId,
+        enabled: def.enabled !== false,
+        is_default: pointer !== null ? id === pointer : def.isDefault === true,
+        // System (env) models read their key from `SYSTEM_PROVIDER_KEYS` — no
+        // stored blob to be revoked or to stop decrypting, so never "dead".
+        needs_reconnection: false,
+        aliased: def.aliased === true,
+        iconUrl: def.iconUrl ?? null,
+        source: "built-in",
+        credentialId: def.credentialId,
+        created_by: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
     mapRow: (row): OrgModelInfo => {
       const creds = credByRow.get(row.id)!;
+      const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+      const metadata = resolveModelMetadata(row, row.modelId, defaults);
       return {
         id: row.id,
-        ...resolveModelMetadata(
-          row,
-          row.modelId,
-          resolveCatalogDefaults(creds.providerId, row.modelId),
-        ),
-        generation: generationOf(
-          resolveCatalogDefaults(creds.providerId, row.modelId),
-          row.aliased,
-        ),
+        ...metadata,
+        generation: generationOf(defaults, {
+          apiShape: creds.apiShape,
+          reasoning: metadata.reasoning,
+          aliased: row.aliased,
+        }),
         apiShape: creds.apiShape,
         providerId: creds.providerId,
         provider_name: getModelProvider(creds.providerId)?.displayName ?? null,
         pi_provider: resolvePiProvider(creds.providerId),
+        pi_dialect: resolvePiDialect(creds.providerId, row.modelId),
         base_url: creds.baseUrl,
         modelId: row.modelId,
         enabled: row.enabled,
@@ -539,11 +552,22 @@ export async function updateOrgModel(
     "aliased",
   ]);
 
+  const rowWhere = scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] });
   try {
-    await db
-      .update(orgModels)
-      .set(updates)
-      .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }));
+    await db.transaction(async (tx) => {
+      if (data.enabled === false) {
+        // The pointer is read under the row lock `setDefaultModel` also takes
+        // before checking `enabled`, so the two refusals cannot both be skipped.
+        await tx.select({ id: orgModels.id }).from(orgModels).where(rowWhere).for("update");
+        if ((await defaultModel.getDefaultId(orgId, tx)) === modelDbId) {
+          throw conflict(
+            "model_disabled",
+            "The default model cannot be disabled. Pick another default model first, or clear the default (PUT /api/models/default with `modelId: null`).",
+          );
+        }
+      }
+      await tx.update(orgModels).set(updates).where(rowWhere);
+    });
   } catch (err) {
     // Repointing a row's model or credential can land on a binding another row
     // already holds. The failed UPDATE rolled back, so the row still reads its
@@ -661,7 +685,8 @@ export async function seedOrgModelsForCredential(
  * model OR one of the org's own rows — picking any row makes exactly that row
  * the default (the integration `setDefaultIntegrationClient` analogue). An
  * unknown custom id is rejected, never stored. A single pointer write — no
- * per-row flag flip — so there is nothing to keep transactionally consistent.
+ * per-row flag flip — made under the target row's lock, the one
+ * {@link updateOrgModel} takes to refuse disabling the default.
  */
 export async function setDefaultModel(orgId: string, modelDbId: string | null): Promise<void> {
   // A model on a dead credential is now LISTED rather than silently dropped
@@ -669,19 +694,37 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // client's reach here. Refuse it: the pointer feeds every run and chat, and
   // resolution of a dead model fails at inference time. The check lives in this
   // service — NOT in `createDefaultPointer`, which is shared byte-for-byte with
-  // `org-proxies` and must stay generic. `modelNeedsReconnection` is the single
-  // predicate (system ids, unknown rows and non-UUIDs all answer false, so the
-  // pointer helper below still owns the 404).
-  if (modelDbId !== null && (await modelNeedsReconnection(orgId, modelDbId))) {
+  // `org-proxies` and must stay generic. System ids, unknown rows and non-UUIDs
+  // carry no binding, so the pointer helper below still owns the 404.
+  const row = modelDbId === null ? undefined : await loadModelBinding(orgId, modelDbId);
+  if (row?.enabled && (await credentialIsDeadButListed(orgId, row.credentialId))) {
     throw conflict(
       "model_needs_reconnection",
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
     );
   }
-  // Validate the target before storing it (mirrors the integration set-default
-  // guard). A system id is trusted via the registry; a custom id must be a row
-  // the org owns.
-  await defaultModel.setDefault(orgId, modelDbId);
+  await db.transaction(async (tx) => {
+    // `resolveModel` skips a switched-off row. `enabled` is read under the row
+    // lock `updateOrgModel` takes before checking the pointer, so a concurrent
+    // disable is either seen here or sees this pointer.
+    if (row && modelDbId !== null) {
+      const [locked] = await tx
+        .select({ enabled: orgModels.enabled })
+        .from(orgModels)
+        .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
+        .for("update");
+      if (locked && !locked.enabled) {
+        throw conflict(
+          "model_disabled",
+          "A disabled model cannot be the default model. Enable it, or pick another model.",
+        );
+      }
+    }
+    // Validate the target before storing it (mirrors the integration set-default
+    // guard). A system id is trusted via the registry; a custom id must be a row
+    // the org owns.
+    await defaultModel.setDefault(orgId, modelDbId, tx);
+  });
 }
 
 // --- Resolution ---
@@ -716,6 +759,8 @@ export interface ResolvedModel extends Pick<
    * a gateway. The key every runtime channel carries — never the Appstrate id.
    */
   piProvider: string | null;
+  /** The Pi dialect of the catalog's record; `null` for a model it does not record. */
+  dialect: PiModelDialect | null;
   /** Request controls supported by the backing model in the catalog. */
   generation?: ModelGenerationCapabilities;
   /**
@@ -796,9 +841,13 @@ export interface CatalogDefaults {
   generation?: ModelGenerationCapabilities;
 }
 
-export function resolveCatalogDefaults(providerId: string, modelId: string): CatalogDefaults {
+export function resolveCatalogDefaults(
+  providerId: string,
+  modelId: string,
+  scope: CatalogScope = "all",
+): CatalogDefaults {
   const provider = getModelProvider(providerId);
-  const entry = provider ? lookupCatalogModel(provider, modelId) : null;
+  const entry = provider ? lookupCatalogModel(provider, modelId, scope) : null;
   if (!entry) return {};
   return {
     label: entry.label,
@@ -811,10 +860,47 @@ export function resolveCatalogDefaults(providerId: string, modelId: string): Cat
   };
 }
 
+/** What decides the controls of a model: its API, its declared reasoning, and whether it is an alias. */
+interface GenerationSubject {
+  apiShape: string;
+  reasoning: boolean | null;
+  aliased: boolean;
+}
+
+/**
+ * The controls of a model the catalog has no record of: the reasoning levels Pi
+ * takes for the model this platform builds for it ({@link buildPiModel}).
+ * Its temperature support stays unknown.
+ */
+function unrecordedGeneration({
+  apiShape,
+  reasoning,
+}: GenerationSubject): ModelGenerationCapabilities {
+  const levels = new Set<string>(
+    piReasoningLevels(buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning })),
+  );
+  return {
+    temperature: "unknown",
+    reasoning: {
+      supported: reasoning ? "supported" : "unsupported",
+      adaptive: null,
+      levels: Object.fromEntries(
+        MODEL_REASONING_LEVELS.map((level) => [
+          level,
+          levels.has(level) ? "supported" : "unsupported",
+        ]),
+      ),
+    },
+  };
+}
+
 /** The controls a caller may set: an alias's are its public contract, never its backing's. */
-function generationOf(defaults: CatalogDefaults, aliased: boolean): ModelGenerationCapabilities {
-  const generation = defaults.generation ?? UNKNOWN_MODEL_GENERATION_CAPABILITIES;
-  return aliased ? projectAliasedGenerationCapabilities(generation) : generation;
+function generationOf(
+  defaults: CatalogDefaults,
+  subject: GenerationSubject,
+): ModelGenerationCapabilities {
+  const generation = defaults.generation ?? unrecordedGeneration(subject);
+  return subject.aliased ? projectAliasedGenerationCapabilities(generation) : generation;
 }
 
 function resolvePiProvider(providerId: string): string | null {
@@ -822,18 +908,35 @@ function resolvePiProvider(providerId: string): string | null {
   return def ? piProviderOf(def) : null;
 }
 
+/** The Pi dialect of the provider's record of `modelId` — what every model builder is handed. */
+function resolvePiDialect(
+  providerId: string,
+  modelId: string,
+  scope: CatalogScope = "all",
+): PiModelDialect | null {
+  const def = getModelProvider(providerId);
+  return def ? lookupCatalogDialect(def, modelId, scope) : null;
+}
+
 /** Build a `ResolvedModel` from a system `ModelDefinition` (env-driven). */
 function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
-  const defaults = resolveCatalogDefaults(def.providerId, def.modelId);
+  // The bundled registry alone: the platform pays for a system model.
+  const defaults = resolveCatalogDefaults(def.providerId, def.modelId, "bundled");
+  const metadata = resolveModelMetadata(def, def.modelId, defaults);
   return {
     providerId: def.providerId,
     piProvider: resolvePiProvider(def.providerId),
+    dialect: resolvePiDialect(def.providerId, def.modelId, "bundled"),
     apiShape: def.apiShape,
     baseUrl: def.baseUrl,
     modelId: def.modelId,
     apiKey: def.apiKey,
-    ...resolveModelMetadata(def, def.modelId, defaults),
-    generation: generationOf(defaults, def.aliased === true),
+    ...metadata,
+    generation: generationOf(defaults, {
+      apiShape: def.apiShape,
+      reasoning: metadata.reasoning,
+      aliased: def.aliased === true,
+    }),
     isSystemModel: true,
     aliased: def.aliased === true,
     aliasId: def.id,
@@ -850,15 +953,21 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
  */
 function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): ResolvedModel {
   const defaults = resolveCatalogDefaults(creds.providerId, row.modelId);
+  const metadata = resolveModelMetadata(row, row.modelId, defaults);
   return {
     providerId: creds.providerId,
     piProvider: resolvePiProvider(creds.providerId),
+    dialect: resolvePiDialect(creds.providerId, row.modelId),
     apiShape: creds.apiShape,
     baseUrl: creds.baseUrl,
     modelId: row.modelId,
     apiKey: creds.apiKey,
-    ...resolveModelMetadata(row, row.modelId, defaults),
-    generation: generationOf(defaults, row.aliased),
+    ...metadata,
+    generation: generationOf(defaults, {
+      apiShape: creds.apiShape,
+      reasoning: metadata.reasoning,
+      aliased: row.aliased,
+    }),
     isSystemModel: false,
     aliased: row.aliased,
     aliasId: row.id,
@@ -867,15 +976,16 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
   };
 }
 
-export async function resolveModel(
+/** The model a run gets, and whether the explicit id supplied it or a default did. */
+export async function resolveModelCascade(
   orgId: string,
   packageId: string,
   modelId: string | null,
-): Promise<ResolvedModel | null> {
+): Promise<{ model: ResolvedModel; fromExplicit: boolean } | null> {
   // 1. Explicit override (agent column or per-run)
   if (modelId) {
     const result = await loadModel(orgId, modelId);
-    if (result) return result;
+    if (result) return { model: result, fromExplicit: true };
     logger.warn("Agent model override not found, falling through to org default", {
       packageId,
       modelId,
@@ -888,19 +998,27 @@ export async function resolveModel(
   const pointer = await defaultModel.getDefaultId(orgId);
   if (pointer) {
     const resolved = await loadModel(orgId, pointer);
-    if (resolved) return resolved;
+    if (resolved) return { model: resolved, fromExplicit: false };
   }
 
   // 3. System default
   const system = getSystemModels();
   for (const [, def] of system) {
     if (def.isDefault && def.enabled !== false) {
-      return buildSystemResolvedModel(def);
+      return { model: buildSystemResolvedModel(def), fromExplicit: false };
     }
   }
 
   // 4. No model configured
   return null;
+}
+
+export async function resolveModel(
+  orgId: string,
+  packageId: string,
+  modelId: string | null,
+): Promise<ResolvedModel | null> {
+  return (await resolveModelCascade(orgId, packageId, modelId))?.model ?? null;
 }
 
 export async function loadModel(orgId: string, modelDbId: string): Promise<ResolvedModel | null> {
@@ -975,8 +1093,9 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
 /**
  * Disambiguate the `loadModel(...) === null` result for an org (DB) model: is it
  * null because the model is missing/disabled, or because its stored credential
- * can no longer serve inference — an OAuth credential flagged
- * `needsReconnection`, or (either auth mode) a blob that no longer decrypts?
+ * can no longer serve inference — a credential flagged `needsReconnection` (a
+ * revoked OAuth grant, or a BYOK API key rejected upstream too often), or
+ * (either auth mode) a blob that no longer decrypts?
  *
  * Returns `true` only for that second case, so a caller can surface an
  * actionable "reconnect" instead of a misleading "not found / not enabled".
@@ -999,26 +1118,35 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
  * it — and the actionable advice for it is "enable it", not "reconnect".
  */
 export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
-  if (isSystemModel(modelDbId)) return false;
+  const row = await loadModelBinding(orgId, modelDbId);
+  return !!row && row.enabled && (await credentialIsDeadButListed(orgId, row.credentialId));
+}
 
-  let row: { credentialId: string; enabled: boolean } | undefined;
+/** A custom row's credential and switch — undefined for a system id, an unknown row or a non-UUID. */
+async function loadModelBinding(
+  orgId: string,
+  modelDbId: string,
+): Promise<{ credentialId: string; enabled: boolean } | undefined> {
+  if (isSystemModel(modelDbId)) return undefined;
   try {
-    [row] = await db
+    const [row] = await db
       .select({ credentialId: orgModels.credentialId, enabled: orgModels.enabled })
       .from(orgModels)
       .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
       .limit(1);
+    return row;
   } catch (err) {
     // Same non-UUID cast hazard `loadModel` guards against → treat as "no".
-    if (isInvalidTextRepresentation(err)) return false;
+    if (isInvalidTextRepresentation(err)) return undefined;
     throw err;
   }
-  if (!row || !row.enabled || !row.credentialId) return false;
+}
 
-  // The list's two tests, in its order: dead for inference, but still
-  // renderable. See the doc block for why the second one is not redundant.
-  if ((await loadInferenceCredentials(orgId, row.credentialId)) !== null) return false;
-  return (await loadCredentialRow(row.credentialId, orgId)) !== null;
+/** Dead for inference but still renderable — see {@link modelNeedsReconnection}. */
+async function credentialIsDeadButListed(orgId: string, credentialId: string): Promise<boolean> {
+  if (!credentialId) return false;
+  if ((await loadInferenceCredentials(orgId, credentialId)) !== null) return false;
+  return (await loadCredentialRow(credentialId, orgId)) !== null;
 }
 
 /**
@@ -1114,7 +1242,7 @@ export function clampToBackingLevel(
   if (level == null) return settings;
   const piModel = buildPiModel({
     id: model.modelId,
-    registryModelId: model.modelId,
+    dialect: model.dialect,
     apiShape: model.apiShape,
     piProvider: model.piProvider,
     baseUrl: model.baseUrl,

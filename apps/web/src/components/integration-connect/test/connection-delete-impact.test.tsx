@@ -4,15 +4,18 @@
  * The delete confirmation says which of the caller's agents and schedules lose
  * the connection, and what each keeps: fewer connections, or none (back to the
  * usual resolution) — or, for an enabled schedule left with none, that it is
- * disabled.
+ * disabled — and how many schedules of other people it disables, unnamed. Until the
+ * impact arrives it says it is checking; a failed check says so.
  */
 
 import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type paths } from "../../../api/client.ts";
+import { ApiError } from "../../../api/errors.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { ConnectionDeleteImpact } from "../connection-delete-impact.tsx";
+import { useConnectionDeleteImpact } from "../../../hooks/use-me-connections.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -22,6 +25,11 @@ const CONNECTION = "33333333-3333-4333-8333-333333333333";
 type Impact =
   paths["/api/me/connections/{connectionId}/delete-impact"]["get"]["responses"][200]["content"]["application/json"];
 
+function Harness() {
+  const impact = useConnectionDeleteImpact(CONNECTION);
+  return <ConnectionDeleteImpact impact={impact} />;
+}
+
 function renderWith(impact: Impact): string {
   const qc = new QueryClient();
   const { queryKey } = $api.queryOptions(
@@ -30,7 +38,7 @@ function renderWith(impact: Impact): string {
     { params: { path: { connectionId: CONNECTION } } },
   );
   qc.setQueryData(queryKey, impact);
-  return render(<ConnectionDeleteImpact connectionId={CONNECTION} />, { queryClient: qc });
+  return render(<Harness />, { queryClient: qc });
 }
 
 describe("ConnectionDeleteImpact", () => {
@@ -51,6 +59,7 @@ describe("ConnectionDeleteImpact", () => {
         },
       ],
       schedules: [],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Ops multi");
@@ -82,6 +91,7 @@ describe("ConnectionDeleteImpact", () => {
           disables: false,
         },
       ],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Rapport du lundi");
@@ -106,6 +116,7 @@ describe("ConnectionDeleteImpact", () => {
           disables: true,
         },
       ],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain("Veille");
     expect(html).toContain("(Ops multi)");
@@ -113,9 +124,34 @@ describe("ConnectionDeleteImpact", () => {
     expect(html).not.toContain(i18n.t("settings:connections.impact.scheduleResets"));
   });
 
-  it("renders nothing when the delete rewrites none of the caller's references", () => {
-    expect(renderWith({ pins: [], schedules: [] })).not.toContain(
-      'data-testid="connection-delete-impact"',
+  it("counts other people's schedules the delete disables, naming none of them", () => {
+    const html = renderWith({ pins: [], schedules: [], other_schedules_disabled_count: 2 });
+    expect(html).toContain('data-testid="connection-delete-impact"');
+    expect(html).toContain(
+      i18n.t("settings:connections.scheduleImpact.othersDisabled", { count: 2 }),
     );
+    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 2 }));
+  });
+
+  it("renders nothing when the delete rewrites none of the caller's references", () => {
+    expect(
+      renderWith({ pins: [], schedules: [], other_schedules_disabled_count: 0 }),
+    ).not.toContain('data-testid="connection-delete-impact"');
+  });
+
+  it("says it is checking until the impact arrives", () => {
+    const html = render(<Harness />, { queryClient: new QueryClient() });
+    expect(html).toContain('data-testid="connection-delete-impact-loading"');
+    expect(html).toContain(i18n.t("settings:connections.deleteImpact.loading"));
+  });
+
+  it("says the check failed when the impact cannot be read", () => {
+    const html = render(
+      <ConnectionDeleteImpact
+        impact={{ data: undefined, error: new ApiError("internal_error", "boom", 500) }}
+      />,
+    );
+    expect(html).toContain('data-testid="connection-delete-impact-error"');
+    expect(html).toContain(i18n.t("settings:connections.deleteImpact.error"));
   });
 });

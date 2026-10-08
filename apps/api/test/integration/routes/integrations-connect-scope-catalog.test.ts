@@ -56,7 +56,7 @@ function manifest(): IntegrationManifest {
     version: "0.1.0",
     display_name: "Gmail",
     description: "Gmail integration",
-    source: { kind: "local", server: { name: INTEGRATION, version: "^0.1.0" } },
+    source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
     auths: {
       catalogued: oauth([
         { value: "openid", label: "OpenID" },

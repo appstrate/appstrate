@@ -20,6 +20,7 @@ import { isModelLive } from "./model-liveness.ts";
 import { logger } from "./logger.ts";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
+import type { PiModelDialect } from "@appstrate/core/sidecar-types";
 
 export interface OrgModel {
   id: string;
@@ -28,8 +29,10 @@ export interface OrgModel {
   apiShape: string;
   /** Credential provider id — distinguishes claude-code (subscription) from anthropic (api key). */
   providerId?: string;
-  /** Pi registry provider whose record shapes the request; `null` for a gateway. */
+  /** Pi registry provider the request is shaped for; `null` for a gateway. */
   pi_provider: string | null;
+  /** The Pi dialect of the registry's record; `null` when it keeps none. */
+  pi_dialect: PiModelDialect | null;
   label?: string;
   enabled?: boolean;
   /** snake_case to match the `/api/models` wire field — camelCase silently never matches. */

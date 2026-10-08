@@ -9,21 +9,20 @@ import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
-import { onMutationError } from "../lib/mutation-error";
+import i18n from "../i18n";
 import {
   packageKeys,
   agentsKeys,
-  runsKeys,
   runKeys,
   paginatedRunsKeys,
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 
-// NOTE on query keys: run-cache keys (["runs"], ["paginated-runs"], ["run"])
+// NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
 // events, and the runs hooks are migrated with the same pinned keys. The
 // package/agent keys stay legacy too (see the note in use-packages.ts).
@@ -47,7 +46,6 @@ export function useSaveInputSettings(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
     },
-    onError: onMutationError,
   });
 }
 
@@ -98,11 +96,10 @@ function useRunAgent(packageId: string) {
       return data!;
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: runsKeys.all });
-      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
+      // Stale, not refetched: every launch leaves for the run's own page.
+      qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
     },
-    onError: onMutationError,
   });
 }
 
@@ -118,33 +115,41 @@ export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  const [isPending, setIsPending] = useState(false);
+  const [flight] = useState(() => launchFlight(setIsPending));
 
-  const onError = (err: Error) => {
-    const errors = missingConnectionErrors(err);
-    if (errors) setMissingErrors(errors);
-  };
-
-  return {
-    isPending: runAgent.isPending,
-    missingErrors,
-    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
-    launch: (launch: RunLaunch, onSuccess?: () => void) => {
-      lastLaunch.current = { launch, onSuccess };
-      runAgent.mutate(launch, { onSuccess, onError });
-    },
-    retry: (picks: Record<string, string[]>) => {
-      const { launch, onSuccess } = lastLaunch.current;
-      const next = retryLaunch(launch, picks, missingErrors ?? []);
-      lastLaunch.current = { launch: next, onSuccess };
-      runAgent.mutate(next, {
+  const send = (launch: RunLaunch, onSuccess?: () => void) => {
+    flight.run(
+      () => {
+        lastLaunch.current = { launch, onSuccess };
+        return runAgent.mutateAsync(launch);
+      },
+      {
         onSuccess: () => {
           setMissingErrors(null);
           onSuccess?.();
         },
-        onError,
-      });
+        // The mutation cache reports every failure; this picks up the 409.
+        onError: (err) => {
+          const errors = missingConnectionErrors(err);
+          if (errors) setMissingErrors(errors);
+        },
+      },
+    );
+  };
+
+  return {
+    isPending,
+    missingErrors,
+    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
+    launch: send,
+    retry: (picks: Record<string, string[]>) => {
+      const { launch, onSuccess } = lastLaunch.current;
+      send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
     },
     dismiss: () => {
+      // A retry still in flight must not reopen the modal.
+      flight.forget();
       setMissingErrors(null);
       runAgent.reset();
     },
@@ -159,6 +164,7 @@ export function useImportPackage({
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       file,
       force,
@@ -216,7 +222,6 @@ export function useImportPackage({
         navigate(packageDetailPath(data.type, data.packageId));
       }
     },
-    onError: onMutationError,
   });
 }
 
@@ -224,6 +229,7 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async (url: string) => {
       const { data } = await client.POST("/api/packages/import-github", { body: { url } });
       return data!;
@@ -235,7 +241,6 @@ export function useImportFromGithub() {
       invalidatePackageFiles(qc);
       navigate(packageDetailPath(data.type, data.packageId));
     },
-    onError: onMutationError,
   });
 }
 
@@ -250,10 +255,8 @@ export function useCancelRun() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: runKeys.all });
-      qc.invalidateQueries({ queryKey: runsKeys.all });
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -267,12 +270,11 @@ export function useDeleteAgentRuns(packageId: string) {
       return data!;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: runsKeys.all });
+      toast.success(i18n.t("agents:detail.runsDeleted"));
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
       qc.invalidateQueries({ queryKey: agentsKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -289,7 +291,6 @@ export function useDeleteAgent() {
       qc.invalidateQueries({ queryKey: agentsKeys.all });
       navigate("/");
     },
-    onError: onMutationError,
   });
 }
 
@@ -306,7 +307,6 @@ export function useDeleteMemory(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -322,7 +322,6 @@ export function useDeleteAllMemories(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: persistenceKeys.all });
     },
-    onError: onMutationError,
   });
 }
 
@@ -331,6 +330,7 @@ export function useDeleteAllMemories(packageId: string) {
 export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
     // declared here that the server does not model is a 400 rather than a
@@ -340,7 +340,7 @@ export function useCreatePackage(type: PackageType) {
       manifest: Record<string, unknown>;
       content: string;
       operations?: components["schemas"]["PackageFileWriteOperation"][];
-    }): Promise<{ id: string }> => {
+    }): Promise<{ id: string; version_count?: number }> => {
       // 201 → the created package resource, bare (issue #657).
       switch (type) {
         case "mcp-server":
@@ -358,24 +358,25 @@ export function useCreatePackage(type: PackageType) {
               manifest: body.manifest as components["schemas"]["AgentManifest"],
             },
           });
-          return { id: data!.id };
+          return data!;
         }
         case "skill": {
           const { data } = await client.POST("/api/packages/skills", { body });
-          return { id: data!.id };
+          return data!;
         }
         case "integration": {
           const { data } = await client.POST("/api/packages/integrations", { body });
-          return { id: data!.id };
+          return data!;
         }
       }
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // The create route skips the initial version when the publish gate would refuse it.
+      if (data.version_count === 0) toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
     },
-    onError: onMutationError,
   });
 }
 
@@ -392,6 +393,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
     // Every caller builds `body` through `packageUpdateBody`, and none of them
     // sends the API's `content` field any more: a package's primary file is
     // one of its files, written as a file operation like the others.
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({
       etag,
       body,
@@ -425,6 +427,5 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
     },
-    onError: onMutationError,
   });
 }

@@ -20,8 +20,8 @@
  *
  * Allowlist rationale: we never ship `set-cookie` (state-bearing
  * cookies are owned by the sidecar's cookie jar, not the agent),
- * `www-authenticate` (auth challenges are translated to
- * `X-Auth-Refreshed` semantics), or any header that could let a
+ * `www-authenticate` (the sidecar answers auth challenges itself),
+ * or any header that could let a
  * malicious upstream influence the agent's runtime configuration.
  * Everything required by Google-resumable / S3-multipart / tus /
  * Microsoft-Graph upload protocols is on the list, plus a small set of
@@ -98,15 +98,30 @@ export const UPSTREAM_HEADER_ALLOWLIST = new Set<string>([
  *
  * - On a real upstream exchange: `status` is the upstream HTTP code,
  *   `headers` is the allowlisted projection.
- * - On a sidecar pre-flight failure (no upstream contact — credential
- *   fetch failure, URL not in `authorizedUris`, body too large): the
- *   sidecar ships `status: 0`, `headers: {}` so the runtime can
- *   distinguish "no upstream contact" from "upstream returned 5xx"
- *   without relying on the absence of `_meta`.
+ * - When the sidecar answered itself (no upstream response reached the
+ *   agent — a pre-flight refusal such as credential fetch failure, URL
+ *   not in `authorizedUris` or body too large, or a failure after
+ *   sending such as a timeout or unreachable upstream): the sidecar
+ *   ships `status: 0`, `headers: {}` so the runtime can distinguish it
+ *   from "upstream returned 5xx" without relying on the absence of
+ *   `_meta`.
  */
 export interface UpstreamMeta {
-  /** Upstream HTTP status code, or 0 for sidecar pre-flight failures. */
+  /** Upstream HTTP status code, or 0 when the sidecar answered itself. */
   status: number;
   /** Lowercased, allowlisted upstream response headers. */
   headers: Record<string, string>;
+}
+
+/** `_meta` key of the code of an `api_call` the sidecar answered itself (beside status 0). */
+export const API_CALL_ERROR_META_KEY = "dev.appstrate/api-call-error";
+
+/** Serialised proxy failure. `code` is afps-runtime's `ApiCallFailureCode`. */
+export interface ApiCallErrorMeta {
+  code: string;
+}
+
+/** The line that tells the model an `api_call`'s status, and its failure code when it has one. */
+export function apiCallStatusLine(status: number, code?: string): string {
+  return `[api_call status=${status}${code ? ` code=${code}` : ""}]`;
 }

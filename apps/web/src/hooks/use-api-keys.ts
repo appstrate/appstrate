@@ -35,6 +35,7 @@ export function useAvailableScopes() {
 export function useCreateApiKey() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/api-keys", {
+    meta: { errorHandledByCaller: true },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/api-keys"] });
     },

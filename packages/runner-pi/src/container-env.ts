@@ -9,6 +9,7 @@
 import { createLogger } from "@appstrate/core/logger";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelInputModality } from "@appstrate/core/module";
+import type { PiModelDialect } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /**
@@ -29,6 +30,11 @@ export interface RuntimePiModelConfig {
   modelId: string;
   /** Pi provider key of the real upstream → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   piProvider?: string | null;
+  /**
+   * The model's Pi dialect → `MODEL_DIALECT`; null when Pi keeps no record of
+   * it. Pass it even for an {@link aliased} run.
+   */
+  dialect: PiModelDialect | null;
   /**
    * `MODEL_API_KEY` of an OAuth-subscription run: shaped like its token, never
    * the token. Absent otherwise → {@link API_KEY_PLACEHOLDER}.
@@ -159,11 +165,16 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // emits plain-OpenAI shape at every provider.
   // An ALIASED run never emits it — naming the vendor is the leak, and there is
   // nothing left to configure, `pi-messages` having one request shape.
-  if (model.piProvider && !model.aliased) env.MODEL_PROVIDER = model.piProvider;
+  // Its record's dialect rides with it, `null` when Pi keeps none. An alias
+  // gets neither: compat flags name the vendor family.
+  if (model.piProvider && !model.aliased) {
+    env.MODEL_PROVIDER = model.piProvider;
+    env.MODEL_DIALECT = JSON.stringify(model.dialect);
+  }
 
   // --- Model-alias masking: the one place the alias policy touches the container
-  // env contract. An alias withholds `MODEL_PROVIDER` and `MODEL_COST`, and
-  // replaces `MODEL_API` with the canonical dialect.
+  // env contract. An alias withholds `MODEL_PROVIDER`, `MODEL_DIALECT` and
+  // `MODEL_COST`, and replaces `MODEL_API` with the canonical dialect.
   // `MODEL_INPUT` and the two token limits go out unchanged: the container needs
   // them — dropping `MODEL_INPUT` silently disables image input — and the exact
   // `usage.input` count it reports out-tells what withholding them could hide.

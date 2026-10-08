@@ -29,6 +29,7 @@ import { PanelDialog } from "./panel-dialog";
 import { SettingsHeading } from "./settings/settings-heading";
 import { openAsModal, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
+import { activeSettingsItem } from "../lib/settings-nav";
 import {
   Select,
   SelectContent,
@@ -105,9 +106,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
     .filter((s) => s.items.length > 0);
 
   const allItems = visibleSections.flatMap((s) => s.items);
-  const activeItem =
-    allItems.find((i) => location.pathname === i.to) ??
-    allItems.find((i) => location.pathname.startsWith(i.to + "/"));
+  const activeItem = activeSettingsItem(allItems, location.pathname);
 
   // Keep the same screen underneath while moving between sections; without it
   // every rail click would close the overlay and navigate for real.
@@ -156,11 +155,12 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
   // Same items, one line high. Grouped so the sections survive the collapse.
   const mobileNav = (
     <Select
-      value={activeItem?.to ?? allItems[0]?.to ?? ""}
+      value={activeItem?.to ?? ""}
       onValueChange={(to) => navigate(to, { state: keepOverlay })}
     >
       <SelectTrigger>
-        <SelectValue />
+        {/* No tab for this URL (a hidden one): name the surface, not a wrong tab. */}
+        <SelectValue placeholder={title} />
       </SelectTrigger>
       <SelectContent>
         {visibleSections.map((section, idx) => (

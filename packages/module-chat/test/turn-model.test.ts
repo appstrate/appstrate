@@ -11,7 +11,7 @@
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
-import { latestTurnModelId, turnModelLabel } from "../src/ui/turn-model.ts";
+import { latestTurnModelId, turnModelLabel, turnModelSentenceKey } from "../src/ui/turn-model.ts";
 
 /** An assistant message carrying the metadata `closePiTurn` stamps. */
 function assistant(
@@ -55,6 +55,24 @@ describe("reading a turn's model", () => {
     const user = { id: "u", role: "user", parts: [{ type: "text", text: "hi" }] } as UIMessage;
     expect(latestTurnModelId([user])).toBeNull();
     expect(turnModelLabel(user)).toBeNull();
+  });
+
+  it("says a failed turn failed with its model, not that the model answered", () => {
+    // The metadata is stamped on failed turns too, and survives reload.
+    expect(turnModelSentenceKey(assistant("a", OPUS))).toBe("model.answeredBy");
+    expect(turnModelSentenceKey(assistant("a", OPUS, { finishReason: "error" }))).toBe(
+      "model.failedWith",
+    );
+    // Same verdict as the error alert under it (`turnFailed`): a turn cut by
+    // the deadline while failing failed; one that simply ran out of clock did not.
+    expect(
+      turnModelSentenceKey(
+        assistant("a", OPUS, { finishReason: "deadline", errorCategory: "rate_limited" }),
+      ),
+    ).toBe("model.failedWith");
+    expect(turnModelSentenceKey(assistant("a", OPUS, { finishReason: "deadline" }))).toBe(
+      "model.answeredBy",
+    );
   });
 });
 

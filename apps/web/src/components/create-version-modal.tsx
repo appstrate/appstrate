@@ -9,9 +9,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ApiError } from "../api/errors";
-import { translateSkillFrontmatterError } from "../lib/skill-frontmatter";
+import { errorMessage } from "../lib/mutation-error";
 
 interface CreateVersionModalProps {
   open: boolean;
@@ -78,7 +77,7 @@ export function CreateVersionModal({
                 ? t("version.draftChanged")
                 : null;
           setError("root", {
-            message: refused ?? translateSkillFrontmatterError(err, t) ?? getErrorMessage(err),
+            message: refused ?? errorMessage(err),
           });
         },
       },
@@ -99,7 +98,7 @@ export function CreateVersionModal({
       actions={
         <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
           {createVersion.isPending && <Spinner />}{" "}
-          {targetVersion
+          {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}
         </Button>
@@ -120,7 +119,7 @@ export function CreateVersionModal({
           )}
         </div>
 
-        {needsBump && latestVersion && (
+        {needsBump && latestVersion && hasUnarchivedChanges && (
           <div className="space-y-2">
             <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
             <div className="flex gap-2">

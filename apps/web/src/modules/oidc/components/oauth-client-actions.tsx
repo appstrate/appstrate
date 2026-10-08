@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
 import { TableRowActions } from "../../../components/table-row-actions";
@@ -36,10 +34,7 @@ export function OAuthClientActions({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   function handleUpdate(body: { disabled?: boolean; isFirstParty?: boolean }) {
-    updateMutation.mutate(
-      { params: { path: { clientId: client.clientId } }, body },
-      { onError: (error) => toast.error(getErrorMessage(error)) },
-    );
+    updateMutation.mutate({ params: { path: { clientId: client.clientId } }, body });
   }
 
   function handleRotate() {
@@ -50,7 +45,6 @@ export function OAuthClientActions({
           setRotateConfirmOpen(false);
           setRotatedSecret(result.clientSecret);
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
       },
     );
   }
@@ -62,7 +56,6 @@ export function OAuthClientActions({
         onSuccess: () => {
           setDeleteConfirmOpen(false);
         },
-        onError: (error) => toast.error(getErrorMessage(error)),
       },
     );
   }

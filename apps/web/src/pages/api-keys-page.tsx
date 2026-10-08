@@ -18,7 +18,6 @@ import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useApiKeyColumns } from "./api-key-columns";
 
 export function ApiKeysPage() {
@@ -74,7 +73,7 @@ export function ApiKeysPage() {
         rowKey={(key) => key.id}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           <EmptyState
             message={t("settings:apiKeys.empty")}

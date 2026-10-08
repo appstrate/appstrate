@@ -98,9 +98,10 @@ export const integrationConnections = pgTable(
     // escalates such a connection to `needsReconnection` so the preflight
     // resolver catches it with an actionable cause instead of every run dying
     // opaquely at integration boot. Also counts upstream 401s on an auth that
-    // cannot refresh (no expiry gate) — cumulative since the last reconnect,
-    // not consecutive. Reset to 0 on any successful credential write
-    // (`persistCredentialBundle`).
+    // cannot refresh (no expiry gate) as a streak: on a non-OAuth2 connection
+    // any successful upstream call through the credential resets it
+    // (`clearUpstreamRejections`); an OAuth2 count is not reset by one. Reset
+    // to 0 on any successful credential write (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,
@@ -165,6 +166,13 @@ export const integrationConnections = pgTable(
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
+    ),
+    // Only a member shares: an end user's connection serves that end user's runs, so it never
+    // enters an admin pin or an org default, and its `end_user_id` cascade strands no id in
+    // either (`assertConnectionShareable` refuses the share with 409 first).
+    check(
+      "integration_connections_end_user_not_shared",
+      sql`NOT shared_with_org OR user_id IS NOT NULL`,
     ),
     // AFPS §7.2 (audit 03c §D-4): manifest auth keys MUST match
     // `^[a-z][a-z0-9_]*$`. The DB mirrors the manifest-side validation

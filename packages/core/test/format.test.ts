@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatDuration } from "../src/format.ts";
+import { formatBytes, formatDuration } from "../src/format.ts";
 
 describe("formatDuration", () => {
   it("renders sub-second values as rounded milliseconds", () => {
@@ -25,5 +25,39 @@ describe("formatDuration", () => {
     expect(formatDuration(-500)).toBe("0ms");
     expect(formatDuration(Number.NaN)).toBe("0ms");
     expect(formatDuration(Number.POSITIVE_INFINITY)).toBe("0ms");
+  });
+});
+
+describe("formatBytes", () => {
+  it("keeps the English form when no locale is given", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(2048)).toBe("2.0 KB");
+    expect(formatBytes(12 * 1024)).toBe("12 KB");
+    expect(formatBytes(5.2 * 1024 * 1024)).toBe("5.2 MB");
+    expect(formatBytes(100 * 1024 ** 3)).toBe("100 GB");
+    expect(formatBytes(4096 * 1024 ** 3)).toBe("4096 GB");
+  });
+
+  it("falls back to a raw count for a malformed input", () => {
+    expect(formatBytes(-1)).toBe("-1 B");
+    expect(formatBytes(Number.NaN)).toBe("NaN B");
+  });
+
+  it("counts in octets with a decimal comma in French", () => {
+    expect(formatBytes(512, "fr")).toBe("512 o");
+    expect(formatBytes(2048, "fr")).toBe("2,0 Ko");
+    expect(formatBytes(1024 * 1024, "fr-FR")).toBe("1,0 Mo");
+    expect(formatBytes(12 * 1024 ** 3, "fr")).toBe("12 Go");
+  });
+
+  it("keeps the English units for another locale", () => {
+    expect(formatBytes(2048, "en")).toBe("2.0 KB");
+  });
+
+  it("renders the English form for a malformed locale tag instead of throwing", () => {
+    expect(formatBytes(2048, "fr_FR")).toBe("2.0 KB");
+    expect(formatBytes(512, "fr_FR")).toBe("512 B");
+    expect(formatBytes(2048, "")).toBe("2.0 KB");
   });
 });

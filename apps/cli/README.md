@@ -14,7 +14,7 @@ Lives at [`apps/cli/`](./) in the monorepo; versioned in lockstep with the platf
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `/usr/local/bin/appstrate`, and immediately execs `appstrate install`.
+Detects your OS/arch, downloads the matching binary of the release the served installer is pinned to (with `APPSTRATE_VERSION=latest`, the tag named by the minisign-signed channel manifest `https://get.appstrate.dev/channels/latest.json`) from [GitHub Releases](https://github.com/appstrate/appstrate/releases), drops it at `~/.local/bin/appstrate` (rootless default; override with `APPSTRATE_BIN_DIR`), and immediately execs `appstrate install`.
 
 Supported: `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`. **Windows is not a v1 target** — run the one-liner inside WSL2 (which reuses the `linux-x64` binary), or invoke `bunx appstrate install` natively if you already have Bun on Windows.
 
@@ -80,12 +80,12 @@ appstrate install --tier 0 --dir ~/demo-appstrate
 
 **Tiers**
 
-| Tier | Runtime deps | Services                   | Storage    | Notes                                                  |
-| ---- | ------------ | -------------------------- | ---------- | ------------------------------------------------------ |
-| 0    | Bun          | None (PGlite in-process)   | Filesystem | Hobby / evaluation. CLI auto-installs Bun if missing.  |
-| 1    | Docker       | PostgreSQL                 | Filesystem | Low-traffic single-node. In-memory scheduler / pubsub. |
-| 2    | Docker       | PostgreSQL + Redis         | Filesystem | Adds Redis (BullMQ, distributed rate-limiter).         |
-| 3    | Docker       | PostgreSQL + Redis + MinIO | S3         | Full production stack (default self-host target).      |
+| Tier | Runtime deps | Services                   | Storage    | Notes                                                   |
+| ---- | ------------ | -------------------------- | ---------- | ------------------------------------------------------- |
+| 0    | Bun          | None (PGlite in-process)   | Filesystem | Hobby / evaluation. CLI auto-installs Bun if missing.   |
+| 1    | Docker       | PostgreSQL                 | Filesystem | Low-traffic single-node. In-memory scheduler / pubsub.  |
+| 2    | Docker       | PostgreSQL + Redis         | Filesystem | Recommended default. Adds Redis (BullMQ, rate-limiter). |
+| 3    | Docker       | PostgreSQL + Redis + MinIO | S3         | Advanced: Tier 2 plus bundled MinIO object storage.     |
 
 **Tier 0 specifics**: `git clone`s the `appstrate/appstrate` monorepo at the CLI's release tag, runs `bun install`, writes `.env`, and `bun run dev` spawns the platform as a detached process. If Bun is absent, the CLI prompts to install it via the official installer into `~/.bun/bin` (user-local, no sudo).
 
@@ -229,7 +229,7 @@ appstrate self-update --force         # bypass version-equality short-circuit
 | `-f`, `--force`   | —       | Re-install even if already on target version. |
 
 - **curl channel** — resolves the newest release from the signed channel manifest (`https://get.appstrate.dev/channels/latest.json` + `.minisig`, verified with minisign before it is read; any failure is fatal — `--release` skips it), downloads the new binary, verifies minisign + SHA-256, and atomically replaces `~/.local/bin/appstrate`.
-- **bun channel** — refuses to overwrite, prints the matching `bun update -g @appstrate/cli` invocation.
+- **bun channel** — refuses to overwrite, prints the matching `bun update -g appstrate` invocation.
 - **unknown channel** — emits diagnostic instructions.
 
 Channel matrix and recipes: [`docs/cli/upgrades.md`](../../docs/cli/upgrades.md).
@@ -381,7 +381,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server, and installs every agent active in the pinned space as a command, `/appstrate:run-<agent>`, that launches it through that server (see [Agent commands](#agent-commands)).
 
-The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no hook, no daemon, no server-side change.
+The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no daemon, no server-side change; the plugin's one `SessionStart` hook only prints the session notice (below).
 
 ```sh
 appstrate code sync --target claude-plugin                                   # → the Claude Code plugin directory
@@ -443,7 +443,9 @@ if command -v appstrate >/dev/null 2>&1; then exec appstrate code sync --target 
 
 It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`, agents as `/appstrate:run-<agent>`.
 
-**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
+**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, and the session notice (below) says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run, leaves the installed plugin untouched, and writes the session notice. Explicit logout performs the cleanup described above.
+
+**Session notice.** Every generated plugin has one `SessionStart` hook that prints `$XDG_DATA_HOME/appstrate/skills-sync/notice.json`, if present, and never fails. A run with `--target claude-plugin` (not `--dry-run`) writes it, with the run's time and the command that fixes the problem, when the run fails on a lost login, a missing profile or pin, or a typed `--space` on a revoked organization, and when a sync that went through finds an unusable pinned space or a revoked organization; a fresh setup plugin and `appstrate logout` write the untimed setup notice with the login command. A plugin sync without such a problem deletes it; a network error, a 5xx or a CLI that cannot start leaves it alone. It shows at the next session start; after the fix, `claude plugin update appstrate@appstrate` re-runs the sync and a new session loads the result.
 
 **MCP connection.** A connected sync writes this `.mcp.json` at the plugin root, using the profile's instance, pinned organization and pinned space:
 
@@ -483,17 +485,18 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 
 **Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and `@scope/name` is not a legal skill name, so the directory is the frontmatter `name` when it is legal, else the slugified package `name` segment. An installed name stays with its package while the catalogue still lists it, even when this run could not read it; it changes owner only when its holder leaves or renames itself. A newcomer claiming a held name becomes `<scope>-<name>`, then `-2`, `-3`, … Every rename is reported on stderr.
 
-**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
+**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors; the actionable ones also write the session notice (see above). The first, fourth and fifth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
-| Condition                                                   | stderr                                                                                      |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Not logged in (or profile not configured)                   | `Profile "default" not configured. Run: appstrate login --profile default`                  |
-| Refresh token expired / session revoked                     | `Session for profile "default" is no longer valid … Run: appstrate login --profile default` |
-| No organization pinned                                      | `No organization pinned. Run: appstrate org switch`                                         |
-| No space pinned                                             | `No space pinned. Run: appstrate space switch`                                              |
-| `--print-path` without the plugin target                    | `--print-path prints the Claude Code plugin directory. Add: --target claude-plugin`         |
-| `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`               |
-| The catalogue call, a target write or the state file failed | the underlying error                                                                        |
+| Condition                                                   | stderr                                                                                                                                        |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Not logged in (or profile not configured)                   | `Profile "default" not configured. Run: appstrate login --profile default --instance <url>`                                                   |
+| No credentials (never stored, or refresh token expired)     | `No credentials for profile "default". Run: appstrate login --profile default --instance https://app.example.com`                             |
+| Session revoked (`invalid_grant`)                           | `Session for profile "default" is no longer valid (invalid_grant). Run: appstrate login --profile default --instance https://app.example.com` |
+| No organization pinned                                      | `No organization pinned. Run: appstrate org switch <org-id-or-slug> --profile default`                                                        |
+| No space pinned                                             | `No space pinned. Run: appstrate space switch <space-id> --profile default`                                                                   |
+| `--print-path` without the plugin target                    | `--print-path prints the Claude Code plugin directory. Add: --target claude-plugin`                                                           |
+| `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`                                                                 |
+| The catalogue call, a target write or the state file failed | the underlying error                                                                                                                          |
 
 **Per-skill failures within the same installed context are graded differently under `--print-path`.** A skill that was never published, whose bytes do not match the server's `X-Integrity`, or whose destination is not ours is reported on stderr and skipped; the rest of the sync completes.
 
@@ -508,7 +511,7 @@ A skill whose refresh fails keeps the version already on disk and its state entr
 Skipped @acme/pdf-tools on codex: /home/you/.agents/skills/pdf-tools exists and is not managed by appstrate — remove or rename it
 ```
 
-There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill. Concurrent syncs and logout cleanup are serialized by a `flock(2)` lock under `skills-sync/`. The kernel releases it when its descriptor closes or the process exits; the lock file is never removed. Where the platform or the filesystem has no working `flock(2)` — Windows, some NFS, 9p and virtiofs mounts — the sync runs unlocked and says so on stderr.
+There is no automatic rename: remove or rename the directory yourself and re-run. While a sync is in flight, staging happens under a dot-prefixed `.appstrate-staging/`, so neither Claude Code nor Codex can pick up a half-written skill. Concurrent syncs and logout cleanup are serialized by a `flock(2)` lock under `skills-sync/`. The kernel releases it when its descriptor closes or the process exits; the lock file is never removed. Where the platform or the filesystem has no working `flock(2)` — Windows, some NFS, 9p and virtiofs mounts — or the lock file cannot be created or opened, the sync runs unlocked and says so on stderr.
 
 Ownership is recorded per target **together with its profile context — profile name, instance, user and organization, and not the pinned space, which is only `.mcp.json` content — and the root it was written under**. `HOME` is not a constant — the same profile run from cron, `launchd`, `sudo -E` or a devcontainer can resolve a different `~/.agents/skills` — so a state file whose recorded root does not match the current one is read as claiming nothing. Every directory it finds is then treated as unmanaged: refused, never overwritten. A state file that does not name its context is refused the same way, for the same reason: nothing can say whose those directories are. That is what a ledger written by `v1.0.0-beta.56` or `.57` looks like — `claude-plugin` is regenerated whole and costs you nothing, while skills already synced into `codex` or `claude-user` are reported unmanaged once and have to be removed by hand before sync will own them again.
 
@@ -561,7 +564,7 @@ Two cases need you to run the sync yourself: you do not use Claude Code at all, 
 A cron entry every 15 minutes — cron's `PATH` is minimal, so give the absolute path:
 
 ```cron
-*/15 * * * * /usr/local/bin/appstrate code sync --target codex >/dev/null 2>&1
+*/15 * * * * $HOME/.local/bin/appstrate code sync --target codex >/dev/null 2>&1
 ```
 
 On macOS, prefer a `launchd` user agent running the same command every 900 seconds (`command -v appstrate` gives the absolute path).
@@ -574,7 +577,9 @@ Per-skill toggles survive all of this. We never write `~/.codex/config.toml`, an
 
 ### `appstrate packages` — pull, status, push, publish
 
-Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. [`appstrate code sync`](#appstrate-code-sync) is the other direction: it copies what is published (or, with `--source draft`, your draft) into your coding tools and never sends anything back — To try a skill before publishing it, even before pushing it, load its folder straight into Claude Code: `claude --plugin-dir <dir>` exposes it as `/<folder>:<name>` for that session, and `/reload-plugins` picks up edits. `push` prints that command for the folder it pushed. If the published version is installed too (`/appstrate:<name>` or a synced `/<name>`), the session holds both, so invoke the draft by its full name. To test whether Claude picks the skill on its own from its description, hide the published copy first: disable the `appstrate` plugin, or move a `claude-user` copy out of `~/.claude/skills/`. `code sync --source draft` is not the way to try one skill: it swaps every synced skill for its draft.
+Edit a package (skill, agent, integration, MCP server) in a local folder with any tool, then write it back to its **draft** and publish it as a separate, deliberate step. [`appstrate code sync`](#appstrate-code-sync) is the other direction: it copies what is published (or, with `--source draft`, your draft) into your coding tools and never sends anything back.
+
+To try a skill before publishing it, even before pushing it, load its folder straight into Claude Code: `claude --plugin-dir <dir>` exposes it as `/<folder>:<name>` for that session, and `/reload-plugins` picks up edits. `push` prints that command for the folder it pushed. If the published version is installed too (`/appstrate:<name>` or a synced `/<name>`), the session holds both, so invoke the draft by its full name. To test whether Claude picks the skill on its own from its description, hide the published copy first: disable the `appstrate` plugin, or move a `claude-user` copy out of `~/.claude/skills/`. `code sync --source draft` is not the way to try one skill: it swaps every synced skill for its draft.
 
 ```sh
 appstrate packages pull my-skill                 # the draft → <workDir>/<org>/packages/skills/@<org>/my-skill
@@ -672,6 +677,23 @@ appstrate api POST /api/agents/abc/run -d '@req.json'
 appstrate api https://app.example.com/api/health  # absolute URL ok if origin matches profile
 ```
 
+#### Headless use with an API key
+
+For a CI job or a shell-only agent, pass a scoped, revocable `apst_…` API key instead of logging in — the same pair `appstrate run` reads:
+
+```sh
+export APPSTRATE_API_KEY=apst_…                   # or --api-key <key> (the flag wins)
+export APPSTRATE_INSTANCE=https://app.example.com # optional when a profile exists: its instance is the fallback
+appstrate api GET /api/agents
+```
+
+- **The key replaces the profile credential entirely.** The keyring is not read, nothing is refreshed, and no profile needs to exist. An empty `APPSTRATE_API_KEY` counts as unset.
+- **The key's own org and space apply.** A key is pinned to one org and one space server-side, so the CLI injects neither `X-Org-Id` nor `X-Space-Id` (the platform answers 403 to a header that disagrees with the key). Your own `-H` headers still pass through. `appstrate run` follows the same rule: it sends only the ids `APPSTRATE_ORG_ID` / `APPSTRATE_SPACE_ID` name, never the profile's; a run executed locally (`--local`, or a bundle file) with remote integrations needs `APPSTRATE_SPACE_ID`.
+- **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If the variable is already set for `appstrate run`, `api` stops using your login in that shell: another principal, no org / space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to the profile.
+- **Prefer the environment variable to `--api-key`.** A command-line argument is visible to other local users through `ps`. An empty `--api-key ""` is refused rather than falling back to your login.
+- **Only `api` and `run` read the key.** `appstrate openapi` and the other commands still use the profile, so with `APPSTRATE_INSTANCE` set they may describe a different instance than the one `api` calls.
+- **The key is visible to whatever launches the command.** "The agent never sees the bearer" holds for the profile path only: an environment variable or a flag is readable by the process that sets it. Give an agent a key scoped to what it may do, not a login.
+
 #### curl → appstrate api mapping
 
 Every row below is a direct drop-in: an agent can replace `curl` with `appstrate api` and strip the hostname. All flags work identically.
@@ -741,7 +763,7 @@ Subset of curl's format string. Unknown variables pass through verbatim; `\n \r 
 #### Differences from curl (intentional)
 
 - **No `-u / --user`**: the whole point is that agents never see the bearer. Use `-H Authorization: …` if you really need to override (it's still `[REDACTED]` under `-v`).
-- **Cross-origin `<url>` refused**: the bearer must not leave the profile's instance. Explicit exit 2 with a pointer at plain `curl`.
+- **Cross-origin `<url>` refused**: the bearer must not leave the resolved instance (the profile's, or `APPSTRATE_INSTANCE` with an API key). Explicit exit 2 with a pointer at plain `curl`.
 - **Cookie jars rejected**: `-b file.txt` is refused (exit 2). An attacker-controlled path would otherwise silently end up in the Cookie header.
 - **No default `Content-Type`**: `-d` / `--data-urlencode` don't auto-set `application/x-www-form-urlencoded` the way curl does. Add `-H 'Content-Type: …'` explicitly when the server expects it (avoids corrupting multipart / binary payloads elsewhere in the API).
 
@@ -907,14 +929,16 @@ The fallback activates transparently when the keyring backend is missing (common
 ```
 $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 ├── config.toml                          # profiles, default profile pointer
-└── credentials.json                     # keyring fallback (only if keyring unavailable)
+├── credentials.json                     # keyring fallback (only if keyring unavailable)
+└── credentials.lock                     # flock(2) target serializing login's save, logout's delete and the token refresh across processes (never removed; skipped where flock(2) or the lock file is unavailable)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate code sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+├── skills-sync/notice.json              # what the plugin's `SessionStart` hook prints (written and deleted by `code sync` and logout)
 ├── packages/<profile>-locks.json       # working folder → package and the draft `ETag` it last saw (`appstrate packages`)
-├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed)
-└── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) is absent)
+├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed; unlocked where flock(2) or the lock file is unavailable)
+└── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) or the lock file is unavailable)
 ```
 
 `skills-sync/state.json` lives outside every target tree on purpose: the generated plugin's version is the hash of its contents, so a state blob inside it would make each sync look like a new plugin version. It is also the only record of which directories in the shared `~/.agents/skills/` and `~/.claude/skills/` belong to the sync.

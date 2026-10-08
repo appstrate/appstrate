@@ -31,7 +31,7 @@ import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
-import { ApiError, conflict, internalError, invalidRequest } from "../lib/errors.ts";
+import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, actorMatch, type Actor } from "../lib/actor.ts";
@@ -66,6 +66,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
+    disabled_reason: row.disabledReason,
     cron_expression: row.cronExpression,
     timezone: row.timezone,
     input: asRecordOrNull(row.input),
@@ -177,15 +178,27 @@ export async function assertScheduleActorValid(
   spaceId: string,
 ): Promise<void> {
   if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
-    throw invalidRequest(`Schedule refused: ${invalidScheduleActorReason(actor)}`, "actor");
+    throw new ApiError({
+      status: 400,
+      code: "schedule_actor_invalid",
+      title: "Invalid Request",
+      detail: `Schedule refused: ${invalidScheduleActorReason(actor)}`,
+      param: "actor",
+    });
   }
 }
 
 async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
   await db
     .update(schedules)
-    .set({ enabled: false, nextRunAt: null, updatedAt: new Date() })
-    .where(eq(schedules.id, scheduleId));
+    .set({
+      enabled: false,
+      disabledReason: "actor_invalid",
+      nextRunAt: null,
+      updatedAt: new Date(),
+    })
+    // A schedule paused while this fire ran is not relabelled.
+    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
   await removeScheduleJobs([scheduleId]);
 }
 
@@ -990,6 +1003,7 @@ export async function updateSchedule(
     nextRunAt: nextRun ?? null,
     updatedAt: new Date(),
   };
+  if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
   if (data.input !== undefined) payload.input = data.input;
   // Explicit `null` clears the override; `undefined` leaves it untouched.
@@ -1064,6 +1078,8 @@ export async function dropLockedFieldsFromSchedules(
         extra: [eq(schedules.packageId, packageId)],
       }),
     )
+    // Id order, like every writer locking several schedules (`schedules-naming-connection.ts`).
+    .orderBy(asc(schedules.id))
     .for("update");
 
   for (const row of rows) {

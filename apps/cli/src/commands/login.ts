@@ -44,7 +44,8 @@ import {
   updateProfile,
   getProfile,
 } from "../lib/config.ts";
-import { saveTokens } from "../lib/keyring.ts";
+import { deleteTokens, saveTokens } from "../lib/keyring.ts";
+import { withCredentialsLock } from "../lib/api.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
@@ -253,13 +254,12 @@ async function runLogin(
         "Check the server version and any middleware transforming the /api/auth/cli/token response, then retry.",
     );
   }
-  await saveTokens(profileName, {
+  const tokens = {
     accessToken: token.accessToken,
     expiresAt: Date.now() + token.expiresIn * 1000,
     refreshToken: token.refreshToken,
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
-  });
-
+  };
   // Preserve the previous `orgId` / `spaceId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call
   // happens to flake (network, server blip) would silently drop the pins
@@ -274,13 +274,24 @@ async function runLogin(
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
-  await setProfile(profileName, {
-    instance,
-    userId: identity.userId,
-    email: identity.email,
-    ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
-    ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
-    ...(sameUser && existingProfile?.syncSpaces ? { syncSpaces: existingProfile.syncSpaces } : {}),
+  // One hold of the lock for both writes; a failed profile write takes the pair back out.
+  await withCredentialsLock(async () => {
+    await saveTokens(profileName, tokens);
+    try {
+      await setProfile(profileName, {
+        instance,
+        userId: identity.userId,
+        email: identity.email,
+        ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
+        ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
+        ...(sameUser && existingProfile?.syncSpaces
+          ? { syncSpaces: existingProfile.syncSpaces }
+          : {}),
+      });
+    } catch (err) {
+      await deleteTokens(profileName).catch(() => {});
+      throw err;
+    }
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already

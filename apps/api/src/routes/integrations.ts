@@ -15,7 +15,7 @@
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
- *   - `PUT    /:packageId/oauth-clients/:clientId`   — admin: rotate a custom OAuth client
+ *   - `PATCH  /:packageId/oauth-clients/:clientId`   — admin: update a custom OAuth client
  *   - `DELETE /:packageId/oauth-clients/:clientId`   — admin: delete a custom OAuth client
  *   - `POST   /:packageId/oauth-clients/:clientId/promote` — admin: move it to the org tier
  *   - `POST   /:packageId/auths/:authKey/connect/session` — Porte A: mint a hosted
@@ -50,8 +50,10 @@ import {
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
   type IntegrationOAuthCallbackResult,
+  type OAuthClientResolver,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
+import type { IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -75,6 +77,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
+import type { AuditPayload } from "@appstrate/core/module";
 import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
@@ -88,6 +91,7 @@ import {
   promoteIntegrationOAuthClient,
   readIntegrationAuth,
   resolveIntegrationActivations,
+  resolveIntegrationClientById,
   serializeIntegrationConnection,
   setDefaultIntegrationClient,
   toPublicClient,
@@ -113,10 +117,12 @@ import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
-  deleteIntegrationPin,
+  deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
   loadConnectionOwnership,
+  pinAudit,
+  pinAuditResourceId,
   setBlockUserConnections,
   updateConnectionMetadata,
   upsertIntegrationPin,
@@ -303,20 +309,20 @@ export const oauthClientCreateSchema = oauthClientSchema
   });
 
 /**
- * Rotation body. `client_secret` is OPTIONAL and its absence means PRESERVE —
- * the rotate form submits an empty secret input whenever the admin only meant
- * to change the redirect URI, and treating that as "clear it" destroyed the
- * credential and flipped the client public.
+ * Update body, merge semantics: absent = unchanged, `null` clears `redirect_uri`.
+ * `client_secret` and `token_endpoint_auth_method` are written as a pair. No
+ * `client_id`: a new `client_id` is a new client.
  */
 export const oauthClientUpdateSchema = oauthClientSchema
+  .omit({ client_id: true })
+  .extend({ redirect_uri: z.url().nullable().optional() })
   .refine(noSecretWithPublicClient, {
     message: PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
     path: ["client_secret"],
   })
   // An EXPLICIT empty string is a destructive statement — it clears the stored
   // ciphertext — so it is only accepted alongside the declaration that makes it
-  // coherent. Absence stays untouched by this rule: it is the preserve path
-  // above, and the rotate form relies on it.
+  // coherent. Absence stays untouched by this rule: it is the preserve path.
   .refine((b) => !(b.client_secret === "" && b.token_endpoint_auth_method !== "none"), {
     message:
       "an empty client_secret clears the stored credential and is only accepted together with token_endpoint_auth_method='none'; omit the field entirely to preserve the stored secret",
@@ -339,12 +345,21 @@ function toOAuthClientCreateInput(body: z.infer<typeof oauthClientCreateSchema>)
 
 function toOAuthClientUpdateInput(body: z.infer<typeof oauthClientUpdateSchema>) {
   return {
-    clientId: body.client_id,
     ...(body.client_secret !== undefined ? { clientSecret: body.client_secret } : {}),
     ...(body.token_endpoint_auth_method !== undefined
       ? { tokenEndpointAuthMethod: body.token_endpoint_auth_method }
       : {}),
     ...(body.redirect_uri !== undefined ? { redirectUri: body.redirect_uri } : {}),
+  };
+}
+
+/** The audited view of a client: never the secret, only whether one is stored. */
+function auditedClient(client: IntegrationOAuthClient) {
+  return {
+    clientId: client.client_id,
+    tokenEndpointAuthMethod: client.token_endpoint_auth_method,
+    redirectUri: client.redirect_uri,
+    hasClientSecret: client.has_client_secret,
   };
 }
 
@@ -404,24 +419,30 @@ export function oauthClientHandlers(
         action: "integration.oauth_client.created",
         resourceType: "integration",
         resourceId: `${packageId}#${authKey}#${client.id}`,
+        after: auditedClient(client),
       });
       return c.json(toPublicClient(client), 201);
     },
 
-    async rotate(c: Context<AppEnv>) {
+    async update(c: Context<AppEnv>) {
       const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
       const body = await readJsonBody(c, oauthClientUpdateSchema);
-      const client = await updateIntegrationOAuthClient(
+      const { previous, client } = await updateIntegrationOAuthClient(
         scopeOf(c),
         packageId,
         clientId,
         toOAuthClientUpdateInput(body),
       );
       await recordAuditFromContext(c, {
-        action: "integration.oauth_client.rotated",
+        action: "integration.oauth_client.updated",
         resourceType: "integration",
         resourceId: `${packageId}#${client.auth_key}#${clientId}`,
+        before: auditedClient(previous),
+        after: {
+          ...auditedClient(client),
+          clientSecretReplaced: body.client_secret !== undefined,
+        },
       });
       return c.json(toPublicClient(client));
     },
@@ -429,16 +450,14 @@ export function oauthClientHandlers(
     async remove(c: Context<AppEnv>) {
       const packageId = packageIdOf(c);
       const clientId = assertOAuthClientRowId(c.req.param("clientId")!);
-      const { deletedConnections, disabledScheduleIds } = await deleteIntegrationOAuthClient(
-        scopeOf(c),
-        packageId,
-        clientId,
-      );
+      const { client, deletedConnections, disabledScheduleIds } =
+        await deleteIntegrationOAuthClient(scopeOf(c), packageId, clientId);
       await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
         resourceType: "integration",
-        resourceId: `${packageId}#${clientId}`,
+        resourceId: `${packageId}#${client.auth_key}#${clientId}`,
+        before: auditedClient(client),
         after: { deletedConnections, disabledScheduleIds },
       });
       return c.body(null, 204);
@@ -508,6 +527,13 @@ async function assertConnectionBelongsToActor(
   }
 }
 
+/** The audited view of an org default. */
+function orgDefaultAudit(
+  def: { connection_ids: string[]; enforce: boolean } | null,
+): AuditPayload | null {
+  return def ? { connectionIds: def.connection_ids, enforce: def.enforce } : null;
+}
+
 /**
  * Guard the caller-supplied `scopes` on both caller-facing kickoffs against the
  * auth's `scope_catalog` (§7.4). `body.scopes` is the ONLY delta the caller
@@ -550,6 +576,22 @@ function connectionPersistedAudit(
     after: { packageId, authKey, accountId: conn.account_id },
   };
 }
+
+/** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
+const resolveCallbackClient: OAuthClientResolver = async (ref) => {
+  const { auth } = await readIntegrationAuth(
+    { orgId: ref.orgId, spaceId: ref.spaceId },
+    ref.packageId,
+    ref.authKey,
+  );
+  return resolveIntegrationClientById(
+    ref.clientRef,
+    ref.spaceId,
+    ref.packageId,
+    ref.authKey,
+    auth.token_endpoint_auth_method,
+  );
+};
 
 // ─────────────────────────────────────────────
 // Router
@@ -624,7 +666,12 @@ export function createIntegrationsRouter() {
     }
     let result: IntegrationOAuthCallbackResult;
     try {
-      result = await handleIntegrationOAuthCallback(oauthStateStore, code, state);
+      result = await handleIntegrationOAuthCallback(
+        oauthStateStore,
+        resolveCallbackClient,
+        code,
+        state,
+      );
     } catch (err) {
       if (err instanceof OAuthCallbackError) {
         // Append the provider's OAuth error code (never its free-text
@@ -633,10 +680,14 @@ export function createIntegrationsRouter() {
         // can actually fix — a `redirect_uri` the provider does not know, a
         // rejected `token_endpoint_auth_method` — are invisible.
         const diagnostic = oauthDiagnosticSuffix(err.oauthError, err.status);
-        const userMessage =
-          err.kind === "revoked"
-            ? `The authorization expired before it could be exchanged. Please retry the connection.${diagnostic}`
-            : `Could not complete the connection. Please try again in a moment.${diagnostic}`;
+        const reason = {
+          revoked:
+            "The authorization expired before it could be exchanged. Please retry the connection.",
+          client_unavailable:
+            "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
+          transient: "Could not complete the connection. Please try again in a moment.",
+        }[err.kind];
+        const userMessage = `${reason}${diagnostic}`;
         logger.error("Integration OAuth callback failed", {
           subjectId: err.subjectId,
           kind: err.kind,
@@ -733,7 +784,7 @@ export function createIntegrationsRouter() {
     clients.setDefault,
   );
   router.post("/:packageId{@[^/]+/[^/]+}/auths/:authKey/oauth-clients", configure, clients.create);
-  router.put("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.rotate);
+  router.patch("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.update);
   router.delete("/:packageId{@[^/]+/[^/]+}/oauth-clients/:clientId", configure, clients.remove);
 
   // Move one of this space's clients to the org tier; its row id is kept, so
@@ -1277,7 +1328,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
-      const pin = await upsertIntegrationPin(scope, packageId, {
+      const { previous, pin } = await upsertIntegrationPin(scope, packageId, {
         agentPackageId,
         connectionIds: body.connection_ids,
         createdBy: userId,
@@ -1285,8 +1336,9 @@ export function createIntegrationsRouter() {
       await recordAuditFromContext(c, {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
-        resourceId: `${packageId}#${agentPackageId}`,
-        after: { connectionIds: pin.connection_ids },
+        resourceId: pinAuditResourceId(agentPackageId, packageId),
+        before: pinAudit(previous),
+        after: pinAudit(pin.connection_ids),
       });
       return c.json(pin);
     },
@@ -1299,12 +1351,13 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const result = await deleteIntegrationPin(scope, packageId, agentPackageId);
-      if (result.deleted) {
+      const { previous } = await deletePin(scope, agentPackageId, packageId, null);
+      if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
-          resourceId: `${packageId}#${agentPackageId}`,
+          resourceId: pinAuditResourceId(agentPackageId, packageId),
+          before: pinAudit(previous),
         });
       }
       // Idempotent delete — 204 whether the pin existed or not.
@@ -1339,7 +1392,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
-      const def = await upsertOrgDefault(scope, packageId, {
+      const { previous, orgDefault } = await upsertOrgDefault(scope, packageId, {
         connectionIds: body.connection_ids,
         enforce: body.enforce,
         createdBy: userId,
@@ -1348,9 +1401,10 @@ export function createIntegrationsRouter() {
         action: "integration.org_default.upserted",
         resourceType: "integration_org_default",
         resourceId: packageId,
-        after: { connectionIds: def.connection_ids, enforce: def.enforce },
+        before: orgDefaultAudit(previous),
+        after: orgDefaultAudit(orgDefault),
       });
-      return c.json(def);
+      return c.json(orgDefault);
     },
   );
 
@@ -1360,12 +1414,13 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const result = await deleteOrgDefault(scope, packageId);
-      if (result.deleted) {
+      const { previous } = await deleteOrgDefault(scope, packageId);
+      if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
+          before: orgDefaultAudit(previous),
         });
       }
       // Idempotent delete — 204 whether a default existed or not.
@@ -1414,10 +1469,14 @@ export function createIntegrationsRouter() {
           detail: "Only the connection owner can share it (shared_with_org: true)",
         });
       }
-      const updated = await updateConnectionMetadata(connectionId, {
-        ...(body.label !== undefined ? { label: body.label } : {}),
-        ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-      });
+      const { connection: updated, disabledScheduleIds } = await updateConnectionMetadata(
+        connectionId,
+        {
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
+        },
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.connection.metadata.updated",
         resourceType: "integration_connection",
@@ -1425,6 +1484,7 @@ export function createIntegrationsRouter() {
         after: {
           ...(body.label !== undefined ? { label: body.label } : {}),
           ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
         },
       });
       // 200 + the bare connection resource — same serializer as the

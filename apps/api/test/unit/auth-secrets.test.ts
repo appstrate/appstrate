@@ -1,114 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
+import { authKeyring } from "../../src/lib/auth-secrets.ts";
 import {
-  signAuthHmac,
-  verifyAuthHmac,
-  getActiveAuthSecret,
-  _resetAuthSecretsCache,
-} from "../../src/lib/auth-secrets.ts";
-import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+  headersWithAuthoritativePendingClient,
+  readPendingClientCookieFromHeaders,
+} from "../../src/modules/oidc/services/pending-client-cookie.ts";
+import { useAuthEnv } from "../helpers/auth-env.ts";
 
-function resetCaches(): void {
-  resetEnvCache();
-  _resetAuthSecretsCache();
-}
+const A = "a-secret-at-least-32-chars-long-for-hmac";
+const B = "b-secret-at-least-32-chars-long-for-hmac";
 
-const ENV_KEYS = ["BETTER_AUTH_SECRET", "BETTER_AUTH_ACTIVE_KID", "BETTER_AUTH_SECRETS"] as const;
+describe("authKeyring", () => {
+  const setEnv = useAuthEnv();
 
-function snapshotEnv(): Record<(typeof ENV_KEYS)[number], string | undefined> {
-  return Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]])) as Record<
-    (typeof ENV_KEYS)[number],
-    string | undefined
-  >;
-}
-
-function restoreEnv(snap: ReturnType<typeof snapshotEnv>): void {
-  for (const k of ENV_KEYS) {
-    if (snap[k] === undefined) delete process.env[k];
-    else process.env[k] = snap[k];
-  }
-}
-
-describe("auth-secrets", () => {
-  let snap: ReturnType<typeof snapshotEnv>;
-
-  beforeEach(() => {
-    snap = snapshotEnv();
+  it("is BETTER_AUTH_SECRET alone when no list is set", () => {
+    setEnv({ BETTER_AUTH_SECRET: A, BETTER_AUTH_SECRETS: undefined });
+    expect(authKeyring()).toEqual([A]);
   });
 
-  afterEach(() => {
-    restoreEnv(snap);
-    resetCaches();
+  it("is the BETTER_AUTH_SECRETS values, current first, once a list is set", () => {
+    setEnv({ BETTER_AUTH_SECRET: A, BETTER_AUTH_SECRETS: `2:${B},1:${A}` });
+    expect(authKeyring()).toEqual([B, A]);
   });
 
-  describe("single BETTER_AUTH_SECRET", () => {
-    beforeEach(() => {
-      process.env.BETTER_AUTH_SECRET = "legacy-single-secret-32-chars-long";
-      delete process.env.BETTER_AUTH_SECRETS;
-      delete process.env.BETTER_AUTH_ACTIVE_KID;
-      resetCaches();
-    });
+  it("verifies a cookie signed under [A] with [B, A], not with [B] alone", () => {
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `1:${A}` });
+    const headers = headersWithAuthoritativePendingClient(new Headers(), "oauth_client");
 
-    it("uses BETTER_AUTH_SECRET as the active secret", () => {
-      expect(getActiveAuthSecret()).toBe("legacy-single-secret-32-chars-long");
-    });
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `2:${B},1:${A}` });
+    expect(readPendingClientCookieFromHeaders(headers)).toBe("oauth_client");
 
-    it("signs with prefixed kid format", () => {
-      const sig = signAuthHmac("payload");
-      expect(sig.startsWith("k1$")).toBe(true);
-    });
-
-    it("verifies its own prefixed signature", () => {
-      const sig = signAuthHmac("payload");
-      expect(verifyAuthHmac("payload", sig)).toBe(true);
-    });
-
-    it("rejects an un-prefixed signature", () => {
-      const sig = signAuthHmac("payload");
-      const unprefixed = sig.split("$")[1]!;
-      expect(verifyAuthHmac("payload", unprefixed)).toBe(false);
-    });
-  });
-
-  describe("rotation: active kid + secrets map", () => {
-    beforeEach(() => {
-      process.env.BETTER_AUTH_SECRET = "fallback-not-used-32-chars-long";
-      process.env.BETTER_AUTH_ACTIVE_KID = "k2";
-      process.env.BETTER_AUTH_SECRETS = JSON.stringify({
-        k1: "old-secret-32-chars-long-for-hmac",
-        k2: "new-secret-32-chars-long-for-hmac",
-      });
-      resetCaches();
-    });
-
-    it("returns the active secret", () => {
-      expect(getActiveAuthSecret()).toBe("new-secret-32-chars-long-for-hmac");
-    });
-
-    it("signs with the active kid", () => {
-      const sig = signAuthHmac("payload");
-      expect(sig.startsWith("k2$")).toBe(true);
-    });
-
-    it("verifies signatures from a previous kid", async () => {
-      // Simulate a cookie signed before rotation by k1.
-      const { createHmac } = await import("node:crypto");
-      const hmac = createHmac("sha256", "old-secret-32-chars-long-for-hmac")
-        .update("payload")
-        .digest("base64")
-        .replace(/\+/g, "-")
-        .replace(/\//g, "_")
-        .replace(/=+$/, "");
-      expect(verifyAuthHmac("payload", `k1$${hmac}`)).toBe(true);
-    });
-
-    it("rejects an unknown kid", () => {
-      expect(verifyAuthHmac("payload", "k99$ZZZ")).toBe(false);
-    });
-
-    it("rejects a tampered signature under a known kid", () => {
-      expect(verifyAuthHmac("payload", "k1$AAAA")).toBe(false);
-    });
+    setEnv({ BETTER_AUTH_SECRET: B, BETTER_AUTH_SECRETS: `2:${B}` });
+    expect(readPendingClientCookieFromHeaders(headers)).toBeNull();
   });
 });

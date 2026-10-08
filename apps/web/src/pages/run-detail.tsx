@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
+import { agentLaunchRefusal } from "../hooks/use-agent-readiness";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunLauncher, useCancelRun } from "../hooks/use-mutations";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
@@ -16,7 +17,7 @@ import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { LoadingState, ResourceErrorState } from "../components/page-states";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-files";
 import { RunDegradedBanner } from "../components/run-degraded-banner";
@@ -36,11 +37,13 @@ import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CircleAlert, CircleSlash } from "lucide-react";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { Badge } from "../components/status-badge";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import type { JournalOverviewFilter } from "../components/log-viewer";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { isQueryInFlight } from "../lib/query-state";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -65,8 +68,12 @@ export function RunDetailPage() {
   // said before the click rather than collected as a 404 after it. The verdict
   // rides this very response (`AgentDetail.active`), resolved for the space the
   // page is read from; the Re-run control renders only once it has landed.
-  const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
-  const { data: run, isLoading, error } = useRun(runId);
+  const { data: agent, isLoading: agentLoading } = usePackageDetail(
+    "agent",
+    isInlinePath ? undefined : packageId,
+  );
+  const runQuery = useRun(runId);
+  const { data: run, error } = runQuery;
   const runNumber = run?.runNumber ?? stateNumber;
   const requestedJournalFilter = new URLSearchParams(location.search).get("journalFilter");
   const journalFilter: JournalOverviewFilter | undefined =
@@ -208,9 +215,10 @@ export function RunDetailPage() {
     ),
   });
 
-  if (isLoading) return <LoadingState />;
+  if (isQueryInFlight(runQuery)) return <LoadingState />;
 
-  if (error || !run) return <ErrorState message={error?.message} />;
+  if (error || !run) return <ResourceErrorState error={error} />;
+  const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
@@ -225,7 +233,12 @@ export function RunDetailPage() {
           : inlineName,
         href: location.pathname,
       }
-    : { label: agent?.display_name || packageId || "", href: `/agents/${packageId}` };
+    : {
+        // The id is the fallback for an agent with no name, not a placeholder
+        // for one whose name is still on its way.
+        label: agent?.display_name || (agentLoading ? "…" : packageId),
+        href: `/agents/${packageId}`,
+      };
 
   const runCrumbLabel = runNumber
     ? t("run.breadcrumb", { number: runNumber })
@@ -272,6 +285,7 @@ export function RunDetailPage() {
             )}
             <RunHeaderActions
               canRerun={!isRunning && !isInline && !!agent && permissionsReady && can("agents:run")}
+              rerunRefusal={rerunRefusal ? t(rerunRefusal) : null}
               // Hidden for remote-origin runs: the process runs on the caller's
               // host and the platform cannot signal it.
               canCancel={isRunning && enrichedRun.runOrigin !== "remote" && can("runs:cancel")}
@@ -336,6 +350,23 @@ export function RunDetailPage() {
                 <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
                 <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
               </DetailTabsList>
+
+              {/* What ended the run, above every pane: a failure, a timeout or a
+                  cancellation each carries its cause. */}
+              {isTerminal && run.status !== "success" && run.error && (
+                <Alert
+                  variant={run.status === "cancelled" ? "default" : "destructive"}
+                  className="mb-3"
+                  data-testid="run-error-banner"
+                >
+                  {run.status === "cancelled" ? (
+                    <CircleSlash className="size-4" aria-hidden />
+                  ) : (
+                    <CircleAlert className="size-4" aria-hidden />
+                  )}
+                  <AlertDescription className="break-words">{run.error}</AlertDescription>
+                </Alert>
+              )}
 
               <TabsContent
                 value="overview"

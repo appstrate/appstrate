@@ -7,6 +7,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
@@ -22,7 +23,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
@@ -31,6 +32,7 @@ import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
+import { isQueryInFlight } from "../lib/query-state";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
@@ -55,7 +57,8 @@ export function ScheduleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const { data: schedule, isLoading, error } = useScheduleById(id);
+  const scheduleQuery = useScheduleById(id);
+  const { data: schedule, error } = scheduleQuery;
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const mayWrite = useCanWriteSchedule(schedule);
@@ -66,8 +69,11 @@ export function ScheduleDetailPage() {
   const [activeTab, setActiveTab] = useTabWithHash(tabs, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isLoading) return <LoadingState />;
-  if (error || !schedule) return <ErrorState message={error?.message} />;
+  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
+  if (error || !schedule) return <ResourceErrorState error={error} />;
+  const disabledReason = schedule.disabled_reason
+    ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
+    : null;
 
   const handleToggle = () => {
     updateSchedule.mutate(
@@ -80,7 +86,7 @@ export function ScheduleDetailPage() {
     <div>
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ScheduleTab)}>
         <PageHeader
-          title={schedule.name || schedule.id}
+          title={schedule.name || t("schedule.unnamed")}
           titleClassName="text-xl"
           wrapActions
           icon={
@@ -90,14 +96,14 @@ export function ScheduleDetailPage() {
           }
           breadcrumbs={[
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || schedule.id, href: `/schedules/${schedule.id}` },
+            { label: schedule.name || t("schedule.unnamed"), href: `/schedules/${schedule.id}` },
             {
               label: activeTab === "details" ? t("detail.overview.summary") : t("schedule.tabRuns"),
             },
           ]}
           actions={
             <>
-              <LiveScheduleStatusBadge schedule={schedule} />
+              <ScheduleStatusBadge schedule={schedule} />
               {/* A schedule running as ANOTHER member is an org owner/admin
                   act (#1611): the page deed stays where it always is, disabled,
                   and says why. */}
@@ -150,6 +156,14 @@ export function ScheduleDetailPage() {
           {readsRuns && <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>}
         </DetailTabsList>
 
+        {/* Disabled by the platform, not by a person: say why, above both tabs. */}
+        {disabledReason && (
+          <Alert variant="warning" className="mb-3">
+            <Pause className="size-4" aria-hidden />
+            <AlertDescription>{disabledReason}</AlertDescription>
+          </Alert>
+        )}
+
         {readsRuns && (
           <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
             <ScheduleHistory schedule={schedule} />
@@ -178,16 +192,6 @@ export function ScheduleDetailPage() {
       />
     </div>
   );
-}
-
-// ─── Live Status Badge (reactive) ────────────────────────
-
-function LiveScheduleStatusBadge({
-  schedule,
-}: {
-  schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
-}) {
-  return <ScheduleStatusBadge enabled={schedule.enabled ?? true} />;
 }
 
 // ─── Params Tab ──────────────────────────────────────────
@@ -322,7 +326,7 @@ function ScheduleHistory({
       <NextRunPreview
         runNumber={(firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
-        schedule_name={schedule.name || schedule.id}
+        schedule_name={schedule.name || t("schedule.unnamed")}
         next_run_at={schedule.next_run_at}
       />
     ) : null;

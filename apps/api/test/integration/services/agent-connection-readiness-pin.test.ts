@@ -205,7 +205,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     // `draft` still reads the working copy — one declared integration, and the
     // pinned-manifest verdict above.
     const draft = await resolveAgentConnectionReadiness({ ...base, version: "draft" });
-    expect(draft.integrations.map((i) => i.integration_id)).toEqual([INTEG]);
+    expect(draft.integrations.map((i) => i.integration_package_id)).toEqual([INTEG]);
     expect(draft.blocks_run).toBe(true);
 
     // The published agent manifest declares nothing to connect.

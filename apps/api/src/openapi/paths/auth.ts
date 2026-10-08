@@ -1,6 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { problemContent } from "../responses.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
+/**
+ * Better Auth answers `sign-up/email` and `sign-in/email` itself: its errors are
+ * `application/json` `{ code, message }`, not the platform's ProblemDetail.
+ */
+const betterAuthError = {
+  "application/json": {
+    schema: {
+      type: "object",
+      properties: { code: { type: "string" }, message: { type: "string" } },
+    },
+  },
+} as const;
+
+/** Better Auth's own limiter answers every route it serves, before the handler. */
+const betterAuthRateLimited = {
+  description:
+    "Too many attempts from this client IP (Better Auth's own rate limit, keyed on the platform-resolved client address).",
+  content: betterAuthError,
+} as const;
 
 export const authPaths = {
   "/api/auth/sign-up/email": {
@@ -25,6 +46,11 @@ export const authPaths = {
                   maxLength: MAX_PASSWORD_LENGTH,
                 },
                 name: { type: "string" },
+                callbackURL: {
+                  type: "string",
+                  description:
+                    "Where the verification link lands once the address is verified (email verification enabled only). A path on this instance, or a URL on a trusted origin. Defaults to `/`.",
+                },
               },
             },
           },
@@ -53,11 +79,18 @@ export const authPaths = {
             },
           },
         },
-        "400": { description: "Validation error" },
+        "400": { description: "Validation error", content: betterAuthError },
         "403": {
           description:
-            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required. Body shape is owned by Better Auth.",
+            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
+          content: betterAuthError,
         },
+        "422": {
+          description:
+            "The address cannot be registered (`USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`). Answered only when e-mail verification is off; with it on, the response is a 200 with `token: null` whether or not the address was free.",
+          content: betterAuthError,
+        },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -78,6 +111,11 @@ export const authPaths = {
               properties: {
                 email: { type: "string", format: "email" },
                 password: { type: "string" },
+                callbackURL: {
+                  type: "string",
+                  description:
+                    "Where the verification link lands when the account's address is not verified yet and this call re-sends it. When set, the 200 response answers `redirect: true` with this value as `url`.",
+                },
               },
             },
           },
@@ -94,6 +132,7 @@ export const authPaths = {
                   // Better Auth's sign-in response carries a `redirect` flag
                   // (post-login redirect signalling) alongside user + token.
                   redirect: { type: "boolean" },
+                  url: { type: "string" },
                   user: { $ref: "#/components/schemas/User" },
                   token: { type: ["string", "null"] },
                 },
@@ -110,7 +149,13 @@ export const authPaths = {
             },
           },
         },
-        "401": { description: "Invalid credentials" },
+        "401": { description: "Invalid credentials", content: betterAuthError },
+        "403": {
+          description:
+            "The account's email address is not verified (`code: EMAIL_NOT_VERIFIED`, email verification enabled only). A fresh verification email was sent.",
+          content: betterAuthError,
+        },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -135,6 +180,7 @@ export const authPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "429": betterAuthRateLimited,
       },
     },
   },
@@ -209,22 +255,29 @@ export const authPaths = {
             },
           },
         },
-        "400": { description: "Validation error" },
-        "401": { description: "Invalid bootstrap token" },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { description: "Invalid bootstrap token", content: problemContent },
         "403": {
           description:
-            "Email rejected by AUTH_ALLOWED_SIGNUP_DOMAINS — the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP only; an active domain allowlist still applies.",
+            "Email rejected: it is not the address named in AUTH_BOOTSTRAP_OWNER_EMAIL (`bootstrap_owner_email_mismatch`), or account creation refused it, with the refusal's own code — `signup_domain_not_allowed` when AUTH_ALLOWED_SIGNUP_DOMAINS excludes it (the bootstrap-token bypass is scoped to AUTH_DISABLE_SIGNUP; the allowlist still applies, except to the address named in AUTH_BOOTSTRAP_OWNER_EMAIL), a module's sign-up refusal code, or `bootstrap_signup_rejected` when the refusal carries none.",
+          content: problemContent,
         },
         "409": {
           description:
             "Either an account with that email already exists, OR another bootstrap redemption is in progress on this instance (cluster-wide advisory lock + in-process CAS).",
+          content: problemContent,
         },
         "410": {
           description:
-            "No bootstrap token is currently redeemable (none configured, already redeemed, or instance bootstrapped via AUTH_BOOTSTRAP_OWNER_EMAIL)",
+            "No bootstrap token is currently redeemable (none configured, or already redeemed)",
+          content: problemContent,
         },
-        "422": { description: "Signup rejected (weak password, duplicate email)" },
+        "422": {
+          description: "Signup rejected (weak password, duplicate email)",
+          content: problemContent,
+        },
         "429": {
+          $ref: "#/components/responses/RateLimited",
           description:
             "Rate-limited (5 redeem attempts per minute per source IP) — defense against brute-force on misconfigured short tokens.",
         },
@@ -255,6 +308,7 @@ export const authPaths = {
             },
           },
         },
+        "429": betterAuthRateLimited,
       },
     },
   },

@@ -251,6 +251,7 @@ function useUploadPackage(type: PackageType) {
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { t } = useTranslation("settings");
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async (id: string) => {
@@ -260,6 +261,7 @@ function useDeletePackage(type: PackageType) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+      toast.success(t("packages.deleted"));
       navigate("/");
     },
   });
@@ -449,6 +451,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
+    meta: { errorHandledByCaller: true },
     /** `version` overrides the manifest's; `etag` refuses (412) a draft moved since it was read. */
     mutationFn: async ({
       version,
@@ -570,6 +573,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
 export function useForkPackage() {
   const qc = useQueryClient();
   return useMutation({
+    meta: { errorHandledByCaller: true },
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
       // 201 → the forked package resource, bare (issue #657): `id` is the new
       // package ID under org scope, `forked_from` the source package ID.

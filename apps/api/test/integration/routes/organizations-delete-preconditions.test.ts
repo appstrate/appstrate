@@ -26,6 +26,7 @@ import { createTestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
 import { organizations, runs } from "@appstrate/db/schema";
 import { reserveOrgDeletion } from "../../../src/services/organizations.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { createRun } from "../../../src/services/state/runs.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -285,7 +286,13 @@ describe("DELETE /api/orgs/:orgId — deletion reservation", () => {
     const ctx = await createTestContext({ orgName: "Busy Org" });
     await seedRunInOrg(ctx, "running");
 
-    await expect(reserveOrgDeletion(ctx.orgId)).rejects.toThrow(/runs are in progress/);
+    const refusal = await reserveOrgDeletion(ctx.orgId).catch((err: unknown) => err);
+    // An expected answer, not a failure: typed, and with no `cause` — a cause is
+    // what makes the error handler write an error line for the response.
+    if (!(refusal instanceof ApiError)) throw new Error("expected an ApiError");
+    expect([refusal.status, refusal.code]).toEqual([400, "delete_failed"]);
+    expect(refusal.cause).toBeUndefined();
+    expect(refusal.message).toMatch(/runs are in progress/);
     expect(await deletingAt(ctx.orgId)).toBeNull();
   });
 

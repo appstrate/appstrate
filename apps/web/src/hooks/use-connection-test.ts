@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { components } from "../api/client";
+import { refusalMessage, toastError } from "../lib/mutation-error";
 
 export type TestResult = components["schemas"]["TestResult"];
 
@@ -47,10 +47,17 @@ export function useConnectionTest(mutation: TestMutation) {
       // Per-call callbacks passed to `mutate` only remain attached to the most
       // recent observer, which can strand an earlier row in its pending state.
       const result = await mutation.mutateAsync({ params: { path: { id } } });
-      if (!result.ok) toast.error(result.message || t("test.failed"));
+      // Named by its code when it has a sentence, as `TestResultSpan` does.
+      if (!result.ok) {
+        toast.error(
+          (result.error && refusalMessage({ code: result.error, message: result.message })) ||
+            result.message ||
+            t("test.failed"),
+        );
+      }
       setTestResults((prev) => ({ ...prev, [id]: result }));
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      toastError(error);
       setTestResults((prev) => ({
         ...prev,
         [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: t("test.failed") },

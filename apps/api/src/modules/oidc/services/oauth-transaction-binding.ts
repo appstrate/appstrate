@@ -46,8 +46,7 @@
  *      re-mints an authoritative `oidc_pending_client` cookie header from
  *      the validated authorize query (`headersWithAuthoritativePendingClient`)
  *      before calling BA in-process — the browser never gets a chance to
- *      strip it. The cookie read here is therefore server-authored on that
- *      path; for everything else it is a legacy/UX fallback only.
+ *      strip it, and marks those headers: the cookie is read only under that mark.
  *
  * Consumers (`oidcRealmResolver`, `oidcBeforeSignupGuard`,
  * `oidcAfterSignupHandler`) treat the result as:
@@ -66,7 +65,10 @@ import { verification } from "@appstrate/db/schema";
 import type { MagicLinkIssuedInfo } from "@appstrate/db/auth";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../../lib/logger.ts";
-import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
+import {
+  hasAuthoritativePendingClient,
+  readPendingClientCookieFromHeaders,
+} from "./pending-client-cookie.ts";
 
 /**
  * Path of the Better Auth OAuth authorize endpoint (oauth-provider plugin
@@ -99,6 +101,12 @@ type PendingClientBinding =
   | { kind: "bound"; clientId: string; source: "oauth-state" | "magic-link" | "cookie" }
   | { kind: "invalid" }
   | { kind: "none" };
+
+function authoritativePendingClient(headers: Headers | null): string | null {
+  return hasAuthoritativePendingClient(headers)
+    ? readPendingClientCookieFromHeaders(headers)
+    : null;
+}
 
 /**
  * Resolve the OAuth client bound to the in-flight Better Auth user
@@ -139,9 +147,7 @@ export async function resolvePendingClientBinding(
     return { kind: "none" };
   }
 
-  // ── 3. Cookie: authoritative on the server-driven register path (re-minted
-  //      from the validated authorize query), legacy/UX fallback elsewhere. ──
-  const cookieClientId = readPendingClientCookieFromHeaders(ctx.headers);
+  const cookieClientId = authoritativePendingClient(ctx.headers);
   if (cookieClientId) return { kind: "bound", clientId: cookieClientId, source: "cookie" };
   return { kind: "none" };
 }
@@ -259,7 +265,7 @@ async function findMagicLinkClientBinding(token: string): Promise<string | null>
  * OIDC link whose verify leg would fall back to forgeable browser state.
  */
 export async function bindIssuedMagicLink(info: MagicLinkIssuedInfo): Promise<void> {
-  const clientId = readPendingClientCookieFromHeaders(info.headers);
+  const clientId = authoritativePendingClient(info.headers);
   if (!clientId) return;
   try {
     await persistMagicLinkClientBinding(info.token, clientId);

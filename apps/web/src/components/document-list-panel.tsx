@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Download, Eye, FileText, Pin, Trash2 } from "lucide-react";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -151,7 +150,6 @@ export function DocumentListPanel({
           toast.success(t("keep.success"));
           onKept?.(doc.id);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
 
@@ -166,7 +164,6 @@ export function DocumentListPanel({
           onDeleted?.(id);
           setPendingDelete(null);
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
   };
@@ -208,7 +205,7 @@ export function DocumentListPanel({
           isLoading ? (
             <Skeleton className="h-7 w-full" />
           ) : error ? (
-            <ErrorState message={getErrorMessage(error)} compact />
+            <ErrorState error={error} compact />
           ) : documents.length === 0 ? (
             emptyState
           ) : (
@@ -289,7 +286,7 @@ export function DocumentListPanel({
             rowLabel={(doc) => doc.name}
             isLoading={isLoading}
             isError={Boolean(error)}
-            error={<ErrorState message={getErrorMessage(error)} compact />}
+            error={<ErrorState error={error} compact />}
             empty={emptyState}
           />
         ) : (
@@ -300,7 +297,7 @@ export function DocumentListPanel({
             itemKey={(doc) => doc.id}
             isLoading={isLoading}
             isError={Boolean(error)}
-            error={<ErrorState message={getErrorMessage(error)} compact />}
+            error={<ErrorState error={error} compact />}
             empty={emptyState}
             renderCard={(doc) => (
               <FileTile

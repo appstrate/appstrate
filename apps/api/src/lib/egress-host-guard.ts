@@ -85,7 +85,7 @@ interface CheckEgressUrlOptions {
  * model test, credential proxy target, remote-MCP spawn) cannot drift apart.
  *
  * Non-throwing: returns a discriminated result so each caller maps a block to
- * its own shape (invalidRequest / TestResult / ProxyAuthorizationError / skip).
+ * its own shape (invalidRequest / TestResult / ProxyCallError / skip).
  * `detail` carries the DNS block reason for server-side logs — never a secret,
  * never surfaced to the caller.
  *

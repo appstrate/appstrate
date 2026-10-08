@@ -20,7 +20,7 @@ import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import type { PeerAttribution } from "./runner-peers.ts";
 

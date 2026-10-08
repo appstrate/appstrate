@@ -16,7 +16,8 @@
 
 import type { IntegrationClient } from "../hooks/use-integrations";
 
-export type ClientLevel = "system" | "org" | "space";
+/** The tier that owns the client — the API names it the same way. */
+export type ClientLevel = IntegrationClient["source"];
 
 export interface ClientRow {
   client: IntegrationClient;
@@ -29,12 +30,6 @@ export interface ClientRow {
   inSpaceList: boolean;
   /** The org list carries it, so an org admin may choose it for the organisation. */
   inOrgList: boolean;
-}
-
-export function clientLevel(client: IntegrationClient): ClientLevel {
-  if (client.source === "built-in") return "system";
-  if (client.source === "org") return "org";
-  return "space";
 }
 
 const LEVEL_ORDER: Record<ClientLevel, number> = { space: 0, org: 1, system: 2 };
@@ -52,7 +47,7 @@ export function mergeClientTiers(
   for (const client of spaceClients) {
     rows.set(client.client_ref, {
       client,
-      level: clientLevel(client),
+      level: client.source,
       usedHere: client.is_default,
       orgDefault: false,
       inSpaceList: true,
@@ -67,7 +62,7 @@ export function mergeClientTiers(
     } else {
       rows.set(client.client_ref, {
         client,
-        level: clientLevel(client),
+        level: client.source,
         usedHere: false,
         orgDefault: client.is_default,
         inSpaceList: false,

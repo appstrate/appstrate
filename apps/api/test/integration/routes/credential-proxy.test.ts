@@ -11,9 +11,9 @@
  *     (`X-Integration-Id`, `X-Target`, non-UUIDv4 `X-Session-Id`)
  *   - the session-principal rebind guard → 403
  *     (a session bound to principal A, replayed by principal B)
- *   - `ProxyAuthorizationError` (target off the `authorizedUris` allowlist)
+ *   - `unauthorized_target` (target off the `authorizedUris` allowlist)
  *     → 403
- *   - `ProxyCredentialError` (no connection / integration not installed) → 404
+ *   - `credential_not_found` (no connection / integration not installed) → 404
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
  *   - `X-Run-Id` confines the call to the run's bound connections; without it
  *     the space-level rules (org defaults, named, own) pick the connection
@@ -25,18 +25,30 @@
  * device-flow JWTs.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
+import { Hono, type Context } from "hono";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { seedApiKey, seedPackage, seedRun, seedSpace } from "../../helpers/seed.ts";
 import {
+  seedApiKey,
+  seedPackage,
+  seedRun,
+  seedSpace,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
+import {
+  auditEvents,
   spacePackages,
   integrationConnections,
   integrationOrgDefaults,
 } from "@appstrate/db/schema";
+import { drainAudits } from "../../../src/services/audit.ts";
+import { auditForeignConnectionUse } from "../../../src/services/credential-proxy/connection-audit.ts";
+import type { AppEnv } from "../../../src/types/index.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -103,6 +115,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     homeSpaceId: ctx.defaultSpaceId,
     draftManifest: gmailManifest(),
   });
+  await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
   // Activate the integration in the default space.
   await db.insert(spacePackages).values({
     spaceId: ctx.defaultSpaceId,
@@ -326,7 +339,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
   });
   afterEach(() => restoreFetch());
 
-  it("maps a not-installed integration to 404 (ProxyCredentialError)", async () => {
+  it("maps a not-installed integration to 404 (credential_not_found)", async () => {
     let upstreamCalls = 0;
     mockUpstream(async () => {
       upstreamCalls += 1;
@@ -340,7 +353,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
         "X-Org-Id": ctx.orgId,
         "X-Space-Id": ctx.defaultSpaceId,
         // Integration is never seeded / installed → resolver throws
-        // IntegrationCredentialNotFoundError → ProxyCredentialError → 404.
+        // IntegrationCredentialNotFoundError → credential_not_found → 404.
         "X-Integration-Id": "@cporg/missing",
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -360,6 +373,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       homeSpaceId: ctx.defaultSpaceId,
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await db.insert(spacePackages).values({
       spaceId: ctx.defaultSpaceId,
       packageId: INTEGRATION_ID,
@@ -389,7 +403,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
   it("maps an integration not activated in the space to 404 (not 500)", async () => {
     // Package exists in the org but is NOT inserted into spacePackages,
     // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not
-    // a ProxyCredentialError). The route's catch must surface its 404 status
+    // a credential_not_found). The route's catch must surface its 404 status
     // rather than masking it as a 500.
     await seedPackage({
       id: INTEGRATION_ID,
@@ -398,6 +412,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       source: "local",
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
 
     let upstreamCalls = 0;
     mockUpstream(async () => {
@@ -420,7 +435,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
-  it("maps an off-allowlist target to 403 (ProxyAuthorizationError)", async () => {
+  it("maps an off-allowlist target to 403 (unauthorized_target)", async () => {
     await seedIntegrationWithConnection(ctx);
 
     let upstreamCalls = 0;
@@ -442,8 +457,31 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       },
     });
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized_target");
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; error=http_request_denied");
     // Allowlist gate fires before the upstream fetch.
     expect(upstreamCalls).toBe(0);
+  });
+
+  it("relays an upstream 401 as the upstream's: Proxy-Status, no platform challenge", async () => {
+    await seedIntegrationWithConnection(ctx);
+    mockUpstream(async () => new Response('{"error":"expired"}', { status: 401 }));
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Proxy-Status")).toBe("appstrate; received-status=401");
+    expect(res.headers.get("WWW-Authenticate")).toBeNull();
+    expect(await res.text()).toBe('{"error":"expired"}');
   });
 
   it("maps several own connections and no X-Connection-Id to 409 must_choose_connection", async () => {
@@ -677,6 +715,42 @@ describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0"
     expect(upstreamBody).toBe('{"token":"ya29.live-token"}');
   });
 
+  it("forwards a streamed upload's Content-Length, never hop-by-hop or Connection-named headers", async () => {
+    let sent: Headers | null = null;
+    mockUpstream(async (_input, init) => {
+      sent = new Headers(init?.headers);
+      await new Response(init?.body).arrayBuffer();
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost(
+      {
+        "X-Stream-Request": "1",
+        "Content-Length": "2",
+        Connection: "x-foo",
+        "X-Foo": "1",
+        "Keep-Alive": "timeout=5",
+      },
+      "{}",
+    );
+    expect(res.status).toBe(200);
+    expect(sent!.get("content-length")).toBe("2");
+    for (const name of ["connection", "x-foo", "keep-alive"]) expect(sent!.get(name)).toBeNull();
+  });
+
+  it("never forwards its own control headers upstream, X-Org-Id included", async () => {
+    let sent: Headers | null = null;
+    mockUpstream(async (_input, init) => {
+      sent = new Headers(init?.headers);
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost({ "X-Custom": "kept" }, "{}");
+    expect(res.status).toBe(200);
+    for (const name of ["x-org-id", "x-space-id", "x-integration-id", "x-target", "x-session-id"]) {
+      expect(sent!.get(name)).toBeNull();
+    }
+    expect(sent!.get("x-custom")).toBe("kept");
+  });
+
   for (const [name, value] of [
     ["X-Substitute-Body", "true"],
     ["X-Stream-Request", "yes"],
@@ -737,6 +811,8 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         [INTEGRATION_ID]: connectionIds.map((connectionId) => ({
           connectionId,
           source: "member_pin",
+          label: connectionId,
+          accountId: connectionId,
         })),
       },
     });
@@ -771,6 +847,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
       homeSpaceId: ctx.defaultSpaceId,
       draftManifest: gmailManifest(),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await db
       .insert(spacePackages)
       .values({ spaceId: ctx.defaultSpaceId, packageId: INTEGRATION_ID });
@@ -786,6 +863,112 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     });
   });
   afterEach(() => restoreFetch());
+
+  it("audits a colleague's shared connection once per session, never the caller's own", async () => {
+    const runId = await runBinding([shared]);
+    const session = uuidV4();
+    expect((await call({ "X-Run-Id": runId, "X-Session-Id": session })).status).toBe(200);
+    expect((await call({ "X-Run-Id": runId, "X-Session-Id": session })).status).toBe(200);
+    expect((await call({ "X-Connection-Id": own1 })).status).toBe(200);
+    await drainAudits(5_000);
+
+    const rows = await db
+      .select({ resourceId: auditEvents.resourceId, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.connection.proxied"));
+    expect(rows).toEqual([
+      {
+        resourceId: shared,
+        after: {
+          packageId: INTEGRATION_ID,
+          sessionId: session,
+          runId,
+          principalType: "user",
+          principalId: ctx.user.id,
+          ownerType: "user",
+          ownerId: colleagueId,
+        },
+      },
+    ]);
+  });
+
+  it("audits a colleague's connection whose upstream fails, not a call refused before sending", async () => {
+    mockUpstream(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const runId = await runBinding([shared]);
+    expect((await call({ "X-Run-Id": runId })).status).toBe(502);
+    const offList = await call({ "X-Run-Id": runId, "X-Target": "https://evil.example.com/x" });
+    expect(offList.status).toBe(403);
+    await drainAudits(5_000);
+
+    const rows = await db
+      .select({ resourceId: auditEvents.resourceId })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.connection.proxied"));
+    expect(rows).toEqual([{ resourceId: shared }]);
+  });
+
+  describe("auditForeignConnectionUse", () => {
+    /** One audit call through a bare Hono context, as the route hands it an API-key request. */
+    async function audit(actorId: string, session: string): Promise<void> {
+      const probe = new Hono<AppEnv>();
+      probe.get("/", async (c) => {
+        c.set("orgId", ctx.orgId);
+        c.set("apiKeyId", "key-1");
+        await auditForeignConnectionUse(c, {
+          actor: { type: "end_user", id: actorId },
+          connectionId: shared,
+          integrationId: INTEGRATION_ID,
+          sessionId: session,
+          runId: null,
+          sessionTtlSeconds: 60,
+        });
+        return c.body(null, 204);
+      });
+      expect((await probe.request("/")).status).toBe(204);
+    }
+
+    async function proxiedRows() {
+      return db
+        .select({ resourceId: auditEvents.resourceId, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.connection.proxied"));
+    }
+
+    it("writes one row per acting principal in a shared session", async () => {
+      const session = uuidV4();
+      await audit("eu_a", session);
+      await audit("eu_b", session);
+      await audit("eu_a", session);
+      const principals = (await proxiedRows()).map(
+        (r) => (r.after as { principalId?: string } | null)?.principalId,
+      );
+      expect(principals.sort()).toEqual(["eu_a", "eu_b"]);
+    });
+
+    it("writes the row on the session's next call when the first write failed", async () => {
+      const session = uuidV4();
+      // Every read of this context throws: the write fails after the dedupe claim.
+      const failing = {
+        get: () => {
+          throw new Error("audit write failed");
+        },
+      } as unknown as Context<AppEnv>;
+      await auditForeignConnectionUse(failing, {
+        actor: { type: "end_user", id: "eu_a" },
+        connectionId: shared,
+        integrationId: INTEGRATION_ID,
+        sessionId: session,
+        runId: null,
+        sessionTtlSeconds: 60,
+      });
+      expect(await proxiedRows()).toHaveLength(0);
+
+      await audit("eu_a", session);
+      expect(await proxiedRows()).toHaveLength(1);
+    });
+  });
 
   it("uses the run's single bound connection — even a colleague's shared one — without naming it", async () => {
     const runId = await runBinding([shared]);
@@ -909,7 +1092,11 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
       packageId: AGENT_ID,
       userId: ctx.user.id,
       status: "running",
-      resolvedConnections: { [INTEGRATION_ID]: [{ connectionId: own1, source: "member_pin" }] },
+      resolvedConnections: {
+        [INTEGRATION_ID]: [
+          { connectionId: own1, source: "member_pin", label: "own1", accountId: "own1" },
+        ],
+      },
     });
     const res = await call({ "X-Run-Id": run.id });
     expect(res.status).toBe(404);
@@ -1038,5 +1225,133 @@ describe("POST /api/credential-proxy/proxy — upstream Set-Cookie is never rela
         .map((p) => p.trim())
         .sort(),
     ).toEqual(["SID=sid-rotated", "pref=1"]);
+  });
+});
+
+describe("POST /api/credential-proxy/proxy — a credential no header can carry", () => {
+  const KEY_INTEGRATION = "@cporg/keyed";
+  const SECRET = "SECRETKEY";
+  let ctx: TestContext;
+  let apiKey: string;
+  let upstreamCalls: number;
+  let logged: unknown[][];
+  const spies: Array<{ mockRestore(): void }> = [];
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "cporg" });
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({
+        name: KEY_INTEGRATION,
+        displayName: "Keyed",
+        description: "Keyed integration",
+        auths: {
+          api: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            delivery: httpHeaderDelivery({ name: "X-Api-Key", prefix: "", field: "api_key" }),
+          },
+        },
+      }),
+    );
+    apiKey = await mintProxyKey(ctx);
+    upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("{}", { status: 200 });
+    });
+    logged = [];
+    for (const level of ["error", "warn", "info"] as const) {
+      spies.push(
+        spyOn(logger, level).mockImplementation(((...args: unknown[]) => {
+          logged.push(args);
+        }) as never),
+      );
+    }
+  });
+  afterEach(() => {
+    restoreFetch();
+    for (const spy of spies.splice(0)) spy.mockRestore();
+  });
+
+  const call = (headers: Record<string, string> = {}) =>
+    app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": KEY_INTEGRATION,
+        "X-Target": "https://1.1.1.1/v1",
+        "X-Session-Id": uuidV4(),
+        ...headers,
+      },
+    });
+
+  /** The problem the proxy answered, asserted to quote no value anywhere it can reach. */
+  async function expectUnusable(res: Response, header: string): Promise<void> {
+    const text = await res.text();
+    expect(res.status).toBe(502);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
+    const body = JSON.parse(text) as { code: string; detail: string };
+    expect(body.code).toBe("credential_unusable");
+    expect(body.detail.toLowerCase()).toContain(`"${header.toLowerCase()}"`);
+    expect(text).not.toContain(SECRET);
+    expect(JSON.stringify(logged)).not.toContain(SECRET);
+    expect(upstreamCalls).toBe(0);
+  }
+
+  // Bun's `Headers` TypeError quotes the value; it reached the 500 log line in full.
+  for (const value of [`${SECRET}\r\nX-Evil: 1`, `${SECRET}\u20ac`]) {
+    it(`refuses the injected credential ${JSON.stringify(value.slice(SECRET.length))}`, async () => {
+      await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: value });
+      await expectUnusable(await call(), "X-Api-Key");
+    });
+
+    it(`refuses a caller template rendering ${JSON.stringify(value.slice(SECRET.length))}`, async () => {
+      await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok", password: value });
+      await expectUnusable(await call({ "X-Pass": "{{password}}" }), "X-Pass");
+    });
+  }
+
+  // The lookup runs on the template: a `{{word}}` inside a value is no placeholder.
+  it("sends a credential whose value holds a `{{word}}`", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", {
+      api_key: "ok",
+      password: "pa{{ss}}word",
+    });
+    const res = await call({ "X-Pass": "{{password}}" });
+    expect(res.status).toBe(200);
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("answers a caller header value that is no HTTP field value as a 400, the credential intact", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
+    const res = await call({ "X-Custom": "a\u0001b" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("invalid_request");
+    expect(body.detail.toLowerCase()).toContain('"x-custom"');
+    expect(upstreamCalls).toBe(0);
+  });
+
+  it("answers a body broken off after the headers as upstream_unreachable, not a 500", async () => {
+    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
+    mockUpstream(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("hel"));
+          controller.error(new Error("socket closed"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const res = await call();
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("upstream_unreachable");
+    expect(body.detail).toBe("1.1.1.1 could not be reached");
   });
 });

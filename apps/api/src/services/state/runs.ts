@@ -38,6 +38,7 @@ import {
   chatSessions,
   type PricingStatus,
   type InferenceRoute,
+  type CredentialSource,
 } from "@appstrate/db/schema";
 import {
   activeRunStatusValues,
@@ -60,7 +61,11 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
-import type { ConnectionOverrides, ResolvedConnectionMap } from "@appstrate/core/integration";
+import {
+  resolvedConnectionMapSchema,
+  type ConnectionOverrides,
+  type ResolvedConnectionMap,
+} from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -331,22 +336,26 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * Project the internal `runs.resolved_connections` snapshot into the
  * display-safe `connections_used` wire shape. Drops the raw `connectionId`
  * (internal state) and keeps the denormalized label/account so the panel
- * renders even after the connection is renamed or deleted. A label/account the
- * snapshot does not carry projects as null. Empty/absent → null.
+ * renders even after the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
   resolved: typeof runs.$inferSelect.resolvedConnections,
 ): RunConnectionUsed[] | null {
-  if (!resolved || typeof resolved !== "object") return null;
-  const used = Object.entries(resolved).flatMap(([integrationId, bound]) =>
-    bound.map((v) => ({
-      integration_id: integrationId,
-      label: v.label ?? null,
-      account_id: v.accountId ?? null,
-      source: v.source,
-    })),
+  const used = Object.entries(readResolvedConnections(resolved) ?? {}).flatMap(
+    ([integrationId, bound]) =>
+      bound.map((v) => ({
+        integration_package_id: integrationId,
+        label: v.label,
+        account_id: v.accountId,
+        source: v.source,
+      })),
   );
   return used.length > 0 ? used : null;
+}
+
+/** `runs.resolved_connections` as read back from jsonb — parsed, never trusted as typed. */
+export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | null {
+  return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
@@ -558,7 +567,7 @@ interface CreateRunParams {
   versionRef?: string;
   proxyLabel?: string;
   modelLabel?: string;
-  modelSource?: string;
+  modelSource?: CredentialSource;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
   /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
@@ -922,7 +931,7 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
 )`;
 
 /** `runs.model_source` of a resolved model: whose credential its inference spends. */
-export function modelSourceOf(model: { isSystemModel: boolean }): "system" | "org" {
+export function modelSourceOf(model: { isSystemModel: boolean }): CredentialSource {
   return model.isSystemModel ? "system" : "org";
 }
 
@@ -1021,13 +1030,15 @@ export async function getRunAttribution(
   packageId: string | null;
   status: RunStatus;
   runOrigin: "platform" | "remote";
-  modelSource: string | null;
+  modelSource: CredentialSource | null;
   spaceId: string;
   userId: string | null;
   endUserId: string | null;
   apiKeyId: string | null;
   /** The kickoff's connection snapshot — what a credential-proxy call naming this run may reach. */
   resolvedConnections: typeof runs.$inferSelect.resolvedConnections;
+  /** The kickoff's frozen integration versions — what a credential-proxy call naming this run reads. */
+  resolvedIntegrationVersions: typeof runs.$inferSelect.resolvedIntegrationVersions;
 } | null> {
   const [row] = await db
     .select({
@@ -1041,11 +1052,14 @@ export async function getRunAttribution(
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
       resolvedConnections: runs.resolvedConnections,
+      resolvedIntegrationVersions: runs.resolvedIntegrationVersions,
     })
     .from(runs)
     .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)))
     .limit(1);
-  return row ?? null;
+  return row
+    ? { ...row, resolvedConnections: readResolvedConnections(row.resolvedConnections) }
+    : null;
 }
 
 /**

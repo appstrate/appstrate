@@ -10,7 +10,7 @@ import { ItemList } from "@/components/item-list";
 import { ListFooter } from "@/components/list-toolbar";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { errorMessage } from "../../../lib/mutation-error";
 
 function formatRelativeTime(
   dateStr: string,
@@ -51,9 +51,9 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   } = useWebhookDeliveries(webhookId);
   const deliveries = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
 
-  // A failed NEXT page keeps the pages already on screen and offers a retry in
-  // the footer; a failed first load or refetch answers like any collection.
-  const failed = Boolean(error) && !isFetchNextPageError;
+  // Only a failed FIRST load answers as a failure. Once rows are on screen, a
+  // failed page (next or refetch) must not hide them: the footer says it.
+  const failed = Boolean(error) && !data;
 
   return (
     <>
@@ -62,7 +62,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
         itemKey={(d) => d.id}
         isLoading={isLoading}
         isError={failed}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={<EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />}
         renderItem={(d) => {
           const variant = deliveryStatusVariant(d);
@@ -87,8 +87,10 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
       />
       <ListFooter
         count={
-          isFetchNextPageError ? (
-            <span className="text-destructive">{getErrorMessage(error)}</span>
+          error && data ? (
+            <span className="text-destructive">
+              {t("common:error.generic")} {errorMessage(error)}
+            </span>
           ) : undefined
         }
       >

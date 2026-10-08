@@ -14,6 +14,7 @@ import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 
 /** Single action for an integration; only genuinely multi-auth packages need a picker. */
 export function AddIntegrationConnection({
@@ -23,6 +24,7 @@ export function AddIntegrationConnection({
   onConfigure,
   canConfigure,
   canConnect,
+  blockedReason,
 }: {
   packageId: string;
   detail: IntegrationDetailWire;
@@ -32,6 +34,8 @@ export function AddIntegrationConnection({
   canConfigure: boolean;
   /** Adding one's own connection (`integrations:connect`). */
   canConnect: boolean;
+  /** Why adding one's own is refused here (an admin blocked personal connections). */
+  blockedReason?: string;
 }) {
   const { t } = useTranslation("settings");
   const { openPopup, isPending } = useHostedConnectPopup();
@@ -62,13 +66,30 @@ export function AddIntegrationConnection({
         <span className="hidden @sm/bar:inline">{t("integration.presentation.configureAuth")}</span>
       </Button>
     );
+  const label = t("integration.presentation.addConnection");
+  // The button the server would refuse stays, dead, with the reason on it.
+  if (blockedReason && canConnect)
+    return (
+      <DisabledReasonTooltip reason={blockedReason}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="@max-sm/bar:size-8 @max-sm/bar:p-0"
+          aria-label={label}
+          disabled
+          data-testid="connections-blocked-by-admin"
+        >
+          <Plus className="size-4" />
+          <span className="hidden @sm/bar:inline">{label}</span>
+        </Button>
+      </DisabledReasonTooltip>
+    );
   // Each method offers what the caller may do with it: connect when it is
   // set up, set it up when it is not.
   const offered = detail.auths.filter((auth) =>
     allowed.has(auth.auth_key) ? canConnect : canConfigure,
   );
   if (!offered.length) return null;
-  const label = t("integration.presentation.addConnection");
   if (detail.auths.length === 1)
     return (
       <Button

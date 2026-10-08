@@ -136,6 +136,7 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
     llmConfig: {
       providerId: "anthropic",
       piProvider: "anthropic",
+      dialect: null,
       apiShape: "anthropic-messages",
       baseUrl: "https://api.anthropic.test",
       modelId: "claude-3-5-sonnet-latest",
@@ -220,9 +221,12 @@ describe("run-launcher — sidecar wiring", () => {
     });
   }
 
-  // The sidecar looks Pi's record up by the backing's Pi provider key — here
-  // one that differs from the Appstrate id (`moonshot`).
-  it("hands the sidecar the backing's Pi provider key", async () => {
+  const KIMI_DIALECT = { name: "Kimi K2.6", compat: { thinkingFormat: "moonshot" } };
+
+  // The sidecar builds the backing under its Pi provider key — here one that
+  // differs from the Appstrate id (`moonshot`) — with the dialect the platform
+  // read. Neither reaches the aliased container.
+  it("hands the sidecar the backing's Pi provider key and dialect, the container neither", async () => {
     const { orchestrator, counts } = createCountingFake();
     await runPlatformContainer({
       runId: "run_alias_provider",
@@ -231,6 +235,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "moonshot",
           piProvider: "moonshotai",
+          dialect: KIMI_DIALECT,
           apiShape: "openai-completions",
           baseUrl: "https://api.example.com/v1",
           modelId: "kimi-k2.6",
@@ -252,9 +257,12 @@ describe("run-launcher — sidecar wiring", () => {
     if (llm?.authMode !== "platform")
       throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap?.backing?.providerId).toBe("moonshotai");
+    expect(llm.modelSwap?.backing?.dialect).toEqual(KIMI_DIALECT);
+    expect(counts.capturedAgentEnv).not.toHaveProperty("MODEL_DIALECT");
+    expect(JSON.stringify(counts.capturedAgentEnv)).not.toContain("moonshot");
   });
 
-  it("hands a non-aliased container the Pi provider key, not the Appstrate id", async () => {
+  it("hands a non-aliased container the Pi provider key, not the Appstrate id, and the dialect", async () => {
     const { orchestrator, counts } = createCountingFake();
     await runPlatformContainer({
       runId: "run_pi_key",
@@ -264,6 +272,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "moonshot",
           piProvider: "moonshotai",
+          dialect: KIMI_DIALECT,
           apiShape: "openai-completions",
           baseUrl: "https://api.example.com/v1",
           modelId: "kimi-k2.6",
@@ -282,6 +291,7 @@ describe("run-launcher — sidecar wiring", () => {
       orchestrator,
     });
     expect(counts.capturedAgentEnv?.MODEL_PROVIDER).toBe("moonshotai");
+    expect(JSON.parse(counts.capturedAgentEnv?.MODEL_DIALECT ?? "null")).toEqual(KIMI_DIALECT);
   });
 
   // A user-described gateway has no Pi record: nothing may invent a key for it,
@@ -290,6 +300,7 @@ describe("run-launcher — sidecar wiring", () => {
     const gateway = {
       providerId: "openai-compatible",
       piProvider: null,
+      dialect: null,
       apiShape: "openai-completions",
       baseUrl: "https://api.example.com/v1",
       modelId: "vendor/some-model",
@@ -332,7 +343,7 @@ describe("run-launcher — sidecar wiring", () => {
     const llm = aliased.counts.capturedSidecarSpec?.llm;
     if (llm?.authMode !== "platform")
       throw new Error(`expected platform llm, got ${llm?.authMode}`);
-    expect(llm.modelSwap?.backing).toEqual({ providerId: null, input: ["text"] });
+    expect(llm.modelSwap?.backing).toEqual({ providerId: null, dialect: null, input: ["text"] });
     expect(aliased.counts.capturedAgentEnv).not.toHaveProperty("MODEL_PROVIDER");
   });
 
@@ -348,6 +359,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "anthropic",
           piProvider: "anthropic",
+          dialect: null,
           apiShape: "anthropic-messages",
           baseUrl: "https://api.anthropic.test",
           modelId: "claude-sonnet-4-6",
@@ -372,6 +384,7 @@ describe("run-launcher — sidecar wiring", () => {
       throw new Error(`expected platform llm, got ${llm?.authMode}`);
     expect(llm.modelSwap?.backing).toEqual({
       providerId: "anthropic",
+      dialect: null,
       reasoning: false,
       input: ["text", "image"],
     });
@@ -387,6 +400,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "deepseek",
           piProvider: "deepseek",
+          dialect: null,
           apiShape: "openai-completions",
           baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat", // the hidden backing
@@ -417,7 +431,7 @@ describe("run-launcher — sidecar wiring", () => {
       clientApiShape: "pi-messages",
       backingApiShape: "openai-completions",
       // No `reasoning`: unknown stays unset so Pi's record decides.
-      backing: { providerId: "deepseek", input: ["text"] },
+      backing: { providerId: "deepseek", dialect: null, input: ["text"] },
     });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
@@ -439,6 +453,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "deepseek",
           piProvider: "deepseek",
+          dialect: null,
           apiShape: "openai-completions",
           baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat",
@@ -495,6 +510,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "deepseek",
           piProvider: "deepseek",
+          dialect: null,
           apiShape: "openai-completions",
           baseUrl: "https://api.example.com/v1",
           modelId: "deepseek-chat",
@@ -538,6 +554,7 @@ describe("run-launcher — sidecar wiring", () => {
         llmConfig: {
           providerId: "anthropic",
           piProvider: "anthropic",
+          dialect: null,
           apiShape: "anthropic-messages",
           baseUrl: "https://api.anthropic.test",
           modelId: "claude-sonnet-4-6",
@@ -565,7 +582,7 @@ describe("run-launcher — sidecar wiring", () => {
       real: "claude-sonnet-4-6",
       clientApiShape: "pi-messages",
       backingApiShape: "anthropic-messages",
-      backing: { providerId: "anthropic", reasoning: true, input: ["text"] },
+      backing: { providerId: "anthropic", dialect: null, reasoning: true, input: ["text"] },
     });
 
     const env = counts.capturedAgentEnv ?? {};
@@ -581,6 +598,7 @@ describe("run-launcher — sidecar wiring", () => {
     const localModel = (baseUrl: string): AppstrateRunPlan["llmConfig"] => ({
       providerId: "openai-compatible",
       piProvider: null,
+      dialect: null,
       apiShape: "openai-completions",
       baseUrl,
       modelId: "llama3",

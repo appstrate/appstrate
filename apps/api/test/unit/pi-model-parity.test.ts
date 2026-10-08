@@ -24,14 +24,19 @@ import { buildRuntimePiEnv, llmProxyBaseUrl, type Api, type Model } from "@appst
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { buildPiModel, DEFAULT_MAX_TOKENS, type PiModelSpec } from "@appstrate/runner-pi/pi-model";
 import coreProvidersModule from "../../src/modules/core-providers/index.ts";
-import { listCatalogModels, piProviderOf } from "../../src/services/model-catalog.ts";
+import {
+  listCatalogModels,
+  lookupCatalogDialect,
+  piProviderOf,
+} from "../../src/services/model-catalog.ts";
 import { resolveCatalogDefaults } from "../../src/services/org-models.ts";
 import {
   registerModelProviders,
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
-import { capturePayload, nativeModel } from "../../../../packages/runner-pi/test/pi-payload.ts";
+import { capturePayload } from "../../../../packages/runner-pi/src/pi-payload.ts";
+import { nativeModel } from "../../../../packages/runner-pi/test/pi-payload.ts";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../../../../runtime-pi/env.ts";
 
 const ORIGIN = "https://appstrate.test";
@@ -42,13 +47,13 @@ const providers = [coreProvidersModule, codexModule, claudeCodeModule].flatMap(
   (module) => module.modelProviders!() as ModelProviderDefinition[],
 );
 
-/** What the platform hands `buildPiModel`: its Pi key and resolved catalog values. */
+/** What the platform hands `buildPiModel`: its Pi key, the record's dialect and resolved catalog values. */
 function platformSpec(def: ModelProviderDefinition, modelId: string): PiModelSpec {
   const defaults = resolveCatalogDefaults(def.providerId, modelId);
   const proxyUrl = llmProxyBaseUrl(ORIGIN, def.apiShape);
   return {
     id: proxyUrl ? PRESET_ID : modelId,
-    registryModelId: modelId,
+    dialect: lookupCatalogDialect(def, modelId),
     apiShape: def.apiShape,
     piProvider: piProviderOf(def),
     baseUrl: proxyUrl ?? "http://sidecar:8080/llm",
@@ -60,7 +65,7 @@ function platformSpec(def: ModelProviderDefinition, modelId: string): PiModelSpe
   };
 }
 
-/** The run container's model: the resolved values through `buildRuntimePiEnv` and back. */
+/** The run container's model: the dialect and resolved values through `buildRuntimePiEnv` and back. */
 function containerModel(def: ModelProviderDefinition, modelId: string): Model<Api> {
   const defaults = resolveCatalogDefaults(def.providerId, modelId);
   const env = buildRuntimePiEnv({
@@ -68,6 +73,7 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
       api: def.apiShape,
       modelId,
       piProvider: piProviderOf(def),
+      dialect: lookupCatalogDialect(def, modelId),
       input: defaults.input,
       contextWindow: defaults.contextWindow,
       maxTokens: defaults.maxTokens,
@@ -92,9 +98,23 @@ function containerModel(def: ModelProviderDefinition, modelId: string): Model<Ap
 
 const limitsOf = ({ contextWindow, maxTokens }: Model<Api>) => ({ contextWindow, maxTokens });
 
+/** Everything of a model but its wire fields and its price (the env carries no tiers). */
+const shapeOf = (model: Model<Api>) => ({
+  ...limitsOf(model),
+  name: model.name,
+  reasoning: model.reasoning,
+  input: model.input,
+  thinkingLevelMap: model.thinkingLevelMap,
+  compat: model.compat,
+});
+
 /** Pi's own record under the wire id, with the platform's refusals on top. */
-function nativeReference(def: ModelProviderDefinition, spec: PiModelSpec): Model<Api> {
-  const record = nativeModel(piProviderOf(def)!, spec.registryModelId!)!;
+function nativeReference(
+  def: ModelProviderDefinition,
+  spec: PiModelSpec,
+  modelId: string,
+): Model<Api> {
+  const record = nativeModel(piProviderOf(def)!, modelId)!;
   expect(record.api).toBe(def.apiShape);
   return { ...record, id: spec.id, compat: { ...record.compat, ...PLATFORM_MODEL_COMPAT } };
 }
@@ -102,11 +122,12 @@ function nativeReference(def: ModelProviderDefinition, spec: PiModelSpec): Model
 async function expectParity(def: ModelProviderDefinition, modelId: string) {
   const spec = platformSpec(def, modelId);
   const proxied = buildPiModel(spec);
-  expect({ modelId, ...limitsOf(containerModel(def, modelId)) }).toEqual({
+  // The container rebuilds the same model from its env: the dialect survives the wire.
+  expect({ modelId, ...shapeOf(containerModel(def, modelId)) }).toEqual({
     modelId,
-    ...limitsOf(proxied),
+    ...shapeOf(proxied),
   });
-  const native = nativeReference(def, spec);
+  const native = nativeReference(def, spec, modelId);
   for (const reasoning of REASONING) {
     expect({ modelId, reasoning, payload: await capturePayload(proxied, reasoning) }).toEqual({
       modelId,
@@ -140,7 +161,7 @@ describe("proxied Pi model payload parity", () => {
     });
   }
 
-  // pi-ai 0.87.1 records a cap equal to the window: no room left for the prompt.
+  // pi-ai 1.0.4 records a cap equal to the window: no room left for the prompt.
   it("mistral-medium-2604: a record cap filling the window resolves to the default on every path", () => {
     const def = providers.find((p) => p.providerId === "mistral")!;
     const record = nativeModel("mistral", "mistral-medium-2604")!;

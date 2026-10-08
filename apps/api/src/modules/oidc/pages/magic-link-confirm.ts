@@ -29,6 +29,16 @@
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedSpaceBranding } from "../services/branding.ts";
+import { magicLinkConfirmPageUrl } from "@appstrate/db/auth";
+
+/** The URL of this interstitial for a Better Auth verify URL — the one the email carries. */
+export function toMagicLinkConfirmUrl(verifyUrl: string, email: string): string {
+  const url = magicLinkConfirmPageUrl(verifyUrl, "/api/oauth/magic-link/confirm");
+  if (!url) return verifyUrl;
+  // Shown on the interstitial; the URL only ever reaches that address's inbox.
+  url.searchParams.set("email", email);
+  return url.toString();
+}
 
 interface MagicLinkConfirmPageProps {
   /** Action URL for the POST form — `/api/oauth/magic-link/confirm?token=…&callbackURL=…&errorCallbackURL=…`. */

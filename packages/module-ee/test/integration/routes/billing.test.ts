@@ -696,8 +696,11 @@ describe("billing routes", () => {
       });
 
       expect(res.status).toBe(400);
-      const text = await res.text();
-      expect(text).toContain("Missing stripe-signature");
+      expect(res.headers.get("content-type")).toBe("application/problem+json");
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        detail: "Missing stripe-signature header",
+      });
     });
 
     it("returns 400 for invalid signature", async () => {
@@ -711,8 +714,11 @@ describe("billing routes", () => {
       });
 
       expect(res.status).toBe(400);
-      const text = await res.text();
-      expect(text).toContain("Invalid signature");
+      expect(res.headers.get("content-type")).toBe("application/problem+json");
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        detail: "Invalid signature",
+      });
     });
 
     it("does not require X-Test-Org-Id (public endpoint)", async () => {

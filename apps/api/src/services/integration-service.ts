@@ -93,6 +93,16 @@ export async function fetchIntegrationManifest(
   return promise;
 }
 
+function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadResult {
+  const parsed = integrationManifestSchema.safeParse(raw);
+  if (!parsed.success)
+    return {
+      ok: false,
+      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
+    };
+  return { ok: true, manifest: parsed.data };
+}
+
 async function fetchIntegrationManifestUncached(
   packageId: string,
 ): Promise<IntegrationManifestLoadResult> {
@@ -105,24 +115,15 @@ async function fetchIntegrationManifestUncached(
   if (pkgRow.type !== "integration") {
     return { ok: false, failure: { kind: "not_integration", actualType: pkgRow.type } };
   }
-  const parsed = integrationManifestSchema.safeParse(pkgRow.manifest);
-  if (!parsed.success)
-    return {
-      ok: false,
-      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
-    };
-  return { ok: true, manifest: parsed.data };
+  return parseIntegrationManifest(pkgRow.manifest);
 }
 
 /**
  * Resolve an `mcp-server` package's MCPB manifest from the package store.
  *
  * An integration whose `source.kind: "local"` references a SEPARATE
- * `mcp-server` package via `source.server.name`. The spawn resolver looks that
- * package up here (unscoped — internal callers already hold an auth context)
- * and reads its runnable server config (`server.{type, entry_point}`) to build
- * the sidecar spawn spec. Returns `null` when the package is absent, is not an
- * mcp-server, or fails MCPB manifest validation.
+ * `mcp-server` package via `source.server.name`. Reads that package's DRAFT; runs
+ * go through {@link resolveMcpServerForSpawn}. Returns `null` when it does not resolve.
  */
 export async function fetchMcpServerManifest(packageId: string): Promise<McpServerManifest | null> {
   const [pkgRow] = await db
@@ -130,12 +131,13 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
     .from(packages)
     .where(eq(packages.id, packageId))
     .limit(1);
+  // `debug`: every read of an integration's draft comes through here.
   if (!pkgRow) {
-    logger.info("referenced mcp-server package not found", { packageId });
+    logger.debug("referenced mcp-server package not found", { packageId });
     return null;
   }
   if (pkgRow.type !== "mcp-server") {
-    logger.warn("referenced package is not an mcp-server", {
+    logger.debug("referenced package is not an mcp-server", {
       packageId,
       actualType: pkgRow.type,
     });
@@ -143,7 +145,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   }
   const parsed = mcpServerManifestSchema.safeParse(pkgRow.manifest);
   if (!parsed.success) {
-    logger.warn("mcp-server manifest failed validation", { packageId });
+    logger.debug("mcp-server manifest failed validation", { packageId });
     return null;
   }
   return parsed.data;
@@ -161,7 +163,6 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
  */
 type PublishedManifestFailure =
   | "not_found"
-  | "wrong_type"
   | "invalid_manifest"
   /** A published version exists, but none satisfied the pin. */
   | "unsatisfiable_pin"
@@ -170,7 +171,8 @@ type PublishedManifestFailure =
 
 type PublishedManifestResolution =
   | { ok: true; rawManifest: unknown; version: string | null; source: "system" | "version" }
-  | { ok: false; reason: PublishedManifestFailure };
+  | { ok: false; reason: PublishedManifestFailure }
+  | { ok: false; reason: "wrong_type"; actualType: string };
 
 /**
  * Resolve a package to a CONCRETE published version honoring its pin, and
@@ -217,7 +219,9 @@ async function resolvePublishedManifest(
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
     .limit(1);
   if (!pkgRow) return { ok: false, reason: "not_found" };
-  if (pkgRow.type !== expectedType) return { ok: false, reason: "wrong_type" };
+  if (pkgRow.type !== expectedType) {
+    return { ok: false, reason: "wrong_type", actualType: pkgRow.type };
+  }
 
   // Projection is deliberately metadata-only: `pickVersion` reads nothing but
   // (version, integrity, yanked), and this list is UNBOUNDED — a package with
@@ -412,13 +416,7 @@ export async function readIntegrationManifestAt(
   if (descriptor.kind === "system") {
     const sys = getSystemPackages().get(packageId);
     if (!sys) return { ok: false, failure: { kind: "not_found" } };
-    const parsed = integrationManifestSchema.safeParse(sys.manifest);
-    if (!parsed.success)
-      return {
-        ok: false,
-        failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
-      };
-    return { ok: true, manifest: parsed.data };
+    return parseIntegrationManifest(sys.manifest);
   }
 
   const [row] = await db
@@ -432,13 +430,7 @@ export async function readIntegrationManifestAt(
     )
     .limit(1);
   if (!row) return { ok: false, failure: { kind: "not_found" } };
-  const parsed = integrationManifestSchema.safeParse(row.manifest);
-  if (!parsed.success)
-    return {
-      ok: false,
-      failure: { kind: "invalid_manifest", issues: formatZodIssues(parsed.error) },
-    };
-  return { ok: true, manifest: parsed.data };
+  return parseIntegrationManifest(row.manifest);
 }
 
 /**
@@ -463,6 +455,25 @@ export function readIntegrationManifestForRun(
         resolvedIntegrationVersionToDescriptor(packageId, frozen),
       )
     : fetchIntegrationManifest(packageId, cache);
+}
+
+/**
+ * The integration manifest a credential-proxy call is authorized against: the version its run
+ * froze (`frozen`), else the `latest` published one — the draft only if the run froze it.
+ */
+export async function readIntegrationManifestForProxy(
+  packageId: string,
+  orgId: string,
+  frozen: ResolvedIntegrationVersion | null,
+): Promise<IntegrationManifestLoadResult | { ok: false; failure: { kind: "not_published" } }> {
+  if (frozen) return readIntegrationManifestForRun(packageId, frozen);
+  const res = await resolvePublishedManifest(packageId, "integration", orgId);
+  if (res.ok) return parseIntegrationManifest(res.rawManifest);
+  if (res.reason === "not_found") return { ok: false, failure: { kind: "not_found" } };
+  if (res.reason === "wrong_type") {
+    return { ok: false, failure: { kind: "not_integration", actualType: res.actualType } };
+  }
+  return { ok: false, failure: { kind: "not_published" } };
 }
 
 type RunIntegrationVersionsResult =

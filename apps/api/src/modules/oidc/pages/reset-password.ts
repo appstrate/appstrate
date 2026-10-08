@@ -33,16 +33,27 @@ interface ResetPasswordPageProps {
 interface InvalidTokenPageProps {
   queryString: string;
   branding: ResolvedSpaceBranding;
+  /** The link was spent and the password written, but not every other sign-in revoked. */
+  revocationFailed?: boolean;
 }
 
 /** Dedicated screen when the verification link is missing/expired. */
 export function renderInvalidTokenPage(props: InvalidTokenPageProps): RawHtml {
   const forgotUrl = `/api/oauth/forgot-password${props.queryString}`;
   const loginUrl = `/api/oauth/login${props.queryString}`;
-  const title = `Lien invalide — ${props.branding.name}`;
+  const [heading, message] = props.revocationFailed
+    ? [
+        "Mot de passe modifié",
+        "Vos autres connexions n'ont pas toutes pu être révoquées. Demandez un nouveau lien pour terminer.",
+      ]
+    : [
+        "Lien invalide ou expiré",
+        "Ce lien de réinitialisation n'est plus valide. Demandez-en un nouveau pour continuer.",
+      ];
+  const title = `${props.revocationFailed ? heading : "Lien invalide"} — ${props.branding.name}`;
   const bodyHtml = html`
-    <h1>Lien invalide ou expiré</h1>
-    <p>Ce lien de réinitialisation n'est plus valide. Demandez-en un nouveau pour continuer.</p>
+    <h1>${heading}</h1>
+    <p>${message}</p>
     <div class="footer-links">
       <a href="${forgotUrl}">Demander un nouveau lien</a>
       <span class="sep">·</span><a href="${loginUrl}">Retour à la connexion</a>
@@ -59,7 +70,10 @@ export function renderResetPasswordPage(props: ResetPasswordPageProps): RawHtml 
   if (props.success) {
     const bodyHtml = html`
       <h1>Mot de passe mis à jour</h1>
-      <p>Votre mot de passe a été réinitialisé. Vous pouvez maintenant vous connecter.</p>
+      <p>
+        Votre mot de passe a été réinitialisé et vos autres connexions révoquées. Vous pouvez
+        maintenant vous connecter.
+      </p>
       <div class="footer-links">
         <a href="${loginUrl}">Se connecter</a>
       </div>

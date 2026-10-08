@@ -184,17 +184,44 @@ describe("Me API (/api/me)", () => {
       const body = (await res.json()) as {
         user: { id: string; name: string | null; email: string | null };
         org: { id: string; role: string };
-        connections: { integration_id: string; name: string; source: string }[];
+        connections: { integration_package_id: string; name: string; source: string }[];
       };
 
       expect(body.user.id).toBe(ctx.user.id);
       expect(body.org.id).toBe(ctx.orgId);
       expect(body.org.role).toBe("owner");
 
-      const byId = new Map(body.connections.map((c) => [c.integration_id, c]));
+      const byId = new Map(body.connections.map((c) => [c.integration_package_id, c]));
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-space")).toBe(false);
+    });
+
+    it("names the space it resolved, following X-Space-Id rather than the default", async () => {
+      const read = async (spaceId: string) => {
+        const res = await app.request("/api/me/context", {
+          headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { space: unknown }).space;
+      };
+
+      expect(await read(ctx.defaultSpaceId)).toEqual({
+        id: ctx.defaultSpaceId,
+        name: "Default",
+        personal: false,
+      });
+
+      const team = await seedSpace({ orgId: ctx.orgId, name: "Sales" });
+      expect(await read(team.id)).toEqual({ id: team.id, name: "Sales", personal: false });
+
+      const mine = await seedSpace({
+        orgId: ctx.orgId,
+        name: "Mine",
+        ownerUserId: ctx.user.id,
+        visibility: "private",
+      });
+      expect(await read(mine.id)).toEqual({ id: mine.id, name: "Mine", personal: true });
     });
 
     it("lists runnable agents (enabled only) with invokable id and input flag", async () => {

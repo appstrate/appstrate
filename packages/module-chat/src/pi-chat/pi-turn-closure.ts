@@ -145,6 +145,8 @@ interface PiTurnClosure {
   chunks: UIMessageChunk[];
   /** The turn was cut by the wall-clock ceiling — the caller logs it. */
   deadlineReached: boolean;
+  /** What the client was told — the caller logs it. */
+  clientError?: ClientTurnError;
 }
 
 /**
@@ -176,6 +178,7 @@ export function closePiTurn(input: {
   modelId: string;
   /** Its display name frozen at write time — never resolved back into a model. */
   modelLabel: string;
+  requestId?: string;
   newId?: () => string;
 }): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
@@ -184,7 +187,8 @@ export function closePiTurn(input: {
     abortReason: input.abortReason,
     finishReason: input.finishReason,
   });
-  const clientError = input.error === undefined ? undefined : classifyClientTurnError(input.error);
+  const clientError =
+    input.error === undefined ? undefined : classifyClientTurnError(input.error, input.requestId);
   const chunks: UIMessageChunk[] = [];
 
   if (!input.streamStarted) chunks.push({ type: "start", messageId: newId() });
@@ -206,5 +210,9 @@ export function closePiTurn(input: {
       modelLabel: input.modelLabel,
     }),
   });
-  return { chunks, deadlineReached: closure.deadlineReached };
+  return {
+    chunks,
+    deadlineReached: closure.deadlineReached,
+    ...(clientError ? { clientError } : {}),
+  };
 }

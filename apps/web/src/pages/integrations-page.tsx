@@ -235,9 +235,7 @@ export function IntegrationsPage() {
           rowLabel={(integration) => integration.manifest.display_name ?? integration.id}
           isLoading={isLoading}
           isError={Boolean(error)}
-          error={
-            <ErrorState message={error instanceof Error ? error.message : undefined} compact />
-          }
+          error={<ErrorState error={error} compact />}
           empty={empty}
         />
       ) : (
@@ -247,9 +245,7 @@ export function IntegrationsPage() {
           renderCard={(integration) => <IntegrationCard integration={integration} />}
           isLoading={isLoading}
           isError={Boolean(error)}
-          error={
-            <ErrorState message={error instanceof Error ? error.message : undefined} compact />
-          }
+          error={<ErrorState error={error} compact />}
           empty={empty}
         />
       )}

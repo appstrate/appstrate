@@ -26,7 +26,12 @@ import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
+  getPiModel,
+  piModelDialect,
+} from "@appstrate/runner-pi/pi-model";
 import {
   _resetSdkDriftWarningForTesting,
   buildBackingModel,
@@ -141,6 +146,10 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
     proxyBaseUrl: "https://platform.invalid/internal/llm-proxy/x",
     headers: PROXY_HEADERS,
   };
+  // What the platform sends: the dialect of its registry's record, if it has one.
+  const record = backing.providerId
+    ? getPiModel(backing.providerId, backing.modelId, backing.apiShape)
+    : undefined;
   const swap: ModelSwap = {
     alias: "appstrate-medium",
     real: backing.modelId,
@@ -148,6 +157,7 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
     backingApiShape: backing.apiShape,
     backing: {
       providerId: backing.providerId,
+      dialect: record ? piModelDialect(record) : null,
       reasoning: true,
       input: ["text"],
     },
@@ -299,7 +309,7 @@ describe("re-originated request shape", () => {
 });
 
 describe("buildBackingModel", () => {
-  it("rebuilds Pi's record for the backing, keyed by its Pi provider key", () => {
+  it("builds the backing from the dialect the platform sent, under its Pi provider key", () => {
     const moonshot: Backing = {
       name: "moonshot",
       providerId: "moonshotai",
@@ -335,7 +345,7 @@ describe("buildBackingModel", () => {
     expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
-  it("falls back to the platform defaults when neither the platform nor Pi sizes the model", () => {
+  it("falls back to the platform defaults when the platform sizes nothing", () => {
     const backing = { ...BACKINGS[0]!, modelId: "not-a-pi-model" };
     const model = buildBackingModel({ ...depsFor(backing), limits: {} });
     expect(model).toMatchObject({
@@ -344,9 +354,9 @@ describe("buildBackingModel", () => {
     });
   });
 
-  // The record's own `forceAdaptiveThinking` + `thinkingLevelMap` shape the
-  // call: nothing on the descriptor carries the dialect any more.
-  it("takes the adaptive Anthropic shape from Pi's record", async () => {
+  // The dialect on the descriptor (`forceAdaptiveThinking`, `thinkingLevelMap`)
+  // shapes the call.
+  it("takes the adaptive Anthropic shape from the dialect it was sent", async () => {
     let payload: unknown;
     const capture: BackingStreamFn = (model, context, options) =>
       streamBacking(model, context, {
@@ -369,7 +379,20 @@ describe("buildBackingModel", () => {
     expect(body).not.toHaveProperty("thinking.budget_tokens");
   });
 
-  // A gateway backing names no Pi provider: no record, the generic key.
+  // The sidecar reads no registry: a recorded id under its own provider, sent
+  // without a dialect, is built bare.
+  it("looks nothing up for a backing sent without a dialect", () => {
+    const deps = depsFor(BACKINGS.find((b) => b.name === "anthropic adaptive")!);
+    const sent = deps.swap.backing!;
+    expect(sent.dialect?.compat).toMatchObject({ forceAdaptiveThinking: true });
+    const backing = { ...sent, dialect: null };
+    const model = buildBackingModel({ ...deps, swap: { ...deps.swap, backing } });
+    expect(model.provider).toBe("anthropic");
+    expect(model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
+  });
+
+  // A gateway backing names no Pi provider: no record, the generic key, and
+  // the levels every reasoning backend takes (no `minimal`).
   it("gives a gateway backing no record", () => {
     const deps = depsFor({
       ...BACKINGS.find((b) => b.name === "anthropic adaptive")!,
@@ -378,7 +401,7 @@ describe("buildBackingModel", () => {
     const model = buildBackingModel(deps);
     expect(model.provider).toBe("anthropic");
     expect(model.compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
-    expect(model.thinkingLevelMap).toBeUndefined();
+    expect(model.thinkingLevelMap).toEqual({ minimal: null });
   });
 
   it("refuses to re-originate without the backing catalog", () => {

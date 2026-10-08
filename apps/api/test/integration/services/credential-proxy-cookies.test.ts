@@ -10,7 +10,7 @@
  * like the in-container sidecar, and kept per connection.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
@@ -39,7 +39,6 @@ async function seedConnectedIntegration(
   opts: {
     packageId: string;
     authorizedUris: string[];
-    allowAllUris?: boolean;
     delivery: ReturnType<typeof httpHeaderDelivery>;
     apiKey: string;
   },
@@ -54,7 +53,6 @@ async function seedConnectedIntegration(
         api: {
           type: "api_key",
           authorizedUris: opts.authorizedUris,
-          ...(opts.allowAllUris ? { allowAllUris: true } : {}),
           delivery: opts.delivery,
         },
       },
@@ -115,6 +113,10 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     jar = new LocalCookieJarStore();
   });
 
+  afterEach(() => {
+    setSystemTime();
+  });
+
   const call = (
     packageId: string,
     target: string,
@@ -122,6 +124,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     connectionId?: string,
   ) =>
     proxyCall({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       ...(connectionId ? { connectionId } : {}),
@@ -136,11 +139,10 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       fetch: fetchImpl,
     });
 
-  const cookieCredential = (packageId: string, allowAllUris = false) =>
+  const cookieCredential = (packageId: string, authorizedUris = ["https://1.1.1.1/**"]) =>
     seedConnectedIntegration(ctx, {
       packageId,
-      authorizedUris: ["https://1.1.1.1/**"],
-      allowAllUris,
+      authorizedUris,
       delivery: SESSION_COOKIE,
       apiKey: "sess-abc",
     });
@@ -253,7 +255,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
   it("files each redirect hop's cookies under that hop's origin", async () => {
     const packageId = "@cpcookieorg/open";
-    await cookieCredential(packageId, true);
+    await cookieCredential(packageId, ["https://1.1.1.1/**", "https://8.8.8.8/**"]);
     const upstream = recordingUpstream((_url, n) =>
       n === 1
         ? new Response(null, { status: 302, headers: { location: "https://8.8.8.8/landing" } })
@@ -270,7 +272,8 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       "POST https://1.1.1.1/cart",
       "POST https://8.8.8.8/landing",
     ]);
-    expect(upstream.seen[1]?.cookie).toBeNull(); // cross-origin hop: credential stripped
+    // An origin the allowlist names keeps the credential cookie, as on the sidecar (#1641).
+    expect(cookiePairs(upstream.seen[1]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
     expect(cookiePairs(upstream.seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
     expect(cookiePairs(upstream.seen[3]?.cookie)).toEqual(["PHPSESSID=planted"]);
   });
@@ -339,15 +342,45 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     ]);
   });
 
+  it("dates a redirect hop's Max-Age from its receipt, not from the exchange's end", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const upstream = recordingUpstream((url, n) => {
+      if (url.endsWith("/cart/add")) return redirect("/cart", "s=short; Max-Age=2");
+      // The redirected hop answers 20 s later: `s` (2 s) is already expired when the jar persists.
+      if (n === 2) setSystemTime(new Date(Date.now() + 20_000));
+      return new Response("{}", { status: 200 });
+    });
+
+    await call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(cookiePairs(upstream.seen[1]?.cookie)).toEqual(["PHPSESSID=sess-abc", "s=short"]);
+    expect(cookiePairs(upstream.seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
+  });
+
   describe("origin scoping", () => {
     it("does not replay a cookie to another host matched by a glob", async () => {
       const packageId = "@cpcookieorg/glob";
-      await seedConnectedIntegration(ctx, {
-        packageId,
-        authorizedUris: ["https://*/**"],
-        delivery: BEARER,
-        apiKey: "tok",
-      });
+      // An unbounded glob is only open to an auth the proxy injects nothing for.
+      await seedProxyIntegration(
+        ctx,
+        localIntegrationManifest({
+          name: packageId,
+          displayName: "Shop",
+          description: "Shop integration",
+          auths: {
+            api: {
+              type: "custom",
+              authorizedUris: ["https://*/**"],
+              credentialFields: ["token"],
+              requiredCredentialFields: ["token"],
+              delivery: envDelivery({ TOKEN: "token" }),
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, packageId, "api", { token: "tok" });
       const upstream = scriptedUpstream([["a=1"]]);
 
       await call(packageId, "https://1.1.1.1/x", upstream.fetchImpl);

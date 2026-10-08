@@ -31,7 +31,6 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { useSpaceColumns } from "./space-columns";
 import { SpaceCreateModal } from "../../components/space-create-modal";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -60,7 +59,6 @@ export function OrgSettingsSpacesPage() {
           setPending(null);
           toast.success(t("spaces.personal.converted"));
         },
-        onError: (err) => toast.error(getErrorMessage(err)),
       });
       return;
     }
@@ -74,7 +72,6 @@ export function OrgSettingsSpacesPage() {
           }),
         );
       },
-      onError: (err) => toast.error(getErrorMessage(err)),
     });
   };
 
@@ -112,7 +109,7 @@ export function OrgSettingsSpacesPage() {
         rowKey={(space) => space.id}
         isLoading={isLoading}
         isError={Boolean(error)}
-        error={<ErrorState message={getErrorMessage(error)} compact />}
+        error={<ErrorState error={error} compact />}
         empty={
           // No action of its own: the button above is the same one.
           <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow} />

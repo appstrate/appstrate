@@ -5,9 +5,23 @@ import {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
   OAuthCallbackError,
+  type OAuthClientResolver,
   type OAuthStateRecord,
   type OAuthStateStore,
+  type ResolvedOAuthClient,
 } from "../src/index.ts";
+
+/** A resolver answering one client for any ref, recording what it was asked. */
+function resolverFor(
+  client: Partial<ResolvedOAuthClient> | null = {},
+): OAuthClientResolver & { calls: Parameters<OAuthClientResolver>[0][] } {
+  const calls: Parameters<OAuthClientResolver>[0][] = [];
+  const resolve = async (ref: Parameters<OAuthClientResolver>[0]) => {
+    calls.push(ref);
+    return client && { clientId: "client-id", clientSecret: "client-secret", ...client };
+  };
+  return Object.assign(resolve, { calls });
+}
 
 function memoryStore(): OAuthStateStore & { _data: Map<string, OAuthStateRecord> } {
   const data = new Map<string, OAuthStateRecord>();
@@ -49,7 +63,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "abc.apps.googleusercontent.com",
-      clientSecret: "secret",
+      clientRef: "client-ref",
       scopes: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
       redirectUri: "http://localhost:3000/api/integrations/callback",
       orgId: "org_1",
@@ -75,7 +89,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://github.com/login/oauth/authorize",
       tokenEndpoint: "https://github.com/login/oauth/access_token",
       clientId: "Iv1.x",
-      clientSecret: "x",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -95,7 +109,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://idp.example.com/authorize",
       tokenEndpoint: "https://idp.example.com/token",
       clientId: "client",
-      clientSecret: "secret",
+      clientRef: "client-ref",
       resource: "https://api.example.com",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
@@ -112,7 +126,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://idp.example.com/authorize?prompt=consent",
       tokenEndpoint: "https://idp.example.com/token",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -131,7 +145,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "abc.apps.googleusercontent.com",
-      clientSecret: "secret",
+      clientRef: "client-ref",
       authorizationParams: { access_type: "offline", prompt: "consent" },
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
@@ -150,7 +164,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
       tokenEndpoint: "https://oauth2.googleapis.com/token",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       authorizationParams: { access_type: "offline", prompt: "consent" },
       forceAccountSelect: true,
       redirectUri: "http://localhost:3000/cb",
@@ -171,7 +185,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -189,7 +203,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       codeChallengeMethodsSupported: ["S256"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
@@ -210,7 +224,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       codeChallengeMethodsSupported: [],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
@@ -238,7 +252,7 @@ describe("initiateIntegrationOAuth", () => {
       authKey: "a",
       issuer: "https://idp.example.com",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -265,7 +279,7 @@ describe("initiateIntegrationOAuth", () => {
       authKey: "a",
       issuer: "https://idp.example.com",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -292,7 +306,7 @@ describe("initiateIntegrationOAuth", () => {
       authKey: "a",
       issuer: "https://idp.example.com",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       codeChallengeMethodsSupported: ["plain"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
@@ -320,7 +334,7 @@ describe("initiateIntegrationOAuth", () => {
       authKey: "a",
       issuer: "https://disco.example.com",
       clientId: "c",
-      clientSecret: "s",
+      clientRef: "client-ref",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
       spaceId: "a",
@@ -358,7 +372,7 @@ describe("initiateIntegrationOAuth", () => {
           authorizationEndpoint: "https://manual.example.com/authorize",
           tokenEndpoint: "https://manual.example.com/token",
           clientId: "c",
-          clientSecret: "s",
+          clientRef: "client-ref",
           redirectUri: "http://localhost:3000/cb",
           orgId: "o",
           spaceId: "a",
@@ -377,7 +391,7 @@ describe("initiateIntegrationOAuth", () => {
         packageId: "@x/y",
         authKey: "a",
         clientId: "c",
-        clientSecret: "s",
+        clientRef: "client-ref",
         redirectUri: "http://localhost:3000/cb",
         orgId: "o",
         spaceId: "a",
@@ -403,7 +417,7 @@ describe("initiateIntegrationOAuth", () => {
         packageId: "@x/y",
         authKey: "a",
         clientId: "c",
-        clientSecret: "s",
+        clientRef: "client-ref",
         redirectUri: "http://localhost:3000/cb",
         orgId: "o",
         spaceId: "a",
@@ -434,7 +448,7 @@ describe("handleIntegrationOAuthCallback", () => {
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
       clientId: "client-id",
-      clientSecret: "client-secret",
+      clientRef: "client-ref",
       scopes: ["openid", "email"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "org_1",
@@ -448,7 +462,7 @@ describe("handleIntegrationOAuthCallback", () => {
     // Pin `client_secret_post` so the test exercises the body-credential
     // path independent of the default-auth-method flip (AFPS
     // changed the default-when-missing from POST to BASIC).
-    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_post" });
+    const { state } = await seedState();
     let captured: { url: string; body: string; headers: Record<string, string> } | null = null;
     const stubFetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -472,7 +486,24 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    const result = await handleIntegrationOAuthCallback(store, "AUTH_CODE", state, stubFetch);
+    const resolve = resolverFor({ tokenEndpointAuthMethod: "client_secret_post" });
+    const result = await handleIntegrationOAuthCallback(
+      store,
+      resolve,
+      "AUTH_CODE",
+      state,
+      stubFetch,
+    );
+    // The secret comes from the resolver, asked by the state's client ref and space.
+    expect(resolve.calls).toEqual([
+      {
+        clientRef: "client-ref",
+        packageId: "@official/gmail",
+        authKey: "primary",
+        orgId: "org_1",
+        spaceId: "spc_1",
+      },
+    ]);
 
     expect(captured).not.toBeNull();
     expect(captured!.url).toBe("https://idp/token");
@@ -499,8 +530,8 @@ describe("handleIntegrationOAuthCallback", () => {
   // `token_endpoint_auth_method`, the runtime now defaults to
   // `client_secret_basic` — the RFC 8414 §2 / RFC 7591 §2 default.
   // Manifest-explicit values still win.
-  it("defaults to client_secret_basic when the manifest omits token_endpoint_auth_method", async () => {
-    const { state } = await seedState(); // no tokenEndpointAuthMethod
+  it("defaults to client_secret_basic when the client resolves no token_endpoint_auth_method", async () => {
+    const { state } = await seedState();
     let captured: { body: string; headers: Record<string, string> } | null = null;
     const stub = (async (_input: unknown, init?: RequestInit) => {
       const body = init?.body ? String(init.body) : "";
@@ -517,7 +548,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
     expect(authHeader?.startsWith("Basic ")).toBe(true);
     // Basic auth carries credentials in the header, not the body.
@@ -525,8 +556,8 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(params.get("client_secret")).toBeNull();
   });
 
-  it("manifest-explicit client_secret_post still wins over the new default", async () => {
-    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_post" });
+  it("a client declaring client_secret_post still wins over the default", async () => {
+    const { state } = await seedState();
     let captured: { body: string; headers: Record<string, string> } | null = null;
     const stub = (async (_input: unknown, init?: RequestInit) => {
       const body = init?.body ? String(init.body) : "";
@@ -543,7 +574,13 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    await handleIntegrationOAuthCallback(
+      store,
+      resolverFor({ tokenEndpointAuthMethod: "client_secret_post" }),
+      "CODE",
+      state,
+      stub,
+    );
     const authHeader = captured!.headers["Authorization"] ?? captured!.headers["authorization"];
     expect(authHeader).toBeUndefined();
     const params = new URLSearchParams(captured!.body);
@@ -555,7 +592,7 @@ describe("handleIntegrationOAuthCallback", () => {
     // token-exchange.test.ts. Here we only assert the callback wrapper
     // forwards `tokenAuthMethod` so the chosen scheme actually reaches the
     // wire (Basic for client_secret_basic).
-    const { state } = await seedState({ tokenEndpointAuthMethod: "client_secret_basic" });
+    const { state } = await seedState();
     let authHeader: string | undefined;
     const stub = (async (_input: unknown, init?: RequestInit) => {
       const headers: Record<string, string> = {};
@@ -571,7 +608,13 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    await handleIntegrationOAuthCallback(
+      store,
+      resolverFor({ tokenEndpointAuthMethod: "client_secret_basic" }),
+      "CODE",
+      state,
+      stub,
+    );
     expect(authHeader?.startsWith("Basic ")).toBe(true);
   });
 
@@ -586,7 +629,7 @@ describe("handleIntegrationOAuthCallback", () => {
       );
     }) as unknown as typeof fetch;
 
-    await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     expect(new URLSearchParams(body).get("resource")).toBe("https://api.example.com");
   });
 
@@ -600,7 +643,7 @@ describe("handleIntegrationOAuthCallback", () => {
 
     let err: unknown = null;
     try {
-      await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+      await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     } catch (e) {
       err = e;
     }
@@ -619,7 +662,7 @@ describe("handleIntegrationOAuthCallback", () => {
 
     let err: unknown = null;
     try {
-      await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+      await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     } catch (e) {
       err = e;
     }
@@ -632,7 +675,7 @@ describe("handleIntegrationOAuthCallback", () => {
   it("rejects missing state with a structured `transient` error", async () => {
     let err: unknown = null;
     try {
-      await handleIntegrationOAuthCallback(store, "CODE", "missing-state-key");
+      await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", "missing-state-key");
     } catch (e) {
       err = e;
     }
@@ -656,7 +699,7 @@ describe("handleIntegrationOAuthCallback", () => {
     await store.set("S", record, 60);
     let err: unknown = null;
     try {
-      await handleIntegrationOAuthCallback(store, "CODE", "S");
+      await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", "S");
     } catch (e) {
       err = e;
     }
@@ -680,7 +723,7 @@ describe("handleIntegrationOAuthCallback", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       )) as unknown as typeof fetch;
 
-    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    const result = await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     expect(result.scopesGranted).toEqual(["openid", "email"]);
     expect(result.scopesRequested).toEqual(["openid", "email", "profile"]);
   });
@@ -693,20 +736,19 @@ describe("integration OAuth clientRef round-trip", () => {
     store = memoryStore();
   });
 
-  async function initiate(clientRef?: string) {
+  async function initiate(clientRef: string) {
     return initiateIntegrationOAuth(store, {
       packageId: "@official/gmail",
       authKey: "primary",
       authorizationEndpoint: "https://idp/authorize",
       tokenEndpoint: "https://idp/token",
       clientId: "client-id",
-      clientSecret: "client-secret",
+      clientRef,
       scopes: ["openid", "email"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "org_1",
       spaceId: "spc_1",
       actor: { type: "user", id: "u_1" },
-      ...(clientRef ? { clientRef } : {}),
     });
   }
 
@@ -716,10 +758,11 @@ describe("integration OAuth clientRef round-trip", () => {
     expect(record?.integration?.clientRef).toBe("gmail-system");
   });
 
-  it("omits clientRef from the state when not supplied", async () => {
-    const { state } = await initiate();
-    const record = store._data.get(state);
-    expect(record?.integration?.clientRef).toBeUndefined();
+  it("keeps the client's credentials out of the state record", async () => {
+    const { state } = await initiate("gmail-system");
+    const record = JSON.stringify(store._data.get(state));
+    expect(record).not.toContain("client-secret");
+    expect(record).not.toContain("clientSecret");
   });
 
   it("returns clientRef from the callback result so the connection can pin it", async () => {
@@ -729,18 +772,27 @@ describe("integration OAuth clientRef round-trip", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as unknown as typeof fetch;
-    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
+    const result = await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
     expect(result.clientRef).toBe("a3f9c1b2-0000-4000-8000-000000000001");
   });
 
-  it("leaves the callback result clientRef undefined when none was pinned", async () => {
-    const { state } = await initiate();
-    const stub = (async () =>
-      new Response(JSON.stringify({ access_token: "AT", refresh_token: "RT", expires_in: 3600 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      })) as unknown as typeof fetch;
-    const result = await handleIntegrationOAuthCallback(store, "CODE", state, stub);
-    expect(result.clientRef).toBeUndefined();
+  it("refuses the callback, and drops the state, when the client no longer resolves", async () => {
+    const { state } = await initiate("deleted-client");
+    let fetched = false;
+    const stub = (async () => {
+      fetched = true;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const err = await handleIntegrationOAuthCallback(
+      store,
+      resolverFor(null),
+      "CODE",
+      state,
+      stub,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OAuthCallbackError);
+    expect((err as OAuthCallbackError).kind).toBe("client_unavailable");
+    expect(fetched).toBe(false);
+    expect(await store.get(state)).toBeNull();
   });
 });

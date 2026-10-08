@@ -48,6 +48,7 @@ import {
 } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
+import { sentenceWithName } from "./sentence-with-name.tsx";
 import { orgSpaceFromHeaders } from "./run-events.ts";
 import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
@@ -124,7 +125,7 @@ export function OAuthConnectCard({
   toolCallId,
   errorText,
 }: {
-  /** Absent while the initiate call is still streaming — renders "Préparation…". */
+  /** Absent while the initiate call is still streaming — renders the preparing state. */
   authUrl?: string;
   state?: string;
   packageId?: string;
@@ -139,13 +140,15 @@ export function OAuthConnectCard({
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
+  const { can, t } = useChatHost();
   // Without `integrations:read` the chip keeps the bare package id.
-  const readsIntegration = useChatHost().can("integrations:read");
+  const readsIntegration = can("integrations:read");
   const [phase, setPhase] = useState<Phase>("idle");
   const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
   const resumed = useRef(false);
-  const label = meta?.name ?? packageId ?? "l'intégration";
+  const label = meta?.name ?? packageId ?? t("connect.integrationFallback");
 
   // Fetch the integration's display name + icon once so the connect button and
   // the resume chip can show its brand instead of the bare `@scope/name` id.
@@ -192,7 +195,7 @@ export function OAuthConnectCard({
       if (resumed.current) return;
       if (!ok) {
         setPhase("error");
-        setErrMsg(error ?? "La connexion a échoué.");
+        setErrMsg(error ?? t("connect.failed"));
         return;
       }
       resumed.current = true;
@@ -220,7 +223,7 @@ export function OAuthConnectCard({
         ],
       });
     },
-    [aui, label, meta, packageId, toolCallId],
+    [aui, label, meta, packageId, t, toolCallId],
   );
 
   // One waiter for the card's lifetime: an SSE hit parked until the popup
@@ -290,9 +293,11 @@ export function OAuthConnectCard({
     const popup = window.open(authUrl, popupName(packageId), "width=520,height=680");
     waiter.popupOpened(popup);
     if (!popup) {
-      // Popup blocked — fall back to a same-tab navigation; the BroadcastChannel
-      // + SSE backstops still resume the (now backgrounded) chat tab.
-      window.location.href = authUrl;
+      // Blocked. Never navigate THIS tab to the flow: the conversation that must
+      // resume lives here. A link to a new tab replaces the button instead.
+      setPopupBlocked(true);
+      setPhase("error");
+      setErrMsg(t("connect.popupBlocked"));
     }
   };
 
@@ -308,18 +313,14 @@ export function OAuthConnectCard({
       <div className="flex h-5 items-center gap-2">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate">
-          {connected ? (
-            <>
-              <span className="font-medium">{label}</span> connectée.
-            </>
-          ) : initiateFailed ? (
-            <>
-              Connexion de <span className="font-medium">{label}</span> impossible.
-            </>
-          ) : (
-            <>
-              Connecte <span className="font-medium">{label}</span> pour continuer.
-            </>
+          {sentenceWithName(
+            t,
+            connected
+              ? "connect.connected"
+              : initiateFailed
+                ? "connect.initiateFailed"
+                : "connect.prompt",
+            label,
           )}
         </span>
       </div>
@@ -327,7 +328,7 @@ export function OAuthConnectCard({
         {connected ? (
           <span className="text-primary flex items-center gap-1.5 text-xs">
             <CheckIcon className="size-3.5 shrink-0" />
-            Connexion active
+            {t("connect.active")}
           </span>
         ) : initiateFailed ? (
           <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
@@ -336,21 +337,29 @@ export function OAuthConnectCard({
           </span>
         ) : (
           <>
-            <Button
-              type="button"
-              onClick={start}
-              disabled={preparing || phase === "pending"}
-              className="gap-2"
-            >
-              {preparing || phase === "pending" ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : null}
-              {preparing
-                ? "Préparation…"
-                : phase === "pending"
-                  ? "En attente de connexion…"
-                  : "Connecter"}
-            </Button>
+            {popupBlocked ? (
+              <Button asChild className="shrink-0">
+                <a href={authUrl} target="_blank" rel="noopener noreferrer">
+                  {t("connect.openInTab")}
+                </a>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={start}
+                disabled={preparing || phase === "pending"}
+                className="gap-2"
+              >
+                {preparing || phase === "pending" ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : null}
+                {preparing
+                  ? t("connect.preparing")
+                  : phase === "pending"
+                    ? t("connect.waiting")
+                    : t("connect.start")}
+              </Button>
+            )}
             {phase === "error" && errMsg ? (
               <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
                 <AlertTriangleIcon className="size-3.5 shrink-0" />

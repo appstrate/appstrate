@@ -22,6 +22,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, PencilIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@appstrate/ui/components/dialog";
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -48,6 +57,7 @@ import {
 import { useSessions } from "./use-sessions.ts";
 
 /**
+/**
  * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
  * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", three words more
  * than a 56px column holds, so the unit comes from the bundle (plural rules
@@ -56,23 +66,23 @@ import { useSessions } from "./use-sessions.ts";
 function relativeTime(iso: string, now: number, t: ChatTranslate): string {
   const sec = Math.round((now - new Date(iso).getTime()) / 1000);
   if (Number.isNaN(sec)) return "";
-  if (sec < 60) return t("list.time.now");
+  if (sec < 60) return t("threads.age.now");
   const min = Math.round(sec / 60);
-  if (min < 60) return t("list.time.minutes", { count: min });
+  if (min < 60) return t("threads.age.minutes", { count: min });
   const hour = Math.round(min / 60);
-  if (hour < 24) return t("list.time.hours", { count: hour });
+  if (hour < 24) return t("threads.age.hours", { count: hour });
   const day = Math.round(hour / 24);
-  if (day < 30) return t("list.time.days", { count: day });
+  if (day < 30) return t("threads.age.days", { count: day });
   const month = Math.round(day / 30);
-  if (month < 12) return t("list.time.months", { count: month });
-  return t("list.time.years", { count: Math.round(day / 365) });
+  if (month < 12) return t("threads.age.months", { count: month });
+  return t("threads.age.years", { count: Math.round(day / 365) });
 }
 
 /**
  * Re-render clock for the relative-time labels. Freshness of the list DATA is
  * event-driven (SSE + safety-net refetch), but React Query's structural sharing
  * keeps `data` referentially stable when the payload is unchanged — no
- * re-render, so a label computed at render time would freeze ("à l'instant"
+ * re-render, so a label computed at render time would freeze (the "now" label
  * forever on a quiet list). 30s granularity matches the coarsest visible unit.
  */
 function useNowTick(): number {
@@ -127,16 +137,16 @@ export function ChatConversationList({
         <SidebarGroup className="pb-0">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("list.new")}>
+              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("threads.new")}>
                 <PlusIcon />
-                <span>{t("list.new")}</span>
+                <span>{t("threads.new")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       )}
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel>{t("list.label")}</SidebarGroupLabel>
+        <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
         <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
           {list.map((s) => (
             <ConversationRow
@@ -157,14 +167,14 @@ export function ChatConversationList({
                 onClick={() => void fetchNextPage()}
                 className="text-sidebar-foreground/70"
               >
-                <span>{isFetchingNextPage ? t("list.loadingMore") : t("list.more")}</span>
+                <span>{isFetchingNextPage ? t("threads.loadingMore") : t("threads.showMore")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           )}
         </SidebarMenu>
         {!isLoading && list.length === 0 && (
           <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
-            {t(canWrite ? "list.empty" : "list.emptyReadOnly")}
+            {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
           </p>
         )}
       </SidebarGroup>
@@ -207,8 +217,10 @@ function ConversationRow({
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const { editing, setEditing, save } = useInlineRename(session.id);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const onDelete = async () => {
+    setConfirmingDelete(false);
     await deleteSession(getHeaders, session.id);
     // Reflect the delete in the cached list. Cancel any in-flight poll first so
     // its stale (pre-delete) response can't land afterwards and resurrect the
@@ -240,7 +252,7 @@ function ConversationRow({
         className="pr-16"
       >
         <span className={`block w-full truncate text-left ${unread ? "font-semibold" : ""}`}>
-          {session.title ?? t("list.untitled")}
+          {session.title ?? t("threads.new")}
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
@@ -253,13 +265,13 @@ function ConversationRow({
         {session.generating ? (
           <Loader2Icon
             className="text-sidebar-foreground/70 size-3.5 animate-spin"
-            aria-label={t("list.generating")}
+            aria-label={t("threads.generating")}
           />
         ) : unread ? (
           <span
             className={`bg-primary size-2 rounded-full transition-opacity ${canWrite ? "group-hover/menu-item:opacity-0" : ""}`}
-            aria-label={t("list.unread")}
-            title={t("list.unread")}
+            aria-label={t("threads.unread")}
+            title={t("threads.unread")}
           />
         ) : (
           <span
@@ -275,8 +287,8 @@ function ConversationRow({
           <div className="pointer-events-none absolute right-0 flex items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
             <button
               type="button"
-              aria-label={t("list.rename")}
-              title={t("list.rename")}
+              aria-label={t("threads.actions.rename")}
+              title={t("threads.actions.rename")}
               onClick={() => setEditing(true)}
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
             >
@@ -284,9 +296,9 @@ function ConversationRow({
             </button>
             <button
               type="button"
-              aria-label={t("list.delete")}
-              title={t("list.delete")}
-              onClick={() => void onDelete()}
+              aria-label={t("threads.actions.delete")}
+              title={t("threads.actions.delete")}
+              onClick={() => setConfirmingDelete(true)}
               className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
             >
               <Trash2Icon className="size-3.5" />
@@ -294,6 +306,24 @@ function ConversationRow({
           </div>
         )}
       </div>
+      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <DialogContent data-testid="chat-delete-confirm">
+          <DialogHeader>
+            <DialogTitle>{t("threads.delete.title")}</DialogTitle>
+            <DialogDescription>
+              {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmingDelete(false)}>
+              {t("common:btn.cancel")}
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+              {t("common:btn.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SidebarMenuItem>
   );
 }
@@ -318,7 +348,7 @@ export function ChatConversationTitle({
   if (!activeId) return null;
   const session = sessions?.find((s) => s.id === activeId);
   if (!session) return null;
-  const title = session.title ?? t("list.untitled");
+  const title = session.title ?? t("threads.new");
 
   // `font-semibold`, like every other last breadcrumb segment: this is where
   // you are, and it carries the same weight in both products. Renaming is a
@@ -337,7 +367,7 @@ export function ChatConversationTitle({
       type="button"
       onClick={() => setEditing(true)}
       className="hover:bg-accent flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5"
-      title={t("list.rename")}
+      title={t("threads.actions.rename")}
     >
       <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold">{title}</span>
       <PencilIcon className="text-muted-foreground size-3.5 shrink-0" />

@@ -7,6 +7,7 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { RunDuration } from "../run-duration";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import { RunCostReadout } from "../run-cost-readout";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { formatDateField } from "../../lib/format-date";
 
 export function RunHeaderSummary({ run }: { run: EnrichedRun }) {
@@ -60,6 +61,7 @@ export function RunHeaderSummary({ run }: { run: EnrichedRun }) {
 
 export function RunHeaderActions({
   canRerun,
+  rerunRefusal,
   canCancel,
   rerunPending,
   cancelPending,
@@ -67,6 +69,8 @@ export function RunHeaderActions({
   onCancel,
 }: {
   canRerun: boolean;
+  /** Why a re-run cannot start (switched off here, nothing published): said before the click. */
+  rerunRefusal?: string | null;
   canCancel: boolean;
   rerunPending: boolean;
   cancelPending: boolean;
@@ -78,16 +82,18 @@ export function RunHeaderActions({
   return (
     <div className="flex items-center gap-2">
       {canRerun && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="bg-card"
-          onClick={onRerun}
-          disabled={rerunPending}
-        >
-          <Play className="text-primary size-3.5" />
-          {t("run.rerun")}
-        </Button>
+        <DisabledReasonTooltip reason={rerunRefusal}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-card"
+            onClick={onRerun}
+            disabled={rerunPending || !!rerunRefusal}
+          >
+            <Play className="text-primary size-3.5" />
+            {t("run.rerun")}
+          </Button>
+        </DisabledReasonTooltip>
       )}
       {canCancel && (
         <Button

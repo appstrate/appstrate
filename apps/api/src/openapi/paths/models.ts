@@ -39,6 +39,7 @@ export const modelsPaths = {
                     providerId: "openai",
                     provider_name: "OpenAI",
                     pi_provider: "openai",
+                    pi_dialect: { name: "GPT-4o" },
                     apiShape: "openai-responses",
                     base_url: "https://api.openai.com/v1",
                     modelId: "gpt-4o",
@@ -112,7 +113,7 @@ export const modelsPaths = {
                 cost: {
                   type: "object",
                   description:
-                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
@@ -149,7 +150,11 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
@@ -207,7 +212,7 @@ export const modelsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The model's stored credential can no longer be used for inference (`model_needs_reconnection`) — see the `needs_reconnection` field on `OrgModel`. Such a model is listed so it can be inspected or detached, but it cannot become the organization default: every run and chat would fail at inference time.",
+            "The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -265,7 +270,11 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when one of `model_ids` is outside the provider's catalog offer.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -327,7 +336,7 @@ export const modelsPaths = {
                         cost: {
                           type: ["object", "null"],
                           description:
-                            "Cost per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
+                            "Cost in USD per million tokens (input/output/cacheRead/cacheWrite), or null when pricing is missing",
                           properties: {
                             input: { type: "number" },
                             output: { type: "number" },
@@ -484,7 +493,7 @@ export const modelsPaths = {
                 cost: {
                   type: ["object", "null"],
                   description:
-                    "Cost per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
+                    "Cost in USD per million tokens (input/output/cacheRead/cacheWrite, optional long-context tiers)",
                   properties: {
                     input: { type: "number" },
                     output: { type: "number" },
@@ -521,11 +530,23 @@ export const modelsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
+        "409": {
+          description:
+            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {

@@ -8,27 +8,14 @@ import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "./spinner";
+import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
+import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
 import type { AgentDetail } from "@appstrate/shared-types";
-
-/**
- * True when there is nothing this caller could launch: the package has no
- * published version (`definition === "draft"` is all the detail route could
- * render) and the working copy is not theirs to run. A launch would send no
- * selector and the server would answer `404 no_published_version` — the same
- * verdict, reached after a round trip and rendered as a toast.
- *
- * `undefined` while the detail is in flight, which reads as "runnable": the
- * button is already pending then, and guessing the refusal would grey out a
- * launch that is very likely fine.
- */
-function isNeverPublishedForReader(detail: AgentDetail | undefined): boolean {
-  return !!detail && detail.definition === "draft" && !detail.home_writable;
-}
 
 interface RunAgentButtonProps {
   packageId: string;
@@ -126,13 +113,12 @@ export function RunAgentButton({
   const neverPublished = isNeverPublishedForReader(detail);
   const isPending = isFetching || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
-  // Two different reasons the button is dead; the caller's own reason wins
-  // only when there is nothing to launch at all to say first.
-  const blockedTitle = neverPublished
-    ? t("detail.titleNeverPublished")
-    : disabled
+  const blockedTitle =
+    disabled && disabledTitle
       ? disabledTitle
-      : undefined;
+      : neverPublished
+        ? t("detail.titleNeverPublished")
+        : undefined;
 
   if (!can("agents:run")) return null;
 
@@ -150,36 +136,39 @@ export function RunAgentButton({
 
   return (
     <>
-      {showLabel ? (
-        <Button
-          variant={variant}
-          size={size}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-          className={cn("relative", className)}
-        >
-          {isPending ? (
-            <Spinner />
-          ) : (
-            <Play className={cn("size-3.5", variant === "outline" && "text-primary")} />
-          )}
-          {t("detail.run")}
-          {warningDot}
-        </Button>
-      ) : (
-        <Button
-          variant={variant}
-          size={size}
-          className={`relative ${className ?? ""}`}
-          onClick={handleClick}
-          disabled={isDisabled}
-          title={blockedTitle ?? t("detail.run")}
-        >
-          {isPending ? <Spinner /> : <Play size={14} />}
-          {warningDot}
-        </Button>
-      )}
+      <DisabledReasonTooltip reason={blockedTitle}>
+        {showLabel ? (
+          <Button
+            variant={variant}
+            size={size}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            className={cn("relative", className)}
+          >
+            {isPending ? (
+              <Spinner />
+            ) : (
+              <Play className={cn("size-3.5", variant === "outline" && "text-primary")} />
+            )}
+            {t("detail.run")}
+            {warningDot}
+          </Button>
+        ) : (
+          <Button
+            variant={variant}
+            size={size}
+            className={cn("relative", className)}
+            onClick={handleClick}
+            disabled={isDisabled}
+            title={blockedTitle ? undefined : t("detail.run")}
+            aria-label={t("detail.run")}
+          >
+            {isPending ? <Spinner /> : <Play size={14} />}
+            {warningDot}
+          </Button>
+        )}
+      </DisabledReasonTooltip>
 
       {detail && (
         <RunModal

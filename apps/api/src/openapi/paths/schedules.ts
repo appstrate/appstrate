@@ -139,7 +139,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here.`,
+                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 \`invalid_request\`).`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
@@ -188,6 +188,7 @@ export const schedulesPaths = {
                 spaceId: "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                 name: "Weekday morning sort",
                 enabled: true,
+                disabled_reason: null,
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
@@ -212,7 +213,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`actor`).",
+            "Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -268,6 +269,7 @@ export const schedulesPaths = {
                 spaceId: "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                 name: "Weekday morning sort",
                 enabled: true,
+                disabled_reason: null,
                 cron_expression: "0 9 * * 1-5",
                 timezone: "Europe/Paris",
                 input: { folder: "inbox", maxEmails: 50 },
@@ -335,7 +337,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create.`,
+                  description: `Per-integration connection sets frozen on the schedule, one array of 1..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or \`version_override\` moves: a key it does not declare is a 400 \`invalid_request\`.`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
@@ -380,7 +382,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`actor`).",
+            "Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -406,7 +408,7 @@ export const schedulesPaths = {
         // by any patch.
         "409": {
           ...scheduleConnectionNotChosen,
-          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
+          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
         },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
       },

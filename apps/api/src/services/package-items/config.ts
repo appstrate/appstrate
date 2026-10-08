@@ -6,9 +6,16 @@ import {
   decodeSkillMarkdown,
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
-import { findNonSnakeCaseIdentityClaimKeys } from "@appstrate/core/integration";
+import {
+  findNonSnakeCaseIdentityClaimKeys,
+  findUnboundedInjectedCredentials,
+  findUnevaluableExpressions,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
+import { asRecord } from "@appstrate/core/safe-json";
 import { validationFailed } from "../../lib/errors.ts";
+import { getLocalServerRef } from "../integration-manifest-helpers.ts";
 
 // ─────────────────────────────────────────────
 // Package type configuration
@@ -51,6 +58,20 @@ export interface PackageTypeConfig {
   manifestIsStoredFile: boolean;
 }
 
+/** A package has one type: an integration naming ITSELF as its mcp-server can never resolve. */
+function findSelfReferencedServer(manifest: unknown): { path: string[]; message: string }[] {
+  const { name } = asRecord(manifest);
+  return typeof name === "string" &&
+    getLocalServerRef(manifest as IntegrationManifest)?.name === name
+    ? [
+        {
+          path: ["source", "server", "name"],
+          message: `'${name}' is this integration itself; name the mcp-server package it runs`,
+        },
+      ]
+    : [];
+}
+
 export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
   agent: {
     type: "agent",
@@ -70,7 +91,12 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     type: "integration",
     storageFolder: "integrations",
     labelSingular: "Integration",
-    checkManifest: findNonSnakeCaseIdentityClaimKeys,
+    checkManifest: (manifest) => [
+      ...findSelfReferencedServer(manifest),
+      ...findNonSnakeCaseIdentityClaimKeys(manifest),
+      ...findUnboundedInjectedCredentials(manifest),
+      ...findUnevaluableExpressions(manifest),
+    ],
     manifestIsStoredFile: true,
   },
   // AFPS §3.4 — standalone MCP Bundle (MCPB) packages referenced by an

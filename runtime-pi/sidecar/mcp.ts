@@ -51,8 +51,10 @@ import {
   createMcpServer,
   ErrorCode,
   McpError,
+  API_CALL_ERROR_META_KEY,
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
+  type ApiCallErrorMeta,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
   type AppstrateToolDefinition,
@@ -85,7 +87,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
@@ -128,17 +130,14 @@ import {
   type ApiCallDeps,
   type ApiCallRequestBody,
 } from "./credential-proxy.ts";
-import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
+import { buildSidecarAnswerUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
- * `_meta` payload attached to every `api_call` pre-flight error
- * (no upstream contact). Surfacing `status: 0` lets the runtime
- * distinguish "no upstream contact" from "upstream returned 5xx" via
- * the status code rather than the absence of `_meta` — the runtime
- * parser now requires `_meta` on every CallToolResult.
+ * `_meta` of an `api_call` the sidecar answered itself: `status: 0` tells the runtime no
+ * upstream response reached it, as opposed to "upstream returned 5xx".
  */
-const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
-  [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
+const SIDECAR_ANSWER_META: Record<string, unknown> = {
+  [UPSTREAM_META_KEY]: buildSidecarAnswerUpstreamMeta(),
 };
 
 /**
@@ -191,58 +190,9 @@ export function validateMcpHostHeader(req: Request): Response | undefined {
 }
 
 /**
- * Headers an LLM caller may NOT inject via `api_call.args.headers`.
- *
- * The MCP descriptor advertises that routing / sidecar-control headers
- * are filtered server-side. Without this filter, an LLM could supply
- * `X-Stream-Response: 1` to opt into the binary streaming path (which
- * the MCP layer deliberately does not expose),
- * `X-Substitute-Body: 1` to inject `{{credential}}` placeholders into
- * an attacker-controlled payload, or `X-Max-Response-Size` to bypass
- * the response truncation budget. The `X-Integration` and `X-Target`
- * routing headers are also stripped so the LLM can't redirect the
- * request post-validation. Header names are matched case-insensitively
- * (HTTP header semantics).
- */
-const API_CALL_FORBIDDEN_HEADERS = new Set<string>([
-  "x-integration",
-  "x-integration-id",
-  "x-target",
-  "x-substitute-body",
-  "x-stream-response",
-  "x-max-response-size",
-  "x-truncated",
-  "x-truncated-size",
-  "x-auth-refreshed",
-]);
-
-/**
- * Strip caller-supplied headers that would forge sidecar control state.
- * Returns the sanitised map plus the list of names that were dropped
- * (used to surface the violation to the agent — silent stripping would
- * mask buggy MCP clients).
- */
-function sanitiseApiCallHeaders(raw: Record<string, string> | undefined): {
-  headers: Record<string, string>;
-  dropped: string[];
-} {
-  if (!raw) return { headers: {}, dropped: [] };
-  const headers: Record<string, string> = {};
-  const dropped: string[] = [];
-  for (const [name, value] of Object.entries(raw)) {
-    if (API_CALL_FORBIDDEN_HEADERS.has(name.toLowerCase())) {
-      dropped.push(name);
-      continue;
-    }
-    headers[name] = value;
-  }
-  return { headers, dropped };
-}
-
-/**
- * Case-insensitive presence check over a sanitised header map. HTTP
- * header names are case-insensitive, but a plain `Record` lookup is
- * not — so a caller's `content-type` would not be seen by a literal
+ * Case-insensitive presence check over a header map. HTTP header names
+ * are case-insensitive, but a plain `Record` lookup is not — so a
+ * caller's `content-type` would not be seen by a literal
  * `headers["Content-Type"]` read. Used to decide whether the sidecar
  * may inject a default Content-Type without clobbering an explicit one.
  */
@@ -313,7 +263,7 @@ function multipartError(
       content: [{ type: "text", text }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -339,7 +289,7 @@ function bodyPreflightError(
       content: [{ type: "text", text: `${label}: ${text}` }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -620,7 +570,7 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
  */
 function upstreamFetchErrorText(tool: string, err: unknown): string {
   if (err instanceof Error && err.name === "TimeoutError") {
-    return `${tool}: upstream fetch timed out after ${OUTBOUND_TIMEOUT_MS}ms`;
+    return `${tool}: upstream fetch timed out after ${API_CALL_TIMEOUT_MS}ms`;
   }
   if (err instanceof Error && err.name === "AbortError") {
     return `${tool}: upstream fetch aborted`;
@@ -649,7 +599,8 @@ function buildSidecarTools(options: MountMcpOptions): {
   makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
-  const { config, fetchFn } = proxyDeps;
+  const { config } = proxyDeps;
+  const fetchFn = proxyDeps.fetchFn ?? fetch;
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
   // integration identifier (just target + method + headers + body).
@@ -673,9 +624,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       headers: {
         type: "object",
         description:
-          "Additional headers to forward. Hop-by-hop headers and sidecar-control " +
-          "headers (X-Integration, X-Target, X-Substitute-Body, …) are filtered " +
-          "server-side.",
+          "Additional headers to forward. Host, hop-by-hop and framing headers are dropped.",
         additionalProperties: { type: "string" },
       },
       body: {
@@ -858,6 +807,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         declaredUris: integ.declaredUris,
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
+        reportUpstreamSuccess: integ.reportUpstreamSuccess,
       },
       integrationId: integ.integrationId,
       connectionId: integ.connectionId,
@@ -1015,6 +965,10 @@ function buildSidecarTools(options: MountMcpOptions): {
     ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
   ): Promise<CallToolResult> {
     {
+      // `target`, `method` and `headers` arrive as `CREDENTIAL_PROXY_INPUT_SCHEMA`
+      // declares them: Pi validates a model's call against it before `execute`
+      // (pinned in `test/api-call-tool-defs.test.ts`), and the upload resolver
+      // builds its own in code. `body` is a union, narrowed below.
       const args = rawArgs as {
         target: string;
         method?: string;
@@ -1026,29 +980,7 @@ function buildSidecarTools(options: MountMcpOptions): {
         substituteBody?: boolean;
       };
 
-      // The MCP SDK does NOT validate `tools/call` arguments against the
-      // descriptor's `inputSchema`, so `target` may be absent or a
-      // non-string. Guard before it reaches executeApiCall →
-      // substituteVars(undefined) → opaque `undefined.replace` TypeError
-      // (surfaced as JSON-RPC -32603 instead of a structured tool error).
-      if (typeof args.target !== "string" || args.target.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `${ctx.label}: 'target' is required and must be a non-empty string (the request URL or path).`,
-            },
-          ],
-          isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
-        };
-      }
-
-      // Normalise the method to upper-case. The descriptor enum is upper-case
-      // and every downstream check (`method === "GET"`, upstream preflight)
-      // compares against upper-case literals — a caller-supplied `"get"` /
-      // `"post"` must not slip past the GET/HEAD body guard on a case mismatch.
-      const method = (typeof args.method === "string" ? args.method : "GET").toUpperCase();
+      const method = args.method ?? "GET";
 
       // Refuse `body` on GET/HEAD explicitly rather than silently
       // dropping it. A model that supplies a body genuinely expects it
@@ -1066,25 +998,11 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           ],
           isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
+          _meta: SIDECAR_ANSWER_META,
         };
       }
 
-      const { headers: callerHeaders, dropped } = sanitiseApiCallHeaders(args.headers);
-      if (dropped.length > 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `${ctx.label}: caller-supplied headers may not include sidecar-control names: ` +
-                `${dropped.join(", ")}. Use the dedicated tool arguments (substituteBody, …) instead.`,
-            },
-          ],
-          isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
-        };
-      }
+      const callerHeaders = { ...args.headers };
 
       // Resolve the loosely-typed body argument into the internal
       // discriminated `ApiCallRequestBody`. All shape narrowing + the
@@ -1121,12 +1039,14 @@ function buildSidecarTools(options: MountMcpOptions): {
         return {
           content: [{ type: "text", text: `${ctx.label}: ${result.error}` }],
           isError: true,
-          // Pre-flight failure (cred fetch, URL allowlist, etc): no
-          // upstream contact, but the runtime parser requires `_meta`
-          // on every CallToolResult — surface `status: 0` so the agent
-          // can distinguish "no upstream contact" from "upstream
-          // returned 5xx" via the status code.
-          _meta: API_CALL_PREFLIGHT_META,
+          // The sidecar answered (refusal, or timeout / unreachable / refused hop after sending):
+          // the parser requires `_meta` on every result — `status: 0`, plus any shared code.
+          _meta: result.code
+            ? {
+                ...SIDECAR_ANSWER_META,
+                [API_CALL_ERROR_META_KEY]: { code: result.code } satisfies ApiCallErrorMeta,
+              }
+            : SIDECAR_ANSWER_META,
         };
       }
       return responseToToolResult(result.response, {
@@ -1150,7 +1070,7 @@ function buildSidecarTools(options: MountMcpOptions): {
    *
    * Cancellation and deadline are composed: `callerSignal` is the MCP
    * request's own abort (client gone, transport closed) and must keep working,
-   * `OUTBOUND_TIMEOUT_MS` is the same bound every other outbound call in the
+   * `API_CALL_TIMEOUT_MS` is the same bound every other outbound call in the
    * sidecar already carries. `/mcp` has no server-side deadline of its own, so
    * without it a platform that accepts the connection and never answers hangs
    * this tool call — and with it the agent — for the rest of the run.
@@ -1180,7 +1100,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     try {
       const res = await fetchFn(url, {
         headers: { Authorization: `Bearer ${config.runToken}` },
-        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
+        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(API_CALL_TIMEOUT_MS)]),
       });
       return await responseToToolResult(res, {
         source: tool,
@@ -1707,6 +1627,8 @@ export interface ApiCallIntegrationConfig {
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
+  /** See {@link ApiCallDeps.reportUpstreamSuccess}. */
+  reportUpstreamSuccess?: ApiCallDeps["reportUpstreamSuccess"];
   /**
    * Resumable-upload protocols this integration auth declared under
    * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. When non-empty the sidecar

@@ -14,6 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { buildPiModel, listPiModels } from "@appstrate/runner-pi/pi-model";
+import { recordSpec } from "../../../../packages/runner-pi/src/pi-payload.ts";
 import { captureRequest } from "../../../../packages/runner-pi/test/pi-payload.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
@@ -42,7 +43,7 @@ describe("upstream headers — shared forwarding policy", () => {
     "x-api-key": "ask_caller",
     cookie: "session=abc",
     "x-forwarded-for": "10.0.0.1",
-    "x-appstrate-pi-sdk": "0.87.1",
+    "x-appstrate-pi-sdk": "1.0.4",
     "x-org-id": "org_1",
     "x-run-id": "run_1",
   });
@@ -407,7 +408,7 @@ describe("anthropicMessagesAdapter", () => {
     for (const record of records) {
       const model = buildPiModel({
         id: "preset",
-        registryModelId: record.id,
+        ...recordSpec(record),
         apiShape: "anthropic-messages",
         piProvider: "anthropic",
         baseUrl: "http://127.0.0.1",
@@ -687,7 +688,7 @@ describe("openaiCompletionsAdapter — request guard", () => {
       for (const record of listPiModels(piProvider, "openai-completions").slice(0, 3)) {
         const model = buildPiModel({
           id: "preset",
-          registryModelId: record.id,
+          ...recordSpec(record),
           apiShape: "openai-completions",
           piProvider,
           baseUrl: "http://127.0.0.1",

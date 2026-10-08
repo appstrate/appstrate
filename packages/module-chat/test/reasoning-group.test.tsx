@@ -57,6 +57,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => true,
+  formatBytes: String,
 };
 
 function Turn({ helpers }: { helpers: ChatHelpers }) {

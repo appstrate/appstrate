@@ -23,6 +23,7 @@ import {
 import {
   listCatalogModels,
   lookupCatalogModel,
+  reachablePriceTiers,
   restrictsToOffer,
 } from "../apps/api/src/services/model-catalog.ts";
 import { getModuleRegistry, importModule } from "../apps/api/src/lib/modules/module-loader.ts";
@@ -65,7 +66,7 @@ export function checkSystemModels(entries: readonly unknown[], offers: Offers) {
 export const registryOffers: Offers = (providerId, modelId) => {
   const def = getModelProvider(providerId);
   if (!def) return null;
-  return !restrictsToOffer(def) || lookupCatalogModel(def, modelId) !== null;
+  return !restrictsToOffer(def) || lookupCatalogModel(def, modelId, "bundled") !== null;
 };
 
 /** Registers the provider definitions of the modules `MODULES` names, without initialising any. */
@@ -99,15 +100,13 @@ export function reachableSubscriptionTiers(
   return defs
     .filter((def) => def.authMode === "oauth2")
     .flatMap((def) =>
-      listCatalogModels(def).flatMap((model) =>
-        (model.cost?.tiers ?? [])
-          .filter((tier) => tier.inputTokensAbove < model.contextWindow)
-          .map((tier) => ({
-            providerId: def.providerId,
-            modelId: model.id,
-            contextWindow: model.contextWindow,
-            inputTokensAbove: tier.inputTokensAbove,
-          })),
+      listCatalogModels(def, "bundled").flatMap((model) =>
+        reachablePriceTiers(model.cost?.tiers, model.contextWindow).map((tier) => ({
+          providerId: def.providerId,
+          modelId: model.id,
+          contextWindow: model.contextWindow,
+          inputTokensAbove: tier.inputTokensAbove,
+        })),
       ),
     );
 }

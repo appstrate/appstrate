@@ -28,6 +28,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { TestResultSpan } from "./test-result-span";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -51,6 +52,7 @@ import {
   pickedProviderId,
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
+import { parsesAsUrl } from "@/lib/model-discovery";
 import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
@@ -249,12 +251,7 @@ function CredentialFormBody({
 
   const baseUrlValidate = (v: string) => {
     if (!v.trim()) return t("validation.required", { ns: "common" });
-    try {
-      new URL(v.trim());
-    } catch {
-      return t("validation.urlFormat", { ns: "common" });
-    }
-    return undefined;
+    return parsesAsUrl(v) ? undefined : t("validation.urlFormat", { ns: "common" });
   };
   // Editing keeps the stored key when nothing is typed.
   const apiKeyValidate = (v: string) =>
@@ -326,11 +323,11 @@ function CredentialFormBody({
               {testMutation.isPending ? <Spinner /> : t("credentials.test")}
             </Button>
             {testResult && (
-              <span className={`text-sm ${testResult.ok ? "text-green-500" : "text-destructive"}`}>
-                {testResult.ok
-                  ? t("credentials.testSuccess", { latency: testResult.latency })
-                  : t("credentials.testFailed", { message: testResult.message })}
-              </span>
+              <TestResultSpan
+                result={testResult}
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
+              />
             )}
           </div>
           <Button type="button" variant="outline" onClick={onClose}>
@@ -342,7 +339,7 @@ function CredentialFormBody({
         </>
       }
     >
-      <form id="pk-form" onSubmit={onFormSubmit} className="space-y-4">
+      <form id="pk-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
           <Select value={pickerValue} onValueChange={handleProviderChange} disabled={isEditing}>

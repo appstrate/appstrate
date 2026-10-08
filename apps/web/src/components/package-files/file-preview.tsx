@@ -34,7 +34,7 @@ import { Link } from "react-router-dom";
 import { Download, FileWarning, Pencil } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { MonacoEditor } from "../monaco";
 import { useTheme } from "../../stores/theme-store";

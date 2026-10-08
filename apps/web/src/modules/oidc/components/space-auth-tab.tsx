@@ -11,7 +11,7 @@
  *
  * Row absent → feature disabled for this space's OIDC clients. No fallback to
  * instance-level env creds. Secrets are write-only: the backend never
- * returns `pass` / `client_secret`.
+ * returns `pass` / `client_secret`, and every save submits them again.
  */
 
 import { useState } from "react";
@@ -96,7 +96,6 @@ function SmtpSection() {
           toast.success(t("settings:spaceAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
-        onError: (err) => toast.error(err.message),
       },
     );
   }
@@ -145,15 +144,14 @@ function SmtpSection() {
           </Field>
           <Field
             label={t("settings:spaceAuth.smtpPass")}
-            required={!initial}
+            required
             hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
           >
             <Input
               type="password"
               value={form.pass}
               onChange={(e) => setForm({ ...form, pass: e.target.value })}
-              placeholder={initial ? "••••••••" : undefined}
-              required={!initial}
+              required
             />
           </Field>
           <Field label={t("settings:spaceAuth.smtpFromAddress")} required>
@@ -239,12 +237,11 @@ function SmtpSection() {
         onSend={(to) =>
           test.mutate(to, {
             // A failed SMTP send is a non-2xx response (the server surfaces
-            // the SMTP error verbatim), so it lands in onError.
+            // the SMTP error verbatim), which the mutation cache toasts.
             onSuccess: () => {
               toast.success(t("settings:spaceAuth.smtpTestOk"));
               setTestOpen(false);
             },
-            onError: (err) => toast.error(err.message),
           })
         }
       />
@@ -331,7 +328,6 @@ function SocialSection({
           toast.success(t("settings:spaceAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
-        onError: (err) => toast.error(err.message),
       },
     );
   }
@@ -363,15 +359,14 @@ function SocialSection({
         </Field>
         <Field
           label="Client Secret"
-          required={!config}
+          required
           hint={config ? t("settings:spaceAuth.socialSecretReuploadHint") : undefined}
         >
           <Input
             type="password"
             value={form.clientSecret}
             onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-            placeholder={config ? "••••••••" : undefined}
-            required={!config}
+            required
           />
         </Field>
         <Field

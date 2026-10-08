@@ -11,6 +11,7 @@ import {
   evaluateSignupPolicy,
   isAllowedSignupDomain,
   isBootstrapOwner,
+  isOperatorNamedEmail,
   isPlatformAdmin,
   normalizeEmail,
 } from "@appstrate/db/auth-policy";
@@ -107,6 +108,21 @@ describe("isBootstrapOwner", () => {
     _resetCacheForTesting();
     expect(isBootstrapOwner("OWNER@acme.com")).toBe(true);
     expect(isBootstrapOwner("other@acme.com")).toBe(false);
+  });
+});
+
+describe("isOperatorNamedEmail", () => {
+  it("returns false when the environment names nobody", () => {
+    expect(isOperatorNamedEmail("anyone@x.com")).toBe(false);
+  });
+  it("is true for the bootstrap owner and for every listed platform admin, in any casing", () => {
+    process.env.AUTH_BOOTSTRAP_OWNER_EMAIL = "owner@acme.com";
+    process.env.AUTH_PLATFORM_ADMIN_EMAILS = "admin@acme.com,ops@acme.com";
+    _resetCacheForTesting();
+    expect(isOperatorNamedEmail("Owner@Acme.com")).toBe(true);
+    expect(isOperatorNamedEmail("ADMIN@acme.com")).toBe(true);
+    expect(isOperatorNamedEmail("ops@acme.com")).toBe(true);
+    expect(isOperatorNamedEmail("member@acme.com")).toBe(false);
   });
 });
 

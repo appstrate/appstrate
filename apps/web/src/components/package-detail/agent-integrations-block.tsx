@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -225,14 +224,7 @@ function IntegrationConnectionCell({
           title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
           onClick={() => {
             if (!currentSpaceId || !canActivate) return;
-            setActive.mutate(
-              { spaceId: currentSpaceId, packageId, active: true },
-              {
-                onSuccess: () =>
-                  toast.success(t("integrations.activate.success", { ns: "settings" })),
-                onError: () => toast.error(t("integrations.activate.error", { ns: "settings" })),
-              },
-            );
+            setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
           }}
           data-testid={`integration-activate-${packageId}`}
         >

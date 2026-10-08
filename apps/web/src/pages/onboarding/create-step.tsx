@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWatch } from "react-hook-form";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { useAppForm } from "../../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { $api } from "../../api/client";
+import { $api, ApiError } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
-import { useAuth } from "../../hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
+import { createStepRedirect } from "../../lib/onboarding-entry";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 import { OnboardingLayout, useOnboardingNav } from "../../components/onboarding-layout";
 import { orgKeys } from "../../lib/query-keys";
+import { errorMessage, errorField } from "../../lib/mutation-error";
 
 function suggestOrgDefaults(
   user: { email: string; name?: string },
@@ -39,6 +40,7 @@ export function OnboardingCreateStep() {
   const queryClient = useQueryClient();
   const { switchOrg, currentOrg, orgs, loading } = useOrg();
   const { user } = useAuth();
+  const canCreateOrg = useCanCreateOrg();
   const { nextRoute } = useOnboardingNav("create");
 
   const location = useLocation();
@@ -86,6 +88,7 @@ export function OnboardingCreateStep() {
   }, [fromSwitcher, orgs, user, i18n.language, reset]);
 
   const createMutation = $api.useMutation("post", "/api/orgs", {
+    meta: { errorHandledByCaller: true },
     onSuccess: async (data) => {
       // The org list is served solely by the legacy ["orgs"] key (use-org.ts).
       await queryClient.invalidateQueries({ queryKey: orgKeys.all });
@@ -93,8 +96,11 @@ export function OnboardingCreateStep() {
       if (nextRoute) navigate(nextRoute);
     },
     onError: (err) => {
-      const message = getErrorMessage(err);
-      if (message.toLowerCase().includes("slug")) {
+      const message = errorMessage(err);
+      // A taken slug, or a slug the body validation refused: the field is folded by default.
+      const aboutSlug =
+        (err instanceof ApiError && err.code === "slug_taken") || errorField(err) === "slug";
+      if (aboutSlug) {
         setSlugOpen(true);
         setError("slug", { message });
       } else {
@@ -106,6 +112,14 @@ export function OnboardingCreateStep() {
   const onSubmit = (data: CreateOrgFormData) => {
     createMutation.mutate({ body: { name: data.name.trim(), slug: data.slug.trim() } });
   };
+
+  // The server refuses this user's `POST /api/orgs` (closed instance): no form.
+  // Decided once the org list is known — "has none" is not "not loaded yet".
+  const redirect = loading
+    ? null
+    : createStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0, fromSwitcher: !!fromSwitcher });
+  if (redirect) return <Navigate to={redirect} replace />;
+  if (!canCreateOrg && loading) return null;
 
   return (
     <OnboardingLayout

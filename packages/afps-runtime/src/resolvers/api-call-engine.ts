@@ -2,274 +2,126 @@
 // Copyright 2026 Appstrate
 
 /**
- * Shared outbound-HTTP engine for credential-injecting integration calls.
- *
- * This module owns the credential-source-agnostic, security-critical
- * request pipeline that EVERY surface making a direct upstream call must
- * share:
- *
- *   1. `authorized_uris` allowlist preflight on the initial target.
- *   2. SSRF blocklist preflight (loopback / RFC1918 / link-local / cloud
- *      metadata) — applied even when no allowlist is declared.
- *   3. A manual redirect-follower that, for EVERY hop:
- *        - re-checks the SSRF blocklist (a compromised upstream cannot
- *          pivot the proxy to `http://169.254.169.254/...`),
- *        - re-checks the declared `authorized_uris` allowlist,
- *        - strips userinfo + fragment from the `Location` before policy
- *          checks and before re-issuing the fetch,
- *        - applies a hybrid credential-strip (forward credentials inside
- *          a declared allowlist; WHATWG origin-based strip otherwise),
- *        - captures each hop's `Set-Cookie` into the caller's cookie scope by
- *          its origin (Bun/Node native fetch only surface the final hop's cookies).
- *
- * What this module deliberately does NOT own:
- *   - HOW credentials are obtained (the sidecar fetches them from the
- *     platform; the local CLI resolver reads a local creds file). Callers
- *     inject the resolved headers BEFORE calling {@link fetchWithGuards}.
- *   - Response serialisation (the sidecar spills to its MCP BlobStore;
- *     the CLI resolver spills to a workspace file). Those are
- *     surface-specific and stay in their respective modules.
- *
- * The two consumers are:
- *   - `runtime-pi/sidecar/credential-proxy.ts` (`executeApiCall`) — the
- *     platform/container path. Its redirect-chain tests in
- *     `runtime-pi/sidecar/test/credential-proxy.test.ts` are the
- *     correctness oracle for the follower in this module.
- *   - `packages/afps-runtime/src/resolvers/integration-api-call.ts`
- *     (`LocalIntegrationResolver`) — the standalone `afps` CLI path. It
- *     previously did a raw `fetch(target, …)` with default
- *     `redirect: "follow"` and NO SSRF check; routing it through this
- *     engine closes that gap.
- *
- * It lives in `@appstrate/afps-runtime` (not `@appstrate/connect`) because
- * the dependency edge runs `connect → afps-runtime`; the CLI path cannot
- * import `@appstrate/connect` without a cycle. The sidecar already depends
- * on `@appstrate/afps-runtime`, so both consumers reach this module freely.
- *
- * ## Why this is not `@appstrate/afps-shared`'s `guardedFetch`
- *
- * There ARE two redirect followers in this codebase and that is deliberate, so
- * this section exists to stop the question being reopened. `guardedFetch` is
- * the primitive for a request whose HOST is untrusted; this follower is the
- * primitive for a request whose CREDENTIAL is the asset. Three differences are
- * contractual, not drift, and the credential-proxy oracle
- * (`runtime-pi/sidecar/test/credential-proxy.test.ts`) pins each:
- *
- *   - **Return shape.** `guardedFetch` is `fetch`-shaped — it returns a bare
- *     `Response`, is re-exported from the published `@appstrate/core/ssrf`, and
- *     `@appstrate/connect`'s DCR client consumes it CAST as `typeof fetch`.
- *     This follower must return `finalUrl` (callers drive OAuth-code / CAS-
- *     ticket / magic-link chains off the terminal hop URL, #471) and `hops`
- *     (the operator debug envelope, #404). Widening the published signature to
- *     carry those would break every `typeof fetch` consumer.
- *   - **Credential policy.** `guardedFetch` strips credentials on ANY
- *     cross-origin hop and, once a `validateHop` contract is declared, drops
- *     the request body too. This follower deliberately FORWARDS credentials
- *     across origins that are inside a declared `authorized_uris` boundary —
- *     that is what makes multi-host APIs (Dropbox `api.` ⇄ `content.`) work.
- *     Folding the two would mean an option that disables the shared
- *     primitive's central safety property for one caller.
- *   - **Cookie continuity.** Every hop's `Set-Cookie` is captured into the
- *     caller's cookie scope (per hop origin) and recomposed onto the next hop
- *     (#473). The shared primitive has no jar and no reason to grow one.
- *
- * What the two DO share is now actually shared: the SSRF blocklist
- * (`@appstrate/afps-shared/ssrf`), the DNS-rebind check (`./ssrf-dns`) and the
- * redirect budget ({@link MAX_REDIRECTS}). The one capability this follower
- * still lacks is `guardedFetch`'s connection PIN to the DNS-validated address
- * — see {@link refuseSsrfUrl} for why it cannot simply be lifted here.
+ * The outbound half of every `api_call` path (platform proxy, sidecar, CLI):
+ * allowlist + SSRF gate on every hop with the connection pinned, credentials
+ * kept only across allowlisted origins, per-hop cookie capture, one deadline.
+ * Credential sourcing, injection, the 401 retry and serving stay per path.
  */
 
-import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
-import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
-import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import {
+  DEFAULT_MAX_REDIRECTS,
+  guardedFetchChain,
+  SsrfBlockedError,
+  type GuardedFetchResult,
+} from "@appstrate/afps-shared/guarded-fetch";
+import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import {
+  assertHttpFieldValue,
+  InvalidHeaderValueError,
+} from "@appstrate/afps-shared/delivery-http";
 import {
   hostLiterallyAllowlisted,
   matchesAuthorizedUriSpec,
-  stripUserInfoAndFragment,
-} from "./http-call-core.ts";
+} from "@appstrate/afps-shared/authorized-uris";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
-import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
+import { ENGINE_FAILURE_CODE } from "./api-call-failure-codes.ts";
 
-// Re-exported from its new home in `http-call-core.ts`, where the
-// `authorized_uris` matcher itself needs it (see
-// {@link matchesAuthorizedUriSpec}). Kept visible here because the
-// redirect-follower below is its other caller.
-export { stripUserInfoAndFragment };
+/** Deadline of one upstream `api_call` exchange, body included, on every path. */
+export const API_CALL_TIMEOUT_MS = 30_000;
 
-export type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+/** RFC 9110 §7.6.1 connection-specific headers plus the proxy-auth pair: never forwarded by a proxy. */
+export const HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-connection",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
 
-/**
- * Maximum redirect hops the follower will chase before giving up.
- *
- * Re-exported from `@appstrate/afps-shared` rather than spelled again: this
- * used to be an independent `10` while `guardedFetch`'s default was `5`, two
- * budgets for the same job that nothing held together. The shared constant is
- * now the single number and this name is its local alias.
- */
-export const MAX_REDIRECTS = DEFAULT_MAX_REDIRECTS;
-
-/**
- * Check a target URL against a list of `authorized_uris` patterns using
- * the AFPS spec semantics (`*` matches a single path segment, `**` matches
- * any substring). Thin `(url, patterns[])` wrapper over
- * {@link matchesAuthorizedUriSpec} — used both for the initial preflight
- * and for per-hop redirect re-checks.
- */
-export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
-  return patterns.some((p) => matchesAuthorizedUriSpec(p, url));
+/** Caller headers minus Host, Content-Length, hop-by-hop and `Connection`-named ones (a credential
+ * excepted). The one caller-header rule. Throws {@link InvalidHeaderValueError} on a value that is
+ * no HTTP field value, before `Headers` can quote it in its own TypeError. */
+export function forwardableHeaders(
+  init: Pick<RequestInit, "headers">,
+  credentialHeaders: readonly string[] = [],
+): Headers {
+  const given =
+    init.headers instanceof Headers
+      ? [...init.headers]
+      : Array.isArray(init.headers)
+        ? init.headers
+        : Object.entries(init.headers ?? {});
+  for (const [name, value] of given) assertHttpFieldValue(String(name), String(value));
+  const headers = new Headers(init.headers);
+  const credential = new Set(credentialHeaders.map((h) => h.toLowerCase()));
+  const named = new Set(
+    (headers.get("connection") ?? "").split(",").map((t) => t.trim().toLowerCase()),
+  );
+  for (const name of [...headers.keys()]) {
+    if (
+      name === "host" ||
+      name === "content-length" ||
+      HOP_BY_HOP_HEADERS.has(name) ||
+      (named.has(name) && !credential.has(name))
+    ) {
+      headers.delete(name);
+    }
+  }
+  return headers;
 }
 
 /**
- * Per-hop redirect refusal. The host is exposed for logs only — a
- * redirect target may itself encode capabilities (`?token=…`) we don't
- * want surfaced verbatim. Callers map this to a 403 (policy decision),
- * distinct from the 502 reserved for network faults.
+ * A target refused: off the allowlist, blocked by the SSRF gate, or with no DNS answer
+ * (`unresolvable`). A redirect's message names its host, credential values scrubbed, never the URL
+ * (`?token=…`).
  */
-export class RedirectBlockedError extends Error {
+export class ApiCallRefusedError extends Error {
   constructor(
-    public readonly reason: "ssrf" | "unauthorized",
-    public readonly hopUrl: string,
+    public readonly kind: "ssrf" | "not_authorized" | "unresolvable",
+    message: string,
+    /** A redirect hop was refused; `false` is the initial target, before any byte was sent. */
+    public readonly redirect = false,
   ) {
-    super(`Redirect blocked (${reason})`);
-    this.name = "RedirectBlockedError";
+    super(message);
+    this.name = "ApiCallRefusedError";
   }
 }
 
-/**
- * Result of {@link preflightUrl}. `{ ok: true }` clears the request to
- * proceed; `{ ok: false }` carries a structured rejection the caller maps
- * to its own error shape (sidecar `{status,error}` failure, CLI
- * `AuthorizedUrisError` / SSRF error).
- */
-type PreflightResult =
-  { ok: true } | { ok: false; reason: "ssrf" | "not_authorized"; message: string };
-
-interface PreflightOptions {
-  /**
-   * The connection's trust boundary (rendered `authorized_uris`). When non-empty and
-   * `allowAllUris` is false, the target must match.
-   */
-  authorizedUris?: string[] | null;
-  /**
-   * The manifest's DECLARED (unrendered) `authorized_uris`: only a host written literally
-   * there exempts a target from the SSRF net — a host rendered from a connection value never does.
-   */
-  declaredUris: readonly string[];
-  /**
-   * When true, the allowlist gate is skipped — but the SSRF blocklist
-   * still applies (no `allowAllUris` ever permits a loopback / RFC1918 /
-   * metadata target).
-   */
-  allowAllUris?: boolean;
-  /**
-   * DNS resolver for the SSRF rebind check — injectable for tests.
-   * Production callers omit it (system resolver via `node:dns`).
-   */
-  resolveHost?: HostResolver;
-  /** Credential values scrubbed from the host a rejection echoes. */
-  credentialFields?: Readonly<Record<string, string>>;
+/** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
+export interface ApiCallFailureClass {
+  code: (typeof ENGINE_FAILURE_CODE)[keyof typeof ENGINE_FAILURE_CODE];
+  /** A redirect hop was refused, not the initial target. */
+  redirect: boolean;
+  /** The refusal's message (hosts redacted); a transport error's own message. */
+  message: string;
+  /** A transport error's system code: Bun's `ConnectionRefused`, Node's `ECONNREFUSED`. */
+  systemCode?: string;
 }
 
-/**
- * SSRF gate shared by every preflight branch without a literal operator
- * host pin: the literal blocklist first (IP literals, known-internal
- * names), then resolve every A/AAAA record and refuse if ANY lands in a
- * blocked range (fail closed on resolution failure). A DNS name whose
- * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
- * alone — this closes the rebind-to-internal vector.
- *
- * RESIDUAL TOCTOU, stated rather than papered over: the connection is delegated
- * to the caller's `fetchFn`, which re-resolves the name, so a record that flips
- * between this check and the connect is not caught here.
- * `@appstrate/afps-shared`'s `guardedFetch` closes exactly this by rewriting the
- * request URL to the validated address and carrying the logical hostname on
- * `Host` + `tls.serverName`. It cannot be lifted into this follower as things
- * stand: the pin requires OWNING the socket semantics (Bun's global `fetch` and
- * its `tls` extension), and every caller here supplies its own `fetchFn` — the
- * sidecar threads one through `AppDeps` and may also set a Bun `proxy` on the
- * init, whose ACLs match on hostname. Pinning behind a
- * `fetchFn === globalThis.fetch` test would give production a security
- * mechanism that no test in the oracle suite can reach, because every one of
- * them injects a stub. Closing it means giving this module a real transport
- * seam first.
- */
-async function refuseSsrfUrl(
-  url: string,
-  resolveHost?: HostResolver,
-  credentialFields: Readonly<Record<string, string>> = {},
-): Promise<PreflightResult> {
-  const blocked: PreflightResult = {
-    ok: false,
-    reason: "ssrf",
-    message: "URL targets a blocked network range",
+/** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
+export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
+  const failure = (kind: keyof typeof ENGINE_FAILURE_CODE, message: string, redirect = false) => ({
+    code: ENGINE_FAILURE_CODE[kind],
+    redirect,
+    message,
+  });
+  if (err instanceof ApiCallRefusedError) return failure(err.kind, err.message, err.redirect);
+  if (err instanceof InvalidHeaderValueError) return failure("invalid_header", err.message);
+  const error = err instanceof Error ? err : new Error(String(err));
+  if (error.name === "TimeoutError") return failure("timeout", error.message);
+  const systemCode = (error as { code?: unknown }).code;
+  return {
+    ...failure("transport", error.message),
+    ...(typeof systemCode === "string" ? { systemCode } : {}),
   };
-  if (isBlockedUrl(url)) return blocked;
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    return blocked;
-  }
-  const check = await resolveAndCheckHost(hostname, { resolve: resolveHost });
-  if (!check.blocked) return { ok: true };
-  if (check.reason === "resolution-failed") {
-    return {
-      ok: false,
-      reason: "ssrf",
-      message: `Target host could not be resolved (${redactCredentialHost(url, credentialFields)})`,
-    };
-  }
-  return blocked;
-}
-
-/**
- * Validate the INITIAL target URL against the allowlist + SSRF blocklist
- * + DNS-rebind layer. Mirrors the sidecar's `executeApiCall` branches:
- *   - `allowAllUris` → SSRF safety-net (literal + DNS).
- *   - `authorizedUris` → must match; a host not pinned literally by
- *     `declaredUris` additionally passes the SSRF safety-net — `https://**`
- *     would otherwise let the agent pick ANY host with zero floor,
- *     strictly weaker than allow_all.
- *   - `declaredUris` rendering to nothing → refused ({@link allowlistUnrendered}).
- *   - neither → SSRF safety-net (no allowlist means "block internals").
- *
- * The per-hop equivalents live in {@link fetchFollowingRedirectsCapturingCookies}.
- */
-export async function preflightUrl(url: string, opts: PreflightOptions): Promise<PreflightResult> {
-  const authorizedUris = opts.authorizedUris ?? undefined;
-  if (opts.allowAllUris) {
-    return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
-  }
-  if (
-    allowlistUnrendered({
-      declaredUris: opts.declaredUris,
-      authorizedUris: authorizedUris ?? [],
-      allowAllUris: false,
-    })
-  ) {
-    return { ok: false, reason: "not_authorized", message: UNRENDERED_ALLOWLIST_REFUSAL };
-  }
-  if (authorizedUris && authorizedUris.length) {
-    if (!matchesAuthorizedUri(url, authorizedUris)) {
-      // The declared entries: a rendered one may be a secret (an exact webhook URL).
-      return {
-        ok: false,
-        reason: "not_authorized",
-        message: `URL not in authorized_uris allowlist. Allowed: ${opts.declaredUris.join(", ")}`,
-      };
-    }
-    if (!hostLiterallyAllowlisted(url, opts.declaredUris)) {
-      return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
-    }
-    return { ok: true };
-  }
-  // No authorized_uris and no allowAllUris — apply the SSRF safety net.
-  return refuseSsrfUrl(url, opts.resolveHost, opts.credentialFields);
 }
 
 /** Extract hostname for audit logs, never throwing. */
-export function redactHost(url: string): string {
+function redactHost(url: string): string {
   try {
     return new URL(url).hostname;
   } catch {
@@ -278,10 +130,7 @@ export function redactHost(url: string): string {
 }
 
 /** Each credential value, raw or percent-encoded, → `{{field}}`; longest first (overlaps). */
-export function redactCredentialValues(
-  value: string,
-  fields: Readonly<Record<string, string>>,
-): string {
+function redactCredentialValues(value: string, fields: Readonly<Record<string, string>>): string {
   const needles: Array<[string, string]> = [];
   for (const [name, fieldValue] of Object.entries(fields)) {
     if (fieldValue.length === 0) continue;
@@ -319,314 +168,156 @@ function redactCredentialMessage(
 
 /**
  * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
- * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
+ * message scrubbed and a system `code` kept, nothing else — Bun keeps the full URL on `.path` even
+ * when the message has none.
  */
-export function scrubTransportError(
-  err: unknown,
-  fields: Readonly<Record<string, string>>,
-): unknown {
+function scrubTransportError(err: unknown, fields: Readonly<Record<string, string>>): unknown {
   if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
+  const code = (err as { code?: unknown }).code;
+  // A credential can be shaped like a system code (`sk_live_abc`): drop any code that holds one.
+  if (
+    typeof code === "string" &&
+    /^[A-Za-z][A-Za-z0-9_]*$/.test(code) &&
+    !Object.values(fields).some((value) => value.length > 0 && code.includes(value))
+  )
+    Object.assign(clean, { code });
   return clean;
 }
 
-/** Optional observability hook — callers pass a logger; defaults to no-op. */
-interface RedirectLogger {
+interface ApiCallLogger {
   warn(message: string, fields?: Record<string, unknown>): void;
 }
 
-const NOOP_LOGGER: RedirectLogger = { warn() {} };
-
-interface RedirectFollowOptions {
+export interface FetchApiCallOptions {
   url: string;
+  /** Method, headers (credential already injected), body, and optionally the caller's signal. */
   init: RequestInit;
-  fetchFn: typeof fetch;
-  cookies: CookieScope;
-  integrationId: string;
-  /** Lowercased name of the credential header server-injected by the caller. */
-  injectedCredentialHeader: string | null;
-  /**
-   * Provider's declared trust boundary. Each candidate redirect hop is
-   * checked against this allowlist; off-allowlist hops throw
-   * {@link RedirectBlockedError} instead of being followed. Empty or
-   * undefined → no allowlist gate, origin-based credential strip applies
-   * (mirroring WHATWG fetch).
-   */
-  authorizedUris?: string[];
-  /**
-   * When true, every URL matches the "allowlist" — the per-hop allowlist
-   * gate is bypassed and credential strip falls back to origin equality.
-   * The per-hop SSRF blocklist still applies (no `allowAllUris` ever lets
-   * a redirect target reach loopback / RFC1918).
-   */
-  allowAllUris?: boolean;
-  /** Optional logger for per-hop refusals. Defaults to a no-op. */
-  logger?: RedirectLogger;
-  /** Credential values scrubbed from the hosts it logs (a relative hop keeps a templated host). */
-  credentialFields?: Readonly<Record<string, string>>;
-  /**
-   * DNS resolver for the per-hop SSRF rebind check — injectable for tests.
-   * Production callers omit it (system resolver via `node:dns`).
-   */
-  resolveHost?: HostResolver;
-}
-
-/**
- * Manually follow 3xx redirects so we can capture `Set-Cookie` from
- * **every** hop into `cookies` — Bun's / undici's native
- * fetch only surfaces the final hop's `Set-Cookie`, which breaks
- * multi-step OAuth/CAS flows where the session cookie lands on an
- * intermediate 302 (see #473).
- *
- * Defence-in-depth for redirect chains (see #475):
- *
- *   - **Per-hop SSRF blocklist** — every candidate hop is checked against
- *     `isBlockedUrl` (loopback, RFC1918, link-local, cloud metadata)
- *     regardless of `allowAllUris`.
- *   - **Per-hop allowlist** — when the integration declared
- *     `authorizedUris`, every hop must match. Off-allowlist redirects are
- *     refused with a {@link RedirectBlockedError} rather than silently
- *     followed into attacker-controlled hosts.
- *   - **Hybrid credential strip** — when an allowlist is declared,
- *     surviving hops are inside the trust boundary by construction so
- *     credentials are forwarded (lets multi-host APIs like Dropbox
- *     `api.dropboxapi.com` ⇄ `content.dropboxapi.com` work). With
- *     `allowAllUris: true` (no declared boundary) we fall back to
- *     WHATWG-style origin-based strip.
- *
- * Streaming bodies must skip this path entirely (caller falls back to
- * native fetch — bodies can't be replayed across hops). The initial-URL
- * allowlist check still bounds the SSRF surface for that path.
- *
- * Each hop's `Set-Cookie` lands in THAT hop's origin bucket; each hop's `Cookie`
- * is composed over `init`'s, which is dropped for good once a strip fires.
- *
- * Returns the terminal `Response`, the URL it was served from (so
- * callers driving redirect-chain flows — OAuth code, CAS ticket,
- * magic-link — can extract callback query params without parsing
- * bodies, see #471), and `hops`: the number of redirects followed
- * (`0` when the first response was terminal). The hop count is surfaced
- * for operator diagnostics (see #404) so a debug log can distinguish a
- * clean call from one that bounced through a redirect chain.
- */
-export async function fetchFollowingRedirectsCapturingCookies(
-  opts: RedirectFollowOptions,
-): Promise<{ response: Response; finalUrl: string; hops: number }> {
-  const {
-    url,
-    init,
-    fetchFn,
-    cookies,
-    integrationId,
-    injectedCredentialHeader,
-    authorizedUris,
-    allowAllUris,
-  } = opts;
-  const logger = opts.logger ?? NOOP_LOGGER;
-  const credentialFields = opts.credentialFields ?? {};
-  const hasAllowlist = !!authorizedUris && authorizedUris.length > 0;
-  // Uncomposed, so a cookie deleted mid-chain falls back to it instead of being re-sent.
-  let base = new Headers(init.headers as RequestInit["headers"]).get("cookie");
-
-  let currentUrl = url;
-  let currentInit: RequestInit = { ...init, redirect: "manual" };
-  const first = cookies.header(url, base);
-  if (first !== (base ?? undefined)) {
-    const headers = new Headers(init.headers as RequestInit["headers"]);
-    if (first) headers.set("cookie", first);
-    else headers.delete("cookie");
-    currentInit.headers = headers;
-  }
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const response = await fetchFn(currentUrl, currentInit);
-    cookies.capture(currentUrl, response.headers.getSetCookie());
-
-    if (response.status < 300 || response.status >= 400) {
-      return { response, finalUrl: currentUrl, hops: hop };
-    }
-    const location = response.headers.get("location");
-    if (!location) return { response, finalUrl: currentUrl, hops: hop };
-
-    // Per WHATWG fetch (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
-    //   - 301/302 downgrade POST → GET (other methods preserved)
-    //   - 303     downgrade everything-except-GET/HEAD → GET (HEAD preserved)
-    //   - 307/308 preserve method + body verbatim
-    const method = (currentInit.method ?? "GET").toUpperCase();
-    const dropBody =
-      ((response.status === 301 || response.status === 302) && method === "POST") ||
-      (response.status === 303 && method !== "GET" && method !== "HEAD");
-    // Resolve, then strip userinfo + fragment. Userinfo in a Location
-    // would arrive as basic-auth on the next hop (credential confusion);
-    // fragment is HTTP-irrelevant. Stripping keeps the allowlist matcher
-    // host-based (not userinfo-spoofable). Input is post-`new URL()` so
-    // the `?? raw` fallback is defensive — never hit in practice.
-    const raw = new URL(location, currentUrl).toString();
-    const nextUrl = stripUserInfoAndFragment(raw) ?? raw;
-
-    // Per-hop SSRF + allowlist validation. The initial-URL checks only
-    // see the operator-supplied target — a redirect chain could pivot to
-    // internal targets or off-allowlist hosts without these guards.
-    if (isBlockedUrl(nextUrl)) {
-      logger.warn("Redirect refused (SSRF blocklist)", {
-        integrationId,
-        hop,
-        host: redactCredentialHost(nextUrl, credentialFields),
-      });
-      throw new RedirectBlockedError("ssrf", nextUrl);
-    }
-    // The literal `isBlockedUrl` above only sees the redirect target's
-    // spelled-out host — a `302 → rebind.attacker.com` whose A record is
-    // 169.254.169.254 sails through it. Resolve every A/AAAA record for the
-    // hop host and refuse if ANY lands in a blocked range (fail closed on
-    // resolution failure), mirroring the initial-target `refuseSsrfUrl` gate.
-    const hopHostCheck = await resolveAndCheckHost(new URL(nextUrl).hostname, {
-      resolve: opts.resolveHost,
-    });
-    if (hopHostCheck.blocked) {
-      logger.warn("Redirect refused (SSRF DNS-rebind)", {
-        integrationId,
-        hop,
-        host: redactCredentialHost(nextUrl, credentialFields),
-      });
-      throw new RedirectBlockedError("ssrf", nextUrl);
-    }
-    if (hasAllowlist && !allowAllUris && !matchesAuthorizedUri(nextUrl, authorizedUris!)) {
-      logger.warn("Redirect refused (not in authorizedUris)", {
-        integrationId,
-        hop,
-        host: redactCredentialHost(nextUrl, credentialFields),
-      });
-      throw new RedirectBlockedError("unauthorized", nextUrl);
-    }
-
-    // Hybrid credential strip:
-    //   - Declared allowlist (and not allowAllUris) → every surviving hop
-    //     is in-allowlist by construction, credentials are safe to forward
-    //     (multi-host APIs like Dropbox work).
-    //   - allowAllUris / no allowlist → no declared trust boundary, fall
-    //     back to WHATWG origin-based strip.
-    const crossOrigin = new URL(nextUrl).origin !== new URL(currentUrl).origin;
-    const stripCred = (!hasAllowlist || !!allowAllUris) && crossOrigin;
-
-    const headers = new Headers(currentInit.headers as RequestInit["headers"]);
-    if (stripCred) {
-      headers.delete("authorization");
-      if (injectedCredentialHeader) headers.delete(injectedCredentialHeader);
-      base = null; // cookies are credentials too
-    }
-    headers.delete("cookie");
-    const cookie = cookies.header(nextUrl, base);
-    if (cookie) headers.set("cookie", cookie);
-    if (dropBody) {
-      headers.delete("content-length");
-      headers.delete("content-type");
-    }
-
-    currentInit = {
-      ...currentInit,
-      method: dropBody ? "GET" : currentInit.method,
-      body: dropBody ? undefined : currentInit.body,
-      headers,
-    };
-    currentUrl = nextUrl;
-  }
-
-  throw new Error(
-    `Too many redirects (>${MAX_REDIRECTS}) starting at ${redactCredentialHost(url, credentialFields)}`,
-  );
-}
-
-/**
- * One-shot guarded fetch for callers that DON'T need cookie-jar continuity
- * across multiple calls (the standalone CLI's `LocalIntegrationResolver`).
- *
- * Runs the initial-URL preflight ({@link preflightUrl}), then dispatches
- * through {@link fetchFollowingRedirectsCapturingCookies} with a fresh
- * per-call jar — gaining the per-hop SSRF + allowlist + credential-strip
- * hardening the sidecar already had. The caller MUST have injected its
- * credential header into `init.headers` already.
- *
- * Throws:
- *   - {@link PreflightError} when the initial target fails the allowlist /
- *     SSRF preflight (no outbound bytes sent).
- *   - {@link RedirectBlockedError} when a redirect hop is refused.
- *   - the underlying fetch error on a network fault.
- *
- * Streaming request bodies (`init.body instanceof ReadableStream`) cannot
- * be replayed across hops, so this helper refuses to follow them — it
- * issues a single `redirect: "manual"` fetch and returns the (possibly
- * 30x) response unfollowed, exactly like the sidecar's streaming path.
- */
-interface GuardedFetchOptions {
-  url: string;
-  init: RequestInit;
-  fetchFn?: typeof fetch;
-  authorizedUris?: string[] | null;
-  /** See {@link PreflightOptions.declaredUris}; also the only hosts that share cookies. */
+  /** The connection's rendered `authorized_uris`: what a target and every hop must match. */
+  authorizedUris: readonly string[];
+  /** The manifest's declared (unrendered) list: only its literal hosts share cookies or can skip SSRF. */
   declaredUris: readonly string[];
-  allowAllUris?: boolean;
-  /** Lowercased name of the credential header injected by the caller. */
-  injectedCredentialHeader?: string | null;
-  integrationId?: string;
-  logger?: RedirectLogger;
-  /** DNS resolver for the SSRF rebind preflight — injectable for tests. */
+  /** `credentialUrlPolicy(...).allowAllUris` — never the raw manifest flag. */
+  allowAllUris: boolean;
+  /** Names of the headers that carry a credential (injected or substituted). */
+  credentialHeaders: readonly string[];
+  /**
+   * Whether the operator of the network this call leaves from lets it reach an internal address
+   * behind `hostname`. A host skips the SSRF gate only when this accepts it AND `declaredUris`
+   * names it literally, never under `allowAllUris`: the operator vouches for the host, the
+   * manifest for the call. Same rule on a redirect hop. A host only a glob or a rendered entry
+   * matches is always gated.
+   */
+  internalHost: (hostname: string) => boolean;
+  /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
+  cookies?: CookieScope;
+  integrationId: string;
+  /** Transport override (tests): disables the address pin. Omitted = pinned global `fetch`. */
+  fetchFn?: typeof fetch;
   resolveHost?: HostResolver;
-  /** Credential values scrubbed from the hosts preflight / redirect refusals echo. */
-  credentialFields?: Readonly<Record<string, string>>;
+  /** Byte length of a `ReadableStream` body from a trusted source (the file size, the request's own
+   * framing), sent as its Content-Length. Omitted = chunked. A caller's Content-Length never is. */
+  bodyLength?: number;
+  /** The target's host as its template names it (`templateHost`): what a message about it echoes. */
+  targetHost: string;
+  /** Credential values scrubbed from the redirect hosts and transport errors a message names. */
+  credentialFields: Readonly<Record<string, string>>;
+  logger?: ApiCallLogger;
 }
 
-export class PreflightError extends Error {
-  constructor(
-    public readonly reason: "ssrf" | "not_authorized",
-    message: string,
-  ) {
-    super(message);
-    this.name = "PreflightError";
-  }
-}
+/**
+ * Send one `api_call` upstream. Throws {@link ApiCallRefusedError} (the initial target or a hop
+ * refused), {@link InvalidHeaderValueError} (nothing sent) or the scrubbed transport error. A
+ * `ReadableStream` body cannot be replayed, so its redirect is returned unfollowed.
+ */
+export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
+  const fields = opts.credentialFields;
+  const { authorizedUris, declaredUris, allowAllUris } = opts;
+  if (!URL.canParse(opts.url)) throw new ApiCallRefusedError("ssrf", "Invalid target URL");
+  const gated = !allowAllUris;
+  const inAllowlist = (url: URL) =>
+    authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
+  const warn = (message: string, hop: number, host: string) =>
+    opts.logger?.warn(message, { integrationId: opts.integrationId, hop, host });
+  const redirectRefused = (kind: ApiCallRefusedError["kind"], host: string) =>
+    new ApiCallRefusedError(
+      kind,
+      `Redirect blocked (${kind === "not_authorized" ? "unauthorized" : kind}): host=${host}`,
+      true,
+    );
 
-export async function guardedFetch(
-  opts: GuardedFetchOptions,
-): Promise<{ response: Response; finalUrl: string; hops: number }> {
-  const fetchFn = opts.fetchFn ?? fetch;
-  const pre = await preflightUrl(opts.url, {
-    authorizedUris: opts.authorizedUris,
-    declaredUris: opts.declaredUris,
-    allowAllUris: opts.allowAllUris,
-    resolveHost: opts.resolveHost,
-    credentialFields: opts.credentialFields,
-  });
-  if (!pre.ok) {
-    throw new PreflightError(pre.reason, pre.message);
+  const callerSignal = opts.init.signal;
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(API_CALL_TIMEOUT_MS),
+    ...(callerSignal ? [callerSignal] : []),
+  ]);
+  try {
+    const headers = forwardableHeaders(opts.init, opts.credentialHeaders);
+    const streamed = opts.init.body instanceof ReadableStream;
+    if (streamed && opts.bodyLength !== undefined) {
+      headers.set("content-length", String(opts.bodyLength));
+    }
+    return await guardedFetchChain(
+      opts.url,
+      { ...opts.init, headers, signal },
+      {
+        ...(gated
+          ? {
+              validateHop: (url: URL, hop: number) => {
+                if (inAllowlist(url)) return;
+                if (hop === 0) {
+                  // The declared entries: a rendered one may be a secret (an exact webhook URL).
+                  throw new ApiCallRefusedError(
+                    "not_authorized",
+                    `URL not in authorized_uris allowlist. Allowed: ${declaredUris.join(", ")}`,
+                  );
+                }
+                const host = redactCredentialHost(url.href, fields);
+                warn("Redirect refused (not in authorizedUris)", hop, host);
+                throw redirectRefused("not_authorized", host);
+              },
+              forwardCredentials: inAllowlist,
+            }
+          : {}),
+        allowHost: (hostname: string) =>
+          !allowAllUris &&
+          hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris) &&
+          opts.internalHost(hostname),
+        sensitiveHeaders: opts.credentialHeaders,
+        cookies:
+          opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),
+        followRedirects: !streamed,
+        // A Bun `proxy` resolves the name itself and matches its ACLs on it.
+        pinToResolvedAddress: !(opts.init as { proxy?: string }).proxy,
+        ...(opts.fetchFn ? { fetchImpl: opts.fetchFn } : {}),
+        ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
+      },
+    );
+  } catch (err) {
+    if (err instanceof ApiCallRefusedError || err instanceof InvalidHeaderValueError) throw err;
+    if (!(err instanceof SsrfBlockedError)) throw scrubTransportError(err, fields);
+    const host = redactCredentialHost(`http://${err.host}/`, fields);
+    if (err.reason === "too-many-redirects") {
+      // No `cause`: the guard's error names the unredacted host (a templated one is a secret).
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error(
+        `Too many redirects (>${DEFAULT_MAX_REDIRECTS}) starting at ${opts.targetHost}`,
+      );
+    }
+    if (err.reason === "resolution-failed") {
+      if (err.hop > 0) throw redirectRefused("unresolvable", host);
+      throw new ApiCallRefusedError(
+        "unresolvable",
+        `Target host could not be resolved (${opts.targetHost})`,
+      );
+    }
+    if (err.hop > 0) {
+      warn("Redirect refused (SSRF)", err.hop, host);
+      throw redirectRefused("ssrf", host);
+    }
+    // Operators read this to find the host an internal API needs listed (`internalHost`).
+    warn("Target refused (SSRF)", 0, opts.targetHost);
+    throw new ApiCallRefusedError("ssrf", "URL targets a blocked network range");
   }
-
-  const init = opts.init;
-  const initAny = init as RequestInit & Record<string, unknown>;
-  if (initAny.body instanceof ReadableStream) {
-    // Streaming bodies can't be replayed across hops — return the 30x
-    // unfollowed (credential stays on the initial, allowlist-checked
-    // origin only). Mirrors the sidecar's streaming branch.
-    initAny.duplex = "half";
-    initAny.redirect = "manual";
-    const response = await fetchFn(opts.url, init);
-    // Streaming path issues a single unfollowed request — no manual hops.
-    return { response, finalUrl: response.url || opts.url, hops: 0 };
-  }
-
-  const integrationId = opts.integrationId ?? "local";
-  return fetchFollowingRedirectsCapturingCookies({
-    url: opts.url,
-    init,
-    fetchFn,
-    cookies: cookieScope(new Map(), integrationId, opts.allowAllUris ? null : opts.declaredUris),
-    integrationId,
-    injectedCredentialHeader: opts.injectedCredentialHeader ?? null,
-    authorizedUris: opts.authorizedUris ?? undefined,
-    allowAllUris: opts.allowAllUris,
-    ...(opts.resolveHost ? { resolveHost: opts.resolveHost } : {}),
-    ...(opts.logger ? { logger: opts.logger } : {}),
-    ...(opts.credentialFields ? { credentialFields: opts.credentialFields } : {}),
-  });
 }

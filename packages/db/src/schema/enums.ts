@@ -67,12 +67,8 @@ export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
 
 /**
- * Which credential set reached the upstream provider for an `llm_usage`
- * row — `system` for platform-provided model credentials, `org` for the
- * organization's own key or subscription. Attribution only: the OSS
- * platform records who paid the provider, never how that maps to any
- * downstream accounting. Nullable on the column (historical rows may
- * predate it); every new row is stamped.
+ * Whose credential reaches the upstream provider — `system` (platform-provided)
+ * or `org` (the organization's own key or subscription). Attribution only.
  */
 export const credentialSourceValues = ["system", "org"] as const;
 export const credentialSourceEnum = pgEnum("credential_source", credentialSourceValues);
@@ -95,6 +91,19 @@ export const runOriginEnum = pgEnum("run_origin", runOriginValues);
 export const inferenceRouteValues = ["proxy", "sidecar"] as const;
 export const inferenceRouteEnum = pgEnum("inference_route", inferenceRouteValues);
 export type InferenceRoute = (typeof inferenceRouteValues)[number];
+
+/** The system act that disabled a `package_schedules` row; a person's pause leaves it NULL. */
+export const scheduleDisabledReasonValues = [
+  "actor_invalid",
+  "actor_left_org",
+  "connection_deleted",
+  "connection_unshared",
+] as const;
+export const scheduleDisabledReasonEnum = pgEnum(
+  "schedule_disabled_reason",
+  scheduleDisabledReasonValues,
+);
+export type ScheduleDisabledReason = (typeof scheduleDisabledReasonValues)[number];
 
 /**
  * How a chat conversation uses skills: `auto` lists the space's skills and the

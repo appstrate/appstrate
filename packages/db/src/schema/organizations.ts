@@ -297,6 +297,8 @@ export const modelProviderCredentials = pgTable(
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    // An api-key credential reuses the counter for consecutive upstream 401s,
+    // reset by any successful call (`clearModelCredentialRejections`).
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no

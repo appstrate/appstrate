@@ -49,7 +49,8 @@ mechanism that closed the first half is the next three sections.
 ## The canonical dialect
 
 pi-ai derives every vendor quirk **per request** from `model.compat` — which
-the platform fills from Pi's registry record for the real model — else from
+the platform reads off Pi's registry record for the real model and hands, as
+the model's dialect, to whatever builds the Model — else from
 `model.provider` + `model.baseUrl` (`getCompat` / `detectCompat`). A container
 handed the real provider id therefore emits that vendor's own request shape and
 reads its own response frames back — `reasoning_content` vs `reasoning`,
@@ -85,16 +86,17 @@ The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
 **terminated and re-originated, never proxied**: `POST /llm/messages` — inside
 the same `/llm/*` handler the surface allowlist already guards — deserialises `{model, context,
 options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
-swap descriptor and Pi's registry record for it (`backing.providerId` is the
-Pi provider key, `null` for a gateway), streams it through pi-ai, and projects the resulting
+swap descriptor alone (`backing.providerId` is the Pi provider key, `null` for
+a gateway; `backing.dialect` is the record's dialect as the platform read it —
+the sidecar looks nothing up), streams it through pi-ai, and projects the resulting
 `AssistantMessageEvent`s down to `PiMessagesEvent`s. The call goes through pi-ai's built-in provider
 for `model.provider`, so provider-layer quirks such as OpenCode's `x-opencode-session` apply — but
 only when that provider's catalog serves the backing's API shape, since a single-API provider
 streams any shape through its one API. Otherwise it goes through the raw per-API `streamSimple`. Everything else in that
 handler (header swap, body forward, response passthrough) serves non-aliased
-runs only. **No quirk table is mirrored anywhere**: Pi's registry, `detectCompat`
-and every per-vendor serializer keep running inside pi-ai, one process to the
-left of the container. The projection is a whitelist (each outbound event built
+runs only. **No quirk table is mirrored anywhere**: the record's dialect comes
+from the platform, and `detectCompat` and every per-vendor serializer keep
+running inside pi-ai, one process to the left of the container. The projection is a whitelist (each outbound event built
 field by field, never a spread) because pi-ai's `partial` carries `api`, `provider` and
 the real model id on every single event, and because a spread would ship the
 next pi-ai version's new field to the container silently.
@@ -166,7 +168,8 @@ the alias never reaches upstream. Two layers hide the backing from users:
    `clampThinkingLevel` (`clampToBackingLevel`, applied to the plan only — the
    run row keeps the requested level) because the container never learns the
    backing; the chat's Pi session clamps against the backing record it is
-   given. The temperature/reasoning support bits still narrow the set of
+   given. A backing Pi keeps no record of (a gateway model) takes no
+   `minimal` (`buildPiModel`), so both send it `low`. The temperature/reasoning support bits still narrow the set of
    possible backing models, an accepted limitation of making aliases
    configurable without revealing their exact binding. The operator
    create/update responses keep the full shape.
@@ -188,7 +191,7 @@ the alias never reaches upstream. Two layers hide the backing from users:
 
 For an adaptive Anthropic backing, the sidecar's rebuilt Model takes
 `compat.forceAdaptiveThinking` and the effort mapping (`thinkingLevelMap`) from
-Pi's registry record for the real id; the agent-side session, which sees only
+the dialect on the swap descriptor; the agent-side session, which sees only
 the public alias id, needs neither. Neither the backing id nor its dialect
 enters the agent container.
 
@@ -672,8 +675,9 @@ Everything an aliased run's container is handed, and nothing else:
 | success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
 | signature fields on that body               | `redacted: true`                    | opaque values, but not every backing emits them |
 
-`MODEL_PROVIDER` and `MODEL_COST` are **not** emitted for an alias. The
-provider key names the vendor outright; a published `{"input":0.28,"output":0.42}` is one catalog
+`MODEL_PROVIDER`, `MODEL_DIALECT` and `MODEL_COST` are **not** emitted for an
+alias. The provider key names the vendor outright and the dialect's compat
+flags name its family; a published `{"input":0.28,"output":0.42}` is one catalog
 lookup from a vendor name. The container reports **no cost** in return, not a
 fabricated `0` — the ledger reads a null reported cost as "nothing to compare"
 and prices the row itself from `runs.model_cost` × the reported token counts, so

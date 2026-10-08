@@ -18,7 +18,7 @@
  * operator on redirect-loop diagnosis, but logging it verbatim leaks a
  * presigned/`?access_token=` redirect target into the debug envelope.
  * It is redacted to origin + path (query string, fragment, and userinfo
- * stripped) — same philosophy as `redactHost` in the api-call engine.
+ * stripped) — same philosophy as `redactCredentialHost` in the api-call engine.
  */
 
 /**
@@ -43,7 +43,8 @@ const SENSITIVE_HEADER_NAMES = new Set<string>([
 ]);
 
 /**
- * Redact a `Location` header value to origin + path.
+ * Redact a URL to origin + path for the operator log: a `Location` header
+ * value, or a request target.
  *
  * Redirect targets routinely carry capabilities in the query string
  * (S3 presigned `X-Amz-Signature`, OAuth `?access_token=`/`?code=`) and
@@ -58,7 +59,7 @@ const SENSITIVE_HEADER_NAMES = new Set<string>([
  *     base so userinfo is stripped rather than string-sliced),
  *   - relative (`/p?q`, `p?q`) → kept as-is minus query/fragment.
  */
-export function redactLocationHeader(value: string): string {
+export function redactUrlForLog(value: string): string {
   try {
     const u = new URL(value);
     return `${u.origin}${u.pathname}`;
@@ -81,7 +82,7 @@ export function redactLocationHeader(value: string): string {
 function redactHeaderValue(key: string, value: string): string | null {
   const lower = key.toLowerCase();
   if (SENSITIVE_HEADER_NAMES.has(lower)) return null;
-  if (lower === "location") return redactLocationHeader(value);
+  if (lower === "location") return redactUrlForLog(value);
   return value;
 }
 

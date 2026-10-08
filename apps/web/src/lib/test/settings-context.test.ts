@@ -8,9 +8,9 @@ import {
 } from "../settings-context";
 
 const workspaces = [
-  { id: "ws-first", isDefault: false },
-  { id: "ws-default", isDefault: true },
-  { id: "ws-last", isDefault: false },
+  { id: "ws-first", isDefault: false, access: "member" },
+  { id: "ws-default", isDefault: true, access: "member" },
+  { id: "ws-last", isDefault: false, access: "member" },
 ];
 
 describe("settings context", () => {
@@ -26,6 +26,21 @@ describe("settings context", () => {
         null,
       )?.id,
     ).toBe("ws-first");
+  });
+
+  it("never lands in a space the caller may not enter", () => {
+    const closed = workspaces.map((workspace) =>
+      workspace.id === "ws-last" || workspace.id === "ws-default"
+        ? { ...workspace, access: "none" }
+        : workspace,
+    );
+    expect(pickWorkspaceForOrganization(closed, "ws-last")?.id).toBe("ws-first");
+    expect(
+      pickWorkspaceForOrganization(
+        closed.map((workspace) => ({ ...workspace, access: "none" })),
+        null,
+      ),
+    ).toBeNull();
   });
 
   it("keeps the active route scope and remounts only for that scope", () => {

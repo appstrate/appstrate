@@ -253,6 +253,44 @@ describe("buildRunContext generation settings", () => {
     );
   });
 
+  /** A model Pi keeps no record of, declared reasoning by the org (#1736). */
+  async function gatewayModel(aliased: boolean): Promise<string> {
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai-compatible",
+      apiShape: "openai-completions",
+      baseUrl: "http://localhost:11434/v1",
+      apiKey: "sk-test",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      modelId: "my-reasoner",
+      reasoning: true,
+      aliased,
+    });
+    return model.id;
+  }
+
+  it("lets a declared-reasoning gateway model take off, low, medium and high", async () => {
+    const modelId = await gatewayModel(false);
+    for (const level of ["off", "low", "medium", "high"] as const) {
+      const built = await build(modelId, { reasoning_level: level });
+      expect(built.plan.generationConfig?.reasoning_level).toBe(level);
+    }
+    for (const level of ["minimal", "xhigh", "max"] as const) {
+      await expect(build(modelId, { reasoning_level: level })).rejects.toThrow(
+        ModelGenerationError,
+      );
+    }
+  });
+
+  it("sends an alias over a gateway model low for minimal, which the gateway never gets", async () => {
+    const built = await build(await gatewayModel(true), { reasoning_level: "minimal" });
+    expect(built.plan.generationConfig?.reasoning_level).toBe("low");
+    expect(built.generationConfig.reasoning_level).toBe("minimal");
+  });
+
   it("drops a schedule's refused setting for that fire and logs it", async () => {
     const warn = spyOn(logger, "warn");
     try {

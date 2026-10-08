@@ -28,6 +28,8 @@
  * default naming an unshared connection is left as it is and fails its runs with
  * `pinned_connection_unavailable`, as after a live access loss, until an admin changes it.
  *
+ * Run it from the `v1.0.0-beta.65` checkout: a later service writes columns this window lacks.
+ *
  * Dry run by default (rolled back); `--apply` commits. Idempotent: a second run unshares nothing.
  * Rollback: the owner re-shares, should they regain the space; the ids are printed.
  */
@@ -65,7 +67,9 @@ export async function runUnshareSpaceAccessLoss(options: {
       await tx.execute("SET LOCAL statement_timeout = '120s'");
       const orgs = await tx.select({ id: organizations.id }).from(organizations);
       for (const org of orgs) {
-        const ids = await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId: org.id });
+        const { connectionIds: ids } = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+          orgId: org.id,
+        });
         if (ids.length === 0) continue;
         out(`  org ${org.id}: ${ids.length} — ${ids.join(", ")}`);
         unshared.push(...ids);

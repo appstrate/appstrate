@@ -37,7 +37,7 @@ import {
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
-import { resolveAuthContext, AuthError } from "../lib/api.ts";
+import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
 import {
   resolveModel,
@@ -217,7 +217,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // Build integration resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
-  const resolverInputs = await buildResolverInputs(mode, opts);
+  const resolverInputs = requireSpaceForLocalRun(await buildResolverInputs(mode, opts));
 
   // ─── 1a. Inherited run-config ────────────────────────────────────
   // When the user runs an agent by id with a remote integration context,
@@ -863,9 +863,10 @@ async function buildResolverInputs(
   // Remote mode — two independent credential paths, checked in order:
   //
   //   1. Headless: an explicit `apst_…` API key via `--api-key` or
-  //      `APPSTRATE_API_KEY`. Pair with `APPSTRATE_INSTANCE` /
-  //      `APPSTRATE_SPACE_ID` (or a profile for fallback). This is the
-  //      flow CI runners and the GitHub Action take.
+  //      `APPSTRATE_API_KEY`, with `APPSTRATE_INSTANCE` (or a profile's
+  //      instance). The key pins its org and space server-side: only
+  //      `APPSTRATE_ORG_ID` / `APPSTRATE_SPACE_ID` name them, never the
+  //      profile. This is the flow CI runners and the GitHub Action take.
   //   2. Interactive: a device-flow JWT from `appstrate login`, pulled
   //      from the keyring via `resolveAuthContext` (silent refresh
   //      against `/api/auth/cli/token` included). The profile also
@@ -874,7 +875,15 @@ async function buildResolverInputs(
   // Mixing the two is rejected — an explicit env-var API key overrides
   // the profile credential entirely so there's no ambiguity about which
   // principal the platform audit log will record.
-  const headlessApiKey = opts.apiKey ?? process.env.APPSTRATE_API_KEY;
+  let headlessApiKey: string | undefined;
+  try {
+    headlessApiKey = explicitApiKey(opts.apiKey);
+  } catch (err) {
+    throw new ResolverConfigError(
+      err instanceof Error ? err.message : String(err),
+      "Pass a valid apst_… key via --api-key or APPSTRATE_API_KEY",
+    );
+  }
   if (headlessApiKey) {
     return buildHeadlessRemoteInputs(headlessApiKey, opts);
   }
@@ -885,19 +894,10 @@ async function buildHeadlessRemoteInputs(
   apiKey: string,
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
-  let instance = process.env.APPSTRATE_INSTANCE;
-  let spaceId = process.env.APPSTRATE_SPACE_ID;
-  let orgId = process.env.APPSTRATE_ORG_ID;
-
-  if (!instance || !spaceId || !orgId) {
-    const resolved = await resolveActiveProfileOrNull(opts.profile);
-    const profile = resolved?.profile;
-    if (profile) {
-      instance ??= profile.instance;
-      spaceId ??= profile.spaceId;
-      orgId ??= profile.orgId;
-    }
-  }
+  const { instance } = await resolveApiKeyTarget(opts.profile);
+  // Never the profile's pins: a header that disagrees with the key is a 403.
+  const spaceId = process.env.APPSTRATE_SPACE_ID || undefined;
+  const orgId = process.env.APPSTRATE_ORG_ID || undefined;
 
   if (!instance) {
     throw new ResolverConfigError(
@@ -905,14 +905,34 @@ async function buildHeadlessRemoteInputs(
       "Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile",
     );
   }
-  if (!spaceId) {
+
+  return {
+    instance,
+    bearerToken: apiKey,
+    ...(spaceId ? { spaceId } : {}),
+    ...(orgId ? { orgId } : {}),
+  };
+}
+
+/** Remote inputs whose space is known: a local run names it in paths and bodies. */
+type SpacedRemoteResolverInputs = RemoteResolverInputs & { spaceId: string };
+
+/**
+ * A local run reads the space's run-config, registers its run record and calls the
+ * credential proxy, all of which name the space. An API key leaves it unset unless
+ * `APPSTRATE_SPACE_ID` spells it out; a remote run needs no id (the key pins it).
+ */
+function requireSpaceForLocalRun(
+  inputs: RemoteResolverInputs | LocalResolverInputs | null,
+): SpacedRemoteResolverInputs | LocalResolverInputs | null {
+  if (!inputs || !("bearerToken" in inputs)) return inputs;
+  if (!inputs.spaceId) {
     throw new ResolverConfigError(
-      "No space id pinned",
-      "Set APPSTRATE_SPACE_ID, or run `appstrate space switch` from a logged-in profile",
+      "No space id for a local run",
+      "Set APPSTRATE_SPACE_ID to the space the API key is pinned to",
     );
   }
-
-  return { instance, bearerToken: apiKey, spaceId, orgId };
+  return { ...inputs, spaceId: inputs.spaceId };
 }
 
 async function buildInteractiveRemoteInputs(
@@ -943,9 +963,7 @@ async function buildInteractiveRemoteInputs(
       orgId: profile.orgId,
     };
   } catch (err) {
-    if (err instanceof AuthError) {
-      throw new ResolverConfigError(err.message, "Run `appstrate login` to re-authenticate");
-    }
+    if (err instanceof AuthError) throw new ResolverConfigError(err.message);
     throw err;
   }
 }
@@ -983,7 +1001,7 @@ async function resolveReportSession(
   opts: RunCommandOptions,
   bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
   bundleSource: BundleSource,
-  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
 ): Promise<ReportSession | null> {
   const mode: ReportMode = opts.report ?? "auto";
   const fallback: ReportFallback = opts.reportFallback ?? "abort";
@@ -1078,7 +1096,7 @@ function resolverInputsInstance(inputs: RemoteResolverInputs | LocalResolverInpu
  */
 async function maybeFetchRunConfig(
   target: ReturnType<typeof parseRunTarget>,
-  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
   opts: RunCommandOptions,
 ): Promise<InheritedRunConfig> {
   const noInherit =
@@ -1096,7 +1114,7 @@ async function maybeFetchRunConfig(
   // Narrowed by the noInherit short-circuit: target is "id" and
   // resolverInputs carries a bearerToken.
   const idTarget = target as Extract<typeof target, { kind: "id" }>;
-  const remoteInputs = resolverInputs as RemoteResolverInputs;
+  const remoteInputs = resolverInputs as SpacedRemoteResolverInputs;
 
   const payload = await fetchRunConfigPayload({
     instance: remoteInputs.instance,
@@ -1142,7 +1160,7 @@ type BundleSource =
 async function resolveBundleSource(
   target: ReturnType<typeof parseRunTarget>,
   opts: RunCommandOptions,
-  resolverInputs: RemoteResolverInputs | LocalResolverInputs | null,
+  resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
 ): Promise<BundleSource> {
   if (target.kind === "path") {
     const abs = path.resolve(target.path);

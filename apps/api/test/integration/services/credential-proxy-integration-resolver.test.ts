@@ -21,15 +21,22 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion, seedRun } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+  runs,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
+  runBoundSelection,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
@@ -120,6 +127,7 @@ describe("credential-proxy integration-resolver", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     const [oauthClient] = await db
       .insert(integrationOauthClients)
@@ -235,6 +243,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
+    await seedPublishedVersion(NO_AUTH, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
 
     await expect(
@@ -279,6 +288,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
+    await seedPublishedVersion(TENANT, "1.0.0");
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, TENANT);
     await db.insert(integrationConnections).values({
       integrationId: TENANT,
@@ -355,10 +365,9 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     };
-    await db
-      .update(packages)
-      .set({ draftManifest: issuerOnly })
-      .where(eq(packages.id, INTEGRATION_ID));
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: { ...issuerOnly, version: "1.0.1" },
+    });
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
@@ -376,28 +385,59 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(false);
   });
 
-  it("flags needsReconnection when the minting OAuth client is gone (terminal, not transient)", async () => {
-    // `buildIntegrationOAuthRefreshContext` returns null for a set of TERMINAL
-    // conditions — deleted OAuth client, missing `client_ref`, undecryptable
-    // client secret, no token endpoint and no issuer to discover one from.
-    // Nothing will ever refresh this token again. The sidecar path flags the
-    // connection here (`flagTerminalAndThrow` → 410); this path used to just
-    // `return null`, so CLI / GitHub Action / self-hosted-runner users looped
-    // on 401 forever with no reconnect prompt anywhere.
+  const flaggedConnection = async (connId: string) =>
+    (
+      await db
+        .select({ needsReconnection: integrationConnections.needsReconnection })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId))
+    )[0]!.needsReconnection;
+
+  it("counts the 401s of an OAuth connection whose minting client is gone, flagging at the threshold", async () => {
+    // Nothing will ever refresh this token, but one 401 can be a transient upstream fault: the
+    // rejection is counted exactly as on the sidecar path, and the proxy still relays the 401.
     const connId = await seedConnection({ userId: ctx.user.id });
     await db
       .delete(integrationOauthClients)
       .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
 
-    // Still null — the proxy must relay the upstream 401 rather than
-    // substitute its own error — but the row is now marked.
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) {
+      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    }
+    expect(await flaggedConnection(connId)).toBe(false);
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await flaggedConnection(connId)).toBe(true);
+  });
 
-    const [row] = await db
-      .select({ needsReconnection: integrationConnections.needsReconnection })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    expect(row!.needsReconnection).toBe(true);
+  it("counts the 401s of an api_key auth, flagging at the threshold", async () => {
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: {
+        ...gmailManifest(token.url),
+        version: "1.0.1",
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["https://api.example.com/*"],
+            credentials: {
+              schema: { type: "object", properties: { api_key: { type: "string" } } },
+            },
+            delivery: {
+              http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" },
+            },
+          },
+        },
+      },
+    });
+    const connId = await seedConnection({ userId: ctx.user.id });
+
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) {
+      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    }
+    expect(await flaggedConnection(connId)).toBe(false);
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await flaggedConnection(connId)).toBe(true);
   });
 
   it("does NOT flag on a transient token-endpoint discovery failure", async () => {
@@ -420,10 +460,9 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     };
-    await db
-      .update(packages)
-      .set({ draftManifest: issuerOnly })
-      .where(eq(packages.id, INTEGRATION_ID));
+    await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+      manifest: { ...issuerOnly, version: "1.0.1" },
+    });
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
@@ -592,6 +631,91 @@ describe("credential-proxy integration-resolver", () => {
       // An undeclared auth key is never picked.
       const primaryOnly = await selectAccessibleConnection(INTEGRATION_ID, manifest, null, context);
       expect(primaryOnly!.id).toBe(primaryId);
+    });
+  });
+
+  describe("the manifest version a call is authorized against", () => {
+    /** The manifest with `primary.authorized_uris` replaced. */
+    const withUris = (version: string, uris: string[]) => {
+      const m = gmailManifest(token.url);
+      (m.auths as Record<string, Record<string, unknown>>).primary!.authorized_uris = uris;
+      return { ...m, version };
+    };
+
+    it("reads the latest published version, never a later draft edit", async () => {
+      await seedConnection({ userId: ctx.user.id });
+      await db
+        .update(packages)
+        .set({ draftManifest: withUris("1.0.0", ["https://draft.example.com/**"]) })
+        .where(eq(packages.id, INTEGRATION_ID));
+
+      const resolved = await resolveIntegrationProxyCredentials(input());
+      expect(resolved.declaredUris).toEqual(["https://api.example.com/*"]);
+    });
+
+    it("refuses an integration that has no published version", async () => {
+      const UNPUBLISHED = "@official/unpublished";
+      await seedPackage({
+        id: UNPUBLISHED,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: { ...gmailManifest(token.url), name: UNPUBLISHED },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, UNPUBLISHED);
+
+      const err = await resolveIntegrationProxyCredentials({
+        ...input(),
+        integrationId: UNPUBLISHED,
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(IntegrationCredentialNotFoundError);
+      expect((err as Error).message).toContain("no published version");
+    });
+
+    it("reads the version an X-Run-Id run froze, not a later published one", async () => {
+      const connectionId = await seedConnection({ userId: ctx.user.id });
+      await seedPublishedVersion(INTEGRATION_ID, "1.0.1", {
+        manifest: withUris("1.0.1", ["https://later.example.com/**"]),
+      });
+      await seedPackage({
+        id: "@official/agent",
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+      });
+      const run = await seedRun({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        packageId: "@official/agent",
+        userId: ctx.user.id,
+        status: "running",
+        runOrigin: "remote",
+        resolvedConnections: {
+          [INTEGRATION_ID]: [
+            { connectionId, source: "member_pin", label: "conn", accountId: "acct" },
+          ],
+        },
+        resolvedIntegrationVersions: { [INTEGRATION_ID]: { version: "1.0.0", source: "version" } },
+      });
+      const actor = { type: "user" as const, id: ctx.user.id };
+      const run1 = runBoundSelection({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        runId: run.id,
+        integrationId: INTEGRATION_ID,
+        actor,
+      });
+
+      const underRun = await resolveIntegrationProxyCredentials({ ...input(), run: run1 });
+      expect(underRun.declaredUris).toEqual(["https://api.example.com/*"]);
+      const withoutRun = await resolveIntegrationProxyCredentials(input());
+      expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);
+
+      // Each read checks the run anew: once it has finished, it lends nothing.
+      expect(await run1.boundSet()).toHaveLength(1);
+      await db.update(runs).set({ status: "success" }).where(eq(runs.id, run.id));
+      await expect(run1.frozenVersion()).rejects.toThrow("no longer active");
     });
   });
 });

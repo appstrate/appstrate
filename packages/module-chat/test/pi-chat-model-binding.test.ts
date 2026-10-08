@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SubscriptionChatModel } from "@appstrate/core/chat-contract";
-import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { loadPiCodingAgentSdk, type ExtensionAPI } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import { getPiModel } from "@appstrate/runner-pi/pi-model";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
 import {
   createPiOAuthModelBinding,
   createPiProxyAuthExtension,
   createPiProxyModelBinding,
-  PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
+  piChatModelRuntimeOptions,
   resolvePiChatModelBinding,
 } from "../src/pi-chat/model-binding.ts";
 
@@ -23,6 +26,7 @@ function orgModel(overrides: Partial<OrgModel> = {}): OrgModel {
     apiShape: "openai-completions",
     providerId: "openai",
     pi_provider: "openai",
+    pi_dialect: null,
     label: "Chat model",
     enabled: true,
     input: ["text"],
@@ -32,6 +36,15 @@ function orgModel(overrides: Partial<OrgModel> = {}): OrgModel {
     cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 },
     ...overrides,
   };
+}
+
+/** What the platform lists of a model's Pi record: its provider key and its dialect. */
+function listed(pi_provider: string, pi_dialect: OrgModel["pi_dialect"] = null) {
+  return { pi_provider, pi_dialect };
+}
+
+function dialectOf(piProvider: string, id: string, api: string) {
+  return piModelDialect(getPiModel(piProvider, id, api)!);
 }
 
 /** The proxy binding of `model`, under the Pi key the platform listed for it. */
@@ -59,8 +72,37 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
 }
 
 describe("Pi chat model binding", () => {
+  it("never reads the host's Pi CLI credential store", async () => {
+    // A stored credential outranks the key the turn registers: a Pi CLI login
+    // in Pi's default store would answer for the org's own credential.
+    const hostAgentDir = await mkdtemp(join(tmpdir(), "pi-host-agent-"));
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    try {
+      await Bun.write(
+        join(hostAgentDir, "auth.json"),
+        JSON.stringify({ anthropic: { type: "api_key", key: "host-cli-key" } }),
+      );
+      process.env.PI_CODING_AGENT_DIR = hostAgentDir;
+      const { ModelRuntime } = await loadPiCodingAgentSdk();
+      const runtime = await ModelRuntime.create(piChatModelRuntimeOptions());
+      runtime.registerProvider("anthropic", { apiKey: "org-key" });
+
+      expect((await runtime.getAuth("anthropic"))?.auth).toEqual({ apiKey: "org-key" });
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+      await rm(hostAgentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives every turn its own credential store", () => {
+    expect(piChatModelRuntimeOptions().credentials).not.toBe(
+      piChatModelRuntimeOptions().credentials,
+    );
+  });
+
   it("skips the redundant full-catalog refresh for an already resolved chat model", () => {
-    expect(PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS).toEqual({
+    expect(piChatModelRuntimeOptions()).toMatchObject({
       modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,
@@ -86,22 +128,23 @@ describe("Pi chat model binding", () => {
 
   // OpenCode Go is unknown to Pi's provider-level detection: the dialect comes
   // from Pi's record for the upstream model, never the wire id.
-  it("takes the upstream model's dialect from Pi's registry, under the preset id", () => {
-    const bind = (reasoning: boolean | null) =>
+  it("takes the dialect the platform listed, under the preset id", () => {
+    const pi_dialect = dialectOf("opencode-go", "deepseek-v4-flash", "openai-completions");
+    const bind = (listed: Partial<OrgModel>) =>
       proxyBinding(
-        orgModel({ providerId: "opencode-go", modelId: "deepseek-v4-flash", reasoning }),
+        orgModel({ providerId: "opencode-go", modelId: "deepseek-v4-flash", ...listed }),
         "opencode-go",
       )!.model;
 
-    expect(bind(null)).toMatchObject({
+    expect(bind({ pi_dialect })).toMatchObject({
       id: "preset_chat",
       provider: "opencode-go",
       reasoning: true,
       compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
     });
-    expect(JSON.stringify(bind(null))).not.toContain("deepseek-v4-flash");
-    // An explicit platform value (org override, catalog) beats the record.
-    expect(bind(false).reasoning).toBe(false);
+    expect(JSON.stringify(bind({ pi_dialect }))).not.toContain("deepseek-v4-flash");
+    // The chat reads no registry: a recorded id listed without a dialect gets none.
+    expect(bind({}).compat).toEqual({ ...PLATFORM_MODEL_COMPAT });
   });
 
   // A gateway names no Pi provider: the api shape's generic key, no record.
@@ -141,14 +184,14 @@ describe("Pi chat model binding", () => {
   });
 
   it("adapts Anthropic and Codex subscriptions to the same binding contract", () => {
-    const anthropic = createPiOAuthModelBinding(oauthModel(), "anthropic");
+    const anthropic = createPiOAuthModelBinding(oauthModel(), listed("anthropic"));
     const codex = createPiOAuthModelBinding(
       oauthModel({
         modelId: "gpt-5.3-codex",
         apiShape: "openai-codex-responses",
         baseUrl: "https://chatgpt.com/backend-api",
       }),
-      "openai-codex",
+      listed("openai-codex"),
     );
 
     expect(anthropic).toMatchObject({
@@ -176,7 +219,7 @@ describe("Pi chat model binding", () => {
     expect(record.compat).toHaveProperty("allowedFallbackModels");
     const model = createPiOAuthModelBinding(
       oauthModel({ modelId: "claude-fable-5" }),
-      "anthropic",
+      listed("anthropic", piModelDialect(record)),
     ).model;
     expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });
     expect(model.compat).toMatchObject({ forceAdaptiveThinking: true, allowedFallbackModels: [] });
@@ -191,7 +234,7 @@ describe("Pi chat model binding", () => {
         apiShape: "openai-codex-responses",
         baseUrl: "https://chatgpt.com/backend-api",
       }),
-      "openai-codex",
+      listed("openai-codex", piModelDialect(record)),
     ).model;
     expect(model.provider).toBe("openai-codex");
     expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });

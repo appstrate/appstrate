@@ -126,8 +126,8 @@ interface McpHostOptions {
 const CONNECTION_PARAM = "connection";
 
 const CONNECTION_DESCRIPTION_PREFIX = "Connection to use for this call. ";
-/** Above the longest legitimate list (10 connections × 80-unit label + 254-byte account id ≈ 5 KiB). */
-const CONNECTION_DESCRIPTION_MAX_BYTES = 6 * 1024;
+/** Above the longest legitimate list (20 connections × 80-unit label + 254-byte account id ≈ 10 KiB). */
+const CONNECTION_DESCRIPTION_MAX_BYTES = 12 * 1024;
 
 /** `null` keys only a connect run's sole upstream, which never gains a sibling route. */
 type ConnectionKey = string | null;

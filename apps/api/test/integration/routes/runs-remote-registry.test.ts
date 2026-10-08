@@ -740,9 +740,19 @@ describe("POST /api/runs/remote — kind: registry", () => {
       });
     }
 
-    it("refuses a run whose cascade binds several connections to one integration (409 agent_not_ready)", async () => {
+    it("refuses a run whose cascade binds several connections to one integration (409, remote_binds_one_connection item)", async () => {
       await pinMine([a, b]);
-      const problem = await expectProblem(await launch(), 409, { code: "agent_not_ready" });
+      const problem = await expectProblem(await launch(), 409, {
+        code: "missing_integration_connection",
+      });
+      expect(problem.errors).toEqual([
+        {
+          field: `integrations.${INTEG}`,
+          code: "remote_binds_one_connection",
+          title: "Remote Run Binds One Connection",
+          message: expect.stringContaining(`'${INTEG}'`),
+        },
+      ]);
       expect(problem.detail).toContain(INTEG);
       expect(await db.select().from(runs).where(eq(runs.packageId, "@acme/briefing"))).toHaveLength(
         0,

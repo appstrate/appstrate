@@ -16,7 +16,8 @@
  *     device-flow JWTs (`oauth2-instance`, `oauth2-dashboard`). Cookie
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
- *   - Explicit `credential-proxy:call` scope — NOT granted by default
+ *   - `credential-proxy:call` scope required — a key created with `scopes` omitted or
+ *     empty carries it when its creator holds it
  *   - Per-space scope (principal cannot reach providers in another space)
  *   - Run binding — `X-Run-Id` confines the call to its run's bound connections
  *     (`selectAccessibleConnection`)
@@ -25,8 +26,9 @@
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
  *     or `user:<id>`) — cookie jars can never be shared between a bearer
  *     JWT and an API key, nor between two API keys of the same org.
- *   - Audit log on every call (requestId, authMethod, apiKeyId, userId,
- *     endUserId, integrationId, target, status)
+ *   - Log line on every call; an audit row on the first use per session of a
+ *     connection the caller does not own (`credential-proxy/connection-audit.ts`)
+ *   - RFC 9209 `Proxy-Status` on every response (`lib/proxy-status.ts`)
  *   - URL allowlist enforced via the integration manifest
  *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
  *   - Upstream `Set-Cookie` never relayed to the caller
@@ -35,7 +37,6 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { getErrorMessage } from "@appstrate/core/errors";
 
 // Streaming cap — single-sourced from the shared outbound-HTTP engine, the
 // same module the in-container resolvers enforce it from, so this route and
@@ -46,7 +47,7 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-import { filterHeaders, stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
+import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
@@ -57,16 +58,13 @@ import {
   ApiError,
   invalidRequest,
   forbidden,
-  notFound,
   internalError,
   payloadTooLarge,
 } from "../lib/errors.ts";
-import {
-  proxyCall,
-  ProxyAuthorizationError,
-  ProxyCredentialError,
-  ProxySubstitutionError,
-} from "../services/credential-proxy/core.ts";
+import { proxyProblem, proxyStatusMarker, relayedProxyStatus } from "../lib/proxy-status.ts";
+import { bodyReadError, proxyCall, ProxyCallError } from "../services/credential-proxy/core.ts";
+import { auditForeignConnectionUse } from "../services/credential-proxy/connection-audit.ts";
+import { trackAudit } from "../services/audit.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import { runBoundSelection } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -79,6 +77,7 @@ export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getCredentialProxyLimits();
 
+  router.use("/*", proxyStatusMarker());
   router.use("/*", requireSpaceContext());
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
@@ -143,9 +142,11 @@ export function createCredentialProxyRouter() {
         throw forbidden("X-Session-Id is bound to a different principal");
       }
 
-      // Optional request body cap
-      const contentLength = c.req.header("Content-Length");
-      if (contentLength && parseInt(contentLength, 10) > limits.max_request_bytes) {
+      // The request's own framing: the body cap, and what a streamed upload is sent upstream with
+      // (absent = chunked).
+      const contentLength = c.req.header("content-length") ?? "";
+      const declaredLen = /^\d+$/.test(contentLength) ? Number(contentLength) : undefined;
+      if (declaredLen !== undefined && declaredLen > limits.max_request_bytes) {
         throw invalidRequest(
           `Request body exceeds CREDENTIAL_PROXY_LIMITS.max_request_bytes (${limits.max_request_bytes})`,
         );
@@ -163,7 +164,6 @@ export function createCredentialProxyRouter() {
       // Streaming control headers from the runtime.
       const streamRequest = readFlagHeader(c, "X-Stream-Request");
       const streamResponse = readFlagHeader(c, "X-Stream-Response");
-      const declaredLen = parseInt(c.req.header("content-length") || "-1", 10);
 
       // Optional caller-supplied buffered-response cap. Clamped to the
       // platform `max_response_bytes` — a caller can only ask for a smaller
@@ -176,7 +176,7 @@ export function createCredentialProxyRouter() {
           : limits.max_response_bytes;
 
       // Guard: declared Content-Length already exceeds the hard cap.
-      if (streamRequest && declaredLen > MAX_STREAMED_BODY_SIZE) {
+      if (streamRequest && declaredLen !== undefined && declaredLen > MAX_STREAMED_BODY_SIZE) {
         throw payloadTooLarge("request body too large");
       }
 
@@ -224,22 +224,26 @@ export function createCredentialProxyRouter() {
         }
       }
 
-      // Forward upstream headers — strip (a) the proxy's control headers
-      // (including the new x-stream-* transport hints — these must not
-      // reach the upstream provider), (b) `host` and `content-length`
-      // (caller's inbound Host would poison the upstream TLS SNI; fetch
-      // recomputes Content-Length), and (c) RFC 7230 hop-by-hop headers.
-      // Reuses the same `filterHeaders` helper as the in-container sidecar.
-      const fwdHeaders = filterHeaders(c.req.header(), PROXY_CONTROL_HEADERS);
-
-      // For streaming uploads, preserve the Content-Length header so the
-      // upstream can frame the request body. Without this, some providers
-      // reject the request with 411 Length Required.
-      if (streamRequest && declaredLen > 0) {
-        fwdHeaders["Content-Length"] = String(declaredLen);
-      }
+      // The proxy's control headers stay here; `fetchApiCall` drops Host, hop-by-hop and
+      // framing headers, a streamed upload's Content-Length coming from `bodyLength`.
+      const fwdHeaders = Object.fromEntries(
+        Object.entries(c.req.header()).filter(([k]) => !PROXY_CONTROL_HEADERS.has(k.toLowerCase())),
+      );
 
       const jar = await getCookieJarStore();
+      // Every call that may have sent the connection's credential, whether it returned or threw.
+      // Off the response path; `drainAudits` flushes it at shutdown.
+      const auditUse = (connectionId: string) =>
+        void trackAudit(
+          auditForeignConnectionUse(c, {
+            actor,
+            connectionId,
+            integrationId,
+            sessionId,
+            runId,
+            sessionTtlSeconds: limits.session_ttl_seconds,
+          }),
+        );
 
       const started = Date.now();
       try {
@@ -248,6 +252,7 @@ export function createCredentialProxyRouter() {
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
         const result = await proxyCall({
+          orgId,
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
@@ -257,6 +262,7 @@ export function createCredentialProxyRouter() {
           target,
           headers: fwdHeaders,
           body,
+          bodyLength: streamRequest ? declaredLen : undefined,
           substituteBody,
           cookieJar: jar,
           jarSessionId: sessionId,
@@ -277,6 +283,7 @@ export function createCredentialProxyRouter() {
           endUserId: endUser?.id,
           spaceId,
           integrationId,
+          connectionId: result.connectionId,
           method,
           target,
           status: result.status,
@@ -284,12 +291,15 @@ export function createCredentialProxyRouter() {
           durationMs,
         });
 
+        auditUse(result.connectionId);
+
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
         // plus the route-specific set (transport hints, Set-Cookie).
         const responseHeaders = stripUpstreamResponseHeaders(
           result.headers,
           CALLER_RESPONSE_SKIP_HEADERS,
         );
+        responseHeaders.append("Proxy-Status", relayedProxyStatus(result.status));
         // One URL serves every target and connection (they ride in headers), so an upstream
         // cache policy must not let a client replay one connection's response for another.
         responseHeaders.set("Cache-Control", "no-store");
@@ -329,7 +339,10 @@ export function createCredentialProxyRouter() {
         // The cap bounds this buffer to `limits.max_response_bytes`.
         let responseBody: ArrayBuffer | null = null;
         if (result.body) {
-          responseBody = await new Response(result.body).arrayBuffer();
+          // A read failing after the headers is the upstream's, never the proxy's own 500.
+          responseBody = await new Response(result.body).arrayBuffer().catch((err: unknown) => {
+            throw bodyReadError(err, result.redactedHost);
+          });
         }
         if (result.truncated) responseHeaders.set("X-Truncated", "true");
 
@@ -343,22 +356,21 @@ export function createCredentialProxyRouter() {
         // active). Surface it with its intended status instead of masking
         // every non-Proxy* error as a 500 below.
         if (err instanceof ApiError) throw err;
-        if (err instanceof ProxyAuthorizationError) {
-          logger.warn("credential-proxy: target not in allowlist", {
-            authMethod,
-            apiKeyId,
-            userId,
-            spaceId,
-            integrationId,
-            target,
-          });
-          throw forbidden(err.message);
-        }
-        if (err instanceof ProxyCredentialError) {
-          throw notFound(err.message);
-        }
-        if (err instanceof ProxySubstitutionError) {
-          throw invalidRequest(err.message);
+        if (err instanceof ProxyCallError) {
+          if (err.connectionId) auditUse(err.connectionId);
+          const problem = proxyProblem(err.code, err.message);
+          if (problem.status === 403) {
+            logger.warn("credential-proxy: call refused", {
+              code: err.code,
+              authMethod,
+              apiKeyId,
+              userId,
+              spaceId,
+              integrationId,
+              target,
+            });
+          }
+          throw problem;
         }
         logger.error("credential-proxy: unexpected failure", {
           authMethod,
@@ -366,7 +378,8 @@ export function createCredentialProxyRouter() {
           userId,
           spaceId,
           integrationId,
-          error: getErrorMessage(err),
+          // The name only: a runtime error (`Headers`, URL parsing) may quote a credential value.
+          error: err instanceof Error ? err.name : typeof err,
         });
         throw internalError();
       }
@@ -385,12 +398,12 @@ function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
 }
 
 const PROXY_CONTROL_HEADERS = new Set([
-  "x-integration",
   "x-integration-id",
   "x-target",
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
+  "x-org-id",
   "x-space-id",
   "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.

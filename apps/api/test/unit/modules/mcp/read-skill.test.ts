@@ -48,6 +48,7 @@ function tool(read: (id: string) => Promise<SkillSnapshot>) {
   const events: Array<{ status: number }> = [];
   const built = buildReadSkillTool({
     readSkill: read,
+    origin: "https://test.local",
     requestId: "req_test",
     observe: (event) => events.push(event),
   });
@@ -112,18 +113,60 @@ describe("read_skill", () => {
     });
   });
 
-  it("answers a small binary file as base64, a larger one as metadata only", async () => {
+  it("answers a small binary file as an embedded blob resource, a larger one as metadata only", async () => {
     const big = new Uint8Array(RESOURCE_BLOB_MAX_BYTES + 1).fill(0xff);
     const { call } = tool(async () => snapshot({ ...files, "assets/big.bin": big }));
 
-    expect(payload(await call({ id: "@acme/tone", path: "assets/logo.bin" }))).toMatchObject({
+    const small = await call({ id: "@acme/tone", path: "assets/logo.bin" });
+    expect(payload(small)).toEqual({
+      id: "@acme/tone",
+      version: "1.2.0",
+      definition: "published",
+      path: "assets/logo.bin",
+      size: 4,
       media_kind: "binary",
-      content_base64: Buffer.from([0xff, 0xfe, 0x00, 0x01]).toString("base64"),
     });
-    const oversized = payload(await call({ id: "@acme/tone", path: "assets/big.bin" }));
-    expect(oversized).toMatchObject({ media_kind: "binary", size: big.byteLength });
-    expect(oversized.note).toContain("exceeds the inline size limit");
-    expect(oversized).not.toHaveProperty("content_base64");
+    expect(small.content[1]).toEqual({
+      type: "resource",
+      resource: {
+        uri: "https://test.local/api/packages/@acme/tone/files/content?path=assets%2Flogo.bin&version=1.2.0",
+        mimeType: "application/octet-stream",
+        blob: Buffer.from([0xff, 0xfe, 0x00, 0x01]).toString("base64"),
+      },
+    });
+    const oversized = await call({ id: "@acme/tone", path: "assets/big.bin" });
+    expect(payload(oversized)).toMatchObject({ media_kind: "binary", size: big.byteLength });
+    expect(payload(oversized).note).toContain("exceeds the inline size limit");
+    expect(oversized.content).toHaveLength(1);
+  });
+
+  it("names the draft in the resource uri when the draft was read, nothing for a system tree", async () => {
+    const uriOf = async (read: Partial<SkillSnapshot>) => {
+      const { call } = tool(async () => ({ ...snapshot(files), ...read }));
+      const result = await call({ id: "@acme/tone", path: "assets/logo.bin" });
+      return (result.content[1] as { resource: { uri: string } }).resource.uri;
+    };
+    expect(await uriOf({ version: null, definition: "draft" })).toBe(
+      "https://test.local/api/packages/@acme/tone/files/content?path=assets%2Flogo.bin&version=draft",
+    );
+    expect(await uriOf({ version: null, definition: "published" })).toBe(
+      "https://test.local/api/packages/@acme/tone/files/content?path=assets%2Flogo.bin",
+    );
+  });
+
+  it("carries every success as structuredContent, errors as text only", async () => {
+    const { call } = tool(async () => snapshot(files));
+    for (const args of [
+      { id: "@acme/tone" },
+      { id: "@acme/tone", path: "scripts/run.sh" },
+      { id: "@acme/tone", path: "assets/logo.bin" },
+    ]) {
+      const result = await call(args);
+      expect(result.structuredContent).toEqual(payload(result));
+    }
+    expect(
+      (await call({ id: "@acme/tone", path: "missing.md" })).structuredContent,
+    ).toBeUndefined();
   });
 
   it("answers a text file over the inline limit, SKILL.md included, as metadata only", async () => {

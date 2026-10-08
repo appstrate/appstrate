@@ -47,12 +47,20 @@ interface SettingsNavigationOptions {
     billing: boolean;
     webhooks: boolean;
   };
+  /**
+   * A personal space takes no members, keys, OAuth clients or end-users: the
+   * server answers 409 `personal_space_*` to every write behind those entries
+   * (the routes are `teamSpaceOnly` in `lib/route-access.ts`).
+   */
+  inPersonalSpace?: boolean;
 }
 
 export function buildSettingsNavigation({
   can,
   features,
+  inPersonalSpace = false,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
+  const teamSpace = !inPersonalSpace;
   return [
     {
       scope: "organization",
@@ -129,7 +137,7 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/members",
           icon: Users,
           labelKey: "spaceMembers.tabTitle",
-          show: can("space-members:read") || can("space-members:invite"),
+          show: teamSpace && (can("space-members:read") || can("space-members:invite")),
         },
         {
           to: "/workspace-settings/auth",
@@ -141,13 +149,13 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/api-keys",
           icon: KeyRound,
           labelKey: "orgSettings.tabApiKeys",
-          show: can("api-keys:read"),
+          show: teamSpace && can("api-keys:read"),
         },
         {
           to: "/workspace-settings/oauth",
           icon: KeyRound,
           labelKey: "appSettings.tabOauth",
-          show: features.oidc && can("oauth-clients:read"),
+          show: teamSpace && features.oidc && can("oauth-clients:read"),
         },
         {
           to: "/workspace-settings/end-users",
@@ -155,7 +163,7 @@ export function buildSettingsNavigation({
           labelKey: "endUsers.pageTitle",
           // Operations, not authoring: an operator manages them, a viewer only
           // reads them, and a screen with nothing to do on it is noise.
-          show: can("end-users:write"),
+          show: teamSpace && can("end-users:write"),
         },
         {
           to: "/workspace-settings/webhooks",

@@ -28,7 +28,7 @@ import {
   deleteWebhook,
   rotateSecret,
   listDeliveries,
-  buildEventEnvelope,
+  sendTestPing,
   webhookEventSchema,
 } from "./service.ts";
 import type { WebhookInfo } from "@appstrate/shared-types";
@@ -346,18 +346,19 @@ export function createWebhooksRouter() {
     return c.body(null, 204);
   });
 
-  // POST /api/webhooks/:id/test — send a synthetic test.ping event
+  // POST /api/webhooks/:id/test — queue a signed test.ping delivery (one
+  // attempt). The 200 confirms it was queued, not that it was delivered.
   router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
-    const wh = await loadWebhookForAction(c, "write");
-
-    const { eventId, payload } = buildEventEnvelope({
-      eventType: "test.ping",
-      run: { id: "run_test", packageId: "test", status: "success" },
-      payloadMode:
-        wh.payloadMode === "full" || wh.payloadMode === "summary" ? wh.payloadMode : "full",
+    const webhook = await loadWebhookForAction(c, "write");
+    const result = await sendTestPing(webhook);
+    // An outbound signed request on the caller's say-so, like a rotation.
+    await recordAuditFromContext(c, {
+      action: "webhook.test_sent",
+      resourceType: "webhook",
+      resourceId: webhook.id,
+      after: { eventId: result.eventId },
     });
-
-    return c.json({ eventId, payload });
+    return c.json(result);
   });
 
   // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.

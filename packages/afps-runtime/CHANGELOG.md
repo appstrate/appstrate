@@ -7,28 +7,162 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one vocabulary of api_call failure codes (#1761)
+
+- `ApiCallFailureCode` (`./resolvers`): the snake_case codes every `api_call`
+  path reports (`unauthorized_target`, `blocked_target`,
+  `credential_exfiltration_refused`, `upstream_unresolvable`,
+  `credential_unusable`, `upstream_unreachable`, `upstream_timeout`), in a
+  leaf module with `URL_POLICY_REFUSAL_CODE` (each `UrlPolicyRefusal` to its
+  code).
+- `classifyApiCallFailure` returns the kind's shared `code`; a transport
+  error's own code moves from `code` to `systemCode` (Bun's
+  `ConnectionRefused`, Node's `ECONNREFUSED`), and a templated call keeps it.
+- **BREAKING:** `ApiCallFailureError` (`code: ApiCallFailureCode`) replaces
+  `AuthorizedUrisError`. The local resolver raises it for every outbound
+  failure and URL-policy refusal, under the code the platform proxy answers;
+  `details` holds `integration`, the target as written, the declared
+  allowlist, and for an engine failure `redirect` and `systemCode`. An
+  unresolvable host is `upstream_unresolvable`, a timeout or transport fault
+  is typed instead of rethrown raw, and a substituted or injected header
+  value that is no HTTP field value is `credential_unusable`;
+  `RESOLVER_HEADER_INVALID` names the agent's own header only. Retired:
+  `RESOLVER_URL_BLOCKED`, `RESOLVER_REDIRECT_BLOCKED`,
+  `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, `AUTHORIZED_URIS_MISMATCH`,
+  `AUTHORIZED_URIS_EMPTY`.
+
+### Removed — `authorized_uris` rules moved to afps-shared (#1763, BREAKING)
+
+- `matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`, `compileEgressPolicy`
+  and the type `EgressPolicy` are no longer exported from `./resolvers`:
+  import them from `@appstrate/afps-shared/authorized-uris`.
+
+### Fixed — a sticky cookie expires (#1778)
+
+- `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at
+  400 days, RFC 6265bis §5.6.2, so it stays finite through JSON), else
+  `Expires` (RFC 6265 §5.2.1–5.2.2), as an absolute time from the receipt
+  time. `header` never sends an expired cookie, so an expired same-name
+  cookie no longer masks the injected credential; expired entries are purged
+  from a bucket at its next capture. A cookie with neither attribute lives as
+  long as the jar. Before, only `Max-Age <= 0` or a past `Expires` was
+  honoured, at capture, and any other cookie was replayed indefinitely.
+
+### Changed — `CookieJar` stores each cookie's expiry (#1778, BREAKING)
+
+- `CookieJar` is `Map<string, { pair: string; expiresAt?: number }[]>`
+  (`expiresAt` in epoch ms), no longer `Map<string, string[]>`.
+- `CookieScope.capture` takes an optional `now` (the receipt time, default
+  the current time).
+
+### Changed — no longer published to npm
+
+- The package is `"private": true`: it is not published to npm. It is
+  consumed in-tree, by the platform through `workspace:*` and by `apps/cli`,
+  which bundles it into the `appstrate` binary.
+
+### Added — one preparation of the caller half of an api_call (#1660)
+
+- `prepareApiCallRequest({ target, headers, bodyTemplates, fields })` and
+  `PreparedApiCallRequest` (`./resolvers`): the target and the caller's
+  headers substituted, the headers a credential went into, and every
+  template of the call for `credentialUrlPolicy`; or the first defect,
+  worded (an unresolved placeholder in the target, a header or the body; a
+  header value that is no HTTP field value). It repairs `Bearer{{field}}` on
+  the template of `Authorization`.
+
+### Changed — local resolver (#1660)
+
+- It goes through `prepareApiCallRequest`: it repairs `Bearer{{field}}`,
+  names the first unresolved location
+  (`Unresolved placeholders in target: {{a}}`) where it listed every key,
+  and judges a caller header value as written, first
+  (`RESOLVER_HEADER_INVALID`): ahead of the URL policy, of an unresolved
+  placeholder elsewhere and of a body error, and for a header the resolver
+  then replaces.
+
+### Changed — one outbound engine for every api_call path (#1641)
+
+- **BREAKING:** `guardedFetch`, `fetchFollowingRedirectsCapturingCookies`,
+  `MAX_REDIRECTS`, `matchesAuthorizedUri`, `stripUserInfoAndFragment`,
+  `scrubTransportError`, `redactHost` and `RedirectBlockedError` are no longer
+  exported; `fetchApiCall` replaces the first two. By default it pins every
+  hop to its DNS-validated address. It bounds the call with
+  `API_CALL_TIMEOUT_MS` combined with the caller's signal, keeps the
+  credential across a redirect only to an origin the allowlist names (never
+  https→http), and refuses every target when there is no allowlist and no
+  `allow_all_uris`. `internalHost` is required: a host skips the SSRF gate
+  only when it accepts the host AND the declared allowlist names that host
+  literally, never under `allow_all_uris` (#1657). There is no default: each
+  caller says who owns the network the call leaves from.
+  It forwards only end-to-end caller headers: a caller's `Host`, the
+  hop-by-hop headers (and any header `Connection` names, except a credential
+  header) and `Content-Length` are dropped.
+- New exports: `fetchApiCall`, whose messages name the initial target by
+  `targetHost` (required: its host as the template names it, `templateHost`,
+  also new) and which scrubs `credentialFields` (required: `{}` scrubs
+  nothing) from redirect hosts and transport errors only; its optional
+  `bodyLength` is a `ReadableStream` body's trusted size, sent as its
+  `Content-Length` (omitted: chunked). It throws `InvalidHeaderValueError`
+  (`@appstrate/afps-shared`) on a header value that is no HTTP field value,
+  a `Headers` instance's included, before anything is sent. Also
+  `API_CALL_TIMEOUT_MS`, `HOP_BY_HOP_HEADERS` (its one home: the
+  `@appstrate/connect/proxy-primitives` and sidecar re-exports are gone),
+  `unresolvedPlaceholders` (the `{{key}}` placeholders of a template that its
+  fields do not own, read on the template, never on the substituted string)
+  and `classifyApiCallFailure`: what `fetchApiCall` threw, as
+  `not_authorized`, `ssrf`, `unresolvable`, `invalid_header`, `timeout` or
+  `transport`, flagged when a redirect hop was refused. A target or a
+  redirect hop with no DNS answer is `unresolvable` (a 502 on both proxies).
+  Both resolvers raise `RESOLVER_HEADER_INVALID` on an agent header that is
+  no HTTP field value; `RemoteAppstrateIntegrationResolver` applies the same
+  caller-header rule to the agent's headers, its transport headers and
+  `Content-Length` always its own.
+  `LocalIntegrationResolver` refuses a call whose target, header or string
+  body names a `{{field}}` its credentials do not hold
+  (`RESOLVER_BODY_INVALID`); it was rendered empty. `ApiCallMeta` is
+  `{ name }`: `makeApiCallTool` gates nothing, the allowlist is
+  `fetchApiCall`'s. `ApiCallFailureClass` and `HostResolver` (import it from
+  `@appstrate/afps-shared/ssrf-dns`) are not exported.
+- **BREAKING:** `matchesAuthorizedUriSpec`, `compileEgressPolicy` and
+  `hostLiterallyAllowlisted` read each entry through
+  `parseAuthorizedUriPattern` (`@appstrate/afps-shared/credential-template`),
+  the parser the host-bound rule judges. A malformed entry (an authority that
+  is empty, not spelled as WHATWG serialises it, or holding `%`, `\`, `@`,
+  `?`, `#`, whitespace, a control or non-ASCII character) matches no URL,
+  grants no authority and pins no host.
+- **BREAKING:** a call that carries a credential — substituted or injected by
+  the proxy — drops `allow_all_uris`, and `credentialUrlPolicy` refuses it
+  when `authorized_uris` is empty or an entry leaves the host to the caller
+  (below).
+- **BREAKING:** `resolveHttpDelivery` renders `valueFrom.template` with
+  `renderCredentialTemplate`: `{$credential.<field>}` only, and any other
+  `{$…}` in a delivery value throws.
+
 ### Changed — `authorized_uris` rendered per connection; only declared hosts pin (#1627)
 
-- `guardedFetch` (and the engine's `preflightUrl`) takes a required `declaredUris`: the manifest's
-  declared, unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
-  connection) decides what matches; only a host written literally in `declaredUris`
-  exempts a target from the SSRF net, and only those hosts share cookies across
-  origins. `hostLiterallyAllowlisted` never pins a templated host (`{…}`).
-- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the creds
-  file's fields (`renderAuthorizedUris`, `@appstrate/afps-shared/credential-template`)
-  and enforces it on the substituted target, so `{{site_url}}/wp-json/…` matches a
-  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target that
-  starts with a `{{field}}` followed by nothing or a `/` path; `apiCallRequestJsonSchema`
-  publishes it (`anyOf` a `uri` or that pattern), and the new `apiCallTargetJsonSchema`
-  export is its `target` property for tool schemas composed by hand.
-- A declared allowlist that renders to nothing for the connection (its URL field unset
-  or not an absolute http(s) URL) refuses every target instead of falling back to the
-  no-allowlist SSRF branch: `allowlistUnrendered` + `UNRENDERED_ALLOWLIST_REFUSAL`, applied
-  by `preflightUrl` / `guardedFetch`, the local resolver and the sidecar.
-- Off-allowlist refusals (`preflightUrl`, `enforceAuthorizedUris`) name the DECLARED
-  entries, never a rendered one — an exact-URL entry such as `{$credential.webhook_url}`
-  renders to a secret. `enforceAuthorizedUris(meta, target, rendered?)` takes the
-  substituted target and the rendered list as one optional `rendered` argument.
+- `fetchApiCall` takes a required `declaredUris`: the manifest's declared,
+  unrendered `authorized_uris`. `authorizedUris` (the list rendered for the
+  connection) decides what matches; only a host written literally in
+  `declaredUris` exempts a target from the SSRF net, and only those hosts
+  share cookies across origins. `hostLiterallyAllowlisted` never pins a
+  templated host (`{…}`).
+- `LocalIntegrationResolver` renders each auth's `authorized_uris` with the
+  creds file's fields (`renderAuthorizedUris`,
+  `@appstrate/afps-shared/credential-template`) and enforces it on the
+  substituted target, so `{{site_url}}/wp-json/…` matches a
+  `{$credential.site_url}/**` entry. The `api_call` schema accepts a target
+  that starts with a `{{field}}` followed by nothing or a `/` path;
+  `apiCallRequestJsonSchema` publishes it (`anyOf` a `uri` or that pattern),
+  and the new `apiCallTargetJsonSchema` export is its `target` property for
+  tool schemas composed by hand.
+- A declared allowlist that renders to nothing for the connection (its URL
+  field unset or not an absolute http(s) URL) refuses every target:
+  `credentialUrlPolicy`'s `"unrendered"` refusal, on the local resolver, the
+  sidecar and the platform proxy.
+- Off-allowlist refusals (`fetchApiCall` and the `api_call` tool's allowlist
+  check) name the DECLARED entries, never a rendered one — an exact-URL entry
+  such as `{$credential.webhook_url}` renders to a secret.
 
 ### Changed — `X-Run-Id` is a reserved transport header
 
@@ -50,51 +184,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@appstrate/runner-pi` uses it to expose `api_call` only for the tools the
   agent selected.
 
-### Added — credential-exfiltration guard
+### Added — the pre-send URL policy of the three `api_call` paths
 
-Exported from `@appstrate/afps-runtime/resolvers` and shared by all three
-`api_call` paths (the sidecar, the local resolver, the platform credential
-proxy):
+Exported from `@appstrate/afps-runtime/resolvers` and shared by the sidecar,
+the local resolver and the platform credential proxy:
 
-- `credentialUrlPolicy({ templates, fields, allowAllUris, authorizedUris })`
-  and its result type `CredentialUrlPolicy` (`substitutesCredential`,
-  `allowAllUris`, `refuse`). A call whose `templates` reference a credential
-  field loses `allow_all_uris`; `refuse` is set when `authorizedUris` is empty.
-  `templates` must be exactly the strings substituted — the sidecar now passes
-  a JSON body's string leaves, not `JSON.stringify(body)`, whose escaping hid
-  `{{\tapi_key}}`.
+- `credentialUrlPolicy(input)` — `templates`, `fields`, `allowAllUris`,
+  `declaredUris`, `authorizedUris`, `injectsCredential` — returns a
+  `CredentialUrlPolicy` (`substitutesCredential`, `allowAllUris`, `refuse`).
+  A call whose
+  `templates` reference a credential field, or whose credential the proxy
+  injects, loses `allow_all_uris`. `refuse` (`UrlPolicyRefusal`) is
+  `"unrendered"` when the declared allowlist renders to nothing for the
+  connection, `"exfiltration"` when a credential-carrying call has no
+  allowlist or an entry that leaves the host to the caller, `"unauthorized"`
+  when there is no allowlist and no `allow_all_uris` (an empty authorized set
+  authorizes nothing), otherwise `null`. `templates` must be exactly the
+  strings substituted — the sidecar passes a JSON body's string leaves, not
+  `JSON.stringify(body)`, whose escaping hid `{{\tapi_key}}`.
+- `urlPolicyRefusalMessage(refusal, integrationId)`: the one message per
+  refusal; it names no credential value.
 - `redactionFields(policy, fields)`: the credential values to scrub from an
   echoed host — `fields` when the call templates a credential, `{}` otherwise.
-- `exfiltrationRefusal(integrationId)`: the one refusal message for
-  `policy.refuse`.
 - `redactCredentialHost(url, fields)`: the URL's host with credential values
   (compared lowercased) replaced by their `{{field}}` placeholder.
-- `scrubTransportError(err, fields)`: `err` unchanged when `fields` is empty
-  (untemplated call); otherwise a same-`name` `Error` carrying only the message,
-  every URL cut to its redacted host (Bun keeps the full URL on `.path`).
-- `guardedFetch` and `fetchFollowingRedirectsCapturingCookies` take an optional
-  `credentialFields`, scrubbed from every host their refusals and logs name.
-  The "Too many redirects" error names the start URL's host instead of the
-  full URL.
+- `fetchApiCall` scrubs its `credentialFields` from every host its refusals
+  and logs name; a transport error on a templated call keeps only its
+  message, every URL cut to its redacted host (Bun keeps the full URL on
+  `.path`). The "Too many redirects" error names the start URL's host
+  instead of the full URL.
 
 ### Changed — local resolver
 
-- Runs the shared guard; its `RESOLVER_CREDENTIAL_EXFIL_BLOCKED` message is
-  `exfiltrationRefusal`'s.
+- Runs the shared policy: an `"exfiltration"` refusal is
+  `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, an `"unrendered"` or `"unauthorized"`
+  one `AUTHORIZED_URIS_EMPTY`, both with `urlPolicyRefusalMessage`'s message.
 - A refused target's error `details.target` carries the template
   (`https://{{api_key}}.x.com/`), never the substituted URL, and the host in
   the message has credential values scrubbed.
-- A transport error is rethrown through `scrubTransportError`.
 
 ### Fixed — own-property placeholders
 
 - `substituteVars` and the guard's placeholder lookup match own properties
   only: `{{constructor}}` no longer resolves to `Object.prototype`'s.
 
-### Changed — redirect follower takes a `CookieScope` (BREAKING)
+### Changed — the redirect follower takes a `CookieScope` (BREAKING)
 
-- `fetchFollowingRedirectsCapturingCookies` takes `cookies: CookieScope` in
-  place of the `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
+- `fetchApiCall` takes `cookies: CookieScope` (omitted: a jar living for the
+  call's redirect chain only) where the follower it replaces took a
+  `cookieJar` map. Each hop's `Set-Cookie` lands in the bucket of
   THAT hop's origin (host-only), no longer in the initial target's, and every
   hop's `Cookie` (the first included) is composed from `init`'s uncomposed
   `Cookie`. Once a cross-origin credential strip fires, that `Cookie` is
@@ -400,10 +538,9 @@ proxy):
   runtime as a workspace dependency and drives the same `PiRunner`
   code path — plus profile / credential-proxy / HMAC sink wiring the
   runtime CLI never had.
-  Migration: `appstrate run <bundle> --integrations=none --report=false
---model-source=env --model-api=<api> --model=<id> --llm-api-key=<key>
---snapshot <path> --input <json>` matches the previous `afps run`
-  surface without requiring an Appstrate instance.
+  Migration: the previous `afps run` surface, without an Appstrate instance,
+  is
+  `appstrate run <bundle> --integrations=none --report=false --model-source=env --model-api=<api> --model=<id> --llm-api-key=<key> --snapshot <path> --input <json>`.
 - **`afps test <bundle> --events <path>` is gone.** Scripted-replay of
   user events through `EventSink.handle` + `reduceEvents` is a
   10-line library call; the CLI wrapper added no behaviour. A ready

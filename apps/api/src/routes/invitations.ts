@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@appstrate/db/auth";
 import { ApiError, gone } from "../lib/errors.ts";
 import {
   getInvitationByToken,
@@ -12,11 +11,12 @@ import {
   getInviterName,
   getOrgName,
 } from "../services/invitations.ts";
-import { getOrgById, provisionMember } from "../services/organizations.ts";
+import { getOrgById, getOrgMember, provisionMember } from "../services/organizations.ts";
 import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { auditSpaceAssignments } from "../lib/space-role-assignment.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
+import { getSessionForwardingCookies } from "../lib/auth-cookies.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { listedOrgPermissions } from "../lib/permissions.ts";
 
@@ -89,9 +89,7 @@ router.post("/:token/accept", async (c) => {
   assertInvitationExists(invitation);
   assertInvitationUsable(invitation);
 
-  const session = await getAuth()
-    .api.getSession({ headers: c.req.raw.headers })
-    .catch(() => null);
+  const session = await getSessionForwardingCookies(c).catch(() => null);
 
   if (!session?.user) {
     throw new ApiError({
@@ -136,7 +134,12 @@ router.post("/:token/accept", async (c) => {
     if (!current) return null;
     // The claim locks and returns the current grant, including edits committed
     // since the initial token lookup. Never apply that earlier snapshot.
-    await provisionMember(tx, current.orgId, session.user.id, current.role as AssignableOrgRole);
+    const invitedRole = current.role as AssignableOrgRole;
+    const { created } = await provisionMember(tx, current.orgId, session.user.id, invitedRole);
+    // An existing member keeps their role: the answer names that one.
+    const member = created ? null : await getOrgMember(current.orgId, session.user.id, tx);
+    if (!created && !member) throw new Error("Membership vanished while accepting an invitation");
+    const role = member?.role ?? invitedRole;
     const assignments = await applySpaceAssignments(tx, {
       orgId: current.orgId,
       userId: session.user.id,
@@ -144,7 +147,7 @@ router.post("/:token/accept", async (c) => {
       assignments: current.spaceAssignments,
       onMissing: "skip",
     });
-    return { invitation: current, assignments };
+    return { invitation: current, assignments, role, created };
   });
 
   if (!claimed) {
@@ -193,8 +196,9 @@ router.post("/:token/accept", async (c) => {
     name: org.name,
     slug: org.slug,
     logo: org.logo,
-    role: claimed.invitation.role,
-    permissions: listedOrgPermissions(claimed.invitation.role),
+    role: claimed.role,
+    permissions: listedOrgPermissions(claimed.role),
+    created: claimed.created,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
   });

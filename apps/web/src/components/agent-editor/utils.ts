@@ -113,7 +113,7 @@ export function defaultIntegrationManifest(
     auths: {
       primary: {
         type: "api_key",
-        authorized_uris: ["https://**"],
+        authorized_uris: [],
         credentials: {
           schema: {
             type: "object",

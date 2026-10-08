@@ -42,7 +42,11 @@ import {
   useAgentsConsumingIntegration,
   useIntegrationPins,
 } from "../hooks/use-integrations";
-import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
+import {
+  useConnectionDeleteImpact,
+  useDisconnectIntegrationConnection,
+} from "../hooks/use-me-connections";
+import { isQueryInFlight } from "../lib/query-state";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanReach } from "../hooks/use-can-reach";
 import { packageDetailPath } from "../lib/package-paths";
@@ -61,9 +65,10 @@ function usePinningAgents(connection: IntegrationConnection, packageId: string) 
   return pins
     .filter((pin) => pin.connection_ids.includes(connection.id))
     .map((pin) => ({
-      id: pin.packageId,
+      id: pin.agent_package_id,
       name:
-        agents?.find((agent) => agent.packageId === pin.packageId)?.display_name ?? pin.packageId,
+        agents?.find((agent) => agent.agent_package_id === pin.agent_package_id)?.display_name ??
+        pin.agent_package_id,
     }));
 }
 
@@ -251,6 +256,8 @@ export function ConnectionActionsCell({
   const { t } = useTranslation(["settings", "common"]);
   const disconnect = useDisconnectIntegrationConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Read only while the confirmation is open; the button waits for it.
+  const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
   const { canConnect, lockKey } = useRowGrants(connection, isOwn, isAdmin);
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
@@ -324,6 +331,7 @@ export function ConnectionActionsCell({
         description={t("integration.connection.deleteConfirm")}
         confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={disconnect.isPending}
+        confirmDisabled={isQueryInFlight(deleteImpact)}
         onConfirm={() =>
           disconnect.mutate(
             { params: { path: { connectionId: connection.id } } },
@@ -333,7 +341,7 @@ export function ConnectionActionsCell({
       >
         {confirmDelete && (
           <>
-            <ConnectionDeleteImpact connectionId={connection.id} />
+            <ConnectionDeleteImpact impact={deleteImpact} />
             <ConnectionTeardownSteps connectionId={connection.id} />
           </>
         )}

@@ -25,7 +25,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../lib/format-bytes";
 import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/format-date";
 import { mimeIconFor, fileRunHref, fileExpiryInfo, type RunFileDirection } from "../lib/files";

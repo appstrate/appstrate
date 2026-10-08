@@ -138,8 +138,13 @@ interface PiMessagesUpstream {
   headers: Record<string, string>;
 }
 
-/** pi-ai needs a key to sign with; the proxy ignores it and reads the run token. */
-const PROXY_PLACEHOLDER_API_KEY = "appstrate-run";
+/**
+ * pi-ai needs a key to sign with; the proxy ignores it and reads the run token.
+ * Shaped like a plain API key: pi-ai reads any other credential sent to
+ * `api.openai.com` as a ChatGPT sign-in and drops `max_output_tokens`,
+ * `temperature` and the cache retention from the request.
+ */
+const PROXY_PLACEHOLDER_API_KEY = "sk-appstrate-run";
 
 /**
  * Send pi-ai's calls to `to` instead of the `from` prefix it built them on.
@@ -326,13 +331,13 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
   }
   return buildPiModel({
     id: swap.real,
-    registryModelId: swap.real,
+    dialect: backing.dialect,
     apiShape: swap.backingApiShape,
     piProvider: backing.providerId,
     baseUrl: upstream.modelBaseUrl,
     reasoning: backing.reasoning,
     input: narrowInputModalities(backing.input),
-    // Explicit, so the record's card never applies: the disclosure control above.
+    // Zero, never a rate card: the disclosure control above.
     cost: ZERO_MODEL_COST,
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
     // sizes pi-ai's clamp; absent, `buildPiModel` sizes them as for the container.

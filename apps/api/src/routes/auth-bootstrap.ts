@@ -41,6 +41,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getAuth, withBootstrapTokenRedemption } from "@appstrate/db/auth";
+import { isBootstrapOwner } from "@appstrate/db/auth-policy";
 import { createBootstrapOrg } from "@appstrate/db/bootstrap-org";
 import { db, reservePgConnection } from "@appstrate/db/client";
 import { user as userTable } from "@appstrate/db/schema";
@@ -82,6 +83,18 @@ export const redeemSchema = z
 // are impossible. The same value is reused across replicas — that's the
 // point: only one process holds it at a time.
 const BOOTSTRAP_REDEEM_LOCK_KEY = 8729463725001923174n;
+
+function bootstrapUserExists(): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "bootstrap_user_exists",
+    title: "Conflict",
+    detail:
+      "An account already exists for this address, and the bootstrap token only creates " +
+      "a new one. Sign in with that account, then make it owner of the root organization " +
+      "with `bun apps/api/scripts/bootstrap-org.ts --owner=<email>`.",
+  });
+}
 
 export function createAuthBootstrapRouter(): Hono {
   const router = new Hono();
@@ -157,8 +170,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: "Gone",
           detail:
             "No bootstrap token is currently redeemable. The instance has either " +
-            "no token configured, has already been claimed, or was bootstrapped " +
-            "via AUTH_BOOTSTRAP_OWNER_EMAIL.",
+            "no token configured or has already been claimed.",
         });
       }
 
@@ -181,47 +193,48 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
+      // After the token check, so only the operator learns the named address.
+      if (getEnv().AUTH_BOOTSTRAP_OWNER_EMAIL && !isBootstrapOwner(data.email)) {
+        throw new ApiError({
+          status: 403,
+          code: "bootstrap_owner_email_mismatch",
+          title: "Forbidden",
+          detail:
+            "This instance names its owner in AUTH_BOOTSTRAP_OWNER_EMAIL. " +
+            "Claim it with that e-mail address.",
+        });
+      }
+
+      // Looked up here: under mail verification Better Auth reports a duplicate as success.
+      const [taken] = await db
+        .select({ id: userTable.id })
+        .from(userTable)
+        .where(eq(userTable.email, data.email))
+        .limit(1);
+      if (taken) throw bootstrapUserExists();
+
       // Step 3: signup via BA inside the bypass envelope
       const authApi = getAuth().api;
       let authResponse: Response;
+      let refusal: string | undefined;
       try {
-        authResponse = (await withBootstrapTokenRedemption(() =>
-          authApi.signUpEmail({
-            body: { email: data.email, password: data.password, name: data.name },
-            headers: c.req.raw.headers,
-            asResponse: true,
-          }),
-        )) as Response;
+        ({ result: authResponse, refusal } = await withBootstrapTokenRedemption(
+          () =>
+            authApi.signUpEmail({
+              body: { email: data.email, password: data.password, name: data.name },
+              headers: c.req.raw.headers,
+              asResponse: true,
+            }) as Promise<Response>,
+        ));
       } catch (err) {
         const msg = getErrorMessage(err);
         // Email omitted — see WARN-log comment above on the bad-token branch.
         logger.error("bootstrap-redeem: signUpEmail threw", { error: msg });
         if (msg.includes("already exists") || msg.includes("duplicate")) {
-          throw new ApiError({
-            status: 409,
-            code: "bootstrap_user_exists",
-            title: "Conflict",
-            detail:
-              "An account with that email already exists. Use a different email — " +
-              "the bootstrap owner must be a fresh account.",
-          });
+          throw bootstrapUserExists();
         }
-        // Domain allowlist rejection (#344 hardening — bootstrap-token
-        // bypass does NOT skip AUTH_ALLOWED_SIGNUP_DOMAINS). Surface
-        // the structured reason so the operator knows to use an
-        // allowlisted email.
-        if (msg.includes("signup_domain_not_allowed")) {
-          throw new ApiError({
-            status: 403,
-            code: "signup_domain_not_allowed",
-            title: "Forbidden",
-            detail:
-              "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
-              "Use an allowlisted email for the bootstrap owner.",
-          });
-        }
-        // The two branches above are diagnoses the code is confident of, and
-        // both are logged with `msg` already. This one is the fall-through —
+        // The branch above is a diagnosis the code is confident of, and it is
+        // logged with `msg` already. This one is the fall-through —
         // "something in Better Auth's signup threw" — so it is the branch that
         // needs the original attached: the error handler renders the chain
         // against this request's id, which the WARN line above cannot do.
@@ -234,6 +247,20 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
+      // Under mail verification Better Auth answers the hook's 403 as a created account.
+      if (refusal) {
+        throw new ApiError({
+          status: 403,
+          code: refusal,
+          title: "Forbidden",
+          detail:
+            refusal === "signup_domain_not_allowed"
+              ? "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
+                "Use an allowlisted email for the bootstrap owner."
+              : `The account could not be created (${refusal}).`,
+        });
+      }
+
       if (!authResponse.ok) {
         const bodyText = await authResponse.text().catch(() => "");
         // Email omitted — see WARN-log comment above on the bad-token branch.
@@ -241,20 +268,6 @@ export function createAuthBootstrapRouter(): Hono {
           status: authResponse.status,
           body: bodyText.slice(0, 400),
         });
-        // Domain-allowlist rejection — surfaced from the auth.ts gate
-        // when the bootstrap-token bypass hits an active
-        // `AUTH_ALLOWED_SIGNUP_DOMAINS`. Remap to 403 with the
-        // structured code so the SPA can display the precise reason.
-        if (bodyText.includes("signup_domain_not_allowed")) {
-          throw new ApiError({
-            status: 403,
-            code: "signup_domain_not_allowed",
-            title: "Forbidden",
-            detail:
-              "The instance has an active email-domain allowlist (AUTH_ALLOWED_SIGNUP_DOMAINS). " +
-              "Use an allowlisted email for the bootstrap owner.",
-          });
-        }
         // Surface BA's status to the SPA so password-policy / duplicate-email
         // errors keep their structured semantics.
         throw new ApiError({
@@ -263,7 +276,7 @@ export function createAuthBootstrapRouter(): Hono {
           title: authResponse.status === 422 ? "Unprocessable Entity" : "Bad Request",
           detail:
             authResponse.status === 422
-              ? "Bootstrap signup rejected (likely duplicate email or weak password)."
+              ? "Bootstrap signup rejected (password refused by the password policy)."
               : "Bootstrap signup rejected by auth provider.",
         });
       }
@@ -331,7 +344,6 @@ export function createAuthBootstrapRouter(): Hono {
         });
       }
 
-      // Step 5: mark consumed (clears in-flight + sets durable consumed flag)
       markBootstrapTokenConsumed();
       inFlight = false;
 

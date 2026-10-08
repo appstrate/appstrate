@@ -23,7 +23,7 @@
  * pi-ai's own request shape — that is the SDK's contract, not ours.
  */
 
-import { describe, it, expect, afterAll, afterEach, mock } from "bun:test";
+import { describe, it, expect, afterAll, afterEach, mock, spyOn } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
@@ -31,6 +31,7 @@ import { acquirePiChatSlot } from "../src/pi-chat/concurrency.ts";
 import { runPiChat, type PiChatInput } from "../src/pi-chat/engine.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { logger } from "../src/logger.ts";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../src/llm.ts";
 
 const ANSWER = "Bonjour le monde";
@@ -139,6 +140,9 @@ let providerPark: {
 /** How long the parked request waits for a teardown before reporting none. */
 const PARK_GIVE_UP_MS = 3_000;
 
+/** When set, the provider stub refuses every completion with this status. Reset in `afterEach`. */
+let providerRefusal: number | null = null;
+
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -146,6 +150,12 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
+      if (providerRefusal !== null) {
+        return Response.json(
+          { error: { message: "Authentication Fails", type: "authentication_error" } },
+          { status: providerRefusal },
+        );
+      }
       if (!providerPark) return openAiSse();
       const park = providerPark;
       park.arrived();
@@ -171,8 +181,23 @@ afterAll(() => server.stop(true));
 afterEach(() => {
   mcpInitGate = null;
   providerPark = null;
+  providerRefusal = null;
   mcpSurface = EMPTY_SURFACE;
 });
+
+const MODEL_ERROR_LOG = "chat turn failed on a model error";
+
+/** Run `act` with `logger.warn` / `logger.error` recorded instead of written. */
+async function recordingWarnAndError<T>(act: () => Promise<T>) {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const error = spyOn(logger, "error").mockImplementation(() => {});
+  try {
+    return { result: await act(), warn: [...warn.mock.calls], error: [...error.mock.calls] };
+  } finally {
+    warn.mockRestore();
+    error.mockRestore();
+  }
+}
 
 function orgModel(): OrgModel {
   return {
@@ -181,6 +206,7 @@ function orgModel(): OrgModel {
     apiShape: "openai-completions",
     providerId: "openai",
     pi_provider: "openai",
+    pi_dialect: null,
     label: "Live engine test model",
     enabled: true,
     input: ["text"],
@@ -199,7 +225,12 @@ async function runTurn(
   mintBearer: () => string,
   abortSignal?: AbortSignal,
   platformFetch?: typeof fetch,
-  turn: { model?: OrgModel; generation?: PiChatInput["generation"]; surfaceKey?: string } = {},
+  turn: {
+    model?: OrgModel;
+    generation?: PiChatInput["generation"];
+    surfaceKey?: string;
+    requestId?: string;
+  } = {},
 ) {
   const binding = createPiProxyModelBinding({
     model: turn.model ?? orgModel(),
@@ -223,6 +254,7 @@ async function runTurn(
       orgId: "org_live",
       userId: "user_live",
       chatSessionId: null,
+      ...(turn.requestId ? { requestId: turn.requestId } : {}),
       messages: userTurn("dis bonjour"),
       system: "You are a helpful assistant.",
       generation: turn.generation ?? {},
@@ -301,6 +333,9 @@ describe("runPiChat against a stub provider", () => {
       modelId: "deepseek-flash",
       providerId: "deepseek",
       pi_provider: "deepseek",
+      // As the listing resolves them off the record: its dialect and its reasoning.
+      pi_dialect: piModelDialect(getPiModel("deepseek", "deepseek-flash", "openai-completions")!),
+      reasoning: true,
     };
     await runTurn(() => "bearer", undefined, undefined, {
       model: alias,
@@ -385,6 +420,66 @@ describe("runPiChat against a stub provider", () => {
     });
   }, 30_000);
 
+  it("logs a turn the provider refused once, at warn, with the raw cause", async () => {
+    // The stream carries the category alone, and the persistence drain ignores
+    // that marker: this line is the only place the provider's answer is kept.
+    providerRefusal = 401;
+    const logs = await recordingWarnAndError(() => runTurn(() => "loopback-refused"));
+
+    const errorChunk = logs.result.chunks.find((c) => c.type === "error");
+    expect(errorChunk?.errorText).toBe("appstrate:chat-turn-error:credential_unavailable");
+    const lines = logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]![1]).toMatchObject({
+      chatSessionId: null,
+      orgId: "org_live",
+      presetId: "preset_live",
+      category: "credential_unavailable",
+    });
+    expect(String((lines[0]![1] as { err: unknown }).err)).toContain("401");
+    expect(logs.error).toEqual([]);
+  }, 30_000);
+
+  it("logs a provider-reported failure under the request id the user is shown", async () => {
+    // The commonest failure: the provider answers with an error, the loop
+    // returns, nothing throws. The id on the turn is only worth showing if a
+    // server log line carries it — with the cause the client never sees.
+    providerRefusal = 401;
+    const logged: Array<Record<string, unknown>> = [];
+    const spy = (msg: string, data?: Record<string, unknown>) => void logged.push({ msg, ...data });
+    const original = { warn: logger.warn, error: logger.error };
+    logger.warn = spy as unknown as typeof logger.warn;
+    logger.error = spy as unknown as typeof logger.error;
+    let chunks: Awaited<ReturnType<typeof runTurn>>["chunks"];
+    try {
+      ({ chunks } = await runTurn(() => "loopback-refused", undefined, undefined, {
+        requestId: "req_turn1",
+      }));
+    } finally {
+      Object.assign(logger, original);
+    }
+
+    const turn = (
+      chunks.find((c) => c.type === "finish") as {
+        messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+      }
+    ).messageMetadata?.appstrate?.turn;
+    expect(turn).toMatchObject({
+      finishReason: "error",
+      errorCategory: "credential_unavailable",
+      requestId: "req_turn1",
+    });
+    expect(chunks.find((c) => c.type === "error")).toMatchObject({
+      errorText: "appstrate:chat-turn-error:credential_unavailable:req_turn1",
+    });
+    const line = logged.find((data) => data.requestId === turn?.requestId);
+    expect(line).toMatchObject({
+      msg: "chat turn failed on a model error",
+      category: "credential_unavailable",
+    });
+    expect(String(line?.err)).toContain("Authentication Fails");
+  }, 30_000);
+
   it("tears the live Pi session down when a stop lands mid-inference", async () => {
     // The two other stop cases in this file abort during CONSTRUCTION — one up
     // front, one on a wedged MCP handshake — so neither ever reaches
@@ -409,14 +504,20 @@ describe("runPiChat against a stub provider", () => {
     providerPark = { arrived, settle };
 
     const stopped = new AbortController();
-    const turn = runTurn(() => "loopback-midflight", stopped.signal);
-    // Only press stop once the completions request has actually landed —
-    // that is the proof the session exists and the prompt is in flight.
-    await requestArrived;
-    stopped.abort(new Error("stopped by user"));
+    const logs = await recordingWarnAndError(async () => {
+      const turn = runTurn(() => "loopback-midflight", stopped.signal);
+      // Only press stop once the completions request has actually landed —
+      // that is the proof the session exists and the prompt is in flight.
+      await requestArrived;
+      stopped.abort(new Error("stopped by user"));
+      return turn;
+    });
 
-    const { chunks } = await turn;
+    const { chunks } = logs.result;
     expect(await providerTornDown).toBe(true);
+    // A stop is not a model error, and not a failure: neither line is written.
+    expect(logs.warn.filter(([msg]) => msg === MODEL_ERROR_LOG)).toEqual([]);
+    expect(logs.error).toEqual([]);
     // Still a well-formed, non-error turn (same contract as the other stops).
     // The step chunks in between are whatever the model got through before the
     // stop — not pinned here, only the envelope and the absence of an error.
@@ -623,11 +724,13 @@ describe("runPiChat against a stub provider", () => {
         onError: (error) => String(error),
         recordUsage: () => {},
         buildMcpTools,
+        // The bound is under test, not its production length.
+        windDownGraceMs: 100,
       });
       const text = await res.text();
 
-      // The body closed and the slot went with it, within the grace (5 s) plus
-      // the turn's own construction — far below the 20 s this test allows.
+      // The body closed and the slot went with it, within the grace plus the
+      // turn's own construction — far below the 20 s this test allows.
       expect(released).toBe(1);
       expect(Date.now() - startedAt).toBeLessThan(15_000);
       // Said so, in the same shape as the session-abort case.

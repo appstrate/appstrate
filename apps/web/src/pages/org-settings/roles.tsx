@@ -6,7 +6,6 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
@@ -51,6 +50,7 @@ import {
   permissionResourceLabel,
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
+import { errorMessage } from "../../lib/mutation-error";
 
 type RoleView = "list" | "matrix";
 type RoleTab = "org" | "space";
@@ -134,7 +134,7 @@ export function OrgSettingsRolesPage() {
             );
             return;
           }
-          setDeleteError(getErrorMessage(err));
+          setDeleteError(errorMessage(err));
         },
       },
     );
@@ -156,7 +156,7 @@ export function OrgSettingsRolesPage() {
   const tableState = {
     isLoading,
     isError: Boolean(error),
-    error: <ErrorState message={getErrorMessage(error)} compact />,
+    error: <ErrorState error={error} compact />,
   };
 
   return (
@@ -214,7 +214,7 @@ export function OrgSettingsRolesPage() {
             isLoading ? (
               <LoadingState />
             ) : error ? (
-              <ErrorState message={getErrorMessage(error)} />
+              <ErrorState error={error} />
             ) : (
               <RoleMatrix roles={roles ?? []} />
             )
@@ -277,6 +277,7 @@ export function OrgSettingsRolesPage() {
           (confirmDelete ? t("roles.deleteConfirm", { name: confirmDelete.name }) : "")
         }
         isPending={deleteRole.isPending}
+        keepOpenOnRefusal
         onConfirm={() => confirmDelete && onDelete(confirmDelete)}
       />
     </>
@@ -378,7 +379,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
       return;
     }
     const trimmedKey = data.key.trim();
-    const onError = (err: unknown) => setFormError(getErrorMessage(err));
+    const onError = (err: unknown) => setFormError(errorMessage(err));
     const body = {
       name: data.name.trim(),
       description: data.description.trim() || null,
@@ -509,7 +510,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
             <LoadingState />
           ) : vocabularyError ? (
             <div role="alert" className="space-y-2">
-              <ErrorState message={getErrorMessage(vocabularyError)} compact />
+              <ErrorState error={vocabularyError} compact />
               <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
                 {t("common:btn.retry")}
               </Button>

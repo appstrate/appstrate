@@ -14,6 +14,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
+import { errorMessage } from "../lib/mutation-error";
 
 type RegisterFormData = {
   displayName: string;
@@ -28,20 +29,10 @@ interface RegisterFormProps extends React.ComponentPropsWithoutRef<"div"> {
   switchAuthSlot?: ReactNode;
   socialCallbackURL?: string;
   /**
-   * Path to navigate to after a successful signup (when no email
-   * verification is required). Defaults to `/`. RegisterPage uses this
-   * to route the closed-mode bootstrap owner through the rest of the
-   * onboarding flow (`/onboarding/create` auto-skips to the next active
-   * step since the bootstrap after-hook already created the org).
+   * Path to navigate to after a successful signup — at once when no email
+   * verification is required, else from the verification link. Defaults to `/`.
    */
   redirectAfterSignup?: string;
-  /**
-   * Pre-fills the display-name field. The user can still edit it. Used
-   * by RegisterPage in the closed-mode bootstrap path to derive a
-   * sensible name from the locked email so the operator only has to
-   * type a password.
-   */
-  defaultDisplayName?: string;
 }
 
 export function RegisterForm({
@@ -52,7 +43,6 @@ export function RegisterForm({
   switchAuthSlot,
   socialCallbackURL,
   redirectAfterSignup = "/",
-  defaultDisplayName = "",
   ...props
 }: RegisterFormProps) {
   const { t } = useTranslation(["settings", "common"]);
@@ -68,21 +58,26 @@ export function RegisterForm({
     showError,
     formState: { errors, isSubmitting },
   } = useAppForm<RegisterFormData>({
-    defaultValues: { displayName: defaultDisplayName, email: fixedEmail ?? "", password: "" },
+    defaultValues: { displayName: "", email: fixedEmail ?? "", password: "" },
   });
 
   const onSubmit = async (data: RegisterFormData) => {
     try {
-      const result = await signup(data.email, data.password, data.displayName.trim() || undefined);
+      const result = await signup(
+        data.email,
+        data.password,
+        data.displayName.trim() || undefined,
+        redirectAfterSignup,
+      );
       if (result.emailVerificationRequired) {
-        navigate("/verify-email", { state: { email: data.email } });
+        navigate("/verify-email", {
+          state: { email: data.email, callbackURL: redirectAfterSignup },
+        });
       } else {
         navigate(redirectAfterSignup);
       }
     } catch (err) {
-      setError("root", {
-        message: err instanceof Error ? err.message : t("login.error"),
-      });
+      setError("root", { message: errorMessage(err) });
     }
   };
 

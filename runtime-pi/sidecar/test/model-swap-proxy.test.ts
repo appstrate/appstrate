@@ -20,7 +20,7 @@ const SWAP = {
   real: "deepseek-chat",
   clientApiShape: "pi-messages" as const,
   backingApiShape: "openai-completions" as const,
-  backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
+  backing: { providerId: "deepseek", dialect: null, reasoning: false, input: ["text"] },
 };
 
 function makeDeps(fetchFn: typeof fetch): AppDeps {

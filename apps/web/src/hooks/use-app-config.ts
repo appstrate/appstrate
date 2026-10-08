@@ -14,7 +14,6 @@ const DEFAULT_CONFIG: AppConfig = {
     githubAuth: false,
     smtp: false,
     signupDisabled: false,
-    orgCreationDisabled: false,
     bootstrapTokenPending: false,
   },
   trustedOrigins: [],

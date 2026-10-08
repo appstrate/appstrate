@@ -257,7 +257,7 @@ export function PackageCollection({
           isLoading={isLoading}
           isError={Boolean(error)}
           empty={emptyBody}
-          error={<ErrorState message={error?.message} compact />}
+          error={<ErrorState error={error} compact />}
         />
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
         <div className="space-y-8 pt-2">
@@ -307,7 +307,7 @@ export function PackageCollection({
           isLoading={isLoading}
           isError={Boolean(error)}
           empty={emptyBody}
-          error={<ErrorState message={error?.message} compact />}
+          error={<ErrorState error={error} compact />}
         />
       )}
       {/* Under the body, like the runs page: what the collection amounts to,

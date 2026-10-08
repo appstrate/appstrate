@@ -38,14 +38,15 @@ describe("mayConfigurePackage", () => {
 });
 
 describe("chatEnforceErrorKey", () => {
-  it("names each refusal of the enforcement PATCH", () => {
-    for (const [code, key] of [
-      ["no_published_version", "library.chatEnforce.error.noPublishedVersion"],
-      ["enforced_skills_limit", "library.chatEnforce.error.limit"],
-      ["enforced_skills_budget", "library.chatEnforce.error.budget"],
-    ] as const) {
-      expect(chatEnforceErrorKey(new ApiError(code, "refused", 409))).toBe(key);
-    }
+  it("names the one refusal whose remedy depends on this surface", () => {
+    expect(chatEnforceErrorKey(new ApiError("no_published_version", "refused", 409))).toBe(
+      "library.chatEnforce.error.noPublishedVersion",
+    );
+  });
+
+  it("leaves the limit and the budget to their code's own sentence", () => {
+    expect(chatEnforceErrorKey(new ApiError("enforced_skills_limit", "x", 409))).toBeUndefined();
+    expect(chatEnforceErrorKey(new ApiError("enforced_skills_budget", "x", 409))).toBeUndefined();
   });
 
   it("leaves any other failure to the server's own message", () => {

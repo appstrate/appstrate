@@ -32,6 +32,11 @@ export function isPlatformAdmin(email: string): boolean {
   return env.AUTH_PLATFORM_ADMIN_EMAILS.includes(normalizeEmail(email));
 }
 
+/** The one rule `POST /api/orgs` enforces and `GET /api/profile` reports as `can_create_org`. */
+export function mayCreateOrganization(email: string): boolean {
+  return !getEnv().AUTH_DISABLE_ORG_CREATION || isPlatformAdmin(email);
+}
+
 /**
  * True when the email's domain is allowed by `AUTH_ALLOWED_SIGNUP_DOMAINS`.
  * Returns true when the env var is empty (no restriction). False if the
@@ -56,6 +61,11 @@ export function isBootstrapOwner(email: string): boolean {
   const env = getEnv();
   if (!env.AUTH_BOOTSTRAP_OWNER_EMAIL) return false;
   return env.AUTH_BOOTSTRAP_OWNER_EMAIL === normalizeEmail(email);
+}
+
+/** Owner or platform admin: an address whose account takes proof of ownership (`auth.ts`). */
+export function isOperatorNamedEmail(email: string): boolean {
+  return isBootstrapOwner(email) || isPlatformAdmin(email);
 }
 
 /**
@@ -100,11 +110,14 @@ export function evaluateSignupPolicy(
   email: string,
   hasPendingInvitation: boolean,
 ): SignupPolicyDecision {
-  const env = getEnv();
-
   if (isBootstrapOwner(email)) return { allowed: true, reason: "bootstrap" };
   if (isPlatformAdmin(email)) return { allowed: true, reason: "platform_admin" };
   if (hasPendingInvitation) return { allowed: true, reason: "invitation" };
+  return evaluateUnprivilegedSignup(email);
+}
+
+export function evaluateUnprivilegedSignup(email: string): SignupPolicyDecision {
+  const env = getEnv();
 
   if (env.AUTH_DISABLE_SIGNUP) {
     if (!isAllowedSignupDomain(email)) {

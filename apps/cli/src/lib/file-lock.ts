@@ -15,8 +15,8 @@
  * filesystem has no `flock` at all, and must not enter the poll loop.
  *
  * **Why an unavailable lock fails open.** Where `flock` does not work — an
- * unsupported mount, or Windows — refusing every command is a larger breakage
- * than the rare race the lock guards, so the body runs and stderr says so.
+ * unsupported mount, or Windows — or no lock file opens, refusing every command
+ * is a larger breakage than the rare race the lock guards, so the body runs.
  *
  * flock is per open file description, so two holders inside ONE process
  * exclude each other exactly as two processes do.
@@ -26,6 +26,7 @@ import { dlopen, FFIType, read, type Pointer } from "bun:ffi";
 import { closeSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
 
 /** The outcome of one non-blocking attempt at the lock. */
@@ -40,13 +41,16 @@ export interface FileLockOptions {
   pollMs?: number;
   /** Where the "running unlocked" warning goes. */
   io?: CommandIO;
+  /** False where the user cannot act on the warning (a token refresh). */
+  warnUnlocked?: boolean;
   /** Test seam; production resolves the libc binding once per process. */
   tryLock?: TryLock;
 }
 
-const DEFAULTS: Required<Pick<FileLockOptions, "timeoutMs" | "pollMs">> = {
+const DEFAULTS: Required<Pick<FileLockOptions, "timeoutMs" | "pollMs" | "warnUnlocked">> = {
   timeoutMs: 60_000,
   pollMs: 500,
+  warnUnlocked: true,
 };
 
 // <sys/file.h>, identical on macOS and Linux.
@@ -72,8 +76,7 @@ export class FileLockBusyError extends Error {
  * Run `body` while holding the lock on `path`, released in a `finally`. `label`
  * names what the lock serializes, in the busy error and the unlocked warning.
  * Throws past `timeoutMs` while another holder keeps it; runs `body` unlocked,
- * after a warning on stderr, where the platform or the filesystem has no
- * working `flock(2)`.
+ * after a warning on stderr (unless `warnUnlocked` is false) where it cannot lock.
  */
 export async function withFileLock<T>(
   path: string,
@@ -81,25 +84,31 @@ export async function withFileLock<T>(
   body: () => Promise<T>,
   options: FileLockOptions = {},
 ): Promise<T> {
-  const { timeoutMs, pollMs } = { ...DEFAULTS, ...options };
+  const { timeoutMs, pollMs, warnUnlocked } = { ...DEFAULTS, ...options };
   const io = options.io ?? DEFAULT_IO;
   const tryLock = options.tryLock ?? sharedTryLock();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const runUnlocked = (reason: string): Promise<T> => {
+    if (warnUnlocked) {
+      io.stderr.write(`warning: ${label} lock unavailable (${reason}); continuing unlocked.\n`);
+    }
+    return body();
+  };
 
-  // Never unlinked: a holder that removed it would let the next opener lock a
-  // file nobody else can see, and two holders would run at once.
-  const fd = openSync(path, "a", 0o600);
+  let fd: number;
+  try {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    // Never unlinked: a holder that removed it would let the next opener lock a
+    // file nobody else can see, and two holders would run at once.
+    fd = openSync(path, "a", 0o600);
+  } catch (err) {
+    return runUnlocked(`no lock file: ${getErrorMessage(err)}`);
+  }
   try {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const attempt = tryLock(fd);
       if (attempt.status === "acquired") return await body();
-      if (attempt.status === "unsupported") {
-        io.stderr.write(
-          `warning: ${label} lock unavailable (${attempt.reason}); continuing unlocked — do not run two ${label}s at once.\n`,
-        );
-        return await body();
-      }
+      if (attempt.status === "unsupported") return await runUnlocked(attempt.reason);
       if (Date.now() >= deadline) throw new FileLockBusyError(label);
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }

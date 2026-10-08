@@ -112,4 +112,24 @@ describe("unified settings navigation", () => {
       "/workspace-settings/members",
     );
   });
+
+  it("drops the team-space entries in a personal space, whatever the grants", () => {
+    // The owner of a personal space holds the admin preset there; the server
+    // still refuses every write behind these four screens.
+    const all = () => true;
+    const shown = buildSettingsNavigation({
+      can: all,
+      features: ALL_FEATURES,
+      inPersonalSpace: true,
+    }).flatMap((section) => section.items.filter((i) => i.show !== false).map((i) => i.to));
+    for (const path of [
+      "/workspace-settings/members",
+      "/workspace-settings/api-keys",
+      "/workspace-settings/oauth",
+      "/workspace-settings/end-users",
+    ]) {
+      expect(shown).not.toContain(path);
+    }
+    expect(shown).toContain("/workspace-settings/general");
+  });
 });

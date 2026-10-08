@@ -15,13 +15,14 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { replayJournal } from "../helpers/journal.ts";
+import type { PGlite } from "@electric-sql/pglite";
+import { journalPGlite } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 const MIGRATION = `${MIGRATIONS_DIR}/0077_connection_sets.sql`;
 const REPLAY_THROUGH = "0076_space_packages_chat_enforced";
+/** The bound `0077` wrote; later migrations move it, this file tests `0077` alone. */
+const CAP_0077 = 10;
 
 const ORG = "e0000000-0000-4000-8000-00000000c077";
 const SPACE = "spc_c0770000-0000-4000-8000-000000000001";
@@ -36,7 +37,7 @@ const conn = (n: number) => `c0770000-0000-4000-8000-${String(n).padStart(12, "0
 const NEXT_STEPS =
   "Run scripts/migration/0033-unshare-space-access-loss.ts --apply, then scripts/migration/0032-connection-sets.sql, then redeploy.";
 
-const pg = new PGlite();
+let pg: PGlite;
 
 interface ApplyError {
   code?: string;
@@ -87,7 +88,7 @@ async function errorCode(sql: string): Promise<string | null> {
 }
 
 beforeAll(async () => {
-  await replayJournal(pg, REPLAY_THROUGH);
+  pg = await journalPGlite({ through: REPLAY_THROUGH });
   const connection = (n: number, integ: string, owner: string, label: string | null, at: string) =>
     `('${conn(n)}', '${integ}', 'primary', 'acct-${n}', '${SPACE}', '${owner}', 'x', ${
       label === null ? "NULL" : `'${label}'`
@@ -155,7 +156,7 @@ beforeAll(async () => {
   skippedScriptError = await applyError();
   await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn(7)}'`);
   await applyMigration();
-  // A journal replay runs past the 15s default in `bunfig.toml`.
+  // A journal replay runs past the suite's 15s per-test timeout (`--timeout`).
 }, 300_000);
 
 afterAll(async () => {
@@ -229,16 +230,12 @@ describe("0077 — connection sets", () => {
     const pin = (ids: string) =>
       `UPDATE integration_pins SET connection_ids = ${ids} WHERE user_id IS NULL`;
     expect(await rejects(pin("ARRAY[]::uuid[]"))).toBe(true);
-    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION + 1)}]::uuid[]`))).toBe(
-      true,
-    );
+    expect(await rejects(pin(`ARRAY[${ids(CAP_0077 + 1)}]::uuid[]`))).toBe(true);
     expect(
       await rejects(`UPDATE integration_connections SET label = '' WHERE id = '${conn(5)}'`),
     ).toBe(true);
     // Control: a set at the cap and a real label land.
-    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION)}]::uuid[]`))).toBe(
-      false,
-    );
+    expect(await rejects(pin(`ARRAY[${ids(CAP_0077)}]::uuid[]`))).toBe(false);
     expect(
       await rejects(`UPDATE integration_connections SET label = 'staging' WHERE id = '${conn(5)}'`),
     ).toBe(false);

@@ -85,6 +85,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           setRotateOpen(false);
           setRotatedSecret(result.secret);
         },
+        onError: () => setRotateOpen(false),
       },
     );
   }
@@ -96,6 +97,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
         onSuccess: () => {
           navigate("/workspace-settings/webhooks", { state: location.state });
         },
+        onError: () => setDeleteConfirmOpen(false),
       },
     );
   }

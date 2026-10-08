@@ -28,11 +28,12 @@
  * network traffic leaves the test harness.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -45,6 +46,11 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
+import { listOrgModelProviderCredentials } from "../../../src/services/model-providers/credentials.ts";
+import {
+  CACHE_STATUS_HIT as HIT,
+  CACHE_STATUS_MISS as MISS,
+} from "../../../src/services/llm-proxy/response-cache.ts";
 
 /**
  * Drive the response cache through its ONLY input — the env. There is no
@@ -399,6 +405,179 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("relays an upstream 401 as the provider's: Proxy-Status, no platform challenge", async () => {
+    const h = await buildHarness();
+    mockUpstream(
+      async () =>
+        new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; received-status=401");
+    expect(res.headers.get("www-authenticate")).toBeNull();
+  });
+
+  it("stops serving the org's key once upstream rejected it INTEGRATION_REFRESH_MAX_FAILURES times", async () => {
+    const h = await buildHarness();
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response(JSON.stringify({ error: { message: "invalid api key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const call = () =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+      });
+    for (let i = 0; i < 5; i++) expect((await call()).status).toBe(401);
+
+    const [row] = await db
+      .select({ failures: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, h.credentialId));
+    expect(row!.failures).toBe(5);
+    const listed = await listOrgModelProviderCredentials(h.ctx.orgId);
+    expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
+    expect((await call()).status).not.toBe(401);
+    expect(upstreamCalls).toBe(5);
+  });
+
+  it("a successful call ends the org key's rejection streak", async () => {
+    const h = await buildHarness();
+    const statuses = [401, 401, 200];
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl_x",
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          { status: statuses.shift()!, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const call = () =>
+      app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+        method: "POST",
+        headers: authHeaders(h),
+        body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+      });
+    const failures = (n: number) =>
+      db
+        .select({ id: modelProviderCredentials.id })
+        .from(modelProviderCredentials)
+        .where(
+          and(
+            eq(modelProviderCredentials.id, h.credentialId),
+            eq(modelProviderCredentials.refreshFailureCount, n),
+          ),
+        );
+    await call();
+    await call();
+    expect(await failures(2)).toHaveLength(1);
+    expect((await call()).status).toBe(200);
+    await waitForRow(() => failures(0));
+  });
+
+  it("marks its own refusal with a Proxy-Status error", async () => {
+    const h = await buildHarness();
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: "no-such-preset", messages: [] }),
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_internal_response");
+  });
+
+  it.each([
+    [
+      "unreachable",
+      new Error("Unable to connect"),
+      502,
+      "upstream_unreachable",
+      "destination_unavailable",
+      "error",
+    ],
+    [
+      "silent",
+      new DOMException("deadline exceeded", "TimeoutError"),
+      504,
+      "upstream_timeout",
+      "http_response_timeout",
+      "warn",
+    ],
+  ] as const)(
+    "answers an %s upstream as its own failure, never a 500",
+    async (_, thrown, status, code, proxyError, level) => {
+      const h = await buildHarness();
+      mockUpstream(async () => {
+        throw thrown;
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const error = spyOn(logger, "error").mockImplementation(() => {});
+      try {
+        const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+          method: "POST",
+          headers: authHeaders(h),
+          body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+        });
+        expect(res.status).toBe(status);
+        expect(((await res.json()) as { code: string }).code).toBe(code);
+        expect(res.headers.get("proxy-status")).toBe(`appstrate; error=${proxyError}`);
+        // One line: `warn` for a silent provider, `error` for an upstream this
+        // platform could not reach at all (it may be its own egress).
+        const lines = { warn: warn.mock.calls, error: error.mock.calls };
+        expect(lines[level].map(([msg]) => msg)).toEqual(["llm-proxy: upstream fetch failed"]);
+        expect(lines[level === "warn" ? "error" : "warn"]).toEqual([]);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    },
+  );
+
+  it("answers an upstream whose host does not resolve with 502 upstream_unresolvable", async () => {
+    const h = await buildHarness({ baseUrl: "https://llm.nonexistent.invalid/v1" });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("upstream_unresolvable");
+    expect(body.detail).not.toContain("nonexistent");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=dns_error");
+  });
+
+  it("refuses a model whose upstream is in a blocked range with 403 blocked_target", async () => {
+    const h = await buildHarness({ baseUrl: "http://169.254.169.254/v1" });
+    mockUpstream(async () => new Response("should not be called", { status: 599 }));
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("blocked_target");
+    expect(body.detail).not.toContain("169.254");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=destination_ip_prohibited");
+  });
+
   it("rejects cookie sessions with 403 (bearer-only)", async () => {
     const h = await buildHarness();
     mockUpstream(async () => new Response("should not be called", { status: 599 }));
@@ -750,7 +929,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     restoreCacheEnv();
   });
 
-  it("returns x-llm-proxy-cache-status: MISS on first call and HIT on identical second call", async () => {
+  it("reports an RFC 9211 Cache-Status miss on the first call and a hit on an identical second", async () => {
     const h = await buildHarness();
     let upstreamCalls = 0;
 
@@ -777,7 +956,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(first.status).toBe(200);
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(first.headers.get("cache-status")).toBe(MISS);
     const firstJson = (await first.json()) as { id: string };
     expect(firstJson.id).toBe("chatcmpl_1");
 
@@ -787,11 +966,37 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(second.status).toBe(200);
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBe("HIT");
+    expect(second.headers.get("cache-status")).toBe(HIT);
+    // Served from the cache: handled by the proxy, no status received from the upstream.
+    expect(second.headers.get("proxy-status")).toBe("appstrate");
     const secondJson = (await second.json()) as { id: string };
     // Replayed verbatim — same id as the first call, no upstream re-hit.
     expect(secondJson.id).toBe("chatcmpl_1");
     expect(upstreamCalls).toBe(1);
+  });
+
+  it("appends its member after the one an upstream cache set", async () => {
+    const h = await buildHarness();
+    mockUpstream(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "chatcmpl_1",
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+            usage: { prompt_tokens: 10, completion_tokens: 4 },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-status": "edge; fwd=miss" },
+          },
+        ),
+    );
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "chain" }] }),
+    });
+    expect(res.headers.get("cache-status")).toBe(`edge; fwd=miss, ${MISS}`);
   });
 
   it("misses when the request body changes (key includes request payload)", async () => {
@@ -821,9 +1026,9 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       });
 
     const a = await callWith("first prompt");
-    expect(a.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(a.headers.get("cache-status")).toBe(MISS);
     const b = await callWith("second prompt");
-    expect(b.headers.get("x-llm-proxy-cache-status")).toBe("MISS");
+    expect(b.headers.get("cache-status")).toBe(MISS);
     expect(upstreamCalls).toBe(2);
   });
 
@@ -867,7 +1072,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
     expect(first.status).toBe(200);
     // Streaming responses are not tagged with cache status — they bypass
     // the cache layer entirely.
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(first.headers.get("cache-status")).toBeNull();
     await first.text(); // drain
 
     const second = await app.request("/api/llm-proxy/anthropic-messages/v1/messages", {
@@ -876,7 +1081,7 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       body,
     });
     expect(second.status).toBe(200);
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(second.headers.get("cache-status")).toBeNull();
     await second.text();
     expect(upstreamCalls).toBe(2);
   });
@@ -941,14 +1146,14 @@ describe("POST /api/llm-proxy/* — response cache", () => {
       headers: authHeaders(h),
       body,
     });
-    expect(first.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(first.headers.get("cache-status")).toBeNull();
 
     const second = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
       headers: authHeaders(h),
       body,
     });
-    expect(second.headers.get("x-llm-proxy-cache-status")).toBeNull();
+    expect(second.headers.get("cache-status")).toBeNull();
     expect(upstreamCalls).toBe(2);
   });
 });

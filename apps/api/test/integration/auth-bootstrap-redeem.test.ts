@@ -11,13 +11,10 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { _resetCacheForTesting } from "@appstrate/env";
-import {
-  _rebuildAuthForTesting,
-  setPostBootstrapOrgHook,
-  setRealmResolver,
-} from "@appstrate/db/auth";
+import { setPostBootstrapOrgHook, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
+import { restoreAfterSuite } from "../helpers/auth.ts";
+import { useAuthEnv } from "../helpers/auth-env.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { organizations, organizationMembers, user } from "@appstrate/db/schema";
 import { _resetBootstrapTokenForTesting } from "../../src/lib/bootstrap-token.ts";
@@ -28,32 +25,7 @@ const app = getTestApp();
 
 const VALID_TOKEN = "kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk";
 
-const SNAPSHOT = {
-  AUTH_BOOTSTRAP_TOKEN: process.env.AUTH_BOOTSTRAP_TOKEN,
-  AUTH_BOOTSTRAP_ORG_NAME: process.env.AUTH_BOOTSTRAP_ORG_NAME,
-  AUTH_DISABLE_SIGNUP: process.env.AUTH_DISABLE_SIGNUP,
-  AUTH_DISABLE_ORG_CREATION: process.env.AUTH_DISABLE_ORG_CREATION,
-  AUTH_ALLOWED_SIGNUP_DOMAINS: process.env.AUTH_ALLOWED_SIGNUP_DOMAINS,
-};
-
-function setEnv(vars: Record<string, string | undefined>) {
-  for (const [k, v] of Object.entries(vars)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-}
-
-function restore() {
-  for (const [k, v] of Object.entries(SNAPSHOT)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  _resetCacheForTesting();
-  _rebuildAuthForTesting();
-  _resetBootstrapTokenForTesting();
-}
+const setEnv = useAuthEnv();
 
 async function redeem(body: Record<string, unknown>) {
   return app.request("/api/auth/bootstrap/redeem", {
@@ -62,6 +34,9 @@ async function redeem(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   });
 }
+
+restoreAfterSuite(_authHookSlotsForTesting.realmResolver);
+restoreAfterSuite(_authHookSlotsForTesting.postBootstrapOrg);
 
 describe("POST /api/auth/bootstrap/redeem", () => {
   beforeEach(async () => {
@@ -78,7 +53,6 @@ describe("POST /api/auth/bootstrap/redeem", () => {
     // (covered in auth-bootstrap-org.test.ts) — we just need it not to
     // be a no-op that hides a regression in the default path.
     setPostBootstrapOrgHook(async () => {});
-    setRealmResolver(async () => "platform");
     setEnv({
       AUTH_BOOTSTRAP_TOKEN: VALID_TOKEN,
       AUTH_DISABLE_SIGNUP: "true",
@@ -91,7 +65,7 @@ describe("POST /api/auth/bootstrap/redeem", () => {
   });
 
   afterAll(() => {
-    restore();
+    _resetBootstrapTokenForTesting();
   });
 
   it("happy path — valid token + signup data → 200, owner + org created, session set", async () => {

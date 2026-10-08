@@ -233,8 +233,8 @@ export interface ApiCallSpec {
   toolName: string;
   /**
    * `auths.{authKey}.authorized_uris` as DECLARED (unrendered). Matching uses the connection's
-   * rendered list from the credentials source; this one decides which hosts are pinned literally
-   * (SSRF exemption, cookie siblings), which a `{$credential.<field>}` entry never is.
+   * rendered list from the credentials source; this one decides which hosts are named literally
+   * (cookie siblings, eligible for the SSRF exemption), which a `{$credential.<field>}` entry never is.
    */
   authorizedUris: readonly string[];
   /**
@@ -583,6 +583,32 @@ export const MODEL_API_SHAPES = [
 export type ModelApiShape = (typeof MODEL_API_SHAPES)[number];
 
 /**
+ * The part of a Pi registry record that shapes requests, beyond the values the
+ * platform resolves. Pi's own vocabulary, read by the Pi SDK alone.
+ */
+export interface PiModelDialect {
+  name: string;
+  thinkingLevelMap?: Record<string, string | null>;
+  compat?: Record<string, unknown>;
+}
+
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** A shape check: the vocabulary is Pi's and is not read. */
+export function isPiModelDialect(value: unknown): value is PiModelDialect {
+  if (!isJsonObject(value) || typeof value.name !== "string" || value.name.length === 0) {
+    return false;
+  }
+  const levels = value.thinkingLevelMap;
+  const levelsOk =
+    levels === undefined ||
+    (isJsonObject(levels) &&
+      Object.values(levels).every((level) => level === null || typeof level === "string"));
+  return levelsOk && (value.compat === undefined || isJsonObject(value.compat));
+}
+
+/**
  * Model-alias swap (LLM-gateway alias pattern). Present only for model aliases.
  * The agent container is handed the public `alias` as its `MODEL_ID`, so every
  * inference request arrives with `model: <alias>`. The sidecar rewrites it to
@@ -626,11 +652,13 @@ export interface ModelSwap {
 export interface ModelSwapBacking {
   /**
    * Pi provider key of the real vendor, or `null` for a gateway Pi keeps no
-   * record of. Selects the Pi registry record — dialect, thinking levels —
-   * the sidecar re-originates with; the container never sees it.
+   * record of. Names the provider the sidecar re-originates through; the
+   * container never sees it.
    */
   providerId: string | null;
-  /** Whether the backing supports extended thinking; absent = unknown, Pi's record decides. */
+  /** The backing's Pi dialect; `null` when Pi keeps no record of it. */
+  dialect: PiModelDialect | null;
+  /** Whether the backing supports extended thinking; absent = it does not. */
   reasoning?: boolean;
   /** Input modalities the backing accepts — pi-ai gates image content on them. */
   input: ReadonlyArray<string>;

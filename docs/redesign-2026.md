@@ -1613,6 +1613,36 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 8 October merge of main (246 commits, 90 conflicted files)**
+
+Same method as on 30 September: one agent per domain on the rule "main's
+behaviour, the redesign's interface", the lab compared screen by screen with
+the branch before the merge. Main had run an e2e fix campaign on the front:
+translated refusals (one error toast from the mutation cache, `ErrorState
+error=`, `ResourceErrorState`), honest loading states, space rights in the UI
+(closed spaces listed but disabled, team-only settings absent in a personal
+space), translated chrome in `@appstrate/ui` (`useUiLabels`) and in the chat.
+What it changed in the redesign:
+
+- The integration page follows main's split into `components/integration-
+detail/`, filled with the redesign's content (one OAuth client table, lock
+  messages, the delete dialog), so later merges go file to file. Editing an
+  OAuth client replaces "rotate"; the add-connection button stays, disabled
+  with its reason, when an admin blocks personal connections.
+- The chat list speaks main's `threads.*` keys; deleting a conversation asks
+  first; "Conversation introuvable" for a gone id.
+- Runs and schedules: a schedule's disabled reason (warning Alert + badge
+  tooltip), a run's failure cause under its tabs, Relancer disabled with its
+  reason, org-level webhooks marked.
+- The agent header's Run button is main's single client verdict
+  (`AgentRunButton`), the diagnostics badge stays as information; main's
+  "no model" alert is back as an Alert under the header.
+- Success toasts main added where the row already shows the change (default
+  model, org switches, OAuth client delete, connection rename or share) were
+  left out; activation keeps one toast, said by the hook.
+- The migration trap a third time: `0078_org_logo` met main's `0078`-`0081`
+  and is now `0082_org_logo`.
+
 **The 30 September merge of main (94 commits, 86 conflicted files)**
 
 Resolved by domain (chat, integrations, org and shell, packages, runs), each on
@@ -3935,7 +3965,7 @@ they already had, by one font weight, when the chat kept its own copy.
   bubble and the welcome suggestions were not (`bg-muted` is a hollow on white
   and reads as a smudge three points of luminance from the canvas). The context
   panel stays white: it is a panel laid ON the canvas, like a dialog.
-- **The list speaks the bundle**, not hard-coded French: `list.*` in
+- **The list speaks the bundle**, not hard-coded French: `threads.*` (main's names, adopted on 8 October) in
   `chat.json`, plural families for the relative-time column. It sits beside an
   i18n'd Studio nav; half a translated sidebar is worse than none.
 - **`heavyChatSessions`** (200 rows, same volume as the other heavy fixtures)

@@ -17,7 +17,7 @@ const app = getTestApp();
 /** Synthetic api-key provider whose listing is unauthenticated (`publicModelListing`). */
 const PUBLIC_LISTING_PROVIDER_ID = "test-public-listing-route";
 /** An id Pi's OpenCode Go records serve. */
-const P_ONE = "kimi-k2.6";
+const P_ONE = "kimi-k2.7-code";
 
 function registerPublicListingProvider(): void {
   try {
@@ -243,6 +243,48 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
       expect(body.label).toStartWith("10.255.255.9:9 · ");
+    });
+
+    it("refuses a base URL that is not http(s)", async () => {
+      const res = await app.request("/api/model-provider-credentials", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          providerId: "openai-compatible",
+          api_key: "sk-local",
+          base_url_override: "ftp://example.com/v1",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.errors[0].field).toBe("base_url_override");
+    });
+
+    it.each([
+      [
+        "discover",
+        {
+          providerId: "openai-compatible",
+          api_key: "sk-local",
+          base_url_override: "ftp://x.test/v1",
+        },
+        "base_url_override",
+      ],
+      [
+        "test",
+        { providerId: "openai-compatible", api_key: "sk-local", base_url: "ftp://x.test/v1" },
+        "base_url",
+      ],
+    ])("refuses a non-http(s) base URL on /%s too", async (route, payload, field) => {
+      const res = await app.request(`/api/model-provider-credentials/${route}`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).errors[0].field).toBe(field);
     });
   });
 

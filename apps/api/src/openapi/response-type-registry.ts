@@ -140,7 +140,7 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "IntegrationPin",
     description: "IntegrationPin",
   },
-  // Inline oauth-client response (create 201 / rotate 200) — both return the
+  // Inline oauth-client response (create 201 / update 200) — both return the
   // secret-stripped public client via `toPublicClient`. Registered so the
   // shared-type's `id` (+ the rest) can't drift back out of the spec.
   {
@@ -152,10 +152,10 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   },
   {
     path: "/api/integrations/{packageId}/oauth-clients/{clientId}",
-    method: "put",
+    method: "patch",
     status: "200",
     sharedTypeName: "IntegrationOAuthClient",
-    description: "PUT .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
+    description: "PATCH .../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
   {
     path: "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
@@ -173,11 +173,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   },
   {
     path: "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}",
-    method: "put",
+    method: "patch",
     status: "200",
     sharedTypeName: "IntegrationOAuthClient",
     description:
-      "PUT /api/org-integrations/.../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
+      "PATCH /api/org-integrations/.../oauth-clients/{clientId} 200 ↔ IntegrationOAuthClient",
   },
   // Inline connection response (import-connection 200) — the PR added `client_ref`
   // to both the schema and the type; register so they stay locked together.

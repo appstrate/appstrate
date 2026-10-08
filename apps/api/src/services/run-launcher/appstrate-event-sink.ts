@@ -19,7 +19,7 @@ import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
-import { type CredentialSource } from "../llm-usage-ledger.ts";
+import type { CredentialSource } from "@appstrate/db/schema";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
 import { aggregatedCostUsd } from "../token-cost.ts";
@@ -48,7 +48,7 @@ export async function persistRunEvent(
     | { writeLedger?: false }
     | {
         writeLedger: true;
-        modelSource?: string | null;
+        modelSource: CredentialSource | null;
         inferenceRoute: InferenceRoute | null;
         modelCost?: ModelCost | null;
       } = {},
@@ -197,7 +197,7 @@ export async function writeRunnerLedgerRow(
     cost: number | null;
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
-    modelSource?: string | null;
+    modelSource: CredentialSource | null;
     /** Run's inference route — see {@link isServedByLlmProxy}. */
     inferenceRoute: InferenceRoute | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
@@ -222,8 +222,10 @@ export async function writeRunnerLedgerRow(
   // this row's cost is DERIVED from: the usage snapshot on a platform run, the
   // reported `cost` on a remote-origin run. A platform run with tokens but no
   // rates is NOT skipped — it lands as a `costUsd: 0` row carrying a pricing
-  // status, and that zero must not read as "free".
-  const serverPriced = costIsServerComputed(row.modelSource);
+  // status, and that zero must not read as "free". An event-ingesting run with
+  // no `model_source` is remote-origin: the platform resolved it no model, so
+  // it holds no rates (`runs_remote_has_no_platform_model`).
+  const serverPriced = row.modelSource !== null;
   if (!row.usage && (serverPriced || row.cost === null)) return;
 
   const { costUsd, pricingStatus } = resolveRunnerCost(scope.orgId, runId, row);
@@ -240,7 +242,7 @@ export async function writeRunnerLedgerRow(
         source: "runner",
         orgId: scope.orgId,
         runId,
-        credentialSource: coerceCredentialSource(row.modelSource),
+        credentialSource: row.modelSource,
         inputTokens: row.usage?.input_tokens ?? 0,
         outputTokens: row.usage?.output_tokens ?? 0,
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,
@@ -261,21 +263,6 @@ export async function writeRunnerLedgerRow(
     });
     throw err;
   }
-}
-
-/** Narrow a run's free-form `model_source` to the `credential_source` enum. */
-function coerceCredentialSource(modelSource: string | null | undefined): CredentialSource | null {
-  return modelSource === "system" || modelSource === "org" ? modelSource : null;
-}
-
-/**
- * True when the platform resolved a model for this run and therefore holds its
- * rates (`runs.model_cost`). A NULL `model_source` is the remote-origin
- * signature (the same fact `notRunnerMirrorSql` keys on): no server-side rates,
- * so the runner's own figure is all there is.
- */
-function costIsServerComputed(modelSource: string | null | undefined): boolean {
-  return coerceCredentialSource(modelSource) !== null;
 }
 
 interface RunnerCostVerdict {
@@ -313,11 +300,11 @@ function resolveRunnerCost(
   row: {
     cost: number | null;
     usage: TokenUsage | null;
-    modelSource?: string | null;
+    modelSource: CredentialSource | null;
     modelCost?: ModelCost | null;
   },
 ): RunnerCostVerdict {
-  if (!costIsServerComputed(row.modelSource)) {
+  if (row.modelSource === null) {
     return { costUsd: row.cost ?? 0, pricingStatus: null };
   }
   const parsedCost = modelCostSchema.safeParse(row.modelCost);

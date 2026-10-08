@@ -31,27 +31,28 @@ whoever retires, archives or absorbs a product, not whoever cuts a release.
 ## 1. Before you tag
 
 **Release the leaf first if its range moved.** Core depends on
-`@appstrate/afps-shared` by caret range (`^0.5.0` today — read
-`packages/core/package.json`, not this line). A bumped range must
-reach npm **before** the core release that references it, or installing
-`@appstrate/core` cannot resolve it. `scripts/verify-package-resolves.ts` packs
-the tarball and typechecks every exported subpath in a clean npm project outside
-the monorepo, so a leaf that is not on npm yet fails there rather than for the
-first consumer to install. It runs twice: in `publish-core.yml` right before
-publish, and in `check.yml` (`Package resolves for consumers`) on every PR and
-every push to `main`.
+`@appstrate/afps-shared` by caret range (read `packages/core/package.json`), and
+`packages/core/test/ssrf.test.ts` holds its floor equal to the workspace version.
+A bumped range must reach npm **before** the core release that references it,
+or installing `@appstrate/core` cannot resolve it. `scripts/verify-package-resolves.ts`
+packs the tarball and typechecks every exported subpath in a clean npm project
+outside the monorepo, so a leaf that is not on npm yet fails there rather than
+for the first consumer to install. It runs in two modes:
 
-That second run is why the leaf's tag is **part of merging**, not of the next
-core release. A PR that bumps `packages/afps-shared` `version` and moves core's
-range to it in the same change (core importing a new leaf export makes this the
-normal shape) is red on `Package resolves for consumers (packages/core)` from its
-first push, and it stays red on `main` until the leaf is on npm. Publishing is by
-tag and the tag must point at the squash commit, so the order is: merge, then
-immediately `git tag afps-shared@X.Y.Z <squash-sha> && git push origin
-afps-shared@X.Y.Z`, then re-run the failed `Check` job on `main`. That job is the
-one red check such a PR may be merged with; every other check must be green.
-Measured: #1536 was merged without the tag and `main` stayed red until
-`afps-shared@0.9.0` was pushed separately.
+- `publish-core.yml`, right before publish: registry only. An unpublished leaf
+  fails the core release.
+- `check.yml` (`Package resolves for consumers`), on every PR and every push to
+  `main`: with `--pack-unpublished-workspace-deps`. When core's floor names the
+  workspace leaf's version and npm does not have it yet, that leaf is installed
+  from a pack of the workspace, and the job log says so.
+
+So a leaf release is an ordinary PR. Bump `packages/afps-shared` `version` and
+move core's range to it in the same change (core importing a new leaf export
+makes this the normal shape); CI is green. Merge, then tag the squash commit on
+`main`: `git tag afps-shared@X.Y.Z <squash-sha> && git push origin afps-shared@X.Y.Z`.
+`publish-afps-shared.yml` publishes it. Tag it right after the merge, not with
+the next core release: until the leaf is on npm, `publish-core.yml` refuses
+every core tag.
 
 **For a non-major release, bring the consumers within one minor first.** Being
 on `^X` is not enough: the gate fails on a consumer two or more minors behind

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useTranslation } from "react-i18next";
 import { User, Calendar, Key, UserCircle, Terminal, Workflow, Globe } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
@@ -47,11 +48,12 @@ function RunnerIcon({ kind }: { kind: string | null | undefined }) {
  *   5. Dashboard user
  */
 export function RunTrigger({ run }: { run: EnrichedRun }) {
+  const { t } = useTranslation("agents");
   if (run.scheduleId) {
     return (
       <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
         <Calendar size={12} className="shrink-0" />
-        <span className="truncate">{run.schedule_name || run.scheduleId}</span>
+        <span className="truncate">{run.schedule_name || t("schedule.unnamed")}</span>
       </span>
     );
   }

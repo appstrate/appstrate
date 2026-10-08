@@ -14,7 +14,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, type components } from "../api/client";
 import { useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
@@ -68,7 +67,6 @@ export function InvitationsTable({
       setCancelingId(null);
       toast.success(t("orgSettings.invitationCanceled"));
     },
-    onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const columns = useInvitationColumns({

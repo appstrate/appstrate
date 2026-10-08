@@ -10,6 +10,7 @@
  */
 
 import {
+  isPiModelDialect,
   MODEL_API_SHAPES,
   type ModelApiShape,
   type ModelSwap,
@@ -79,6 +80,10 @@ export function parseModelSwapEnv(raw: string): ModelSwap {
   const providerId = b["providerId"];
   if (providerId !== null && (typeof providerId !== "string" || providerId.trim().length === 0)) {
     throw new Error('PI_MODEL_SWAP_JSON: missing or blank "backing.providerId"');
+  }
+  // null = a backing Pi keeps no record of.
+  if (b["dialect"] !== null && !isPiModelDialect(b["dialect"])) {
+    throw new Error('PI_MODEL_SWAP_JSON: missing or malformed "backing.dialect"');
   }
   if (b["reasoning"] !== undefined && typeof b["reasoning"] !== "boolean") {
     throw new Error('PI_MODEL_SWAP_JSON: non-boolean "backing.reasoning"');

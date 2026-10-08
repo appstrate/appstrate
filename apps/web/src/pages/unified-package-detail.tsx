@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect } from "react";
-import { toast } from "sonner";
 import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
@@ -25,9 +24,10 @@ import { useHomeSpaceName } from "../hooks/use-permissions";
 import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, EmptyState } from "../components/page-states";
+import { LoadingState, EmptyState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
+import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 
@@ -47,16 +47,15 @@ import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab"
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
-import { RunAgentButton } from "../components/run-agent-button";
+import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { RoleLimitNotice } from "../components/role-limit-notice";
-import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
+import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
+import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 
 type DetailTab =
   "overview" | "runs" | "settings" | "memory" | "versions" | "diff" | "content" | "usedBy";
-
-// ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
 function AgentReadinessBadge({
   packageId,
@@ -111,42 +110,45 @@ function AgentReadinessBadge({
   );
 }
 
-function AgentRunButtonInline({
-  packageId,
-  detail,
-  versionLabel,
-}: {
-  packageId: string;
-  detail: AgentDetail;
-  versionLabel: string | undefined;
-}) {
-  const canReadAgent = usePermissions().can("agents:read");
-  const diagnostics = useAgentDiagnostics(packageId, versionLabel);
-  const result = diagnostics.data;
-  // Without `agents:read` there is no verdict to wait for: the launch itself
-  // checks readiness and opens the recovery flow, as on every launch surface.
-  const runDisabled = canReadAgent && (diagnostics.isLoading || !diagnosticsAllowLaunch(result));
-  const runDisabledTitle = result?.diagnostics.find(
-    (item) => item.severity === "blocking" && !item.recoverable_on_launch,
-  )?.explanation;
-  const connectionWarning =
-    result?.diagnostics.some(
-      (item) => item.severity === "blocking" && item.recoverable_on_launch,
-    ) ?? false;
+/** No model a run could use: said where it can be acted on, graded by who may act. */
+function ModelRequiredAlert({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["settings"]);
+  // The model verdict alone: it holds whatever else blocks the run first.
+  const blocker = useAgentModelBlocker(packageId);
+  const { can } = usePermissions();
+
+  const copy =
+    blocker === "detail.titleModel"
+      ? {
+          title: t("models.alert.noModel"),
+          // Only `models:write` can act on "configure a model" (POST /api/models).
+          description: t(
+            can("models:write")
+              ? "models.alert.noModelDescription"
+              : "models.alert.noModelAskAdmin",
+          ),
+        }
+      : blocker === "detail.titleNoDefaultModel"
+        ? {
+            title: t("models.alert.noDefaultModel"),
+            // Only `models:write` can set the default (PUT /api/models/default).
+            description: t(
+              can("models:write")
+                ? "models.alert.noDefaultModelDescription"
+                : "models.alert.noDefaultModelAskAdmin",
+            ),
+          }
+        : null;
+  if (!copy) return null;
 
   return (
-    <RunAgentButton
-      packageId={packageId}
-      detail={detail}
-      version={versionLabel}
-      disabled={runDisabled}
-      disabledTitle={runDisabledTitle}
-      connectionWarning={!runDisabled && connectionWarning}
-      variant="outline"
-      size="sm"
-      className="bg-card"
-      showLabel
-    />
+    <Alert variant="destructive" className="mb-4">
+      <TriangleAlert className="h-4 w-4" />
+      <AlertTitle>{copy.title}</AlertTitle>
+      <AlertDescription className="flex items-center justify-between">
+        <span>{copy.description}</span>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -175,7 +177,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
-  const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
+  const detailQuery = usePackageDetail(type, packageId);
+  const { data: detail, error } = detailQuery;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
 
   // Agents list for "Used by" tab enrichment
@@ -200,11 +203,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // read-only system package is freely editable/deletable (registry checks happen at publish).
   const isOwned = source !== "system";
 
-  const {
-    data: versionDetail,
-    isLoading: versionLoading,
-    error: versionError,
-  } = useVersionDetail(type, packageId, versionParam);
+  const versionQuery = useVersionDetail(type, packageId, versionParam);
+  const { data: versionDetail, error: versionError } = versionQuery;
+  const versionLoading = isQueryInFlight(versionQuery);
 
   // The server's own flag gates publishing (the header badge and the publish
   // dialog), as it does for `appstrate packages publish`: the server judges the
@@ -233,7 +234,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Only a skill or an MCP server needs this: their detail response carries no
   // `active`, so the library's projection of the placement is the only answer
   // available. An agent's detail answers for itself (`AgentDetail.active`,
-  // read by `AgentRunButtonInline`, `AgentActions` and the banner below), and
+  // read by `AgentRunButton`, `AgentActions` and the banner below), and
   // asking the library too would be one page reading one fact twice — so the
   // query is not even mounted there.
   const { isActiveInCurrentSpace } = usePackageActivationState(packageId, {
@@ -333,10 +334,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
   // ── Loading / Error ──
-  if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
-  if (error || !detail) {
-    return <Navigate to="/" replace />;
-  }
+  if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
+  if (error || !detail) return <ResourceErrorState error={error} />;
 
   // A published version whose stored archive is unavailable EXISTS — redirecting
   // to the live page (what any other version failure does) would hide that it
@@ -404,7 +403,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
-    version: isHistoricalVersion ? versionDetail?.version : version,
+    // The header names the version on screen, not the live one behind it.
+    version: downloadVersion,
     icon:
       type === "agent"
         ? agentDetail?.icon
@@ -469,8 +469,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        // The server's own flag, as for the publish dialog below.
-        hasUnarchivedChanges={hasTimestampChanges}
+        // The server's own flag, as for the publish dialog below. Authoring
+        // state: only whoever can publish the draft has a use for it.
+        hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
         latestPublishedVersion={versionInfo?.latest_published_version}
         activeSubpage={{
           label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
@@ -482,11 +483,14 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ) : undefined
         }
         actionsLeft={
-          type === "agent" && agentDetail ? (
-            <AgentRunButtonInline
+          type === "agent" ? (
+            // The page's one launch verdict, shared with the empty runs list.
+            <AgentRunButton
               packageId={packageId}
-              detail={agentDetail}
               versionLabel={versionLabel}
+              variant="outline"
+              size="sm"
+              className="bg-card"
             />
           ) : undefined
         }
@@ -542,16 +546,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 canActivate={isActiveInCurrentSpace === false}
                 onActivate={() => {
                   if (!currentSpaceId) return;
-                  setActive.mutate(
-                    { spaceId: currentSpaceId, packageId, active: true },
-                    // Same as the DEACTIVATE path below: the optimistic write
-                    // shows the switch taken and its rollback says nothing, so
-                    // the server's refusal is reported here or nowhere.
-                    {
-                      onError: (err) =>
-                        toast.error(err instanceof Error ? err.message : t("error.generic")),
-                    },
-                  );
+                  setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
                 }}
                 canDeactivate={isActiveInCurrentSpace === true}
                 onDeactivate={() => {
@@ -575,6 +570,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         versionDetail={versionDetail}
         activeUrl={packageDetailPath(type, packageId)}
       />
+
+      {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
 
       {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that
@@ -793,20 +790,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               { spaceId: currentSpaceId, packageId, active: false },
               {
                 onSuccess: close,
-                onError: (err) =>
-                  toast.error(err instanceof Error ? err.message : t("error.generic")),
               },
             );
           } else {
-            deletePkgMutation.mutate(packageId, {
-              onSuccess: close,
-              onError: (err) =>
-                toast.error(
-                  err instanceof Error
-                    ? err.message
-                    : t("packages.deleteDependedOn", { ns: "settings" }),
-                ),
-            });
+            deletePkgMutation.mutate(packageId, { onSuccess: close });
           }
         }}
       />

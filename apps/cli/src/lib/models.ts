@@ -29,6 +29,7 @@ export type ModelPreset = Pick<
   | "source"
   | "providerId"
   | "pi_provider"
+  | "pi_dialect"
   | "modelId"
   | "contextWindow"
   | "maxTokens"

@@ -28,8 +28,15 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       header: t("settings:webhooks.urlColumn"),
       width: "minmax(100px,2fr)",
       cell: (wh) => (
-        <span className="truncate font-mono text-xs" title={wh.url}>
-          {wh.url}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-mono text-xs" title={wh.url}>
+            {wh.url}
+          </span>
+          {wh.level === "org" && (
+            <Badge variant="outline" className="shrink-0">
+              {t("settings:webhooks.levelBadge.org")}
+            </Badge>
+          )}
         </span>
       ),
     },

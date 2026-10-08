@@ -10,7 +10,7 @@
  * sign-in chain.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, setSystemTime } from "bun:test";
 import { APIError } from "better-auth/api";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -23,22 +23,27 @@ import { db } from "@appstrate/db/client";
 import { organizationMembers } from "@appstrate/db/schema";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { oidcBeforeSignupGuard, oidcAfterSignupHandler } from "../../../auth/signup-guard.ts";
-import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
+import { headersWithAuthoritativePendingClient } from "../../../services/pending-client-cookie.ts";
 
-// The cookie helpers we're testing — issue a fake Headers for the guard.
-// We rebuild the signed cookie out-of-band so the test is agnostic to
-// how the entry pages encode it; the cookie format lives in
-// `services/pending-client-cookie.ts`.
+// The headers the hosted register route hands to Better Auth: its own mark,
+// and the pending-client cookie it re-minted. The cookie is read only under
+// that mark, so the bad-cookie cases keep the mark and replace the cookie.
 async function signedCookieHeader(clientId: string): Promise<Headers> {
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  return new Headers({ cookie: `oidc_pending_client=${payload}.${sig}` });
+  return headersWithAuthoritativePendingClient(new Headers(), clientId);
 }
 
-function expiredCookieHeader(clientId: string, sig = "tampered"): Headers {
-  const exp = Math.floor(Date.now() / 1000) - 60; // past
-  return new Headers({ cookie: `oidc_pending_client=${clientId}.${exp}.${sig}` });
+function markedHeadersWithCookie(clientId: string, cookie: string): Headers {
+  const headers = headersWithAuthoritativePendingClient(new Headers(), clientId);
+  headers.set("cookie", `oidc_pending_client=${cookie}`);
+  return headers;
+}
+
+// A live cookie with its signature's last char flipped: only verification rejects it.
+function badSignatureCookieHeader(clientId: string): Headers {
+  const live = headersWithAuthoritativePendingClient(new Headers(), clientId);
+  const value = /oidc_pending_client=([^;]+)/.exec(live.get("cookie") ?? "")![1]!;
+  const tampered = value.slice(0, -1) + (value.at(-1) === "A" ? "B" : "A");
+  return markedHeadersWithCookie(clientId, tampered);
 }
 
 describe("oidcBeforeSignupGuard + pending-client cookie", () => {
@@ -93,21 +98,22 @@ describe("oidcBeforeSignupGuard + pending-client cookie", () => {
     await expect(
       oidcBeforeSignupGuard({
         user: { email: "bad@example.com" },
-        headers: expiredCookieHeader(closedOrgClientId, "notasignature"),
+        headers: badSignatureCookieHeader(closedOrgClientId),
       }),
     ).resolves.toBeUndefined();
   });
 
   it("pass-through when cookie is expired", async () => {
-    // Build a cookie with a correct HMAC over a past `exp` — the guard
-    // still rejects it because the expiry check runs after signature
+    // A correctly signed cookie minted 11 min ago (lifetime 10 min) — the
+    // guard still rejects it because the expiry check runs after signature
     // verification.
-    const exp = Math.floor(Date.now() / 1000) - 60;
-    const payload = `${closedOrgClientId}.${exp}`;
-    const sig = signAuthHmac(payload);
-    const headers = new Headers({
-      cookie: `oidc_pending_client=${payload}.${sig}`,
-    });
+    setSystemTime(new Date(Date.now() - 11 * 60 * 1000));
+    let headers: Headers;
+    try {
+      headers = await signedCookieHeader(closedOrgClientId);
+    } finally {
+      setSystemTime();
+    }
     await expect(
       oidcBeforeSignupGuard({ user: { email: "stale@example.com" }, headers }),
     ).resolves.toBeUndefined();

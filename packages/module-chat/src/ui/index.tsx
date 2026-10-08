@@ -33,11 +33,13 @@ import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@appstrate/ui/components/button";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
   ChatHostProvider,
   SelectConversationProvider,
+  useChatHost,
 } from "./runtime-context.ts";
 import type {
   ChatCan,
@@ -166,6 +168,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
+  /** Renders a byte count in the host's language. Pass a stable function. */
+  formatBytes: ChatHost["formatBytes"];
 }
 
 export function ChatPage({
@@ -181,6 +185,7 @@ export function ChatPage({
   uploadFile,
   t,
   can,
+  formatBytes,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -273,8 +278,9 @@ export function ChatPage({
       useFileImageSrc,
       t,
       can,
+      formatBytes,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, can],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can, formatBytes],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -401,6 +407,7 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
+  const { t } = useChatHost();
   const spaceId = spaceIdFromHeaders(getHeaders);
   const history = useQuery({
     queryKey: sessionQueryKey(spaceId, id),
@@ -446,9 +453,15 @@ const Conversation = memo(function Conversation({
   if (persistedAtMount && history.isPending) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        Chargement…
+        {t("conversation.loading")}
       </div>
     );
+  }
+  // No composer on a 404: the server would create a session under that id.
+  // Mount-persisted only — the reconcile writes a refused first send's 404 into
+  // this same entry, and that conversation must keep its message and error.
+  if (persistedAtMount && history.data === null) {
+    return <ConversationNotFound canWrite={canWrite} onNew={rest.onConversationChange} />;
   }
   return (
     <ConversationInner
@@ -462,6 +475,31 @@ const Conversation = memo(function Conversation({
     />
   );
 });
+
+function ConversationNotFound({
+  canWrite,
+  onNew,
+}: {
+  canWrite: boolean;
+  onNew: SelectConversation | undefined;
+}) {
+  const { t } = useChatHost();
+  return (
+    <div
+      role="status"
+      data-testid="chat-conversation-not-found"
+      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+    >
+      <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
+      <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>
+      {canWrite && onNew ? (
+        <Button type="button" variant="outline" size="sm" onClick={() => onNew(null)}>
+          {t("threads.new")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 function ConversationInner({
   id,
@@ -601,7 +639,7 @@ function ConversationInner({
         staleTime: 0,
       })
       .then((fetched) => {
-        if (cancelled || fetched.messages.length <= chatMessages.length) return;
+        if (cancelled || !fetched || fetched.messages.length <= chatMessages.length) return;
         setMessages(fetched.messages);
       })
       .catch(() => {

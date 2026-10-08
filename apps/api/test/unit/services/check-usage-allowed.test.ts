@@ -38,6 +38,7 @@ import {
 } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
   AppstrateModule,
   ModuleInitContext,
@@ -92,8 +93,8 @@ describe("checkUsageAllowed", () => {
     ]);
   });
 
-  afterAll(() => {
-    resetModules();
+  afterAll(async () => {
+    await restoreDiscoveredModules();
     initSystemModelProviderKeys([]);
     seedTestModelProviders();
   });

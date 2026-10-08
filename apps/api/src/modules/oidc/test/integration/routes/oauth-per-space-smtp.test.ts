@@ -206,11 +206,11 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
   });
 
   it("magic-link (with per-space SMTP): 200 + one per-space mail", async () => {
-    const { clientId } = await setupSpaceClient({ smtp: true });
+    const { clientId, spaceId } = await setupSpaceClient({ smtp: true });
 
     // Magic-link returns 200 HTML "check your email" regardless of whether the
     // account exists (anti-enumeration) — a mail only goes out for a known
-    // account. Seed one first, otherwise `mails` stays empty and the
+    // account of this space. Seed one first, otherwise `mails` stays empty and the
     // per-space-transport assertion below iterates zero times (it used to,
     // which made this test unable to fail).
     const email = `ml-${Date.now()}@test.com`;
@@ -218,7 +218,10 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
       body: { email, password: "TestPassword123!", name: "ML" },
       asResponse: true,
     });
-    await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.email, email));
+    await db
+      .update(userTable)
+      .set({ emailVerified: true, realm: `end_user:${spaceId}` })
+      .where(eq(userTable.email, email));
     // Signup above used the BA core path (outside OIDC routes), so it went
     // through BA's boot-time env transport and is NOT captured by the spy.
     mails.length = 0;
@@ -250,7 +253,7 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
   });
 
   it("forgot-password (with per-space SMTP): 200 + per-space mail for existing user", async () => {
-    const { clientId } = await setupSpaceClient({ smtp: true });
+    const { clientId, spaceId } = await setupSpaceClient({ smtp: true });
 
     // Create a verified user so BA will actually send the reset mail.
     const email = `reset-${Date.now()}@test.com`;
@@ -258,7 +261,10 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
       body: { email, password: "TestPassword123!", name: "R" },
       asResponse: true,
     });
-    await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.email, email));
+    await db
+      .update(userTable)
+      .set({ emailVerified: true, realm: `end_user:${spaceId}` })
+      .where(eq(userTable.email, email));
     // Signup above used the BA core path (outside OIDC routes), so it went
     // through BA's boot-time env transport and is NOT captured by the spy.
     // The subsequent forgot-password runs through OIDC routes → per-space.
@@ -276,5 +282,44 @@ describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
     // At least one mail, all through the per-space transport.
     expect(mails.length).toBeGreaterThanOrEqual(1);
     for (const m of mails) expect(m.source).toBe("per-space");
+  });
+
+  it("reset-password (with per-space SMTP): the 'password changed' notice goes through the per-space transport", async () => {
+    const { clientId, spaceId } = await setupSpaceClient({ smtp: true });
+    const email = `changed-${Date.now()}@test.com`;
+    await getAuth().api.signUpEmail({
+      body: { email, password: "TestPassword123!", name: "R" },
+      asResponse: true,
+    });
+    await db
+      .update(userTable)
+      .set({ emailVerified: true, realm: `end_user:${spaceId}` })
+      .where(eq(userTable.email, email));
+
+    const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
+    const forgot = await getCsrf(await app.request(`/api/oauth/forgot-password${qs}`));
+    await app.request(`/api/oauth/forgot-password${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: forgot.cookie },
+      body: `_csrf=${forgot.csrfToken}&email=${encodeURIComponent(email)}`,
+    });
+    // The emailed link is Better Auth's `/reset-password/<token>?callbackURL=…`.
+    const token = /\/reset-password\/([^?"&]+)\?/.exec(mails.at(-1)!.html)![1]!;
+    mails = [];
+
+    const reset = await getCsrf(
+      await app.request(`/api/oauth/reset-password${qs}&token=${encodeURIComponent(token)}`),
+    );
+    const res = await app.request(`/api/oauth/reset-password${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: reset.cookie },
+      body: `_csrf=${reset.csrfToken}&token=${encodeURIComponent(token)}&password=BrandNewPassword456!&password_confirm=BrandNewPassword456!`,
+    });
+    expect(res.status).toBe(200);
+
+    expect(mails).toHaveLength(1);
+    expect(mails[0]!.subject).toBe("Votre mot de passe a été modifié");
+    expect(mails[0]!.to).toBe(email);
+    expect(mails[0]!.source).toBe("per-space");
   });
 });

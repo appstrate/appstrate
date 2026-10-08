@@ -1,0 +1,164 @@
+name: Publish Model Catalog
+
+# Publishes the live model catalog (docs/architecture/MODEL_CATALOG.md): for
+# each Pi version a recent release or `main` pins, the models the latest Pi
+# registry records that the pinned Pi code can serve, signed, under
+# `model-catalog/` on the installer-pages branch (get.appstrate.dev).
+#
+# Each file is built from the checkout that pins its Pi version, so the code
+# that weighs a record is the code that will serve it. Of the latest Pi
+# package only JSON data is read: nothing of it is installed or run.
+#
+# Not in the `publish-installer` concurrency group on purpose: a run queued
+# behind a release there would cancel any other pending one. The two workflows
+# write disjoint paths, and each rebases its push when it loses a race.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-model-catalog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refs:
+    # A fork has neither the key nor the pages branch.
+    if: github.repository == 'appstrate/appstrate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.refs.outputs.matrix }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Pick one ref per Pi version in use
+        id: refs
+        run: |
+          # The two newest release tags, then main: an instance runs a release,
+          # and the newest may not be deployed yet. The first ref to pin a Pi
+          # version builds its file; a ref older than this workflow is skipped.
+          seen=""
+          entries=""
+          for ref in $(git tag --list 'v*' --sort=-v:refname | head -2) origin/main; do
+            git cat-file -e "$ref:scripts/build-model-catalog.ts" 2>/dev/null || continue
+            pi=$(git show "$ref:packages/runner-pi/src/provider-map.ts" \
+              | sed -n 's/^export const PI_SDK_VERSION = "\([0-9A-Za-z.-]*\)";$/\1/p')
+            if [ -z "$pi" ]; then
+              echo "::error::No PI_SDK_VERSION at $ref"
+              exit 1
+            fi
+            case " $seen " in *" $pi "*) continue ;; esac
+            seen="$seen $pi"
+            entries="$entries{\"ref\":\"${ref#origin/}\",\"pi\":\"$pi\"},"
+          done
+          echo "matrix=[${entries%,}]" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: refs
+    if: needs.refs.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    strategy:
+      # One push at a time to the pages branch.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.refs.outputs.matrix) }}
+    steps:
+      - name: Check the signing key is configured
+        id: key
+        env:
+          MODEL_CATALOG_SIGNING_KEY: ${{ secrets.MODEL_CATALOG_SIGNING_KEY }}
+        run: |
+          if [ -z "${MODEL_CATALOG_SIGNING_KEY:-}" ]; then
+            echo "::warning::MODEL_CATALOG_SIGNING_KEY is not set — no catalog is published."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout the ref that pins this Pi version
+        if: steps.key.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+
+      - name: Setup Bun
+        if: steps.key.outputs.configured == 'true'
+        uses: ./.github/actions/bun-setup
+
+      - name: Install dependencies
+        if: steps.key.outputs.configured == 'true'
+        run: bun install
+
+      - name: Fetch the latest Pi registry data
+        if: steps.key.outputs.configured == 'true'
+        id: source
+        run: |
+          # Data only: the tarball is neither installed nor run, and only its
+          # manifest and its data directory leave the archive.
+          mkdir -p "$RUNNER_TEMP/pi"
+          cd "$RUNNER_TEMP/pi"
+          npm pack @earendil-works/pi-ai@latest --ignore-scripts --silent
+          tar -xzf ./*.tgz package/package.json package/dist/providers/data
+          version=$(jq -r .version package/package.json)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Unexpected Pi version: $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout installer-pages branch
+        if: steps.key.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: installer-pages
+          path: pages
+          fetch-depth: 1
+
+      - name: Build and sign the catalog
+        if: steps.key.outputs.configured == 'true'
+        env:
+          MODEL_CATALOG_SIGNING_KEY: ${{ secrets.MODEL_CATALOG_SIGNING_KEY }}
+          SOURCE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          # Writes nothing when the published file already lists these records.
+          bun run build:model-catalog \
+            --data "$RUNNER_TEMP/pi/package/dist/providers/data" \
+            --source-version "$SOURCE_VERSION" \
+            --out pages/model-catalog
+
+      - name: Commit & push
+        if: steps.key.outputs.configured == 'true'
+        working-directory: pages
+        env:
+          PI_VERSION: ${{ matrix.pi }}
+          SOURCE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add model-catalog
+          if git diff --cached --quiet; then
+            echo "Nothing to publish"
+            exit 0
+          fi
+          git commit -m "model-catalog: pi-${PI_VERSION} from ${SOURCE_VERSION}"
+          # A release publishing its installer may push in between.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:installer-pages; then
+              exit 0
+            fi
+            echo "Push lost a race (attempt ${attempt}) — rebasing."
+            git pull --rebase origin installer-pages
+          done
+          echo "::error::Could not push the catalog to installer-pages."
+          exit 1

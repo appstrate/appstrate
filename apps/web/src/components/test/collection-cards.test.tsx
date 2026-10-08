@@ -19,6 +19,7 @@ function makeSchedule(overrides: Partial<EnrichedSchedule> = {}): EnrichedSchedu
     spaceId: "app_1",
     name: "Rapport du matin",
     enabled: true,
+    disabled_reason: null,
     cron_expression: "0 7 * * *",
     timezone: "America/Toronto",
     input: null,

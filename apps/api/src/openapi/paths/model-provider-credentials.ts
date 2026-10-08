@@ -232,7 +232,7 @@ export const modelProviderCredentialsPaths = {
                   type: ["string", "null"],
                   format: "uri",
                   description:
-                    "Optional override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.",
+                    "Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.",
                 },
               },
               additionalProperties: false,

@@ -446,7 +446,7 @@ function DashboardScheduleRow({
         </p>
       </div>
       <div className="shrink-0 text-right">
-        <ScheduleStatusBadge enabled={schedule.enabled ?? true} />
+        <ScheduleStatusBadge schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
           {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "Aucune date"}
         </p>

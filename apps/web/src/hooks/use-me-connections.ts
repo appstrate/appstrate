@@ -13,7 +13,6 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
-import { onMutationError } from "../lib/mutation-error";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateSchedules } from "./use-schedules";
 
@@ -25,6 +24,18 @@ import { invalidateSchedules } from "./use-schedules";
  */
 export function useMyConnections() {
   return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
+}
+
+/** Fetches only while `connectionId` is set, i.e. while the confirmation is open. */
+export function useConnectionDeleteImpact(connectionId: string | undefined) {
+  return $api.useQuery(
+    "get",
+    "/api/me/connections/{connectionId}/delete-impact",
+    { params: { path: { connectionId: connectionId ?? "" } } },
+    // Never answered from cache: the user confirms on what this says, and a
+    // pick made since the last open would be missing from it.
+    { gcTime: 0, enabled: !!connectionId },
+  );
 }
 
 interface OrgSpaceHeaders {
@@ -53,14 +64,12 @@ export function useDisconnectIntegrationConnection() {
       await client.DELETE("/api/me/connections/{connectionId}", vars);
     },
     onSuccess: () => {
-      // The caller's own schedule overrides drop the connection; a colleague's keep
-      // its id and show it unavailable in their picker.
+      // The caller's own schedule overrides drop the connection; a colleague's schedule
+      // naming it is disabled, its overrides kept.
       invalidateSchedules(qc);
       // The connection list, the agent page's reuse hints and accessible-connection lists.
       void invalidateIntegrationQueries(qc);
     },
-    // `connection_pinned` while an admin pin or the space default names it.
-    onError: onMutationError,
   });
 }
 
@@ -101,9 +110,10 @@ export function useUpdateMeIntegrationConnection() {
       );
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, { sharedWithOrg }) => {
       void invalidateIntegrationQueries(qc);
+      // Unsharing disables other people's schedules naming the connection.
+      if (sharedWithOrg === false) invalidateSchedules(qc);
     },
-    onError: onMutationError,
   });
 }

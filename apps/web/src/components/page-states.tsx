@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { TriangleAlert } from "lucide-react";
+import { SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Spinner } from "./spinner";
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { errorDetail } from "../lib/mutation-error";
+import { ApiError } from "../api/errors";
 
 export function LoadingState() {
   return (
@@ -28,17 +29,57 @@ export function LoadingState() {
  * callers do not hand it. That belongs to the pass that takes the state family
  * as a whole.
  */
-export function ErrorState({ message, compact }: { message?: string; compact?: boolean }) {
+export function ErrorState({
+  message,
+  error,
+  compact,
+}: {
+  /** A line the caller already wrote. */
+  message?: string;
+  /** Shown as its translated refusal. */
+  error?: unknown;
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
+  const detail = message ?? errorDetail(error);
   return (
     <EmptyState
       message={t("error.generic")}
-      hint={message}
+      hint={detail}
       icon={TriangleAlert}
       tone="danger"
       compact={compact}
     />
   );
+}
+
+/**
+ * A detail page's unreadable resource: missing and forbidden get the same panel, as the API
+ * answers them alike. `hint` and `children` are the page's own way forward for that panel
+ * (what to ask for, where to go); any other failure shows neither.
+ */
+export function ResourceErrorState({
+  error,
+  hint,
+  children,
+}: {
+  error: unknown;
+  hint?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+    return (
+      <EmptyState
+        icon={SearchX}
+        message={t("error.resourceUnavailable")}
+        hint={hint ?? t("error.resourceUnavailableHint")}
+      >
+        {children}
+      </EmptyState>
+    );
+  }
+  return <ErrorState error={error} />;
 }
 
 /**

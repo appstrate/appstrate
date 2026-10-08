@@ -129,6 +129,16 @@ jobs:
           RUN_TOKEN_SECRET: ci-dummy-run-token-secret
           CONNECT_SESSION_SECRET: ci-dummy-connect-session-secret
 
+      # `scripts/test/lint.test.ts` runs here, not in `test.yml`: it lints the
+      # whole repo before `--max-warnings 0` can trip, so it needs the
+      # `.eslintcache` `bun run check` just warmed in this job (~3 s) — on a
+      # test runner's cold cache it took ~150 s and set the unit job's pace.
+      # Tier 0: the root preload needs no service on PGlite.
+      - name: Lint gate tests
+        run: bun test --timeout=15000 scripts/test/lint.test.ts
+        env:
+          TEST_TIER: "0"
+
       - name: Save check caches
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
@@ -151,6 +161,12 @@ jobs:
   # setup — but it is kept out of the `check` job because it must NOT run inside a
   # workspace install. `timeout-minutes: 15` is deliberate headroom for a slow or
   # degraded registry, not an expected runtime.
+  #
+  # `--pack-unpublished-workspace-deps`: a workspace leaf whose version the
+  # consumer's floor names but npm lacks yet comes from a pack of the workspace,
+  # so the PR bumping a leaf and its consumer's floor together is green and the
+  # leaf is tagged on `main` after merge. The publish workflows never pass it:
+  # publishing a consumer still requires the leaf on npm.
   package-resolution:
     name: Package resolves for consumers (${{ matrix.package }})
     runs-on: ubuntu-latest
@@ -176,7 +192,7 @@ jobs:
       # No `bun install` on purpose — the script only uses Bun stdlib + npm, and a
       # workspace install is precisely the environment that hides the defect.
       - name: Verify ${{ matrix.package }} resolves in a clean consumer install
-        run: bun scripts/verify-package-resolves.ts ${{ matrix.package }}
+        run: bun scripts/verify-package-resolves.ts ${{ matrix.package }} --pack-unpublished-workspace-deps
 
   # The schema the migration chain builds, as a committed fingerprint
   # (`packages/db/schema-catalog.txt`, produced by `scripts/schema-catalog.sql`).

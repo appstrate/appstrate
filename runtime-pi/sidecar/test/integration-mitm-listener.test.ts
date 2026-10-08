@@ -31,7 +31,7 @@ import {
 } from "@appstrate/connect";
 import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
-import { compileEgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,
@@ -551,6 +551,132 @@ describe("MITM listener — 401 refresh + retry", () => {
   });
 
   runIfOpenssl(
+    "reports an upstream success on a 2xx with the injected credential only",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      let successReports = 0;
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          return false;
+        },
+        reportUpstreamSuccess() {
+          successReports += 1;
+        },
+      };
+      const statuses = [200, 401];
+      const recorded = makeRecordingFetch(
+        async () => new Response("{}", { status: statuses.shift()! }),
+      );
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: stubResolveHost,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        for (let i = 0; i < 2; i++) {
+          await drivenFetch({
+            listenerPort: addr.port,
+            sni: "api.test.local",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/",
+            headers: {},
+          });
+        }
+        expect(successReports).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "names the revision the request carried when the credential changes in flight",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, ["https://api.test.local/**"]);
+      const revisions = ["rev-a", "rev-b", "rev-c"];
+      const refreshed: Array<string | undefined> = [];
+      const reported: Array<string | undefined> = [];
+      const creds: MitmCredentialSource = {
+        current: () => ({ ...pl, credentialRevision: revisions[0] }),
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized(_authKey, revision) {
+          refreshed.push(revision);
+          return false;
+        },
+        reportUpstreamSuccess(revision) {
+          reported.push(revision);
+        },
+      };
+      const statuses = [401, 200];
+      // Each upstream answer arrives after another writer replaced the stored credential.
+      const recorded = makeRecordingFetch(async () => {
+        revisions.shift();
+        return new Response("{}", { status: statuses.shift()! });
+      });
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: stubResolveHost,
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        for (let i = 0; i < 2; i++) {
+          await drivenFetch({
+            listenerPort: addr.port,
+            sni: "api.test.local",
+            caCertPem: bundle.pems.caCertPem,
+            method: "GET",
+            path: "/",
+            headers: {},
+          });
+        }
+        expect(refreshed).toEqual(["rev-a"]);
+        expect(reported).toEqual(["rev-b"]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
     "403 does NOT trigger a refresh (authorization decision, not a dead credential)",
     async () => {
       // A 403 is an authorization decision on a specific resource, not a dead
@@ -1063,6 +1189,192 @@ describe("MITM listener — SSRF floor", () => {
       await listener.close();
     }
   });
+
+  runIfOpenssl(
+    "refuses a request whose host resolves to a blocked address after the CONNECT check",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const events: MitmListenerEvent[] = [];
+      const creds: MitmCredentialSource = {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://rebind.example/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      };
+      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+      // Public at CONNECT (the leaf is minted), the metadata address once the request goes out.
+      let lookups = 0;
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: async () => (lookups++ === 0 ? ["203.0.113.10"] : ["169.254.169.254"]),
+        fetch: recorded.fetch,
+        onEvent: (e) => events.push(e),
+      });
+      await listener.ready;
+      try {
+        const res = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "rebind.example",
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/latest/meta-data/",
+          headers: {},
+        });
+
+        expect(res.status).toBe(403);
+        expect(res.body).toContain("blocked by SSRF policy");
+        expect(events.some((e) => e.kind === "request-refused" && /SSRF/.test(e.reason))).toBe(
+          true,
+        );
+        expect(recorded.calls.length).toBe(0);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl("answers 502 when the host no longer resolves at request time", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const events: MitmListenerEvent[] = [];
+    const creds: MitmCredentialSource = {
+      current: () => payload("v", "oauth2", { access_token: "t" }, ["https://gone.example/**"]),
+      deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+    };
+    const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+    let lookups = 0;
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      ...permissiveEgress,
+      resolveHostFn: async () => {
+        if (lookups++ === 0) return ["203.0.113.10"];
+        throw new Error("NXDOMAIN");
+      },
+      fetch: recorded.fetch,
+      onEvent: (e) => events.push(e),
+    });
+    await listener.ready;
+    try {
+      const res = await drivenFetch({
+        listenerPort: listener.address().port,
+        sni: "gone.example",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/",
+        headers: {},
+      });
+
+      expect(res.status).toBe(502);
+      expect(events.some((e) => e.kind === "upstream-error")).toBe(true);
+      expect(events.some((e) => e.kind === "request-refused")).toBe(false);
+      expect(recorded.calls.length).toBe(0);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl("returns an upstream redirect to the runner without following it", async () => {
+    const bundle = await makeCaBundle();
+    const minter = createCertMinter({
+      caCertPem: bundle.pems.caCertPem,
+      caKeyPem: bundle.pems.caKeyPem,
+    });
+    const creds: MitmCredentialSource = {
+      current: () => payload("v", "oauth2", { access_token: "t" }, ["https://hop.example/**"]),
+      deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+    };
+    const recorded = makeRecordingFetch(
+      async () =>
+        new Response(null, { status: 302, headers: { location: "https://hop.example/next" } }),
+    );
+
+    const listener = createIntegrationMitmListener({
+      caBundle: bundle,
+      minter,
+      credentials: creds,
+      ...permissiveEgress,
+      resolveHostFn: stubResolveHost,
+      fetch: recorded.fetch,
+    });
+    await listener.ready;
+    try {
+      const res = await drivenFetch({
+        listenerPort: listener.address().port,
+        sni: "hop.example",
+        caCertPem: bundle.pems.caCertPem,
+        method: "GET",
+        path: "/start",
+        headers: {},
+      });
+
+      expect(res.status).toBe(302);
+      expect(res.headers["location"]).toBe("https://hop.example/next");
+      expect(recorded.calls.map((c) => c.url)).toEqual(["https://hop.example/start"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  runIfOpenssl(
+    "hands the runtime fetch the validated address, the name kept on Host and TLS",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const creds: MitmCredentialSource = {
+        current: () => payload("v", "oauth2", { access_token: "t" }, ["https://pin.example/**"]),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      };
+      // No injected `fetch`: the production transport, observed at the runtime's own `fetch`.
+      const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = recorded.fetch;
+
+      const listener = createIntegrationMitmListener({
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: stubResolveHost,
+      });
+      try {
+        await listener.ready;
+        const res = await drivenFetch({
+          listenerPort: listener.address().port,
+          sni: "pin.example",
+          port: 8443,
+          caCertPem: bundle.pems.caCertPem,
+          method: "GET",
+          path: "/v1/items?page=2",
+          headers: {},
+        });
+
+        expect(res.status).toBe(200);
+        expect(recorded.calls.length).toBe(1);
+        const { url, init } = recorded.calls[0]!;
+        expect(url).toBe("https://203.0.113.10:8443/v1/items?page=2");
+        expect(new Headers(init.headers).get("host")).toBe("pin.example:8443");
+        expect((init as { tls?: { serverName?: string } }).tls?.serverName).toBe("pin.example");
+      } finally {
+        globalThis.fetch = realFetch;
+        await listener.close();
+      }
+    },
+  );
 });
 
 describe("MITM listener — proxyUrl shape", () => {
@@ -1226,7 +1538,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         expect(calls.length).toBe(0);
         expect(events).toContainEqual({
           kind: "request-refused",
-          url: "https://api.test.local/denied?x=1",
+          url: "https://api.test.local/denied",
           reason: "not-authorized",
         });
 

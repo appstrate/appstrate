@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Helper for clearing stale Better Auth session cookies.
+ * Helpers for Better Auth session cookies on server-side session reads.
  *
  * When `getAuth().api.getSession(...)` returns no user even though the request
  * carries a Better Auth session cookie (signature invalid after secret
@@ -25,6 +25,27 @@ import { deleteCookie } from "hono/cookie";
 import { getCookies } from "better-auth/cookies";
 import { getAuth } from "@appstrate/db/auth";
 import type { AppEnv } from "../types/index.ts";
+
+/** Every browser-facing session read forwards Better Auth's Set-Cookie (sliding refresh). */
+export async function readSessionWithCookies(c: Context) {
+  const { headers, response } = await getAuth().api.getSession({
+    headers: c.req.raw.headers,
+    returnHeaders: true,
+  });
+  return { session: response, setCookies: headers.getSetCookie() };
+}
+
+/** Appended, never set: other cookies on the response survive. */
+export function appendSetCookies(c: Context, setCookies: readonly string[]): void {
+  for (const cookie of setCookies) c.header("Set-Cookie", cookie, { append: true });
+}
+
+/** For handlers: forwards the cookies onto the response they are about to build. */
+export async function getSessionForwardingCookies(c: Context) {
+  const { session, setCookies } = await readSessionWithCookies(c);
+  appendSetCookies(c, setCookies);
+  return session;
+}
 
 /**
  * Send `Set-Cookie: …; Max-Age=0` for every Better Auth cookie we manage so

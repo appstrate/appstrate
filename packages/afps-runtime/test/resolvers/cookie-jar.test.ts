@@ -5,12 +5,10 @@
  * credential proxies, and for the redirect follower's use of it.
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, afterEach, setSystemTime } from "bun:test";
 import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
-import {
-  fetchFollowingRedirectsCapturingCookies,
-  guardedFetch,
-} from "../../src/resolvers/api-call-engine.ts";
+import { fetchApiCall } from "../../src/resolvers/api-call-engine.ts";
+import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
 
 const API = "https://api.example.com/x";
 const CONTENT = "https://content.example.com/x";
@@ -147,6 +145,16 @@ describe("cookieScope.header", () => {
     expect(scope.header("https://victim.glob.example/y", null)).toBe("s=victim");
   });
 
+  it("never sends an https-captured sibling cookie to a non-https URL", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", LITERAL);
+    scope.capture(API, ["sess=secure"]);
+    scope.capture("http://content.example.com/x", ["plain=1"]);
+    expect(scope.header("http://api.example.com/x", null)).toBe("plain=1");
+    expect(scope.header("http://content.example.com/y", null)).toBe("plain=1");
+    expect(scope.header(CONTENT, null)).toBe("sess=secure; plain=1");
+  });
+
   it("never reads another integration's buckets", () => {
     const jar: CookieJar = new Map();
     cookieScope(jar, "other", LITERAL).capture(API, ["a=1"]);
@@ -155,7 +163,77 @@ describe("cookieScope.header", () => {
   });
 });
 
-describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
+describe("cookieScope — expiry (RFC 6265 §5.3 step 3, §5.4)", () => {
+  const T0 = Date.parse("2030-01-01T00:00:00Z");
+  const at = (seconds: number) => setSystemTime(new Date(T0 + seconds * 1000));
+  afterEach(() => setSystemTime());
+
+  it.each([
+    ["Max-Age=60", "a=1; Max-Age=60"],
+    ["an Expires 60 s ahead", "a=1; Expires=Tue, 01 Jan 2030 00:01:00 GMT"],
+    [
+      "Max-Age=60 over a far-future Expires",
+      "a=1; Expires=Fri, 01 Jan 2999 00:00:00 GMT; Max-Age=60",
+    ],
+  ])("sends a cookie with %s until it expires", (_label, header) => {
+    const jar: CookieJar = new Map();
+    at(0);
+    cookieScope(jar, "i", null).capture(API, [header]);
+    at(59);
+    expect(ownCookies(jar, API)).toBe("a=1");
+    at(61);
+    expect(ownCookies(jar, API)).toBeUndefined();
+  });
+
+  it("hands the name back to the base once the masking cookie expires", () => {
+    const scope = cookieScope(new Map(), "i", null);
+    at(0);
+    scope.capture(API, ["s=rotated; Max-Age=60"]);
+    expect(scope.header(API, "s=injected")).toBe("s=rotated");
+    at(61);
+    expect(scope.header(API, "s=injected")).toBe("s=injected");
+  });
+
+  it("stores the expiry and purges expired entries on the next capture", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    at(0);
+    scope.capture(API, ["a=1; Max-Age=60", "b=2"]);
+    expect([...jar.values()]).toEqual([[{ pair: "a=1", expiresAt: T0 + 60_000 }, { pair: "b=2" }]]);
+    at(61);
+    scope.capture(API, ["c=3"]);
+    expect([...jar.values()]).toEqual([[{ pair: "b=2" }, { pair: "c=3" }]]);
+  });
+
+  it("caps an overflowing Max-Age so the expiry survives a JSON round-trip", () => {
+    const jar: CookieJar = new Map();
+    at(0);
+    cookieScope(jar, "i", null).capture(API, [`a=1; Max-Age=${"9".repeat(400)}`]);
+    const restored: CookieJar = new Map(JSON.parse(JSON.stringify([...jar])));
+    expect(ownCookies(restored, API)).toBe("a=1");
+  });
+
+  it("drops an expired cookie from a literal sibling and from the allowlist own origin", () => {
+    const scope = cookieScope(new Map(), "i", LITERAL);
+    at(0);
+    scope.capture(CONTENT, ["cdn=1; Max-Age=60", "keep=1"]);
+    scope.capture(API, ["own=1; Max-Age=60"]);
+    expect(scope.header(API, null)).toBe("cdn=1; keep=1; own=1");
+    at(61);
+    expect(scope.header(API, null)).toBe("keep=1");
+  });
+
+  it("dates Max-Age from an explicit receipt time", () => {
+    const jar: CookieJar = new Map();
+    at(30);
+    cookieScope(jar, "i", null).capture(API, ["a=1; Max-Age=60"], T0);
+    expect(ownCookies(jar, API)).toBe("a=1");
+    at(61);
+    expect(ownCookies(jar, API)).toBeUndefined();
+  });
+});
+
+describe("fetchApiCall — a caller's cookie scope", () => {
   /** Records the `Cookie` header of every hop; `routes` maps a URL to its response. */
   function routedFetch(routes: Record<string, () => Response>) {
     const seen: (string | null)[] = [];
@@ -177,14 +255,19 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
     jar: CookieJar,
     policy: { authorizedUris?: string[]; allowAllUris?: boolean },
   ) {
-    return fetchFollowingRedirectsCapturingCookies({
+    return fetchApiCall({
       url,
       init: { method: "GET", headers: { cookie } },
       fetchFn,
       cookies: cookieScope(jar, "i", null),
       integrationId: "i",
-      injectedCredentialHeader: "cookie",
-      ...policy,
+      targetHost: "api.example.com",
+      credentialFields: {},
+      credentialHeaders: ["cookie"],
+      authorizedUris: policy.authorizedUris ?? [],
+      declaredUris: policy.authorizedUris ?? [],
+      allowAllUris: policy.allowAllUris ?? false,
+      internalHost: () => false,
       resolveHost: async () => ["203.0.113.7"],
     });
   }
@@ -262,7 +345,7 @@ describe("fetchFollowingRedirectsCapturingCookies — cookie scope", () => {
   });
 });
 
-describe("guardedFetch — cookie scope", () => {
+describe("fetchApiCall — the per-call cookie scope", () => {
   const SSO = "https://sso.vendor.example/login";
   const HOME = "https://api.vendor.example/home";
 
@@ -277,12 +360,18 @@ describe("guardedFetch — cookie scope", () => {
         ? new Response(null, { status: 302, headers: { location: HOME, "set-cookie": "sess=S" } })
         : new Response("ok");
     }) as unknown as typeof fetch;
-    await guardedFetch({
+    await fetchApiCall({
       url: SSO,
       init: { method: "GET" },
       fetchFn,
       authorizedUris,
       declaredUris,
+      allowAllUris: false,
+      credentialHeaders: [],
+      internalHost: () => false,
+      integrationId: "i",
+      targetHost: "api.example.com",
+      credentialFields: {},
       resolveHost: async () => ["203.0.113.7"],
     });
     return seen[1] ?? null;
@@ -305,5 +394,33 @@ describe("guardedFetch — cookie scope", () => {
 
   it("keeps it origin-scoped when a glob entry matched the hosts", async () => {
     expect(await secondHopCookie(["https://*.vendor.example/**"])).toBeNull();
+  });
+});
+
+describe("guardedFetchChain — a literal-allowlist jar across an https→http redirect", () => {
+  it("sends the http hop no Cookie after the https hop set one", async () => {
+    const seen: (string | null)[] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get("cookie"));
+      return seen.length === 1
+        ? new Response(null, {
+            status: 302,
+            headers: { location: "http://api.example.com/home", "set-cookie": "sess=S; Secure" },
+          })
+        : new Response("ok");
+    }) as unknown as typeof fetch;
+
+    await guardedFetchChain(
+      "https://api.example.com/login",
+      { headers: { cookie: "caller=c" } },
+      {
+        resolve: async () => ["203.0.113.7"],
+        fetchImpl,
+        cookies: cookieScope(new Map(), "i", LITERAL),
+        forwardCredentials: () => true,
+      },
+    );
+
+    expect(seen).toEqual(["caller=c", null]);
   });
 });

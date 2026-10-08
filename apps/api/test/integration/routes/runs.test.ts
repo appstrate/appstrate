@@ -1969,16 +1969,16 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       // One entry per BOUND connection — a single integration bound twice
-      // contributes two entries sharing an `integration_id`.
+      // contributes two entries sharing an `integration_package_id`.
       expect(body.connections_used).toEqual([
         {
-          integration_id: "@acme/gmail",
+          integration_package_id: "@acme/gmail",
           label: "Gmail Boulot",
           account_id: "dt@tractr.net",
           source: "member_pin",
         },
         {
-          integration_id: "@acme/gmail",
+          integration_package_id: "@acme/gmail",
           label: "Gmail Perso",
           account_id: "dt@perso.net",
           source: "member_pin",

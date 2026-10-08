@@ -16,6 +16,7 @@ import { Separator } from "./separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./sheet";
 import { Skeleton } from "./skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
+import { useUiLabels } from "./ui-labels.ts";
 
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
@@ -152,6 +153,7 @@ const Sidebar = React.forwardRef<
     ref,
   ) => {
     const { isMobile, state, openMobile, setOpenMobile, peeking, setPeeking } = useSidebar();
+    const labels = useUiLabels();
     const panelRef = React.useRef<HTMLDivElement>(null);
     const canPeek = collapsible === "offcanvas" && state === "collapsed" && !isMobile;
     const peek = canPeek && peeking;
@@ -213,8 +215,8 @@ const Sidebar = React.forwardRef<
             side={side}
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+              <SheetTitle>{labels.sidebar}</SheetTitle>
+              <SheetDescription>{labels.sidebarDescription}</SheetDescription>
             </SheetHeader>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
@@ -302,6 +304,7 @@ const SidebarTrigger = React.forwardRef<
 >(({ className, onClick, ...props }, ref) => {
   const { toggleSidebar } = useSidebar();
   const { children, ...buttonProps } = props;
+  const labels = useUiLabels();
 
   return (
     <Button
@@ -317,7 +320,7 @@ const SidebarTrigger = React.forwardRef<
       {...buttonProps}
     >
       {children ?? <PanelLeft />}
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{labels.toggleSidebar}</span>
     </Button>
   );
 });
@@ -326,15 +329,16 @@ SidebarTrigger.displayName = "SidebarTrigger";
 const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
   ({ className, ...props }, ref) => {
     const { toggleSidebar } = useSidebar();
+    const labels = useUiLabels();
 
     return (
       <button
         ref={ref}
         data-sidebar="rail"
-        aria-label="Toggle Sidebar"
+        aria-label={labels.toggleSidebar}
         tabIndex={-1}
         onClick={toggleSidebar}
-        title="Toggle Sidebar"
+        title={labels.toggleSidebar}
         className={cn(
           "hover:after:bg-sidebar-border ease-surface absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex",
           "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",

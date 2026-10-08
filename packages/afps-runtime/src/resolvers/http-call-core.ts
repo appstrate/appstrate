@@ -13,18 +13,10 @@
  * Scope of THIS module: request-body materialisation (string / `{ fromBytes }`
  * / `{ fromFile }` / `{ multipart }`, with streaming + size caps), the
  * workspace-rooted path-safety pipeline, the JSON-schema surfaced to the
- * LLM, the static `authorized_uris` allowlist matcher
- * ({@link matchesAuthorizedUriSpec}) + tool-layer enforcement
- * ({@link makeApiCallTool} calls `enforceAuthorizedUris` before dispatch),
- * and response serialisation ({@link serializeFetchResponse}).
+ * LLM, and response serialisation ({@link serializeFetchResponse}).
  *
- * The credential-source-agnostic OUTBOUND request pipeline — SSRF
- * blocklist preflight + the manual redirect-follower (per-hop SSRF,
- * per-hop `authorized_uris` re-check, hybrid credential-strip,
- * cookie-jar capture, userinfo/fragment stripping) — lives in the
- * sibling `./api-call-engine.ts`, shared verbatim with the platform
- * sidecar's `executeApiCall`. `integration-api-call.ts`'s local resolver
- * dispatches through that engine's `guardedFetch`.
+ * The OUTBOUND half of an api_call, allowlist gate included, is `fetchApiCall`
+ * (`./api-call-engine.ts`).
  *
  * Specification: `afps-spec/spec.md` §8.2, §8.4 — file-reference IO.
  */
@@ -35,8 +27,7 @@ import * as nodePath from "node:path";
 import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
-import { AuthorizedUrisError, ResolverError } from "../errors.ts";
-import { allowlistUnrendered, UNRENDERED_ALLOWLIST_REFUSAL } from "./credential-guard.ts";
+import { ResolverError } from "../errors.ts";
 
 /**
  * Default inline cap for response bodies that come back without an
@@ -348,40 +339,13 @@ export const apiCallTargetJsonSchema = (
 ).properties.target;
 
 /**
- * Flat view over the subset of fields {@link makeApiCallTool} consumes
- * for URL-allowlist enforcement. Callers project their credential source
- * (integration manifest auth, local creds file, …) onto this shape.
- *
- * Credential header metadata (name / prefix / field name) is
- * deliberately NOT part of this type. Every shipped transport —
- * sidecar, credential-proxy, local/remote integration resolver — owns
- * credential injection itself:
- *
- *   - Sidecar + credential-proxy: read the metadata from the platform's
- *     internal credentials endpoint and write the header server-side.
- *     The runtime never sees the credential field at all.
- *   - Local integration resolver: reads the injection plan from the
- *     integration manifest's `delivery.http` (or the local creds file
- *     override), not surfaced on this meta.
- *
- * Consequence: the tool schema surfaced to the LLM is identical across
- * auth modes and carries no hint of how the credential is transported.
+ * What {@link makeApiCallTool} reads of an integration. The transport behind the {@link ApiCallFn}
+ * owns the URL allowlist and the credential header, so the tool schema surfaced to the LLM is
+ * identical across auth modes and carries no hint of how the credential is transported.
  */
 export interface ApiCallMeta {
   /** Scoped package name (e.g. `@appstrate/gmail`). */
   name: string;
-  /**
-   * URL allowlist enforced by the tool before dispatch. Patterns follow
-   * {@link matchesAuthorizedUriSpec} semantics (`*` = single path
-   * segment, `**` = any substring).
-   */
-  authorizedUris?: string[];
-  /**
-   * When true, the tool does not enforce the URL allowlist — the
-   * transport is expected to enforce it instead (e.g. Appstrate's
-   * sidecar gates this server-side). Defaults to false.
-   */
-  allowAllUris?: boolean;
 }
 
 /**
@@ -482,24 +446,6 @@ export interface ApiCallContext {
 export type ApiCallFn = (req: ApiCallRequest, ctx: ApiCallContext) => Promise<ApiCallResponse>;
 
 /**
- * Apply transport control headers to an outgoing credentialled call.
- *
- * Used by {@link RemoteAppstrateIntegrationResolver} for the CLI's HTTP
- * path to the platform's `/api/credential-proxy/proxy` route.
- * Container runs reach the sidecar's `executeApiCall` over MCP
- * (`{ns}__api_call`) and bypass this header layer entirely.
- *
- * Rules applied (mirrors the platform server contract):
- *  - `wantsFile` → `X-Stream-Response: 1` (server pipes response as stream).
- *    `X-Max-Response-Size` is omitted — it is redundant when streaming.
- *  - `isStreamingBody` → `X-Stream-Request: 1` + explicit `Content-Length`
- *    (so the server can enforce the 100 MB cap up-front before reading the body).
- *  - Otherwise → `X-Max-Response-Size: <cap>` when the agent requested a
- *    larger inline payload (lifts the server's default cap).
- *
- * Mutates `headers` in place and returns it for convenience.
- */
-/**
  * Returns true when the body can be re-resolved from scratch for a retry.
  * `ReadableStream` bodies are not reproducible — the caller has already
  * consumed the stream. All other variants can be re-passed to
@@ -516,40 +462,45 @@ export function isReproducibleBody(body: ApiCallRequest["body"]): boolean {
   return false; // ReadableStream or other non-serialisable value
 }
 
+/**
+ * Set the transport control headers of the CLI's call to the platform's
+ * `/api/credential-proxy/proxy` route ({@link RemoteAppstrateIntegrationResolver}).
+ * Container runs reach the sidecar's `executeApiCall` over MCP and bypass it.
+ * These headers belong to the transport: any copy already in `headers` is replaced.
+ *  - `wantsFile` → `X-Stream-Response: 1` (server pipes the response as a stream).
+ *  - otherwise → `X-Max-Response-Size: <cap>` when the agent asked for a larger inline payload.
+ *  - `isStreamingBody` → `X-Stream-Request: 1`, and `Content-Length` from `bodySize` when known
+ *    (the server enforces the 100 MB cap up-front); unknown, the body goes chunked.
+ */
 export function applyTransportHeaders(
-  headers: Record<string, string>,
+  headers: Headers,
   opts: {
     wantsFile: boolean;
     isStreamingBody: boolean;
     bodySize?: number;
     maxInlineBytes?: number;
   },
-): Record<string, string> {
+): Headers {
+  // fetch measures a buffered body itself; a stream's length is only ever `bodySize`.
+  for (const name of [
+    "content-length",
+    "x-stream-request",
+    "x-stream-response",
+    "x-max-response-size",
+  ]) {
+    headers.delete(name);
+  }
   if (opts.wantsFile) {
-    headers["X-Stream-Response"] = "1";
-    // X-Max-Response-Size is not needed on the streaming-response path —
-    // the server enforces MAX_STREAMED_BODY_SIZE via a transform stream.
-    delete headers["X-Max-Response-Size"];
-  } else {
-    const maxInline = opts.maxInlineBytes;
-    if (typeof maxInline === "number" && maxInline > 0) {
-      const cap = Math.min(maxInline, ABSOLUTE_MAX_RESPONSE_SIZE);
-      headers["X-Max-Response-Size"] = String(cap);
-    }
+    headers.set("X-Stream-Response", "1");
+  } else if (typeof opts.maxInlineBytes === "number" && opts.maxInlineBytes > 0) {
+    headers.set(
+      "X-Max-Response-Size",
+      String(Math.min(opts.maxInlineBytes, ABSOLUTE_MAX_RESPONSE_SIZE)),
+    );
   }
   if (opts.isStreamingBody) {
-    // Use a case-insensitive check so mixed-case keys (e.g. "content-Length")
-    // are detected correctly regardless of how the caller populated the object.
-    const hasXStreamRequest = Object.keys(headers).some(
-      (k) => k.toLowerCase() === "x-stream-request",
-    );
-    if (!hasXStreamRequest) {
-      headers["X-Stream-Request"] = "1";
-    }
-    const hasContentLength = Object.keys(headers).some((k) => k.toLowerCase() === "content-length");
-    if (opts.bodySize !== undefined && !hasContentLength) {
-      headers["Content-Length"] = String(opts.bodySize);
-    }
+    headers.set("X-Stream-Request", "1");
+    if (opts.bodySize !== undefined) headers.set("Content-Length", String(opts.bodySize));
   }
   return headers;
 }
@@ -608,7 +559,6 @@ export function makeApiCallTool(
         );
       }
       const req: ApiCallRequest = parsed.data;
-      enforceAuthorizedUris(meta, req.target);
 
       const callCtx: ApiCallContext = {
         workspace: ctx.workspace,
@@ -1730,395 +1680,6 @@ export async function serializeFetchResponse(
       // Omit `truncated` entirely when false — absence means false.
       ...(truncated ? { truncated: true as const } : {}),
       ...(truncatedSize !== undefined && { truncatedSize }),
-    },
-  };
-}
-
-/**
- * Match against `meta.authorizedUris`, or — when the caller substitutes — `rendered`: the
- * substituted target and the list rendered for the connection. Errors name only `target` and
- * the declared entries, never a rendered value (it may be a secret, e.g. an exact webhook URL).
- */
-export function enforceAuthorizedUris(
-  meta: ApiCallMeta,
-  target: string,
-  rendered: { target: string; authorizedUris: readonly string[] } = {
-    target,
-    authorizedUris: meta.authorizedUris ?? [],
-  },
-): void {
-  if (meta.allowAllUris) return;
-  const declared = meta.authorizedUris ?? [];
-  const patterns = rendered.authorizedUris;
-  if (
-    allowlistUnrendered({ declaredUris: declared, authorizedUris: patterns, allowAllUris: false })
-  ) {
-    throw new AuthorizedUrisError(
-      "AUTHORIZED_URIS_EMPTY",
-      `Integration ${meta.name}: ${UNRENDERED_ALLOWLIST_REFUSAL}`,
-      { integration: meta.name, target },
-    );
-  }
-  if (patterns.length === 0) {
-    throw new AuthorizedUrisError(
-      "AUTHORIZED_URIS_EMPTY",
-      `Integration ${meta.name}: authorized_uris allowlist is empty; every target is forbidden. ` +
-        `Declare authorized_uris in the integration manifest or set allow_all_uris: true.`,
-      { integration: meta.name, target },
-    );
-  }
-  for (const pattern of patterns) {
-    if (matchesAuthorizedUriSpec(pattern, rendered.target)) return;
-  }
-  throw new AuthorizedUrisError(
-    "AUTHORIZED_URIS_MISMATCH",
-    `Integration ${meta.name}: target ${target} is not in authorized_uris allowlist`,
-    { integration: meta.name, target, allowlist: declared },
-  );
-}
-
-/**
- * AFPS-spec URL allowlist matcher:
- *   - literal URLs (no wildcards)   → exact equality
- *   - `*`  (single path segment)    → regex `[^/]*`
- *   - `**` (any substring)          → regex `.*` in the PATH,
- *                                     `[^/]*` in the AUTHORITY
- *
- * All regex metacharacters in the pattern are escaped so pattern authors
- * cannot accidentally inject a regex.
- *
- * SECURITY — authority-boundary containment: neither wildcard may cross the
- * `scheme://host` authority boundary. If `**` compiled to `.*` everywhere,
- * a host wildcard like `https://**.example.com/**` would match
- * `https://evil.com/x/.example.com/y` (the `.*` swallows `evil.com/x` —
- * including the `/` that ends the authority — so the attacker controls the
- * real host). The pattern is therefore split at the first `/` after the
- * scheme: within the authority both `*` and `**` compile to `[^/]*` (an
- * authority never contains a slash), so a host wildcard only ever matches
- * within the host component; only a `**` in the path expands to `.*`.
- *
- * That containment only holds against a NORMALISED target, so the target is
- * re-serialised through WHATWG `URL` before the regex runs and an unparseable
- * target is refused outright — see the inline note in the body for why `?`,
- * `#` and userinfo defeat the raw-string form.
- */
-export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
-  // SECURITY — normalise the target BEFORE matching. The authority fragment
-  // above is `[^/]*`, which is only containment if `/` is the ONLY character
-  // that can end an authority. It is not: `?` opens the query and `#` opens
-  // the fragment, and neither is a `/`, so in the RAW string both sail
-  // straight through `[^/]*` carrying an allowlisted-looking suffix:
-  //
-  //   pattern https://*.salesforce.com/**
-  //   target  https://attacker.example?.salesforce.com/steal   real host attacker.example
-  //   target  https://attacker.example#.salesforce.com/steal   real host attacker.example
-  //
-  // Both matched, and the caller then attached the integration's server-held
-  // credential to a request aimed at a host the operator never allowed (13
-  // shipped system integrations use wildcard-host patterns). `?`/`#` in the
-  // authority is not a shape any legitimate target has, so there is nothing
-  // to preserve here.
-  //
-  // Re-serialising through WHATWG `URL` collapses each form to its true
-  // origin: `?`/`#` gain the `/` that ends the authority — precisely the `/`
-  // the authority fragment cannot cross. Userinfo (`user@host`) is folded away
-  // by the same pass: it was NOT a bypass against these suffix-anchored host
-  // patterns (`foo.salesforce.com@attacker.example` does not end in
-  // `.salesforce.com`), but dropping it keeps the matcher host-based rather
-  // than leaving a second authority-detaching character to reason about.
-  //
-  // Fail closed on anything that is not a URL rather than testing the raw
-  // string: a target we cannot normalise is a target whose real host we cannot
-  // name, and every caller of this matcher is deciding whether to hand over a
-  // credential. `authorized_uris` targets are absolute URLs by spec, so an
-  // unparseable one is a malformed call, not a shape to accommodate.
-  const normalized = stripUserInfoAndFragment(target);
-  if (normalized === undefined) return false;
-  const regex = new RegExp("^" + compileAuthorizedUriPattern(pattern) + "$");
-  return regex.test(normalized);
-}
-
-/**
- * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL, returning the
- * WHATWG-normalised serialisation. Mirrors Fetch `Response.url` sanitisation.
- * Two callers, both policy gates: {@link matchesAuthorizedUriSpec} normalises
- * every target before allowlist matching, and the redirect-follower runs it on
- * every hop before policy checks / re-fetch (block attacker-injected
- * basic-auth, keep the allowlist matcher host-based).
- *
- * Returns `undefined` when the input does not parse as a URL. The matcher
- * treats that as "no match" (fail closed); the redirect-follower resolves the
- * `Location` through `new URL()` first, so for it that arm is defensive and it
- * falls back to the unstripped string rather than dropping the hop.
- */
-export function stripUserInfoAndFragment(url: string): string | undefined {
-  try {
-    const u = new URL(url);
-    u.username = "";
-    u.password = "";
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * True when some allowlist entry names the URL's host with a literal
- * (wildcard-free) host component. Only then is the allowlist a
- * host-level trust declaration that exempts the target from the SSRF
- * gate: the operator wrote that exact host down, so an internal address
- * behind it is their declared topology (on-prem APIs are legitimate
- * allowlist targets). Entries whose host segment contains a glob
- * (`https://**`, `https://*.example.com/…`) never pin — the concrete
- * host is then chosen by the agent at call time, and the SSRF gate must
- * still apply.
- *
- * The host comparison is authority-only and case-insensitive: userinfo
- * and the port are stripped, a globbed scheme (`**://`, `*://`) and a
- * globbed port (`:*`) are tolerated — a glob there doesn't make the HOST
- * agent-chosen, and refusing to pin would wrongly re-gate a literal
- * on-prem host the operator explicitly named.
- */
-export function hostLiterallyAllowlisted(url: string, specs: readonly string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  for (const spec of specs) {
-    const m = /^(?:[a-zA-Z][a-zA-Z0-9+.-]*|\*{1,2}):\/\/([^/?#]+)/.exec(spec.trim());
-    if (!m) continue;
-    const hostPart = m[1]!.replace(/^[^@]*@/, "").replace(/:(\d+|\*)$/, "");
-    // A templated host (`{$credential.host}`) is connection-chosen, never a pin.
-    if (hostPart.includes("*") || hostPart.includes("{")) continue;
-    if (hostPart.toLowerCase() === host) return true;
-  }
-  return false;
-}
-
-/** Escape regex metacharacters, leaving the `*` wildcard chars intact. */
-function escapeUriLiteral(part: string): string {
-  return part.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Compile one URL component to a regex fragment. `crossSlash` controls
- * whether a `**` may span `/` (true for the path, false for the authority).
- * `*` never crosses a slash in either component.
- */
-function compileUriComponent(part: string, crossSlash: boolean): string {
-  const doubleStar = crossSlash ? ".*" : "[^/]*";
-  // Match `**` before `*` (alternation is ordered + `**` is longer) so a
-  // double-star is never mis-expanded as two single-stars.
-  return escapeUriLiteral(part).replace(/\*\*|\*/g, (m) => (m === "**" ? doubleStar : "[^/]*"));
-}
-
-const URI_PATTERN_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
-
-/**
- * Count non-overlapping occurrences of `needle` in `haystack`.
- * `needle` is always one of the wildcard placeholders below (never empty).
- */
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
-  let from = 0;
-  for (;;) {
-    const at = haystack.indexOf(needle, from);
-    if (at === -1) return count;
-    count += 1;
-    from = at + needle.length;
-  }
-}
-
-/**
- * Put the PATTERN through the same WHATWG normalisation the target goes
- * through, so the two sides are compared in one representation.
- *
- * {@link matchesAuthorizedUriSpec} normalises the target (that is what closes
- * the `?`/`#` authority-smuggling bypass). Normalising only ONE side breaks
- * every literal whose canonical form differs from how its author spelled it —
- * both measured before this existed:
- *
- *   - `("https://api.example.com", "https://api.example.com")` → false.
- *     `URL.toString()` gives the empty path a `/`, the compiled pattern is
- *     `$`-anchored without one, and AFPS documents "literal URLs (no
- *     wildcards) → exact equality".
- *   - `("https://a.com/v1/{id}", "https://a.com/v1/{id}")` → false. The target
- *     percent-encodes to `%7Bid%7D`; the raw pattern still says `{id}`. Same
- *     class for space, `|`, `^` and a backtick.
- *
- * The pattern cannot simply go through `new URL()`: `*` and `**` are not
- * URL-legal in every position they may appear. So each wildcard is first
- * masked with an all-lowercase ASCII placeholder — which survives host
- * lowercasing and path percent-encoding untouched — the masked pattern is
- * normalised, and the placeholders are restored. If a placeholder does not
- * come back out exactly as many times as it went in (IDNA folding, an
- * unforeseen encoding pass), or the masked pattern does not parse at all, we
- * return `undefined` and the caller compiles the raw pattern as before.
- *
- * Because both sides are now canonical, three things that used to be
- * non-matches now match. All three are the WHATWG reading of "same URL" and
- * none of them widens the authority boundary:
- *
- *   1. **Default ports are elided on both sides.** `https://*.wrike.com/api/**`
- *      now matches `https://www.wrike.com:443/api/x` (`:443` IS the https
- *      authority), and — new here — a pattern that spells `:443` explicitly
- *      finally matches anything at all; before, `https://*.wrike.com:443/api/**`
- *      matched neither the ported nor the unported target. A NON-default port
- *      is still part of the host component and still has to match.
- *   2. **Scheme and host are case-folded on both sides.** Target-side folding
- *      already happened; the pattern side did not, so `https://*.SALESFORCE.com/**`
- *      matched nothing. Host and scheme are case-insensitive per RFC 3986; the
- *      PATH remains case-sensitive on both sides.
- *   3. **Dot-segments are resolved before matching.** This one TIGHTENS:
- *      `https://slack.com/api/../../evil` no longer matches
- *      `https://slack.com/api/**`, because the request that actually goes on
- *      the wire is for `/evil`. A traversal that stays inside the prefix
- *      (`/api/v1/../chat` → `/api/chat`) still matches, as it should.
- *
- * A path-less literal also now matches its own trailing-slash form
- * (`https://api.example.com` ≡ `https://api.example.com/`) — the same URL by
- * every reading, and the shape (a) above was reported against.
- */
-function normalizeAuthorizedUriPattern(pattern: string): string | undefined {
-  // Pick placeholders the pattern does not already contain, so restoring them
-  // cannot resurrect a wildcard the author wrote literally.
-  let n = 0;
-  let single = "zzurisinglezz";
-  let double = "zzuridoublezz";
-  while (pattern.includes(single) || pattern.includes(double)) {
-    n += 1;
-    single = `zzurisingle${n}zz`;
-    double = `zzuridouble${n}zz`;
-  }
-  // `**` before `*` — same ordered alternation the compiler uses.
-  const masked = pattern.replace(/\*\*|\*/g, (m) => (m === "**" ? double : single));
-  const normalized = stripUserInfoAndFragment(masked);
-  if (normalized === undefined) return undefined;
-  if (
-    countOccurrences(normalized, single) !== countOccurrences(masked, single) ||
-    countOccurrences(normalized, double) !== countOccurrences(masked, double)
-  ) {
-    return undefined;
-  }
-  return normalized.split(double).join("**").split(single).join("*");
-}
-
-/** Normalised scheme/authority/path; `authority: null` = `scheme://**`, `undefined` = no scheme. */
-function splitAuthorizedUriPattern(
-  rawPattern: string,
-): { scheme: string; authority: string | null; rest: string } | undefined {
-  const rawSchemeMatch = rawPattern.match(URI_PATTERN_SCHEME_RE);
-  if (!rawSchemeMatch) return undefined;
-  // The bare `scheme://**` catch-all is decided on the RAW pattern, BEFORE
-  // normalisation: `new URL("https://<placeholder>")` would hand back a
-  // trailing `/`, turning the catch-all into `^https://[^/]*/$` and breaking
-  // the "any host, any path" contract the SSRF-gate branch tests rely on.
-  if (rawPattern.slice(rawSchemeMatch[0].length) === "**") {
-    // Scheme is case-insensitive and the target's is lowercased by `URL`.
-    return { scheme: rawSchemeMatch[0].toLowerCase(), authority: null, rest: "" };
-  }
-  // Fall back to the raw pattern when it cannot be canonicalised — a pattern
-  // we cannot normalise matches strictly LESS than before, never more, since
-  // the target side stays normalised either way.
-  const pattern = normalizeAuthorizedUriPattern(rawPattern) ?? rawPattern;
-  const schemeMatch = pattern.match(URI_PATTERN_SCHEME_RE);
-  const scheme = schemeMatch ? schemeMatch[0] : rawSchemeMatch[0];
-  const afterScheme = pattern.slice(scheme.length);
-  const slashIdx = afterScheme.indexOf("/");
-  // The bare `scheme://**` catch-all ("any host, any path", relied on by the
-  // SSRF-gate branch tests) is handled above, on the raw pattern. Anything
-  // WITH a path (`https://**/health`) keeps the authority boundary-contained:
-  // `**` in the host is `[^/]*` and cannot swallow the `/` that ends the
-  // authority. It carries no literal host suffix either, so there is nothing
-  // for an attacker to smuggle past (the authority-confusion attack needs a
-  // fixed suffix like `.example.com` AFTER the `**`), and any actual internal
-  // host it admits is still refused downstream by the SSRF gate.
-  const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
-  const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
-  return { scheme, authority, rest };
-}
-
-function compileAuthorizedUriPattern(rawPattern: string): string {
-  const parts = splitAuthorizedUriPattern(rawPattern);
-  if (!parts) {
-    // No `scheme://authority` prefix: compile the whole pattern as a path.
-    return compileUriComponent(rawPattern, true);
-  }
-  if (parts.authority === null) return escapeUriLiteral(parts.scheme) + ".*";
-  return (
-    escapeUriLiteral(parts.scheme) +
-    compileUriComponent(parts.authority, false) +
-    compileUriComponent(parts.rest, true)
-  );
-}
-
-/** A connection's rendered `authorized_uris`, compiled for URL and (host, port) checks (#1458). */
-export interface EgressPolicy {
-  allowsAuthority(host: string, port: number): boolean;
-  allowsUrl(url: string): boolean;
-}
-
-const EGRESS_DEFAULT_PORTS: Readonly<Record<string, number>> = {
-  https: 443,
-  wss: 443,
-  http: 80,
-  ws: 80,
-  ssh: 22,
-  sftp: 22,
-};
-
-// Hostname / IPv4 only: `[`, `@`, `?`, `#` could smuggle an allowed suffix past `[^/]*`.
-const EGRESS_HOST_RE = /^[a-z0-9_.-]+$/;
-
-// WHATWG elides default ports, so only these suffixes name a port explicitly.
-const EGRESS_EXPLICIT_PORT_RE = /:(?:\d+|\*\*?)$/;
-
-export function compileEgressPolicy(input: {
-  authorizedUris: readonly string[];
-  allowAllUris: boolean;
-}): EgressPolicy {
-  if (input.allowAllUris) return { allowsAuthority: () => true, allowsUrl: () => true };
-  const urlRegexes = input.authorizedUris.map(
-    (p) => new RegExp("^" + compileAuthorizedUriPattern(p) + "$"),
-  );
-  let anyAuthority = false;
-  const authorityRules: {
-    regex: RegExp;
-    explicitPort: boolean;
-    defaultPort: number | undefined;
-  }[] = [];
-  for (const pattern of input.authorizedUris) {
-    const parts = splitAuthorizedUriPattern(pattern);
-    // Scheme-less patterns name no transport: they grant nothing at TCP level.
-    if (!parts) continue;
-    if (parts.authority === null) {
-      anyAuthority = true;
-      continue;
-    }
-    authorityRules.push({
-      regex: new RegExp("^" + compileUriComponent(parts.authority, false) + "$", "i"),
-      explicitPort: EGRESS_EXPLICIT_PORT_RE.test(parts.authority),
-      defaultPort: EGRESS_DEFAULT_PORTS[parts.scheme.slice(0, -3).toLowerCase()],
-    });
-  }
-  return {
-    allowsUrl(url) {
-      const normalized = stripUserInfoAndFragment(url);
-      return normalized !== undefined && urlRegexes.some((r) => r.test(normalized));
-    },
-    allowsAuthority(host, port) {
-      const h = host.toLowerCase();
-      if (!EGRESS_HOST_RE.test(h) || !Number.isInteger(port) || port < 1 || port > 65535) {
-        return false;
-      }
-      if (anyAuthority) return true;
-      // No explicit port = scheme default only, on the bare host (`[^/]*` can't span `:port`).
-      return authorityRules.some((r) =>
-        r.explicitPort ? r.regex.test(`${h}:${port}`) : r.defaultPort === port && r.regex.test(h),
-      );
     },
   };
 }

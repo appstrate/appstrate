@@ -29,7 +29,8 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
-import { useAgentReadiness } from "../../hooks/use-agent-readiness";
+import { agentModelBlocker } from "../../hooks/use-agent-readiness";
+import { findMissingDependencies, isPromptEmpty } from "@appstrate/core/validation";
 import { useAgentConnectionReadiness } from "../../hooks/use-integrations";
 import { useModels, useAgentModel } from "../../hooks/use-models";
 import { useProxies, useAgentProxy } from "../../hooks/use-proxies";
@@ -333,7 +334,19 @@ export function AgentOverviewTab({
     isError: pinnedError,
     isSuccess: pinnedSuccess,
   } = useAgentPinned(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
+  // Each card's own half of the launch verdict (`agentRunBlocker`), so a card
+  // flags what it holds rather than the first thing that blocks the run.
+  const readiness = {
+    hasModel: agentModelBlocker(models, agentModel?.modelId) === null,
+    // A summary read omits the prompt: absent is unknown, not empty.
+    hasPrompt: detail.prompt === undefined || !isPromptEmpty(detail.prompt),
+    hasRequiredSkills:
+      findMissingDependencies(
+        (detail.manifest?.dependencies as Record<string, Record<string, string>> | undefined)
+          ?.skills ?? {},
+        detail.dependencies.skills?.map((skill) => skill.id) ?? [],
+      ).length === 0,
+  };
 
   const defaultModel = models?.find((model) => model.is_default);
   const resolvedModel = models?.find((model) => model.id === agentModel?.modelId) ?? defaultModel;
@@ -342,7 +355,7 @@ export function AgentOverviewTab({
   const inputProperties = detail.input?.schema?.properties ?? {};
   const inputCount = Object.keys(inputProperties).length;
   const configuredCount = Object.keys(detail.input?.values ?? {}).length;
-  // `hasRequiredConfig` a quitté `useAgentReadiness` avec la fusion de `config`
+  // `hasRequiredConfig` a quitté le verdict de lancement avec la fusion de `config`
   // dans `input` : la question se pose maintenant sur les valeurs de l'espace,
   // pas sur un objet de configuration séparé.
   const requiredInputFields =

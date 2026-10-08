@@ -24,6 +24,7 @@ import { emitEvent } from "./modules/module-loader.ts";
 import { createDefaultSpace } from "../services/spaces.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { markBootstrapTokenConsumed } from "./bootstrap-token.ts";
 
 interface PostBootstrapOrgArgs {
   orgId: string;
@@ -34,6 +35,8 @@ interface PostBootstrapOrgArgs {
 
 export async function triggerPostBootstrapOrg(args: PostBootstrapOrgArgs): Promise<void> {
   const { orgId, slug, userId, userEmail } = args;
+  // Whichever path created the org, so the SPA stops routing to `/claim`.
+  markBootstrapTokenConsumed();
   await emitEvent("onOrgCreate", orgId, userEmail);
   const defaultSpace = await createDefaultSpace(orgId, userId).catch((err) => {
     logger.warn("Failed to create default space for bootstrap org", {

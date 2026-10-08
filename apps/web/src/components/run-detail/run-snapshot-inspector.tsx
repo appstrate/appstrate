@@ -344,7 +344,7 @@ export function RunSnapshotInspector({
                       value={
                         <span className="flex flex-col">
                           {bound.map((connection, i) => (
-                            <span key={`${connection.label ?? connection.account_id ?? ""}-${i}`}>
+                            <span key={`${connection.label}-${i}`}>
                               {[
                                 connection.label,
                                 connection.account_id,

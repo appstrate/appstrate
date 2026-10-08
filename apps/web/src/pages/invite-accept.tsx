@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
 import { ApiError, client, type paths } from "../api/client";
-import { refreshAuth, useAuth } from "../hooks/use-auth";
+import { useAuth } from "../hooks/use-auth";
 import { useHostedAuthRedirect, isHostedAuthEnabled } from "../hooks/use-hosted-auth-redirect";
 import { orgStore } from "../stores/org-store";
 import { Spinner } from "../components/spinner";
@@ -15,6 +16,7 @@ import { RegisterForm } from "../components/register-form";
 import { LoginForm } from "../components/login-form";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { orgKeys } from "../lib/query-keys";
+import { hasVerificationLinkError } from "../lib/auth-errors";
 
 /** Spec response of GET /invite/{token}/info (all fields required, role is an org-role enum). */
 type InviteInfo =
@@ -56,6 +58,9 @@ export function InviteAcceptPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
+  // The verification link of a signup made from this page lands back here,
+  // with `?error=` when it could not be honoured.
+  const verificationLinkFailed = hasVerificationLinkError(useLocation().search);
 
   const [info, setInfo] = useState<InviteInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,14 +111,17 @@ export function InviteAcceptPage() {
     const { data } = await client.POST("/invite/{token}/accept", {
       params: { path: { token: token ?? "" } },
     });
-    await refreshAuth();
     // Refetch orgs so the new org is in the cache BEFORE setId triggers useAutoSelect.
     await queryClient.invalidateQueries({ queryKey: orgKeys.all });
     if (data?.id) {
       orgStore.getState().setId(data.id);
     }
+    // An existing member keeps their role, whatever the invitation offered.
+    if (data && !data.created) {
+      toast.info(t("invite.roleUnchanged", { role: t(roleI18nKey(data.role)) }));
+    }
     navigate("/");
-  }, [token, navigate, queryClient]);
+  }, [token, navigate, queryClient, t]);
 
   if (loading) {
     return (
@@ -285,6 +293,9 @@ export function InviteAcceptPage() {
     <AuthLayout>
       <div className="flex flex-col gap-6">
         {inviteBanner}
+        {verificationLinkFailed && (
+          <p className="text-destructive text-sm">{t("preferences.verificationLinkExpired")}</p>
+        )}
         {serverError && <p className="text-destructive text-sm">{serverError}</p>}
         {mode === "register" ? (
           <RegisterForm
@@ -298,11 +309,10 @@ export function InviteAcceptPage() {
         ) : (
           <LoginForm
             fixedEmail={info.email}
-            onSuccess={refreshAuth}
             header={null}
             footer={null}
             switchAuthSlot={switchToRegister}
-            socialCallbackURL={`/invite/${token}`}
+            callbackURL={`/invite/${token}`}
           />
         )}
       </div>

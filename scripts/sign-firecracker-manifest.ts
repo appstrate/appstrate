@@ -34,22 +34,16 @@
  *   bun scripts/sign-firecracker-manifest.ts --generate
  *       → prints a fresh seed + its public key (never touches the network)
  *
- * Zero dependencies (node:crypto + node:fs only) so it runs on a bare
- * checkout without `bun install`.
+ * Zero dependencies (node:crypto + node:fs, and `lib/ed25519-seed.ts` next to
+ * it) so it runs on a bare checkout without `bun install`.
  */
 
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import type { KeyObject } from "node:crypto";
+import { privateKeyFromSeed, seedOfPrivateKey } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "FIRECRACKER_MANIFEST_SIGNING_KEY";
-
-/**
- * PKCS#8 DER prefix for an Ed25519 private key (RFC 8410). Appending the raw
- * 32-byte seed yields a complete DER document node:crypto can import — this
- * is what lets the GitHub secret be a plain base64 seed instead of PEM.
- */
-const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 
 function fail(message: string): never {
   console.error(`sign-firecracker-manifest: ${message}`);
@@ -61,18 +55,11 @@ function importPrivateKey(): KeyObject {
   if (!secret) {
     fail(`${SECRET_ENV} is not set — expected a base64 raw 32-byte Ed25519 seed.`);
   }
-  const seed = Buffer.from(secret, "base64");
-  if (seed.length !== 32) {
-    fail(
-      `${SECRET_ENV} must decode to exactly 32 bytes (got ${seed.length}) — ` +
-        `expected a base64 raw Ed25519 seed.`,
-    );
+  try {
+    return privateKeyFromSeed(secret);
+  } catch (error) {
+    fail(`${SECRET_ENV}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return createPrivateKey({
-    key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]),
-    format: "der",
-    type: "pkcs8",
-  });
 }
 
 /** Base64 raw 32-byte public key — the format ARTIFACTS_SIGNING_PUBKEY pins. */
@@ -86,8 +73,7 @@ function publicKeyBase64(privateKey: KeyObject): string {
 
 function generateKeypair(): void {
   const { privateKey } = generateKeyPairSync("ed25519");
-  const pkcs8 = privateKey.export({ format: "der", type: "pkcs8" }) as Buffer;
-  const seed = pkcs8.subarray(PKCS8_ED25519_PREFIX.length).toString("base64");
+  const seed = seedOfPrivateKey(privateKey);
   console.log(`${SECRET_ENV} (GitHub Actions secret — keep private):`);
   console.log(`  ${seed}`);
   console.log("Public key (safe to publish — bake into ARTIFACTS_SIGNING_PUBKEY):");

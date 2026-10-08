@@ -8,15 +8,14 @@ import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
-import { getErrorMessage } from "@appstrate/core/errors";
-import { formatBytes } from "@appstrate/core/format";
+import { formatBytes } from "../../lib/format-bytes";
 import { canLeaveOrg } from "@appstrate/shared-types";
-import { $api, ApiError } from "../../api/client";
+import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
+import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
@@ -66,7 +65,7 @@ export function OrgSettingsGeneralPage() {
   const navigate = useNavigate();
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
-  const { features } = useAppConfig();
+  const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   const canUpdateOrg = can("org:update");
@@ -112,9 +111,6 @@ export function OrgSettingsGeneralPage() {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
     },
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
@@ -125,21 +121,10 @@ export function OrgSettingsGeneralPage() {
 
   const deleteOrgMutation = $api.useMutation("delete", "/api/orgs/{orgId}", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
-    onError: (err) => {
-      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-    },
   });
 
   const leaveOrgMutation = $api.useMutation("post", "/api/orgs/{orgId}/leave", {
     onSuccess: (_data, { params }) => exitOrg(params.path.orgId),
-    onError: (err) => {
-      // The server is the real guard (owners may have changed meanwhile).
-      toast.error(
-        err instanceof ApiError && err.code === "last_owner"
-          ? t("orgSettings.leaveLastOwner")
-          : t("error.prefix", { message: getErrorMessage(err) }),
-      );
-    },
   });
 
   if (!currentOrg) {
@@ -343,16 +328,10 @@ export function OrgSettingsGeneralPage() {
             checked={orgSettings?.restrict_package_copy ?? false}
             disabled={!can("org:settings") || updateSettingsMutation.isPending}
             onCheckedChange={(checked) =>
-              updateSettingsMutation.mutate(
-                {
-                  params: { path: { orgId: currentOrg.id } },
-                  body: { restrict_package_copy: checked === true },
-                },
-                {
-                  onError: (error) =>
-                    toast.error(t("error.prefix", { message: getErrorMessage(error) })),
-                },
-              )
+              updateSettingsMutation.mutate({
+                params: { path: { orgId: currentOrg.id } },
+                body: { restrict_package_copy: checked === true },
+              })
             }
           />
         </SettingRow>
@@ -422,9 +401,9 @@ export function OrgSettingsGeneralPage() {
         </p>
         {orgs.length === 1 && (
           <p className="mt-2 text-sm font-medium">
-            {features.orgCreationDisabled
-              ? t("orgSettings.leaveLastOrgWaiting")
-              : t("orgSettings.leaveLastOrgCreate")}
+            {canCreateOrg
+              ? t("orgSettings.leaveLastOrgCreate")
+              : t("orgSettings.leaveLastOrgWaiting")}
           </p>
         )}
       </ConfirmModal>

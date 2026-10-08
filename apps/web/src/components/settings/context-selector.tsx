@@ -36,7 +36,7 @@ export function ContextSelector({
   value: string;
   label: string;
   disabled?: boolean;
-  options: { id: string; name: string }[];
+  options: { id: string; name: string; disabled?: boolean }[];
   onValueChange: (value: string) => void;
 }) {
   return (
@@ -46,7 +46,7 @@ export function ContextSelector({
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem key={option.id} value={option.id} disabled={option.disabled}>
             {option.name}
           </SelectItem>
         ))}

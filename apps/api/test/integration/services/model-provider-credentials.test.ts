@@ -16,6 +16,7 @@
  *     a separate API surface
  *   - `updateOAuthCredentialTokens` writes fresh tokens, preserves email/etc.
  *   - `markCredentialNeedsReconnection` flips the OAuth blob flag
+ *   - upstream rejections of an api key flag it within a window; rotation clears it
  *
  * The service is dormant in production at the time of writing this file —
  * Phase 4 wires it into the OAuth flow and Phase 6 wires it into the routes.
@@ -25,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
@@ -34,6 +36,8 @@ import {
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
+  clearModelCredentialRejections,
+  recordModelCredentialRejection,
   updateModelProviderCredential,
   updateOAuthCredentialTokens,
 } from "../../../src/services/model-providers/credentials.ts";
@@ -387,6 +391,111 @@ describe("model-provider-credentials service — oauth path", () => {
       (k) => k.source === "custom",
     );
     expect(list[0]!.needs_reconnection).toBe(true);
+  });
+});
+
+describe("model-provider-credentials service — upstream rejections of an api key", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  async function apiKeyCredential(slug: string) {
+    const ctx = await createTestContext({ orgSlug: slug });
+    const id = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "OpenAI",
+      providerId: "openai",
+      apiKey: PLAINTEXT,
+    });
+    return { orgId: ctx.orgId, id };
+  }
+
+  const flagged = async (orgId: string, id: string) =>
+    (await listOrgModelProviderCredentials(orgId)).find((k) => k.id === id)!.needs_reconnection;
+
+  it("flags the key at INTEGRATION_REFRESH_MAX_FAILURES rejections, and a rotation clears it", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-flag");
+    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(false);
+    expect(await loadInferenceCredentials(orgId, id)).not.toBeNull();
+
+    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(true);
+    expect(await loadInferenceCredentials(orgId, id)).toBeNull();
+
+    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    expect(await flagged(orgId, id)).toBe(false);
+    expect((await loadInferenceCredentials(orgId, id))!.apiKey).toBe("sk-rotated");
+    const [row] = await db
+      .select({ count: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    expect(row!.count).toBe(0);
+  });
+
+  it("never flags a key the row no longer holds", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-rotated");
+    for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(false);
+  });
+
+  it("never flags the rotated key when the threshold rejection interleaves with the rotation", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-race");
+    for (let round = 0; round < 10; round++) {
+      const key = `sk-round-${round}`;
+      await updateModelProviderCredential(orgId, id, { apiKey: key });
+      for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, key);
+      const next = `sk-round-${round}-next`;
+      await Promise.all([
+        recordModelCredentialRejection(orgId, id, key),
+        updateModelProviderCredential(orgId, id, { apiKey: next }),
+      ]);
+      expect((await loadInferenceCredentials(orgId, id))?.apiKey).toBe(next);
+      expect(await flagged(orgId, id)).toBe(false);
+    }
+  });
+
+  it("flags a key rejected on every call, however far apart, at the threshold", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-dead");
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 1; i < max; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(false);
+    await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+    expect(await flagged(orgId, id)).toBe(true);
+  });
+
+  it("a successful call ends the streak, so interleaved rejections never flag the key", async () => {
+    const { orgId, id } = await apiKeyCredential("mpc-reject-healthy");
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 0; i < 2 * max; i++) {
+      await recordModelCredentialRejection(orgId, id, PLAINTEXT);
+      await clearModelCredentialRejections(orgId, id);
+    }
+    expect(await flagged(orgId, id)).toBe(false);
+    const [row] = await db
+      .select({ count: modelProviderCredentials.refreshFailureCount })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, id));
+    expect(row!.count).toBe(0);
+  });
+
+  it("never flags an OAuth credential", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-reject-oauth" });
+    const id = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Subscription",
+      providerId: "test-oauth",
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      expiresAt: Date.now() + 3_600_000,
+    });
+
+    for (let i = 0; i < 6; i++) await recordModelCredentialRejection(ctx.orgId, id, "access-1");
+    expect(await flagged(ctx.orgId, id)).toBe(false);
   });
 });
 

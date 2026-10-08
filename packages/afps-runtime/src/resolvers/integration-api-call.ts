@@ -15,17 +15,12 @@
  *
  * The reusable HTTP core lives in {@link makeApiCallTool} / {@link ApiCallFn}
  * (body streaming, `authorized_uris` matching, response serialisation), and
- * the shared outbound pipeline (SSRF blocklist + the redirect-follower with
- * per-hop SSRF / per-hop allowlist / hybrid credential-strip / cookie
- * capture) lives in `./api-call-engine.ts` — identical to the platform
- * sidecar's `executeApiCall`. This module is credential-source-specific:
+ * the outbound half is `fetchApiCall` (`./api-call-engine.ts`). This module is
+ * credential-source-specific:
  *
  *   - {@link LocalIntegrationResolver} reads a JSON creds file keyed by
- *     integration id and injects the credential header itself, then
- *     dispatches the upstream call through the shared engine's
- *     `guardedFetch` (offline / air-gapped dev — no refresh, no rotation).
- *     The engine adds the SSRF blocklist + redirect-follower the raw
- *     `fetch` path used to lack.
+ *     integration id and injects the credential header itself (offline /
+ *     air-gapped dev — no refresh, no rotation).
  *   - {@link RemoteAppstrateIntegrationResolver} forwards every call through
  *     a pinned Appstrate instance's `/api/credential-proxy/proxy` route, with
  *     the integration id as the `X-Integration-Id` scope marker. Credentials never
@@ -41,16 +36,14 @@
 import type { Tool } from "@afps-spec/types";
 import type { Bundle } from "../bundle/types.ts";
 import {
-  enforceAuthorizedUris,
   makeApiCallTool,
   resolveBodyForFetch,
   serializeFetchResponse,
   applyTransportHeaders,
   isReproducibleBody,
   type ApiCallFn,
-  type ApiCallMeta,
 } from "./http-call-core.ts";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import {
   apiCallToolNameForAuth,
   assertUniqueApiToolAuthTokens,
@@ -59,13 +52,10 @@ import {
   allocateMcpToolNamespace,
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
-import {
-  guardedFetch,
-  PreflightError,
-  scrubTransportError,
-  type HostResolver,
-} from "./api-call-engine.ts";
-import { AuthorizedUrisError, ResolverError } from "../errors.ts";
+import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import { classifyApiCallFailure, fetchApiCall, forwardableHeaders } from "./api-call-engine.ts";
+import { URL_POLICY_REFUSAL_CODE, type ApiCallFailureCode } from "./api-call-failure-codes.ts";
+import { ApiCallFailureError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -73,12 +63,18 @@ import {
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 import {
+  InvalidHeaderValueError,
   isBareAuthSchemePrefix,
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars } from "./template-vars.ts";
-import { credentialUrlPolicy, exfiltrationRefusal, redactionFields } from "./credential-guard.ts";
+import { substituteVars, templateHost } from "./template-vars.ts";
+import { prepareApiCallRequest } from "./api-call-request.ts";
+import {
+  credentialUrlPolicy,
+  redactionFields,
+  urlPolicyRefusalMessage,
+} from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
 // ─────────────────────────────────────────────
@@ -125,7 +121,7 @@ interface ApiCallIntegrationMeta {
   authType: string;
   /** DECLARED `authorized_uris`, unrendered: `{$credential.<field>}` entries render per connection. */
   authorizedUris: string[];
-  /** When true, the tool skips the URL allowlist (SSRF blocklist still applies upstream). */
+  /** When true, the call skips the URL allowlist (SSRF blocklist still applies upstream). */
   allowAllUris: boolean;
   /** `auths.{key}.delivery.http`, when declared. Drives header injection in local mode. */
   http?: HttpDeliveryConfig;
@@ -242,10 +238,8 @@ function projectApiCallMetas(name: string, parsed: unknown): ApiCallIntegrationM
 /**
  * Tool name surfaced to the LLM, matching the platform's `{ns}__{toolName}`.
  *
- * Package-internal: dropped from the `resolvers` barrel because nothing outside
- * this package ever consumed it. The `export` keyword survives only so
- * `test/resolvers/integration-api-call.test.ts` can pin the 56-character tool
- * name cap directly.
+ * Package-internal: exported only so `test/resolvers/integration-api-call.test.ts`
+ * can pin the 56-character tool name cap.
  */
 export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
   return `${meta.namespace}__${meta.toolName}`;
@@ -359,7 +353,7 @@ function assertUsableCredsFile(
 interface LocalIntegrationResolverOptions {
   /** Path to a creds JSON file or an already-parsed object. */
   creds: string | LocalIntegrationCredentialsFile;
-  /** Override the low-level HTTP client. Defaults to the global `fetch`. */
+  /** Transport override (tests) — disables the address pin. Omitted = pinned global `fetch`. */
   fetch?: typeof fetch;
   /**
    * DNS resolver for the SSRF rebind preflight — injectable for tests.
@@ -375,13 +369,13 @@ interface LocalIntegrationResolverOptions {
  * no refresh, no rotation. Tokens expire; dev re-authenticates manually.
  */
 export class LocalIntegrationResolver implements IntegrationApiCallResolver {
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl: typeof fetch | undefined;
   private readonly resolveHost: HostResolver | undefined;
   private creds: LocalIntegrationCredentialsFile | null;
   private readonly credsPath: string | null;
 
   constructor(opts: LocalIntegrationResolverOptions) {
-    this.fetchImpl = opts.fetch ?? fetch;
+    this.fetchImpl = opts.fetch;
     this.resolveHost = opts.resolveHost;
     if (typeof opts.creds === "string") {
       this.creds = null;
@@ -410,9 +404,8 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        // `buildCall` enforces authorized_uris on the SUBSTITUTED target (`{{site_url}}/…`).
         tools.push(
-          makeApiCallTool({ name: meta.name, allowAllUris: true }, this.buildCall(meta, entry), {
+          makeApiCallTool(meta, this.buildCall(meta, entry), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -446,12 +439,6 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     return async (req, ctx) => {
       const fields = entry.fields;
 
-      // Every substituted string: target, kept header values, a string body (never multipart).
-      const templates = [req.target];
-      if (typeof req.body === "string") templates.push(req.body);
-      const target = substituteVars(req.target, fields);
-      enforceAuthorizedUris(meta, req.target, { target, authorizedUris });
-
       const deliveryPlan = resolveLocalDeliveryPlan(meta, entry);
       const allowsAuthorizationOverride =
         deliveryPlan?.allowServerOverride === true &&
@@ -461,7 +448,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       // survives on this LOCAL path only when the delivery plan targets that
       // header and explicitly authorises a caller override. The remote resolver
       // always strips it because it authenticates to Appstrate with that header.
-      const headers: Record<string, string> = {};
+      const callerHeaders: Record<string, string> = {};
       for (const [key, value] of Object.entries(req.headers ?? {})) {
         const lowerKey = key.toLowerCase();
         if (
@@ -470,9 +457,23 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         ) {
           continue;
         }
-        templates.push(value);
-        headers[key] = substituteVars(value, fields);
+        callerHeaders[key] = value;
       }
+      // A string body is the only one substituted (never multipart).
+      const prepared = prepareApiCallRequest({
+        target: req.target,
+        headers: callerHeaders,
+        bodyTemplates: typeof req.body === "string" ? [req.body] : [],
+        fields,
+      });
+      if (!prepared.ok) {
+        const { kind, message } = prepared.refusal;
+        if (kind === "invalid_header") throw headerInvalid(meta.name, message);
+        throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
+          integration: meta.name,
+        });
+      }
+      const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
       // shared engine's redirect-follower knows which header to strip on
       // an out-of-boundary cross-origin hop.
@@ -484,13 +485,16 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         templates,
         fields,
         allowAllUris: meta.allowAllUris,
+        declaredUris: meta.authorizedUris,
         authorizedUris,
+        injectsCredential: injectedCredentialHeader !== null,
       });
       if (policy.refuse) {
-        throw new ResolverError(
-          "RESOLVER_CREDENTIAL_EXFIL_BLOCKED",
-          exfiltrationRefusal(meta.name),
-          { integration: meta.name },
+        throw apiCallFailure(
+          URL_POLICY_REFUSAL_CODE[policy.refuse],
+          urlPolicyRefusalMessage(policy.refuse, meta.name),
+          meta,
+          req.target,
         );
       }
       const redactFields = redactionFields(policy, fields);
@@ -502,14 +506,13 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
 
       if (resolvedBody.kind === "bytes" && resolvedBody.contentType) {
+        // A caller's spelling of the header would survive beside ours: the boundary must be ours.
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === "content-type") delete headers[key];
+        }
         headers["Content-Type"] = resolvedBody.contentType;
       }
 
-      // Route through the shared engine — same SSRF blocklist + manual
-      // redirect-follower (per-hop SSRF, per-hop authorized_uris,
-      // hybrid credential-strip, userinfo/fragment stripping) the sidecar
-      // uses. Previously this was a raw `fetch(target, …)` with default
-      // `redirect: "follow"` and NO SSRF check — the gap this engine closes.
       const init: RequestInit & Record<string, unknown> = {
         method: req.method,
         headers,
@@ -520,47 +523,33 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
 
       let res: Response;
       try {
-        const result = await guardedFetch({
+        const result = await fetchApiCall({
           url: target,
           init,
-          fetchFn: this.fetchImpl,
           authorizedUris,
           declaredUris: meta.authorizedUris,
           allowAllUris: policy.allowAllUris,
-          injectedCredentialHeader: injectedCredentialHeader?.toLowerCase() ?? null,
+          credentialHeaders: injectedCredentialHeader
+            ? [...credentialHeaders, injectedCredentialHeader]
+            : credentialHeaders,
+          // The caller's own machine and network: a host the manifest names literally is theirs.
+          internalHost: () => true,
           integrationId: meta.name,
-          resolveHost: this.resolveHost,
+          ...(this.fetchImpl ? { fetchFn: this.fetchImpl } : {}),
+          ...(this.resolveHost ? { resolveHost: this.resolveHost } : {}),
+          targetHost: templateHost(req.target),
           credentialFields: redactFields,
         });
         res = result.response;
       } catch (err) {
-        // The shared engine throws on a refused initial target (SSRF /
-        // off-allowlist) or a refused redirect hop. Surface these as a
-        // typed resolver error rather than a bare fetch exception so the
-        // CLI agent gets a clear, structured failure — the host is
-        // redacted (a redirect target may carry `?token=…`).
-        if (err instanceof PreflightError) {
-          if (err.reason === "not_authorized") {
-            throw new AuthorizedUrisError(
-              "AUTHORIZED_URIS_MISMATCH",
-              `Integration ${meta.name}: ${err.message}`,
-              { integration: meta.name, target: req.target },
-            );
-          }
-          throw new ResolverError(
-            "RESOLVER_URL_BLOCKED",
-            `Integration ${meta.name}: ${err.message}`,
-            { integration: meta.name, target: req.target },
-          );
-        }
-        if (err instanceof Error && err.name === "RedirectBlockedError") {
-          throw new ResolverError(
-            "RESOLVER_REDIRECT_BLOCKED",
-            `Integration ${meta.name}: redirect blocked (${(err as { reason?: string }).reason})`,
-            { integration: meta.name },
-          );
-        }
-        throw scrubTransportError(err, redactFields);
+        // The caller cancelled: its own abort, not an outcome of the call.
+        if (ctx.signal?.aborted) throw err;
+        // No `cause`: Bun's error keeps the full URL (a redirect's `?token=…`) on `.path`.
+        const { code, message, redirect, systemCode } = classifyApiCallFailure(err);
+        throw apiCallFailure(code, `Integration ${meta.name}: ${message}`, meta, req.target, {
+          redirect,
+          ...(systemCode ? { systemCode } : {}),
+        });
       }
 
       return serializeFetchResponse(res, {
@@ -570,6 +559,29 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
     };
   }
+}
+
+/** An outbound failure or URL-policy refusal: the target as written, the allowlist as declared. */
+function apiCallFailure(
+  code: ApiCallFailureCode,
+  message: string,
+  meta: ApiCallIntegrationMeta,
+  target: string,
+  extra: Record<string, unknown> = {},
+): ApiCallFailureError {
+  return new ApiCallFailureError(code, message, {
+    integration: meta.name,
+    target,
+    allowlist: meta.authorizedUris,
+    ...extra,
+  });
+}
+
+/** An agent header value that is no HTTP field value (the message names the header only). */
+function headerInvalid(integration: string, message: string): ResolverError {
+  return new ResolverError("RESOLVER_HEADER_INVALID", `Integration ${integration}: ${message}`, {
+    integration,
+  });
 }
 
 /**
@@ -691,11 +703,8 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       for (const projectedMeta of metas) {
         const meta =
           projectedMeta.namespace === namespace ? projectedMeta : { ...projectedMeta, namespace };
-        // The platform enforces `authorized_uris` server-side — allow all
-        // locally so the tool dispatches and lets the proxy gate.
-        const remoteMeta: ApiCallMeta = { name: meta.name, allowAllUris: true };
         tools.push(
-          makeApiCallTool(remoteMeta, this.buildCall(meta), {
+          makeApiCallTool(meta, this.buildCall(meta), {
             toolName: apiCallToolName(meta),
             description:
               `Make an authenticated request through the "${meta.name}" integration's ` +
@@ -710,21 +719,17 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
 
   private buildCall(meta: ApiCallIntegrationMeta): ApiCallFn {
     return async (req, ctx) => {
-      const resolved = await resolveBodyForFetch(req.body, {
-        allowFromFile: true,
-        allowStreaming: true,
-        workspace: ctx.workspace,
-      });
-      // Apply the agent-supplied headers FIRST, with any reserved transport
-      // header stripped (case-insensitively), then set the platform-controlled
-      // headers LAST so they always win and cannot be overridden by a tool call.
-      const sanitizedAgentHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(req.headers ?? {})) {
-        if (RESERVED_TRANSPORT_HEADERS.has(key.toLowerCase())) continue;
-        sanitizedAgentHeaders[key] = value;
+      // The caller-header rule of `fetchApiCall`, then the reserved transport headers; the
+      // platform-controlled ones are set over what remains.
+      let agentHeaders: Headers;
+      try {
+        agentHeaders = forwardableHeaders({ headers: req.headers });
+      } catch (err) {
+        if (err instanceof InvalidHeaderValueError) throw headerInvalid(meta.name, err.message);
+        throw err;
       }
-      const baseHeaders: Record<string, string> = {
-        ...sanitizedAgentHeaders,
+      for (const name of RESERVED_TRANSPORT_HEADERS) agentHeaders.delete(name);
+      const platformHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.apiKey}`,
         "X-Space-Id": this.spaceId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
@@ -734,72 +739,43 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
         ...(this.endUserId ? { "Appstrate-User": this.endUserId } : {}),
         ...this.extraHeaders,
       };
-
       const wantsFile = typeof req.responseMode?.toFile === "string";
-      const isStreamingBody = resolved.kind === "stream";
 
-      const headers = applyTransportHeaders(
-        { ...baseHeaders },
-        {
+      const send = async (): Promise<Response> => {
+        const resolved = await resolveBodyForFetch(req.body, {
+          allowFromFile: true,
+          allowStreaming: true,
+          workspace: ctx.workspace,
+        });
+        const headers = new Headers(agentHeaders);
+        for (const [name, value] of Object.entries(platformHeaders)) headers.set(name, value);
+        const isStreamingBody = resolved.kind === "stream";
+        applyTransportHeaders(headers, {
           wantsFile,
           isStreamingBody,
           bodySize: isStreamingBody ? resolved.size : undefined,
           maxInlineBytes: req.responseMode?.maxInlineBytes,
-        },
-      );
-      if (resolved.kind === "bytes" && resolved.contentType) {
-        headers["Content-Type"] = resolved.contentType;
-      }
-
-      const init: RequestInit & Record<string, unknown> = {
-        method: req.method,
-        headers,
-        signal: ctx.signal,
+        });
+        if (resolved.kind === "bytes" && resolved.contentType) {
+          headers.set("Content-Type", resolved.contentType);
+        }
+        const init: RequestInit & Record<string, unknown> = {
+          method: req.method,
+          headers,
+          signal: ctx.signal,
+          body: isStreamingBody ? resolved.stream : resolved.bytes,
+        };
+        if (isStreamingBody) init.duplex = "half";
+        return this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, init);
       };
-      if (isStreamingBody) {
-        init.body = resolved.stream;
-        init.duplex = "half";
-      } else {
-        init.body = resolved.bytes;
-      }
 
-      let res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, init);
-
+      let res = await send();
       if (
         res.status === 401 &&
         res.headers.get("x-auth-refreshed") === "true" &&
         isReproducibleBody(req.body)
       ) {
-        const retryResolved = await resolveBodyForFetch(req.body, {
-          allowFromFile: true,
-          allowStreaming: true,
-          workspace: ctx.workspace,
-        });
-        const retryIsStreamingBody = retryResolved.kind === "stream";
-        const retryHeaders = applyTransportHeaders(
-          { ...baseHeaders },
-          {
-            wantsFile,
-            isStreamingBody: retryIsStreamingBody,
-            bodySize: retryIsStreamingBody ? retryResolved.size : undefined,
-            maxInlineBytes: req.responseMode?.maxInlineBytes,
-          },
-        );
-        if (retryResolved.kind === "bytes" && retryResolved.contentType) {
-          retryHeaders["Content-Type"] = retryResolved.contentType;
-        }
-        const retryInit: RequestInit & Record<string, unknown> = {
-          method: req.method,
-          headers: retryHeaders,
-          signal: ctx.signal,
-        };
-        if (retryIsStreamingBody) {
-          retryInit.body = retryResolved.stream;
-          retryInit.duplex = "half";
-        } else {
-          retryInit.body = retryResolved.bytes;
-        }
-        res = await this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, retryInit);
+        res = await send();
       }
 
       return serializeFetchResponse(res, {

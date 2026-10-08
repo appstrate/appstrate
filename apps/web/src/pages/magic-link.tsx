@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -16,6 +16,8 @@ export function MagicLinkPage() {
   const { startMagicLink } = useAuth();
   const location = useLocation();
   const prefillEmail = (location.state as { email?: string })?.email ?? "";
+  // A spent or expired link redirects here with `?error=` (see `startMagicLink`).
+  const linkFailed = useSearchParams()[0].has("error");
 
   const [email, setEmail] = useState(prefillEmail);
   const [state, setState] = useState<"form" | "submitting" | "sent">("form");
@@ -69,6 +71,9 @@ export function MagicLinkPage() {
               required
             />
           </div>
+          {linkFailed && !error && (
+            <p className="text-destructive text-sm">{t("magicLink.linkInvalid")}</p>
+          )}
           {error && <p className="text-destructive text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("magicLink.submit")}

@@ -12,7 +12,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { visibleSettingsSections, type UnifiedSettingsSection } from "./navigation";
 
 export function useSettingsSections(): UnifiedSettingsSection[] {
-  const { can } = usePermissions();
+  const { can, inPersonalSpace } = usePermissions();
   const { features } = useAppConfig();
 
   return visibleSettingsSections({
@@ -22,5 +22,6 @@ export function useSettingsSections(): UnifiedSettingsSection[] {
       billing: !!features.billing,
       webhooks: !!features.webhooks,
     },
+    inPersonalSpace,
   });
 }

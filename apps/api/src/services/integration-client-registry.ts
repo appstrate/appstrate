@@ -50,6 +50,7 @@ import { CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
+import { systemIdSchema } from "../lib/system-registry.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
@@ -111,10 +112,8 @@ const rawSystemIntegrationClientSchema = z
   .object({
     // Constrained to the same charset the wire `client_ref` accepts (`^[\w.-]+$`)
     // so every configured client is explicitly selectable at connect time — the
-    // registry-admissible id set == the API-addressable set. MUST NOT be
-    // UUID-shaped: ids are resolved system-first, so a system id colliding with a
-    // custom `integration_oauth_clients.id` (UUID) would shadow the custom row.
-    id: z.string().regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
+    // registry-admissible id set == the API-addressable set.
+    id: systemIdSchema.regex(/^[\w.-]+$/, "id must match ^[\\w.-]+$"),
     // AFPS §7.2: auth keys match `^[a-z][a-z0-9_]*$` — mirror the manifest gate
     // via the canonical `CREDENTIAL_KEY_RE` (@appstrate/core/naming).
     auth_key: z.string().regex(CREDENTIAL_KEY_RE, "auth_key must match ^[a-z][a-z0-9_]*$"),

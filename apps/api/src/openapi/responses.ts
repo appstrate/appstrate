@@ -2,6 +2,11 @@
 
 import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
 
+/** The `content` of an error response: an RFC 9457 `ProblemDetail`. */
+export const problemContent = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
@@ -10,9 +15,7 @@ export const responses = {
     description:
       "The selected published version's archive is missing, corrupt, or lacks the content entry its type requires (`prompt.md` for an agent, `SKILL.md` for a skill) — `version_artifact_unavailable`. Nothing is substituted for it, not even the working copy, and nothing is written. When the version is about to run (a run or schedule) and `AFPS_SIGNATURE_POLICY` is `required`, the signature gate answers first: a corrupt archive is `bundle_invalid` and an unsigned or untrusted one `bundle_signature_invalid`, both 422. An archive past the decompression ceiling answers `422 package_archive_unreadable`.",
     headers: REQUEST_ID_ONLY_HEADERS,
-    content: {
-      "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-    },
+    content: problemContent,
   },
   Unauthorized: {
     description: "Missing or invalid authentication",
@@ -118,13 +121,21 @@ export const responses = {
               type: "https://docs.appstrate.dev/errors/validation-failed",
               title: "Validation Failed",
               status: 400,
-              detail: "name: Required (+2 more)",
+              detail: "name: Invalid input: expected string, received undefined (+2 more)",
               code: "validation_failed",
               request_id: "req_abc123",
               errors: [
-                { field: "name", code: "invalid_type", message: "Required" },
-                { field: "email", code: "invalid_format", message: "Invalid email" },
-                { field: "age", code: "invalid_type", message: "Expected number" },
+                {
+                  field: "name",
+                  code: "required",
+                  message: "Invalid input: expected string, received undefined",
+                },
+                { field: "email", code: "invalid_format", message: "Invalid email address" },
+                {
+                  field: "age",
+                  code: "invalid_type",
+                  message: "Invalid input: expected number, received string",
+                },
               ],
             },
           },
@@ -264,11 +275,7 @@ export const responses = {
       },
     },
   },
-  /**
-   * The 409 of both model writes — the one-row-per-binding rule is a property
-   * of the table, so `POST` and `PATCH` refuse for the same reason and share
-   * one description.
-   */
+  /** The 409 of `POST /api/models` — one row per binding (`PATCH` words the same rule inline). */
   ModelAlreadyAdded: {
     description:
       "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",

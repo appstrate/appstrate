@@ -3,8 +3,10 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
+  agentPackageIdParam,
   connectionIdSetJsonSchema,
   connectionSetRefusals,
+  integrationPackageIdParam,
   lockedBySchema,
 } from "./integrations.ts";
 
@@ -222,9 +224,7 @@ export const mePaths = {
           schema: { type: "string" },
           description:
             "Agent package id whose pins to list. Omitted, the list is empty — " +
-            "the picker renders before it has an agent to ask about. The DELETE " +
-            "below requires it, because deleting nothing in particular is not a " +
-            "coherent request.",
+            "the picker renders before it has an agent to ask about.",
         },
       ],
       responses: {
@@ -262,6 +262,8 @@ export const mePaths = {
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
+  },
+  "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}": {
     put: {
       operationId: "upsertMyIntegrationPin",
       tags: ["Profile"],
@@ -272,10 +274,13 @@ export const mePaths = {
         "to an admin pin, an enforced org default and the launch override (the run's or " +
         "the schedule's `connection_overrides`). " +
         "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
-        "Idempotent — repeated calls rewrite the same set.",
+        "Idempotent — repeated calls rewrite the same set. Path-addressed like the admin " +
+        "pins; encode each id with `encodePackageIdPath`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        agentPackageIdParam,
+        integrationPackageIdParam,
       ],
       requestBody: {
         required: true,
@@ -283,10 +288,8 @@ export const mePaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["agent_package_id", "integration_package_id", "connection_ids"],
+              required: ["connection_ids"],
               properties: {
-                agent_package_id: { type: "string", minLength: 1 },
-                integration_package_id: { type: "string", minLength: 1 },
                 connection_ids: connectionIdSetJsonSchema,
               },
               additionalProperties: false,
@@ -304,10 +307,15 @@ export const mePaths = {
           },
         },
         "400": {
+          $ref: "#/components/responses/ValidationError",
           description: `Refused: ${connectionSetRefusals}.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`).",
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
@@ -325,26 +333,17 @@ export const mePaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        {
-          name: "agent_package_id",
-          in: "query",
-          required: true,
-          schema: { type: "string" },
-        },
-        {
-          name: "integration_package_id",
-          in: "query",
-          required: true,
-          schema: { type: "string" },
-        },
+        agentPackageIdParam,
+        integrationPackageIdParam,
       ],
       responses: {
         "204": { description: "Pin cleared (or never existed)" },
-        "400": {
-          description: "Missing required query param (agent_package_id or integration_package_id).",
-        },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`).",
+        },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -356,15 +355,21 @@ export const mePaths = {
       summary: "The caller's pins and schedules a connection delete would rewrite",
       description:
         "Lists the caller's own member pins and schedules whose connection set names this connection — " +
-        "exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
+        "the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
         "say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a " +
         "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
-        "re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, " +
-        "admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller " +
-        "references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees " +
-        "its bound organization (and space) only; an end user has no pins.",
+        "re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules " +
+        "naming the connection are disabled by the delete with their overrides kept " +
+        "(`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, " +
+        "never listed. Other members' pins, admin pins and org defaults are not listed: the delete " +
+        "leaves them untouched. The lists are " +
+        "empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A " +
+        "delegated or end-user credential sees its bound organization (and space) only: a connection " +
+        "outside it answers empty lists, and only the owner's schedules inside it are listed, though " +
+        "the delete also rewrites the owner's schedules outside it. A pinned connection is still " +
+        "listed, though its delete answers 409 `connection_pinned`. An end user has no pins.",
       parameters: [
         { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
       ],
@@ -376,8 +381,14 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["pins", "schedules"],
+                required: ["pins", "schedules", "other_schedules_disabled_count"],
                 properties: {
+                  other_schedules_disabled_count: {
+                    type: "integer",
+                    minimum: 0,
+                    description:
+                      "How many enabled schedules of actors other than the caller name the connection: the delete disables them (`connection_deleted`) and keeps their overrides. A count only — their names and actors are not the caller's to read. A bound credential counts those of its organization (and space) only. 0 whenever the lists are empty for an unknown, unowned or out-of-scope connection.",
+                  },
                   pins: {
                     type: "array",
                     items: {
@@ -428,8 +439,7 @@ export const mePaths = {
                         disables: {
                           type: "boolean",
                           description:
-                            "True when the delete disables this schedule: it is enabled and this connection is " +
-                            "the only one in its set for the integration.",
+                            "True when the delete disables this schedule: it is enabled and one of its sets empties.",
                         },
                       },
                     },
@@ -460,11 +470,15 @@ export const mePaths = {
         "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
-        "Another member's pins and schedules keep the id, and their next run fails " +
-        "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
-        "a set never shrinks behind its owner. " +
+        "Another member's pins keep the id, and their next run fails " +
+        "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
+        "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
+        "transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: " +
+        "while the connection stays unreachable, re-enabling one requires a new choice. " +
+        "Delete-impact counts them " +
+        "(`other_schedules_disabled_count`). " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
-        "drop the member pin instead (see `DELETE /api/me/integration-pins`). " +
+        "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
         "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
       parameters: [
@@ -545,8 +559,10 @@ export const mePaths = {
         "they could attach when building an agent in the current space (their own or " +
         "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
-        "respect the caller's role (operations beyond it 403 at invoke time). Space context " +
-        "resolves from `X-Space-Id`, the API key's space, or the org default.",
+        "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
+        "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
+        "is refused — else the one `X-Space-Id` names; with neither the request is a 400, " +
+        "except through the MCP server, which falls back to the org's default space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -562,6 +578,7 @@ export const mePaths = {
                 required: [
                   "user",
                   "org",
+                  "space",
                   "connections",
                   "recent_runs",
                   "agents",
@@ -597,6 +614,25 @@ export const mePaths = {
                       slug: { type: ["string", "null"], description: "Organization slug." },
                     },
                   },
+                  space: {
+                    type: "object",
+                    description:
+                      "The space this request resolved to. Every list in this payload is " +
+                      "scoped to it. An empty list means nothing of that kind is available to " +
+                      "this caller in this space, this is not the space you meant, or the " +
+                      "caller's permissions do not cover that list.",
+                    required: ["id", "name", "personal"],
+                    properties: {
+                      id: { type: "string" },
+                      name: { type: "string", description: "Human-readable space name." },
+                      personal: {
+                        type: "boolean",
+                        description:
+                          "Whether this space is one member's personal space (always " +
+                          "`private`, no other members) rather than a team space.",
+                      },
+                    },
+                  },
                   recent_runs: {
                     type: "array",
                     description:
@@ -622,9 +658,9 @@ export const mePaths = {
                     description: "Integrations the caller could attach to an agent.",
                     items: {
                       type: "object",
-                      required: ["integration_id", "name", "source"],
+                      required: ["integration_package_id", "name", "source"],
                       properties: {
-                        integration_id: { type: "string" },
+                        integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
                         version: {
@@ -765,9 +801,18 @@ export const mePaths = {
               example: {
                 user: { id: "user_abc", name: "Ada Lovelace", email: "ada@acme.com" },
                 org: { id: "org_abc123", role: "member", name: "Acme", slug: "acme" },
+                space: {
+                  id: "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                  name: "Sales",
+                  personal: false,
+                },
                 connections: [
-                  { integration_id: "@appstrate/gmail", name: "Gmail", source: "own" },
-                  { integration_id: "@appstrate/clickup", name: "ClickUp", source: "shared" },
+                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  {
+                    integration_package_id: "@appstrate/clickup",
+                    name: "ClickUp",
+                    source: "shared",
+                  },
                 ],
                 recent_runs: [
                   {

@@ -3,11 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client, type components } from "../api/client";
-import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
-import { runsKeys, runKeys } from "../lib/query-keys";
+import { runKeys } from "../lib/query-keys";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 /**
@@ -20,25 +19,6 @@ type RunLogEntry = components["schemas"]["RunLog"];
 function useCanReadRuns(): boolean {
   const { can } = usePermissions();
   return canReadRuns(can);
-}
-
-export function useRuns(packageId: string | undefined) {
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
-  const canRead = useCanReadRuns();
-  return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync patches this cache
-    // in place (setQueryData) on SSE run_update events.
-    queryKey: runsKeys.forAgent(orgId, spaceId, packageId),
-    queryFn: async (): Promise<EnrichedRun[]> => {
-      const { scope, name } = splitPackageRef(packageId!);
-      const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-        params: { path: { scope, name } },
-      });
-      return data?.data ?? [];
-    },
-    enabled: canRead && !!packageId && !!spaceId,
-  });
 }
 
 export function useRun(runId: string | undefined) {

@@ -68,12 +68,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   isBlockedHost,
-  isBlockedUrl,
   peerAddress,
   peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
-  OUTBOUND_TIMEOUT_MS,
+  API_CALL_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
@@ -84,16 +83,19 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import {
   planMitmAction,
+  type MitmAction,
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
+import { substituteVars } from "@appstrate/connect/proxy-primitives";
+import { HOP_BY_HOP_HEADERS, unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import {
-  HOP_BY_HOP_HEADERS,
-  substituteVars,
-  findUnresolvedPlaceholders,
+  isHostUnboundedUriPattern,
   matchesAuthorizedUriSpec,
-} from "@appstrate/connect/proxy-primitives";
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+  type EgressPolicy,
+} from "@appstrate/afps-shared/authorized-uris";
+import { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
+import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import type { CertMinter } from "./integration-cert-minter.ts";
 
 // ─────────────────────────────────────────────
@@ -129,7 +131,13 @@ export interface MitmCredentialSource {
    * needsReconnection on a terminal failure, so a false result just means
    * "don't retry" — the dead-credential bookkeeping is platform-side.
    */
-  refreshOnUnauthorized?(authKey: string): Promise<boolean>;
+  refreshOnUnauthorized?(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
+  /**
+   * A call carrying the injected credential got a 2xx: tells the platform, when a rejection streak
+   * is pending on the connection, that the credential works (fire-and-forget).
+   * `credentialRevision` (here and above) is the one {@link current} carried when the call was built.
+   */
+  reportUpstreamSuccess?(credentialRevision: string | undefined): void;
   /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
@@ -167,12 +175,13 @@ interface CreateMitmListenerOptions {
   credentials: MitmCredentialSource;
   /** Host to bind. Defaults to `"127.0.0.1"`. */
   host?: string;
-  /** Upstream fetch implementation. Defaults to `globalThis.fetch`. */
+  /** Upstream transport for tests; it disables the address pin. Omitted = pinned global `fetch`. */
   fetch?: typeof fetch;
   /**
-   * Injectable DNS resolver for the SNI rebind guard (tests stub it so
-   * non-resolving `*.local` SNI hosts pass; production uses the system
-   * resolver). Only consulted for non-IP-literal SNI hosts.
+   * Injectable DNS resolver for the rebind guard, at CONNECT and on each
+   * upstream request (tests stub it so non-resolving `*.local` SNI hosts
+   * pass; production uses the system resolver). Only consulted for
+   * non-IP-literal hosts.
    */
   resolveHostFn?: HostResolver;
   /** Telemetry sink — non-fatal events surface here. */
@@ -204,7 +213,8 @@ export type MitmListenerEvent =
     }
   | { kind: "request-refused"; url: string; reason: string }
   | { kind: "tls-error"; error: string }
-  | { kind: "upstream-error"; url: string; error: string };
+  | { kind: "upstream-error"; url: string; error: string }
+  | { kind: "internal-error"; url: string; error: string };
 
 export interface MitmListenerHandle {
   /** Rejects if the listener cannot come up, leaving nothing bound or on disk. */
@@ -213,6 +223,10 @@ export interface MitmListenerHandle {
   proxyUrl(): string;
   close(): Promise<void>;
 }
+
+/** The upstream transport: one request, its redirect returned unfollowed. The listener's own is
+ * SSRF-guarded; one handed to {@link handleInnerRequest} directly (tests) is used as given. */
+type UpstreamFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /** An inner TLS server (one per upstream authority), reachable only through its unix socket. */
 interface InnerTlsServer {
@@ -231,7 +245,14 @@ export function createIntegrationMitmListener(
   // Ephemeral port (0 → kernel-assigned, read back from `address()` after `ready`).
   const port = 0;
   const maxRequestBytes = 10 * 1024 * 1024; // 10 MiB inner-request body cap.
-  const fetchFn = options.fetch ?? globalThis.fetch;
+  // Each upstream request connects to the address the guard validated for it, the name kept on
+  // `Host` and the TLS identity. An injected `fetch` (tests) owns its transport: checked, not pinned.
+  const fetchFn: UpstreamFetch = (url, init) =>
+    guardedFetch(url, init, {
+      followRedirects: false,
+      fetchImpl: options.fetch,
+      resolve: options.resolveHostFn,
+    });
   const emit = options.onEvent ?? (() => {});
 
   // Inner servers keyed by upstream authority: the inner request carries no
@@ -257,7 +278,9 @@ export function createIntegrationMitmListener(
               unix: string;
               maxRequestBodySize: number;
               tls: { cert: string; key: string };
+              development: boolean;
               fetch: (req: Request) => Promise<Response>;
+              error: () => Response;
             }) => { stop(): void };
           };
         }
@@ -274,6 +297,10 @@ export function createIntegrationMitmListener(
         // `handleInnerRequest`.
         maxRequestBodySize: maxRequestBytes,
         tls: { cert: leaf.certPem, key: leaf.keyPem },
+        // Never Bun's development error page: it embeds the error's message (a header value
+        // included) and source paths.
+        development: false,
+        error: () => new Response("MITM listener: internal error", { status: 500 }),
         fetch: (req) =>
           handleInnerRequest(
             req,
@@ -315,7 +342,7 @@ export function createIntegrationMitmListener(
       emit,
       resolveHostFn: options.resolveHostFn,
     }).catch((err: unknown) => {
-      emit({ kind: "tls-error", error: `connection handler failed: ${(err as Error).message}` });
+      emit({ kind: "tls-error", error: `connection handler failed: ${errorClass(err)}` });
       rawSocket.destroy();
     });
   });
@@ -324,6 +351,10 @@ export function createIntegrationMitmListener(
     tcpServer.once("error", rej);
     tcpServer.listen(port, host, () => {
       tcpServer.off("error", rej);
+      // A later server-level fault (EMFILE on accept, …) must not become an uncaught throw.
+      tcpServer.on("error", (err) =>
+        emit({ kind: "tls-error", error: `listener: ${errorClass(err)}` }),
+      );
       res();
     });
   });
@@ -480,7 +511,7 @@ async function handleInboundConnection(
     try {
       clientHello = await collectUntilSniParses(rawSocket, clientHello);
     } catch (err) {
-      emit({ kind: "tls-error", error: `ClientHello read failed: ${(err as Error).message}` });
+      emit({ kind: "tls-error", error: `ClientHello read failed: ${errorClass(err)}` });
       rawSocket.destroy();
       return;
     }
@@ -514,10 +545,8 @@ async function handleInboundConnection(
   }
   // … then the DNS-rebind layer: a public-looking SNI name whose A/AAAA
   // record points inside must not get a minted leaf either. Fail closed on
-  // resolution failure. Note: the upstream request is made by `fetch` against
-  // the SNI hostname (TLS cert validation needs the name), so this cannot pin
-  // the connect to a resolved IP — it is fail-closed defence-in-depth with a
-  // residual resolver TOCTOU, same stance as the platform's `ssrf-dns` guard.
+  // resolution failure. This check gates the leaf only: each upstream request
+  // resolves again and connects to the address it validated (`guardedFetch`).
   const sniCheck = await resolveAndCheckHost(sniHost, { resolve: resolveHostFn });
   if (sniCheck.blocked) {
     const why =
@@ -534,7 +563,7 @@ async function handleInboundConnection(
   try {
     tlsServer = await deps.resolveTlsServer(sniHost, result.port);
   } catch (err) {
-    emit({ kind: "tls-error", error: `tls bring-up failed: ${(err as Error).message}` });
+    emit({ kind: "tls-error", error: `tls bring-up failed: ${errorClass(err)}` });
     rawSocket.destroy();
     return;
   }
@@ -549,7 +578,7 @@ async function handleInboundConnection(
     upstream.pipe(rawSocket);
   });
   upstream.on("error", (err) => {
-    emit({ kind: "tls-error", error: `tls relay error: ${err.message}` });
+    emit({ kind: "tls-error", error: `tls relay error: ${errorClass(err)}` });
     rawSocket.destroy();
   });
   rawSocket.on("close", () => upstream.destroy());
@@ -710,56 +739,28 @@ type ConnectInputSubstitutionResult =
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
- * substitution. Runs {@link substituteVars} over the URL, body, and each
- * header value using `inputs`, then re-checks each field with
- * {@link findUnresolvedPlaceholders}.
+ * substitution: {@link substituteVars} over the URL, body, and each header
+ * value using `inputs`.
  *
- * Fail-closed contract: if any field that originally contained a `{{...}}`
- * placeholder still contains one after substitution, we return
- * `{ failed: <name> }` rather than forwarding a half-substituted value
- * upstream. A literal secret/placeholder must NEVER leak upstream nor into
- * a tool result — refusing the request is the only safe outcome.
- *
- * Fields that never contained a placeholder are passed through untouched
- * (substituteVars is a no-op on them), so a request with no placeholders is
- * returned verbatim.
+ * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
+ * `{ failed: <name> }` rather than forwarding a half-substituted request
+ * upstream. A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
   parts: { url: string; bodyText: string | null; headers: Record<string, string> },
   inputs: Record<string, string>,
 ): ConnectInputSubstitutionResult {
-  const checkField = (original: string, substituted: string): string | null => {
-    // Only fail-closed when the ORIGINAL field carried a placeholder. A
-    // field that legitimately contains `{{...}}`-looking text but was never
-    // a substitution target (no placeholder before substitution) can't have
-    // a half-substituted secret in it — but here `original === substituted`
-    // for a field with no resolvable placeholder, so we gate on whether the
-    // original had any placeholder at all.
-    if (findUnresolvedPlaceholders(original).length === 0) return null;
-    const remaining = findUnresolvedPlaceholders(substituted);
-    return remaining.length > 0 ? remaining[0]! : null;
-  };
-
-  const url = substituteVars(parts.url, inputs);
-  const urlFail = checkField(parts.url, url);
-  if (urlFail) return { failed: urlFail };
-
-  let bodyText: string | null = null;
-  if (parts.bodyText !== null) {
-    bodyText = substituteVars(parts.bodyText, inputs);
-    const bodyFail = checkField(parts.bodyText, bodyText);
-    if (bodyFail) return { failed: bodyFail };
+  for (const template of [parts.url, parts.bodyText ?? "", ...Object.values(parts.headers)]) {
+    const [missing] = unresolvedPlaceholders(template, inputs);
+    if (missing !== undefined) return { failed: missing };
   }
-
   const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(parts.headers)) {
-    const sub = substituteVars(v, inputs);
-    const headerFail = checkField(v, sub);
-    if (headerFail) return { failed: headerFail };
-    headers[k] = sub;
-  }
-
-  return { url, bodyText, headers };
+  for (const [k, v] of Object.entries(parts.headers)) headers[k] = substituteVars(v, inputs);
+  return {
+    url: substituteVars(parts.url, inputs),
+    bodyText: parts.bodyText === null ? null : substituteVars(parts.bodyText, inputs),
+    headers,
+  };
 }
 
 /**
@@ -783,13 +784,44 @@ function targetWithinAuthorizedUris(url: string, authorizedUris: readonly string
  * The per-authority `Bun.serve` fetch callback. `authority` is the upstream
  * `host` or `host:port` ({@link upstreamAuthority}). Exported (like
  * {@link extractSni}) so the body-cap and strip/inject behaviour can be
- * exercised directly, without standing up TLS.
+ * exercised directly, without standing up TLS. An unexpected throw is a fixed
+ * 500 and an event naming the error's class only: a message may quote a value.
  */
 export async function handleInnerRequest(
   req: Request,
   authority: string,
   credentials: MitmCredentialSource,
-  fetchFn: typeof fetch,
+  fetchFn: UpstreamFetch,
+  maxRequestBytes: number,
+  emit: (event: MitmListenerEvent) => void,
+  egressPolicy: Pick<EgressPolicy, "allowsUrl">,
+): Promise<Response> {
+  try {
+    return await forwardInnerRequest(
+      req,
+      authority,
+      credentials,
+      fetchFn,
+      maxRequestBytes,
+      emit,
+      egressPolicy,
+    );
+  } catch (err) {
+    emit({ kind: "internal-error", url: eventUrl(req, authority), error: errorClass(err) });
+    return new Response("MITM listener: internal error", { status: 500 });
+  }
+}
+
+/** What events name: the path before login substitution, no query (either may hold a secret). */
+function eventUrl(req: Request, authority: string): string {
+  return `https://${authority}${URL.canParse(req.url) ? new URL(req.url).pathname : ""}`;
+}
+
+async function forwardInnerRequest(
+  req: Request,
+  authority: string,
+  credentials: MitmCredentialSource,
+  fetchFn: UpstreamFetch,
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
   egressPolicy: Pick<EgressPolicy, "allowsUrl">,
@@ -799,6 +831,7 @@ export async function handleInnerRequest(
   // upstream.
   const incoming = new URL(req.url);
   let targetUrl = `https://${authority}${incoming.pathname}${incoming.search}`;
+  const url = eventUrl(req, authority);
 
   // Read the body up-front. Connect-login substitution (below) may need
   // to rewrite it, and the planner check must run on the SUBSTITUTED url,
@@ -812,13 +845,13 @@ export async function handleInnerRequest(
     // which cancels the stream the moment the cap is crossed.
     const declared = Number(req.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxRequestBytes) {
-      emit({ kind: "request-refused", url: targetUrl, reason: "body too large" });
+      emit({ kind: "request-refused", url, reason: "body too large" });
       return new Response("MITM listener: request body exceeds limit", { status: 413 });
     }
     try {
       const bytes = await readRequestBodyBounded(req, maxRequestBytes);
       if (bytes === "exceeded") {
-        emit({ kind: "request-refused", url: targetUrl, reason: "body too large" });
+        emit({ kind: "request-refused", url, reason: "body too large" });
         return new Response("MITM listener: request body exceeds limit", { status: 413 });
       }
       // View over the exact-size buffer — no second copy of the body.
@@ -826,8 +859,8 @@ export async function handleInnerRequest(
     } catch (err) {
       emit({
         kind: "request-refused",
-        url: targetUrl,
-        reason: `body read: ${(err as Error).message}`,
+        url,
+        reason: `body read: ${errorClass(err)}`,
       });
       return new Response("MITM listener: body read error", { status: 400 });
     }
@@ -835,8 +868,9 @@ export async function handleInnerRequest(
 
   // The Headers we forward downstream. When a connect-login is in flight we
   // replace the inbound values with their substituted counterparts so the
-  // raw login secret reaches upstream proxy-side only — never the tool code
-  // and never a tool result.
+  // raw login secret leaves the sidecar only toward the upstream. The upstream's
+  // response is relayed as is: a login endpoint that echoes its input returns
+  // it to the tool (known residual, tracked separately).
   let headersForOutbound = req.headers;
 
   // Connect-login transient-input substitution (P1). Runs BEFORE
@@ -851,6 +885,9 @@ export async function handleInnerRequest(
   // request at an arbitrary host and exfiltrate the secret off-target. A
   // request outside those URIs is never substituted (any `{{...}}` literal it
   // carries stays a literal — a placeholder name, never the secret value).
+  // A request inside them that a secret would be substituted into is refused
+  // when an entry leaves the host to the caller: the injection rule
+  // (`buildAction` below) binds a login secret too.
   const active = credentials.activeInputs?.() ?? null;
   if (active && targetWithinAuthorizedUris(targetUrl, active.authorizedUris)) {
     const inboundHeaders: Record<string, string> = {};
@@ -863,36 +900,66 @@ export async function handleInnerRequest(
       active.inputs,
     );
     if ("failed" in result) {
-      emit({ kind: "request-refused", url: targetUrl, reason: "unresolved login placeholder" });
+      emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
+    }
+    const substituted =
+      result.url !== targetUrl ||
+      result.bodyText !== bodyText ||
+      Object.entries(result.headers).some(([k, v]) => v !== inboundHeaders[k]);
+    if (substituted && active.authorizedUris.some(isHostUnboundedUriPattern)) {
+      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
+      return new Response("MITM listener: credential allowlist leaves the host open", {
+        status: 403,
+      });
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
     const subbed = new Headers();
-    for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
+    for (const [k, v] of Object.entries(result.headers)) {
+      if (!isHttpFieldValue(v)) return refuseInvalidCredential(url, emit);
+      subbed.set(k, v);
+    }
     headersForOutbound = subbed;
   }
 
   // Hard egress allowlist on the FINAL url (substitution above may rewrite
   // it): an unauthorized request is refused, never forwarded un-injected.
   if (!egressPolicy.allowsUrl(targetUrl)) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "not-authorized" });
+    emit({ kind: "request-refused", url, reason: "not-authorized" });
     return new Response("MITM listener: target not authorized", { status: 403 });
   }
 
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
-  const buildAction = () => {
+  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
+  // auth's allowlist names, never to one an entry leaves to the caller. Applied to every build,
+  // the first attempt and the post-refresh replay alike; `null` = refused.
+  const buildAction = (): (MitmAction & { credentialRevision: string | undefined }) | null => {
     const ctx: MitmRequestContext = {
       url: targetUrl,
       headerNames: callerHeaderNames,
       deliveryPlans: credentials.deliveryPlans(),
     };
-    return planMitmAction(ctx, credentials.current());
+    const held = credentials.current();
+    const planned = { ...planMitmAction(ctx, held), credentialRevision: held.credentialRevision };
+    if (
+      planned.injectedHeader &&
+      planned.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)
+    ) {
+      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
+      return null;
+    }
+    return planned;
   };
 
   const action = buildAction();
+  if (!action) {
+    return new Response("MITM listener: credential allowlist leaves the host open", {
+      status: 403,
+    });
+  }
 
   const outboundHeaders = buildOutboundHeaders(
     headersForOutbound,
@@ -900,27 +967,28 @@ export async function handleInnerRequest(
     action.strippedHeaderNames,
     action.injectedHeader,
   );
+  if (!outboundHeaders) return refuseInvalidCredential(url, emit);
 
-  // SSRF defense-in-depth: the SNI host was checked at CONNECT, but the
-  // connect-login substitution above can rewrite `targetUrl` — re-check the
-  // final URL before egress (mirrors credential-proxy).
-  if (isBlockedUrl(targetUrl)) {
-    emit({ kind: "request-refused", url: targetUrl, reason: "target blocked by SSRF policy" });
-    return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
-  }
+  const send = (headers: Headers): Promise<Response> =>
+    fetchFn(targetUrl, {
+      method: req.method,
+      headers,
+      ...(body.byteLength > 0 ? { body } : {}),
+      signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
+    });
 
   let response: Response;
   try {
-    response = await fetchFn(targetUrl, {
-      method: req.method,
-      headers: outboundHeaders,
-      ...(body.byteLength > 0 ? { body } : {}),
-      redirect: "manual",
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-    });
+    response = await send(outboundHeaders);
   } catch (err) {
-    emit({ kind: "upstream-error", url: targetUrl, error: (err as Error).message });
-    return new Response(`MITM upstream error: ${(err as Error).message}`, { status: 502 });
+    // The SNI host was checked at CONNECT; the guard re-checks the final URL (the connect-login
+    // substitution can rewrite it) and the address it resolves to now.
+    if (err instanceof SsrfBlockedError && err.reason !== "resolution-failed") {
+      emit({ kind: "request-refused", url, reason: "target blocked by SSRF policy" });
+      return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
+    }
+    emit({ kind: "upstream-error", url, error: errorClass(err) });
+    return new Response("MITM listener: upstream request failed", { status: 502 });
   }
 
   // Recovery paths converge here:
@@ -958,9 +1026,10 @@ export async function handleInnerRequest(
 
   // Rebuild the action from the source's CURRENT state (fresh after a refresh /
   // re-login, identical for a same-credential replay) and re-issue the request
-  // once. Returns the new response, or null if the retry threw.
+  // once. Returns the new response, or null if the rebuild was refused or the retry threw.
   const refetch = async (): Promise<Response | null> => {
     const a = buildAction();
+    if (!a) return null;
     lastAction = a;
     const outbound = buildOutboundHeaders(
       headersForOutbound,
@@ -968,16 +1037,14 @@ export async function handleInnerRequest(
       a.strippedHeaderNames,
       a.injectedHeader,
     );
+    if (!outbound) {
+      emit({ kind: "request-refused", url, reason: INVALID_CREDENTIAL });
+      return null;
+    }
     try {
-      return await fetchFn(targetUrl, {
-        method: req.method,
-        headers: outbound,
-        ...(body.byteLength > 0 ? { body } : {}),
-        redirect: "manual",
-        signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-      });
+      return await send(outbound);
     } catch (err) {
-      emit({ kind: "upstream-error", url: targetUrl, error: `retry: ${(err as Error).message}` });
+      emit({ kind: "upstream-error", url, error: `retry: ${errorClass(err)}` });
       return null;
     }
   };
@@ -992,19 +1059,25 @@ export async function handleInnerRequest(
     matchedAuthKey !== null &&
     credentials.refreshOnUnauthorized
   ) {
-    const refreshed = await credentials.refreshOnUnauthorized(matchedAuthKey).catch(() => false);
+    const refreshed = await credentials
+      .refreshOnUnauthorized(matchedAuthKey, action.credentialRevision)
+      .catch(() => false);
     if (refreshed) {
       const replay = await refetch();
       if (replay) {
+        await response.body?.cancel().catch(() => {});
         response = replay;
         retried = true;
       }
     }
   }
 
+  if (response.ok && lastAction.injectedHeader !== null) {
+    credentials.reportUpstreamSuccess?.(lastAction.credentialRevision);
+  }
   emit({
     kind: "request-forwarded",
-    url: targetUrl,
+    url,
     method: req.method,
     status: response.status,
     authKey: lastAction.matchedAuth?.authKey ?? null,
@@ -1012,6 +1085,21 @@ export async function handleInnerRequest(
     headerInjected: lastAction.injectedHeader !== null,
   });
   return passthroughResponse(response);
+}
+
+const INVALID_CREDENTIAL = "credential is not a valid header value";
+
+/** A credential `Headers` would refuse in a TypeError quoting it: refused before it is set. */
+function refuseInvalidCredential(url: string, emit: (event: MitmListenerEvent) => void): Response {
+  emit({ kind: "request-refused", url, reason: INVALID_CREDENTIAL });
+  return new Response(`MITM listener: ${INVALID_CREDENTIAL}`, { status: 403 });
+}
+
+/** An error's class and code, never its message (a transport message may quote the URL). */
+function errorClass(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  const name = err instanceof Error ? err.name : typeof err;
+  return typeof code === "string" ? `${name} (${code})` : name;
 }
 
 function passthroughResponse(response: Response): Response {
@@ -1077,7 +1165,7 @@ function buildOutboundHeaders(
   authority: string,
   strip: readonly string[],
   inject: { name: string; value: string } | null,
-): Headers {
+): Headers | null {
   const stripLower = new Set(strip.map((s) => s.toLowerCase()));
   const out = new Headers();
   incoming.forEach((v, k) => {
@@ -1089,6 +1177,9 @@ function buildOutboundHeaders(
     out.set(k, v);
   });
   out.set("Host", authority);
-  if (inject) out.set(inject.name, inject.value);
+  if (inject) {
+    if (!isHttpFieldValue(inject.value)) return null;
+    out.set(inject.name, inject.value);
+  }
   return out;
 }

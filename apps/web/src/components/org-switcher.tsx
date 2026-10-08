@@ -27,7 +27,8 @@ import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
-import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { useCanCreateOrg } from "../hooks/use-auth";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
@@ -37,10 +38,12 @@ import { OrganizationAvatar } from "./organization-avatar";
 function ColumnHeader({
   label,
   onAdd,
+  addState,
   addLabel,
 }: {
   label: string;
   onAdd?: string;
+  addState?: unknown;
   addLabel: string;
 }) {
   return (
@@ -49,7 +52,11 @@ function ColumnHeader({
         {label}
       </span>
       {onAdd && (
-        <Link to={onAdd} className="text-primary flex items-center gap-1 text-xs font-medium">
+        <Link
+          to={onAdd}
+          state={addState}
+          className="text-primary flex items-center gap-1 text-xs font-medium"
+        >
           {addLabel}
           <Plus size={13} />
         </Link>
@@ -72,6 +79,7 @@ export function OrgSwitcher({
   const { switchSpace } = useSpaceSwitcher();
   const { isMobile, setOpenMobile } = useSidebar();
   const { can } = usePermissions();
+  const canCreateOrg = useCanCreateOrg();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organisation whose workspaces column two is showing. Null means "the
@@ -178,7 +186,7 @@ export function OrgSwitcher({
                     |
                   </span>
                   <span className="text-muted-foreground min-w-0 truncate">
-                    {currentSpace.name}
+                    {spaceLabel(currentSpace, t)}
                   </span>
                 </>
               )}
@@ -211,7 +219,7 @@ export function OrgSwitcher({
                   <span className="text-border mx-1.5" aria-hidden>
                     |
                   </span>
-                  <span className="text-muted-foreground">{currentSpace.name}</span>
+                  <span className="text-muted-foreground">{spaceLabel(currentSpace, t)}</span>
                 </>
               )}
             </span>
@@ -242,7 +250,7 @@ export function OrgSwitcher({
                   <span className="text-border mx-1.5" aria-hidden>
                     |
                   </span>
-                  <span className="text-muted-foreground">{currentSpace.name}</span>
+                  <span className="text-muted-foreground">{spaceLabel(currentSpace, t)}</span>
                 </>
               )}
             </span>
@@ -268,7 +276,7 @@ export function OrgSwitcher({
                 <span className="text-border" aria-hidden>
                   |
                 </span>
-                <span className="truncate font-semibold">{currentSpace.name}</span>
+                <span className="truncate font-semibold">{spaceLabel(currentSpace, t)}</span>
               </>
             )}
             <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
@@ -302,7 +310,10 @@ export function OrgSwitcher({
             <ColumnHeader
               label={t("switcher.orgsColumn")}
               addLabel={t("switcher.add")}
-              onAdd="/onboarding/create"
+              // Whether this user may create one is the server's rule, not a flag.
+              onAdd={canCreateOrg ? "/onboarding/create" : undefined}
+              // Without it the create step forwards a user who already has an org.
+              addState={{ fromSwitcher: true }}
             />
             {shownOrgs.map((org) => {
               const isCurrent = org.id === currentOrg.id;
@@ -414,14 +425,26 @@ export function OrgSwitcher({
                       )}
                     >
                       {/* The end of the pick: org AND workspace applied together. */}
+                      {/* A closed space is listed but cannot be entered (and an
+                          orphaned personal one only managed): disabled, and says why. */}
                       <button
                         type="button"
                         data-testid={`app-item-${app.id}`}
-                        disabled={app.access !== undefined && app.access !== "member"}
+                        disabled={!isSpaceEnterable(app)}
+                        title={
+                          isSpaceEnterable(app)
+                            ? undefined
+                            : t("spaces.requestAccess", { ns: "settings" })
+                        }
                         onClick={() => applyContext(exploredId ?? currentOrg.id, app.id)}
                         className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <span className="truncate text-sm font-medium">{spaceLabel(app, t)}</span>
+                        {!isSpaceEnterable(app) && (
+                          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                            {t("switcher.spaceOnRequest")}
+                          </span>
+                        )}
                         {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
                       </button>
                       {isCurrent && (

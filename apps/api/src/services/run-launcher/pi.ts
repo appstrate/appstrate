@@ -252,11 +252,11 @@ async function runPlatformContainerImpl(
           // endpoint, and tells the sidecar to terminate rather than proxy.
           clientApiShape: ALIAS_CLIENT_API_SHAPE,
           backingApiShape: llmConfig.apiShape,
-          // What the sidecar rebuilds the backing's pi-ai Model from — Pi's
-          // record, by its Pi provider key. Private to this channel — none of
-          // it reaches `containerEnv` below.
+          // What the sidecar rebuilds the backing's pi-ai Model from. Private
+          // to this channel — none of it reaches `containerEnv` below.
           backing: {
             providerId: llmConfig.piProvider,
+            dialect: llmConfig.dialect,
             ...(llmConfig.reasoning != null ? { reasoning: llmConfig.reasoning } : {}),
             input: llmConfig.input ?? ["text"],
           },
@@ -337,11 +337,11 @@ async function runPlatformContainerImpl(
       model: {
         api: llmConfig.apiShape,
         modelId,
-        // The Pi key the container resolves Pi's record (dialect, limits) by.
-        // MODEL_BASE_URL is the sidecar's, so without it every provider would
-        // get plain-OpenAI bytes. An aliased
-        // run needs no vendor key at all.
+        // The Pi provider the container speaks as, and its record's dialect.
+        // MODEL_BASE_URL is the sidecar's, so without them every provider
+        // would get plain-OpenAI bytes. An aliased run is given neither.
         piProvider: llmConfig.piProvider,
+        dialect: llmConfig.dialect,
         // pi-ai reads a subscription's identity from the key's shape; every
         // other run gets a constant.
         ...(delivery.route === "sidecar"

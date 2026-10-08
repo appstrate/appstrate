@@ -9,6 +9,7 @@ import { bootCritical, bootBackground, probeUsercontentReachability } from "./li
 import { createShutdownHandler } from "./lib/shutdown.ts";
 import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
+import { accessLog } from "./middleware/access-log.ts";
 import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
 import { errorHandler } from "./middleware/error-handler.ts";
@@ -84,6 +85,9 @@ app.use("*", requestId());
 // the span — and its bound logger trace context — covers the full handler
 // chain. Pass-through no-op when no provider is installed.
 app.use("*", telemetry());
+
+// Access log — one `debug` line per request; after `telemetry()` for its trace ids.
+app.use("*", accessLog());
 
 // Client IP — captures `getConnInfo(c).remote.address` into a per-Request
 // WeakMap so downstream code that only sees the bare `Request` (Better

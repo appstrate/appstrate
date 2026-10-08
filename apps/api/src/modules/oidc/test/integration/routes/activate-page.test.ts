@@ -16,7 +16,11 @@ import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestContext } from "../../../../../../test/helpers/auth.ts";
+import {
+  ageSessionPastUpdateAge,
+  createTestContext,
+  SESSION_TTL_MS,
+} from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
@@ -105,6 +109,27 @@ describe("GET /activate", () => {
     expect(html).toContain(`${userCode.slice(0, 4)}-${userCode.slice(4)}`);
   });
 
+  it("re-issues the session cookie beside its CSRF cookie when the session is past updateAge", async () => {
+    const cookie = await signUpPlatformUser();
+    const { userCode } = await requestDeviceCode();
+    const [signedUp] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, "activate-test@example.com"));
+    await ageSessionPastUpdateAge(signedUp!.id);
+
+    const res = await app.request(`/activate?user_code=${userCode}`, {
+      headers: { Cookie: cookie },
+    });
+
+    expect(res.status).toBe(200);
+    const setCookies = res.headers.getSetCookie();
+    const sessionCookies = setCookies.filter((c) => c.startsWith("better-auth.session_token="));
+    expect(sessionCookies).toHaveLength(1);
+    expect(sessionCookies[0]).toContain(`Max-Age=${SESSION_TTL_MS / 1000}`);
+    expect(setCookies.some((c) => c.startsWith("oidc_csrf="))).toBe(true);
+  });
+
   it("rejects a malformed user_code with the entry form + error", async () => {
     const cookie = await signUpPlatformUser();
     const res = await app.request("/activate?user_code=SHORT", {
@@ -158,6 +183,36 @@ describe("POST /activate", () => {
     expect(res.status).toBe(303);
     const location = res.headers.get("location") ?? "";
     expect(location).toBe("/activate?user_code=ABCDEFGH");
+  });
+
+  it("re-issues an aged session's cookie on POST /activate/deny", async () => {
+    const sessionCookie = await signUpPlatformUser();
+    const { userCode } = await requestDeviceCode();
+    const [signedUp] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, "activate-test@example.com"));
+    await ageSessionPastUpdateAge(signedUp!.id);
+    // CSRF from the session-less entry form, so nothing refreshes the session first.
+    const getRes = await app.request("/activate");
+    const csrfCookie = (getRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+    const csrfToken = (await getRes.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+
+    const res = await app.request("/activate/deny", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: `${sessionCookie}; ${csrfCookie}`,
+      },
+      body: new URLSearchParams({ _csrf: csrfToken, user_code: userCode }).toString(),
+    });
+
+    expect(res.status).toBe(200);
+    const sessionCookies = res.headers
+      .getSetCookie()
+      .filter((c) => c.startsWith("better-auth.session_token="));
+    expect(sessionCookies).toHaveLength(1);
+    expect(sessionCookies[0]).toContain(`Max-Age=${SESSION_TTL_MS / 1000}`);
   });
 
   it("rejects the submission with 403 when the CSRF token is missing", async () => {

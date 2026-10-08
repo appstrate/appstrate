@@ -20,6 +20,8 @@ type Permission = CorePermission | (string & {});
 type RouteAccess = {
   /** Module feature flag (`features.<key>`) without which the route does not exist. */
   readonly feature?: string;
+  /** Absent in a personal space: the server refuses its writes there (409 `personal_space_*`). */
+  readonly teamSpaceOnly?: true;
 } & (
   | {
       readonly anyOf: readonly Permission[];
@@ -140,6 +142,7 @@ export const ROUTE_ACCESS = {
   "/workspace-settings/general": { anyOf: ["space-settings:write"], operations: ["updateSpace"] },
   // An inviter who may not list members still reaches the add-member form.
   "/workspace-settings/members": {
+    teamSpaceOnly: true,
     anyOf: ["space-members:read", "space-members:invite"],
     operations: ["listSpaceMembers", "addSpaceMember"],
   },
@@ -148,13 +151,22 @@ export const ROUTE_ACCESS = {
     anyOf: ["space-settings:write"],
     operations: ["getSpaceSmtpConfig"],
   },
-  "/workspace-settings/api-keys": { anyOf: ["api-keys:read"], operations: ["listApiKeys"] },
+  "/workspace-settings/api-keys": {
+    teamSpaceOnly: true,
+    anyOf: ["api-keys:read"],
+    operations: ["listApiKeys"],
+  },
   "/workspace-settings/oauth": {
     feature: "oidc",
+    teamSpaceOnly: true,
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
-  "/workspace-settings/end-users": { anyOf: ["end-users:read"], operations: ["listEndUsers"] },
+  "/workspace-settings/end-users": {
+    teamSpaceOnly: true,
+    anyOf: ["end-users:read"],
+    operations: ["listEndUsers"],
+  },
   // Both levels; the detail's guard is the row's level, resolved in its handler.
   "/workspace-settings/webhooks": {
     feature: "webhooks",
@@ -170,16 +182,18 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
-/** `absent`: the module behind the route is not loaded, so the route does not exist. */
+/** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
 type RouteVerdict = "absent" | "granted" | "denied";
 
 export function routeVerdict(
   path: RoutePath,
   can: (permission: Permission) => boolean,
   features: Readonly<Record<string, boolean | undefined>>,
+  inPersonalSpace: boolean,
 ): RouteVerdict {
   const access: RouteAccess = ROUTE_ACCESS[path];
   if (access.feature && !features[access.feature]) return "absent";
+  if (access.teamSpaceOnly && inPersonalSpace) return "absent";
   if ("open" in access) return "granted";
   return access.anyOf.some(can) ? "granted" : "denied";
 }

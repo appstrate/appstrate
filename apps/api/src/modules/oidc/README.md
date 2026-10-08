@@ -177,6 +177,8 @@ The OIDC module also owns the lifecycle of CLI refresh-token families that back 
 
 The user-facing routes are **cookie-only by design** — a leaked API key (or a compromised stamping flow) must not be able to sign every device out at once. The org-scoped admin routes accept cookie or API key, gated by the `cli-sessions: read | delete` resource the module contributes via `permissionsContribution()` (granted to owner + admin by default; not API-key-grantable, not end-user-grantable).
 
+A password change or reset revokes every family of the account too (reason `password_changed`), along with its OAuth refresh and access tokens and its device codes, approved or not: `services/credential-change.ts`, installed at `init()` through `setCredentialChangeHook` and called by core's `endOtherAccessAfterCredentialChange` (`packages/db/src/credential-change.ts`) once the other Better Auth sessions have ended.
+
 ## Auth strategy contributed
 
 A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix, per Phase 0 discipline rule). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.
@@ -420,12 +422,7 @@ Before exposing the module to external satellites:
 
 `space_smtp_configs.pass_encrypted` and `space_social_providers.client_secret_encrypted` are AES-256-GCM encrypted via `@appstrate/connect`. Each ciphertext is a self-describing envelope (`v1:<kid>:<base64>`): the embedded key id (`kid`) drives decryption against the connect keyring, so per-space secrets rotate exactly like every other credential on the platform — no parallel version column, no module-specific SOP.
 
-To rotate `CONNECTION_ENCRYPTION_KEY`:
-
-1. Generate the new key, set it as `CONNECTION_ENCRYPTION_KEY` with a new `CONNECTION_ENCRYPTION_KEY_ID`, and move the old key into `CONNECTION_ENCRYPTION_KEYS` (the retired-keys map, keyed by its old kid).
-2. Deploy. Existing rows keep decrypting via their embedded kid; new/updated rows are encrypted under the active kid. Nothing is disabled for tenants during the rotation window.
-3. (Optional hygiene) Re-`PUT` rows via the admin API to re-encrypt them under the active kid, then drop the retired kid from `CONNECTION_ENCRYPTION_KEYS` once no row references it.
-4. A row whose kid was removed from the keyring (or whose ciphertext is corrupt) fails decryption; the resolver logs it and treats the row as "not configured" — it never silently falls through to instance-level env credentials or surfaces as a cryptic crypto error.
+To rotate `CONNECTION_ENCRYPTION_KEY` (both columns included): [`docs/ENV.md` § "Rotating `CONNECTION_ENCRYPTION_KEY`"](../../../../../docs/ENV.md#rotating-connection_encryption_key). A row whose kid is no longer in the keyring (or whose ciphertext is corrupt) fails decryption; the resolver logs it and treats the row as "not configured" — it never falls through to instance-level env credentials.
 
 Cross-instance cache invalidation: admin `PUT`/`DELETE` publishes the invalidated key on the platform `PubSub` (`oidc:smtp-cache-invalidate`, `oidc:social-cache-invalidate`). Every API instance subscribes at boot and evicts its local `TtlCache` entry on publish — see `services/ttl-cache.ts`. When Redis is unavailable the subscribe fails open (logged as `oidc per-space cache: pub/sub subscribe failed, running single-instance`); in that mode, other pods only see admin mutations after the **10-second null TTL** expires. Multi-instance deployments MUST configure `REDIS_URL` for immediate invalidation. Operators should also expect a ≤10 s propagation window on freshly-configured SMTP/social rows (first read caches `null`, subsequent reads see the new row once the null entry expires).
 

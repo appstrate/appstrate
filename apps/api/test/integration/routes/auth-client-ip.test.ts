@@ -20,12 +20,10 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { session, user } from "@appstrate/db/schema";
-import {
-  _rebuildAuthForTesting,
-  setPostBootstrapOrgHook,
-  setRealmResolver,
-} from "@appstrate/db/auth";
+import { setPostBootstrapOrgHook, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
+import { restoreAfterSuite } from "../../helpers/auth.ts";
+import { useAuthEnv } from "../../helpers/auth-env.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
@@ -65,6 +63,9 @@ async function spendBudget(headers: Record<string, string>): Promise<void> {
     expect(await attemptSignIn(headers)).not.toBe(429);
   }
 }
+
+restoreAfterSuite(_authHookSlotsForTesting.realmResolver);
+restoreAfterSuite(_authHookSlotsForTesting.postBootstrapOrg);
 
 describe("Better Auth rate limiting keys on the platform-resolved client IP", () => {
   beforeEach(async () => {
@@ -125,30 +126,21 @@ describe("Better Auth rate limiting keys on the platform-resolved client IP", ()
  */
 describe("an auth.api-backed route hands Better Auth the platform's address", () => {
   const BOOTSTRAP_TOKEN = "kZ7p_4xQm9Lr8sT2vN1wJ6yH3eC5bD0aF9oI8uP7tRk";
-  const snapshot = {
-    AUTH_BOOTSTRAP_TOKEN: process.env.AUTH_BOOTSTRAP_TOKEN,
-    AUTH_BOOTSTRAP_ORG_NAME: process.env.AUTH_BOOTSTRAP_ORG_NAME,
-  };
+  const setAuthEnv = useAuthEnv();
 
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
     _resetBootstrapTokenForTesting();
     setPostBootstrapOrgHook(async () => {});
-    setRealmResolver(async () => "platform");
-    process.env.AUTH_BOOTSTRAP_TOKEN = BOOTSTRAP_TOKEN;
-    process.env.AUTH_BOOTSTRAP_ORG_NAME = "Client IP HQ";
     setTrustProxy("true");
-    _rebuildAuthForTesting();
+    setAuthEnv({
+      AUTH_BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN,
+      AUTH_BOOTSTRAP_ORG_NAME: "Client IP HQ",
+    });
   });
 
   afterAll(() => {
-    for (const [key, value] of Object.entries(snapshot)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    _resetCacheForTesting();
-    _rebuildAuthForTesting();
     _resetBootstrapTokenForTesting();
   });
 

@@ -57,6 +57,13 @@ const DECLARED_OTHER = "@schedbodyorg/dep-other";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  seedConnectionTestIntegration,
+  seedIntegrationConnection,
+} from "../../helpers/run-connection-fixtures.ts";
+
+/** The integration the fixture agent declares — the one `connection_overrides` may key on. */
+const INTEGRATION = "@schedbodyorg/gmail";
 
 const app = getTestApp();
 
@@ -76,6 +83,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     // names nothing the effective manifest declares is refused on its own rule
     // (400, before the authority gate), so a control that wants to exercise the
     // VALUE gate has to name declared ones.
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedPackage({
       id: DECLARED_SKILL,
       type: "skill",
@@ -96,10 +104,21 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
         schema_version: "0.1",
         display_name: "Sched Body Agent",
         author: "tester",
-        dependencies: { skills: { [DECLARED_SKILL]: "^1.0.0", [DECLARED_OTHER]: "^1.0.0" } },
+        dependencies: {
+          skills: { [DECLARED_SKILL]: "^1.0.0", [DECLARED_OTHER]: "^1.0.0" },
+          integrations: { [INTEGRATION]: "^1.0.0" },
+        },
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
       },
     });
   });
+
+  /** `count` connections of the caller's own on the declared integration. */
+  async function ownConnections(count: number): Promise<string[]> {
+    return Promise.all(
+      Array.from({ length: count }, () => seedIntegrationConnection(ctx, INTEGRATION)),
+    );
+  }
 
   async function post(body: Record<string, unknown>) {
     return app.request(`/api/agents/${agentRef}/schedules`, {
@@ -125,9 +144,9 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     for (const id of ["", "conn_1"]) {
       const res = await post({
         cron_expression: "0 9 * * 1-5",
-        connection_overrides: { "@acme/gmail": [id] },
+        connection_overrides: { [INTEGRATION]: [id] },
       });
-      await expectRejectedField(res, "connection_overrides.@acme/gmail[0]");
+      await expectRejectedField(res, `connection_overrides.${INTEGRATION}[0]`);
     }
   });
 
@@ -136,17 +155,17 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     // frozen pin would be skipped in silence on every fire.
     const res = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: { "@acme/gmail": [] },
+      connection_overrides: { [INTEGRATION]: [] },
     });
-    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+    await expectRejectedField(res, `connection_overrides.${INTEGRATION}`);
   });
 
   it("rejects a string where a set belongs", async () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: { "@acme/gmail": "conn_1" },
+      connection_overrides: { [INTEGRATION]: "conn_1" },
     });
-    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+    await expectRejectedField(res, `connection_overrides.${INTEGRATION}`);
   });
 
   it("rejects a repeated connection id in a set, in either case", async () => {
@@ -154,21 +173,21 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await expectRejectedField(
       await post({
         cron_expression: "0 9 * * 1-5",
-        connection_overrides: { "@acme/gmail": [a, a] },
+        connection_overrides: { [INTEGRATION]: [a, a] },
       }),
-      "connection_overrides.@acme/gmail",
+      `connection_overrides.${INTEGRATION}`,
     );
     await expectRejectedField(
       await post({
         cron_expression: "0 9 * * 1-5",
-        connection_overrides: { "@acme/gmail": [a, a.toUpperCase()] },
+        connection_overrides: { [INTEGRATION]: [a, a.toUpperCase()] },
       }),
-      "connection_overrides.@acme/gmail",
+      `connection_overrides.${INTEGRATION}`,
     );
     // Control: two different ids freeze onto the row.
     const distinct = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: { "@acme/gmail": [crypto.randomUUID(), crypto.randomUUID()] },
+      connection_overrides: { [INTEGRATION]: await ownConnections(2) },
     });
     expect(distinct.status).toBe(201);
   });
@@ -177,29 +196,41 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     const res = await post({
       cron_expression: "0 9 * * 1-5",
       connection_overrides: {
-        "@acme/gmail": Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
+        [INTEGRATION]: Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
           crypto.randomUUID(),
         ),
       },
     });
-    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+    await expectRejectedField(res, `connection_overrides.${INTEGRATION}`);
   });
 
   it("accepts a connection_overrides set of 1 and of the cap (control)", async () => {
+    const [first, ...rest] = await ownConnections(MAX_CONNECTIONS_PER_INTEGRATION);
     const one = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: { "@acme/gmail": [crypto.randomUUID()] },
+      connection_overrides: { [INTEGRATION]: [first!] },
     });
     expect(one.status).toBe(201);
     const capped = await post({
       cron_expression: "0 9 * * 1-5",
-      connection_overrides: {
-        "@acme/gmail": Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, () =>
-          crypto.randomUUID(),
-        ),
-      },
+      connection_overrides: { [INTEGRATION]: [first!, ...rest] },
     });
     expect(capped.status).toBe(201);
+  });
+
+  it("rejects a connection_overrides key the agent does not declare, and freezes nothing", async () => {
+    // The fire's resolver reads declared ids only, so an undeclared key used to
+    // freeze onto the row and bind a lower cascade layer at every tick.
+    const res = await post({
+      cron_expression: "0 9 * * 1-5",
+      connection_overrides: { "@schedbodyorg/typo": await ownConnections(1) },
+    });
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.param).toBe("connection_overrides");
+    expect(problem.detail).toContain("@schedbodyorg/typo");
+    expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
   it('rejects a "latest" dependency_overrides value with 400', async () => {
@@ -278,6 +309,16 @@ describe("PATCH /api/schedules/:id — body validation", () => {
   it("accepts a legal patch (control)", async () => {
     const res = await put({ enabled: false });
     expect(res.status).toBe(200);
+  });
+
+  it("rejects a connection_overrides key the fired agent does not declare, and keeps the row", async () => {
+    const res = await put({ connection_overrides: { "@schedputorg/typo": [crypto.randomUUID()] } });
+    expect(res.status).toBe(400);
+    const problem = (await res.json()) as { code?: string; detail?: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.detail).toContain("@schedputorg/typo");
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+    expect(row!.connectionOverrides).toBeNull();
   });
 
   it("rejects an unknown field with 400 instead of applying the rest of the patch", async () => {

@@ -33,6 +33,7 @@ import {
   integrationConnections,
   integrationOauthClients,
   integrationPins,
+  runs,
   schedules,
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
@@ -51,6 +52,7 @@ import {
   deleteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
 import { upsertOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -278,7 +280,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
 
       const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
-      expect(listed.map((a) => a.packageId)).toEqual(["@pinsorg/runs-here"]);
+      expect(listed.map((a) => a.agent_package_id)).toEqual(["@pinsorg/runs-here"]);
     });
 
     it("a pin is refused for an agent this space does not RUN", async () => {
@@ -302,7 +304,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
       // Same agent, switched ON — the pin lands.
       await seedSpacePackage(scope.spaceId, "@pinsorg/pin-off", { enabled: true });
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: "@pinsorg/pin-off",
         connectionIds: [connectionId],
         createdBy: ctx.user.id,
@@ -365,7 +367,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("pins N connections as one row, in the caller's order", async () => {
       const ids = await seedSharedConnections(3);
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
         createdBy: ctx.user.id,
@@ -379,16 +381,18 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("a second write REPLACES the set rather than merging into it", async () => {
       const ids = await seedSharedConnections(3);
-      await upsertIntegrationPin(scope, INTEGRATION, {
+      const first = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
         createdBy: ctx.user.id,
       });
-      await upsertIntegrationPin(scope, INTEGRATION, {
+      expect(first.previous).toBeNull();
+      const second = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: [ids[2]!],
         createdBy: ctx.user.id,
       });
+      expect(second.previous).toEqual(ids);
       const listed = await listIntegrationPins(scope, INTEGRATION);
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
@@ -398,7 +402,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     it("echoes what the next read returns, in the caller's order", async () => {
       const ids = await seedSharedConnections(2);
       const reversed = [...ids].reverse();
-      const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: reversed.map((id) => id.toUpperCase()),
         createdBy: ctx.user.id,
@@ -432,8 +436,8 @@ describe("integration-pins-service — DB access/ownership", () => {
       ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
       // Control: a shared connection outside the set unshares freely.
       const [outside] = await seedSharedConnections(1);
-      const row = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
-      expect(row.sharedWithOrg).toBe(false);
+      const { connection } = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
+      expect(connection.sharedWithOrg).toBe(false);
     });
 
     it("returns the written pin even when the row is deleted right after the write", async () => {
@@ -450,7 +454,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         CREATE TRIGGER pin_vanish_trg AFTER INSERT OR UPDATE ON integration_pins
         FOR EACH ROW EXECUTE FUNCTION pin_vanish_fn()`);
       try {
-        const pin = await upsertIntegrationPin(scope, INTEGRATION, {
+        const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: ids,
           createdBy: ctx.user.id,
@@ -504,9 +508,8 @@ describe("integration-pins-service — DB access/ownership", () => {
       const owner = { type: "user" as const, id: memberId };
       await deleteIntegrationConnection(scope, ownPinned!, owner);
       await deleteIntegrationConnection(scope, colleaguePinned!, owner);
-      expect(
-        (await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false })).sharedWithOrg,
-      ).toBe(false);
+      const { connection } = await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false });
+      expect(connection.sharedWithOrg).toBe(false);
       const left = await db
         .select({ id: integrationConnections.id })
         .from(integrationConnections)
@@ -633,13 +636,74 @@ describe("integration-pins-service — DB access/ownership", () => {
         });
       });
 
-      it("keeps the id in a COLLEAGUE's schedule — it fails loudly, it never shrinks", async () => {
+      it("disables a COLLEAGUE's armed schedule naming it, its overrides kept, and its fire runs nothing", async () => {
         const [a, b] = await seedSharedConnections(2);
-        const colleague = await scheduleWith({ [INTEGRATION]: [a!, b!] }, { userId: ctx.user.id });
+        const colleague = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          userId: ctx.user.id,
+          nextRunAt: new Date(Date.now() + 3_600_000),
+          connectionOverrides: { [INTEGRATION]: [a!, b!] },
+        });
 
-        await deleteIntegrationConnection(scope, b!, owner());
+        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, b!, owner());
 
-        expect(await overridesOf(colleague)).toEqual({ [INTEGRATION]: [a!, b!] });
+        expect(disabledScheduleIds).toEqual([colleague.id]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, colleague.id));
+        expect(row).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          nextRunAt: null,
+          connectionOverrides: { [INTEGRATION]: [a!, b!] },
+        });
+        expect(await triggerScheduledRun(colleague.id)).toBeNull();
+        expect(await db.select({ id: runs.id }).from(runs)).toEqual([]);
+      });
+
+      it("disables an END USER's armed schedule naming it: its actor has no user id", async () => {
+        const [a] = await seedSharedConnections(1);
+        const endUser = await seedEndUser({
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          externalId: "ext-eu-foreign-schedule",
+        });
+        const foreign = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          endUserId: endUser.id,
+          connectionOverrides: { [INTEGRATION]: [a!] },
+        });
+
+        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, a!, owner());
+
+        expect(disabledScheduleIds).toEqual([foreign.id]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, foreign.id));
+        expect(row).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          connectionOverrides: { [INTEGRATION]: [a!] },
+        });
+      });
+
+      it("leaves a colleague's DISABLED schedule naming it as it is, its reason included", async () => {
+        const [a] = await seedSharedConnections(1);
+        const paused = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          userId: ctx.user.id,
+          enabled: false,
+          disabledReason: "actor_invalid",
+          connectionOverrides: { [INTEGRATION]: [a!] },
+        });
+
+        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, a!, owner());
+
+        expect(disabledScheduleIds).toEqual([]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, paused.id));
+        expect(row).toEqual(paused);
       });
 
       it("prunes an end user's own schedules when the end user deletes", async () => {
@@ -681,6 +745,53 @@ describe("integration-pins-service — DB access/ownership", () => {
           .from(schedules)
           .where(eq(schedules.id, emptied));
         expect(row!.enabled).toBe(false);
+      });
+
+      it("an OAuth client delete disables a colleague's schedule naming two of its connections once", async () => {
+        const minted = await seedSharedConnections(2);
+        const clientId = await seedClientMinting(minted);
+        const colleague = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          userId: ctx.user.id,
+          nextRunAt: new Date(Date.now() + 3_600_000),
+          connectionOverrides: { [INTEGRATION]: minted },
+        });
+
+        const { disabledScheduleIds } = await deleteIntegrationOAuthClient(
+          scope,
+          INTEGRATION,
+          clientId,
+        );
+
+        expect(disabledScheduleIds).toEqual([colleague.id]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, colleague.id));
+        expect(row).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          nextRunAt: null,
+          connectionOverrides: { [INTEGRATION]: minted },
+        });
+      });
+
+      it("an OAuth client delete forgets two minted connections sharing a pin and a schedule set", async () => {
+        const minted = await seedSharedConnections(2);
+        const clientId = await seedClientMinting(minted);
+        await pinAs(memberId, minted);
+        const emptied = await scheduleWith({ [INTEGRATION]: minted });
+
+        const { deletedConnections, disabledScheduleIds } = await deleteIntegrationOAuthClient(
+          scope,
+          INTEGRATION,
+          clientId,
+        );
+
+        // The pin goes and the schedule is disabled once, whichever connection is forgotten first.
+        expect(deletedConnections).toBe(2);
+        expect(await memberPinSet(memberId)).toBeNull();
+        expect(await overridesOf(emptied)).toBeNull();
+        expect(disabledScheduleIds).toEqual([emptied]);
       });
 
       it("touches no pin and no schedule when the delete is refused", async () => {
@@ -790,12 +901,18 @@ describe("integration-pins-service — DB access/ownership", () => {
         label: "Prod",
       });
       // Control for the refusal above: the row's own label is not "another" row's.
-      expect((await updateConnectionMetadata(mine, { label: "prod" })).label).toBe("prod");
+      expect((await updateConnectionMetadata(mine, { label: "prod" })).connection.label).toBe(
+        "prod",
+      );
       // Verbatim comparison, the sidecar's enum: `Prod` is a second address.
       await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "staging" });
-      expect((await updateConnectionMetadata(mine, { label: "Staging" })).label).toBe("Staging");
+      expect((await updateConnectionMetadata(mine, { label: "Staging" })).connection.label).toBe(
+        "Staging",
+      );
       // `Prod` is taken on the OTHER integration only.
-      expect((await updateConnectionMetadata(mine, { label: "Prod" })).label).toBe("Prod");
+      expect((await updateConnectionMetadata(mine, { label: "Prod" })).connection.label).toBe(
+        "Prod",
+      );
     });
   });
 

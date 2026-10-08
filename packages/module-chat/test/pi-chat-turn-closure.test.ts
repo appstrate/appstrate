@@ -136,6 +136,32 @@ describe("closePiTurn", () => {
     expect(JSON.stringify(message)).not.toContain("leaked detail");
   });
 
+  it("reports a failure that named no request id under the turn's own, live and persisted", async () => {
+    const chunks = closePiTurn({
+      error: new Error("Authentication Fails"),
+      finishReason: "error",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 0,
+      stepCapReached: false,
+      ...MODEL,
+      requestId: "req_turn1",
+      newId: () => "assistant-1",
+    }).chunks;
+
+    // Live: the transient error chunk is all the client reads before a reload.
+    expect(chunks.find((chunk) => chunk.type === "error")).toEqual({
+      type: "error",
+      errorText: "appstrate:chat-turn-error:credential_unavailable:req_turn1",
+    });
+    // Reloaded: the persisted metadata.
+    expect(turnMetadataFromMessage(await assemble(chunks))).toMatchObject({
+      errorCategory: "credential_unavailable",
+      requestId: "req_turn1",
+    });
+  });
+
   it("finishes a started prompt failure exactly once for reload persistence", async () => {
     const chunks: UIMessageChunk[] = [
       { type: "start", messageId: "assistant-after-start" },

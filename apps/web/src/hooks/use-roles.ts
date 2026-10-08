@@ -51,17 +51,26 @@ export function useInvalidateRoles() {
 
 export function useCreateRole() {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("post", "/api/roles", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/roles", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useUpdateRole() {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("patch", "/api/roles/{id}", { onSuccess: invalidate });
+  return $api.useMutation("patch", "/api/roles/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useDeleteRole() {
   const invalidate = useInvalidateRoles();
-  return $api.useMutation("delete", "/api/roles/{id}", { onSuccess: invalidate });
+  return $api.useMutation("delete", "/api/roles/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 /** `value` folds the wire's `preset_role` / `custom_role_id` into the one string a `<Select>` carries. */

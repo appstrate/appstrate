@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
 
@@ -35,6 +36,20 @@ export function withConnectionOverride(
   const { connection_overrides: picks, ...rest } = overrides;
   const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
+}
+
+/**
+ * `overrides` with `connection_overrides` narrowed to the integrations the definition declares:
+ * the server refuses any other key (400). `declared` unknown (not loaded) keeps every key.
+ */
+export function withDeclaredConnections(
+  overrides: RunOverridesValue,
+  declared: readonly string[] | undefined,
+): RunOverridesValue {
+  const { connection_overrides: picks, ...rest } = overrides;
+  if (!picks || !declared) return overrides;
+  const kept = Object.entries(picks).filter(([id]) => declared.includes(id));
+  return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
 }
 
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
@@ -107,4 +122,16 @@ export function placeCreatedConnection(input: {
         ? checkedIds
         : [...checkedIds, createdId],
   };
+}
+
+/**
+ * Option label for the two admin pickers (org default, pins). Those lists
+ * are org-wide — since the connections endpoint returns shared connections
+ * owned by other members, an admin choosing a cross-agent default is picking
+ * between rows whose labels can collide ("Connexion 1" for two members), so
+ * the owner is part of the identity here. The per-row table carries the same
+ * information as a badge instead, where a suffix would fight the rename UI.
+ */
+export function connectionOptionLabel(c: IntegrationConnection): string {
+  return c.owner_name ? `${c.label} — ${c.owner_name}` : c.label;
 }

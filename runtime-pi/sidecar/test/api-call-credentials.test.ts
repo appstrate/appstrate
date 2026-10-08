@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { createApiCallCredentialAdapter } from "../api-call-credentials.ts";
 import { executeApiCall } from "../credential-proxy.ts";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import {
   createIntegrationCredentialsSource,
@@ -283,7 +283,10 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "primary",
       declaredUris: ["https://api.example.com/**"],
     });
-    const result = await adapter.refreshCredentials("@scope/integ");
+    const result = await adapter.refreshCredentials(
+      "@scope/integ",
+      await adapter.fetchCredentials("@scope/integ"),
+    );
     expect(refreshed).toBe(true);
     expect(result?.credentials[PROXY_INJECTED_FIELD]).toBe("AT");
   });
@@ -310,7 +313,12 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "session",
       declaredUris: ["https://api.example.com/**"],
     });
-    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+    expect(
+      await adapter.refreshCredentials(
+        "@scope/integ",
+        await adapter.fetchCredentials("@scope/integ"),
+      ),
+    ).toBeNull();
   });
 
   it("refreshCredentials returns null when the credential was NOT rotated", async () => {
@@ -325,13 +333,18 @@ describe("createApiCallCredentialAdapter — refresh re-snapshot", () => {
       authKey: "primary",
       declaredUris: ["https://api.example.com/**"],
     });
-    expect(await adapter.refreshCredentials("@scope/integ")).toBeNull();
+    expect(
+      await adapter.refreshCredentials(
+        "@scope/integ",
+        await adapter.fetchCredentials("@scope/integ"),
+      ),
+    ).toBeNull();
   });
 });
 
 /**
  * The adapter feeding `executeApiCall` (#1627): the list the platform renders for the connection
- * decides what matches; only the DECLARED list pins the SSRF gate or shares cookies.
+ * decides what matches; only the DECLARED list shares cookies or can skip the SSRF gate.
  */
 describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declared authorized_uris", () => {
   function run(
@@ -388,7 +401,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
     expect((await call("{{site_url}}/wp-json/x")).ok).toBe(true);
     expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
     const other = await call("https://other.example.com/wp-json/x");
-    expect(other).toMatchObject({ ok: false, status: 403 });
+    expect(other).toMatchObject({ ok: false, code: "unauthorized_target" });
     expect(hits).toHaveLength(1);
   });
 
@@ -397,7 +410,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
     [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
   ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
     const { call, hits } = run(uris, fields);
-    expect(await call(target)).toMatchObject({ ok: false, status: 403 });
+    expect(await call(target)).toMatchObject({ ok: false, code: "blocked_target" });
     expect(hits).toEqual([]);
   });
 

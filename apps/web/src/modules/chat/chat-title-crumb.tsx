@@ -34,7 +34,7 @@ export function ChatTitleCrumb({
   const { data: sessions } = useSessions();
   const setEntries = useBreadcrumbStore((s) => s.setEntries);
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
-  const title = session ? (session.title ?? t("list.untitled")) : null;
+  const title = session ? (session.title ?? t("threads.new")) : null;
 
   useEffect(() => {
     if (!conversationId || title === null) {

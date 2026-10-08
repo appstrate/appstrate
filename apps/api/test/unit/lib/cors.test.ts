@@ -33,7 +33,7 @@ describe("apiCors", () => {
       expect(list).toContain(name);
     }
     // Server-to-server proxy headers stay private: no browser calls those routes.
-    for (const name of ["x-auth-refreshed", "x-truncated", "x-llm-proxy-cache-status"]) {
+    for (const name of ["x-auth-refreshed", "x-truncated", "cache-status"]) {
       expect(list).not.toContain(name);
     }
   });

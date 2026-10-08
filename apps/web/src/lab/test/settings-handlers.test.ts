@@ -75,13 +75,32 @@ describe("settings lab mutations", () => {
     it("lists the org client the space inherits, and the system one the org does", () => {
       expect(rows(space).map((c) => [c.client_ref, c.source, c.is_default])).toEqual([
         ["cli_lab_org", "org", false],
-        ["cli_lab_custom", "custom", true],
-        ["cli_lab_second", "custom", false],
+        ["cli_lab_custom", "space", true],
+        ["cli_lab_second", "space", false],
       ]);
       expect(rows(org).map((c) => [c.client_ref, c.source, c.is_default])).toEqual([
-        ["sys_a91f2c", "built-in", false],
+        ["sys_a91f2c", "system", false],
         ["cli_lab_org", "org", true],
       ]);
+    });
+
+    it("patches a client in place: client_id kept, a null redirect_uri clears it", () => {
+      const url = new URL(
+        "http://lab.local/api/integrations/@appstrate/google-drive/oauth-clients/cli_lab_second",
+      );
+      const patched = resolveHandler("PATCH", url, "nominal", new Headers(), {
+        client_id: "ignored",
+        redirect_uri: null,
+      });
+      expect(patched?.status).toBe(200);
+      expect(patched?.body).toMatchObject({
+        client_id: "884012773901-p3t7d5j1a2f6.apps.googleusercontent.com",
+        redirect_uri: null,
+        token_endpoint_auth_method: "none",
+      });
+      expect(
+        resolveHandler("PATCH", url, "nominal", new Headers(), { client_secret: "" })?.status,
+      ).toBe(400);
     });
 
     it("promotes a space client to the org tier", () => {

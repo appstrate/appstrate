@@ -1,6 +1,5 @@
 [test]
 preload = ["./test/setup/preload.ts"]
-timeout = 15000
 coverageSkipTestFiles = true
 pathIgnorePatterns = ["e2e/**"]
 # Exclude non-product code from coverage so local `bun test --coverage` and the

@@ -23,12 +23,8 @@ function client(
 
 describe("mergeClientTiers", () => {
   it("lists each client once, space first, and keeps both verdicts", () => {
-    const space = [
-      client("org_a", "org"),
-      client("sp_1", "custom", true),
-      client("sp_2", "custom"),
-    ];
-    const org = [client("sys", "built-in"), client("org_a", "org", true)];
+    const space = [client("org_a", "org"), client("sp_1", "space", true), client("sp_2", "space")];
+    const org = [client("sys", "system"), client("org_a", "org", true)];
 
     const rows = mergeClientTiers(space, org);
 

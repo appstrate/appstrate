@@ -5,14 +5,23 @@
 // organization membership. Self-hosters get a calm "wait for invitation"
 // screen instead of a broken /onboarding/create flow.
 
+import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { useAuth } from "../../hooks/use-auth";
+import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
+import { useOrg } from "../../hooks/use-org";
+import { waitingStepRedirect } from "../../lib/onboarding-entry";
 import { Mail } from "lucide-react";
 
 export function OnboardingWaitingStep() {
   const { t } = useTranslation("settings");
   const { user, logout } = useAuth();
+  const canCreateOrg = useCanCreateOrg();
+  const { orgs, loading } = useOrg();
+
+  if (loading) return null;
+  const redirect = waitingStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0 });
+  if (redirect) return <Navigate to={redirect} replace />;
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">

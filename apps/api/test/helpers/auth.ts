@@ -16,9 +16,11 @@
  *
  * Organizations, memberships, and spaces are seeded directly in the DB.
  */
+import { afterAll, afterEach, beforeAll, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
-import { getAuth } from "@appstrate/db/auth";
+import { getAuth, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { db } from "./db.ts";
+import { captureMails, firstLink } from "./smtp.ts";
 import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -72,7 +74,7 @@ export interface TestContext {
 // and immediate.
 
 const SESSION_COOKIE_NAME = "better-auth.session_token";
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // matches auth.ts session.expiresIn
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // matches auth.ts session.expiresIn
 
 const textEncoder = new TextEncoder();
 let signingKey: CryptoKey | null = null;
@@ -166,6 +168,14 @@ export async function createTestUser(
   ]);
 
   return { id: userId, email, name, cookie: await signSessionCookie(token) };
+}
+
+/** Backdate the user's sessions to 25h old: past `updateAge`, so the next read refreshes them. */
+export async function ageSessionPastUpdateAge(userId: string): Promise<void> {
+  await db
+    .update(sessionTable)
+    .set({ expiresAt: new Date(Date.now() + SESSION_TTL_MS - 25 * 60 * 60 * 1000) })
+    .where(eq(sessionTable.userId, userId));
 }
 
 /**
@@ -317,5 +327,85 @@ export async function createTestContext(
     cookie: testUser.cookie,
     orgId: org.id,
     defaultSpaceId,
+  };
+}
+
+/** The `Cookie` header for the session a Better Auth response set. */
+export function sessionCookieOf(res: Response): string {
+  const token = /better-auth\.session_token=([^;]+)/.exec(res.headers.get("set-cookie") ?? "");
+  if (!token) throw new Error(`no session cookie (status ${res.status})`);
+  return `${SESSION_COOKIE_NAME}=${token[1]}`;
+}
+
+/** Better Auth calls through a test app, the way a browser makes them. */
+export function authClientFor(app: {
+  request(path: string, init?: RequestInit): Response | Promise<Response>;
+}) {
+  const post = (path: string, body: unknown, cookie?: string): Promise<Response> =>
+    Promise.resolve(
+      app.request(`/api/auth${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+        body: JSON.stringify(body),
+      }),
+    );
+  return {
+    post,
+    /** A real email sign-in: the cookie of the session it opened. */
+    signIn: async (email: string, password: string): Promise<string> =>
+      sessionCookieOf(await post("/sign-in/email", { email, password })),
+    /** 200 while the session lives, 401 once it has ended. */
+    profileStatus: async (cookie: string): Promise<number> =>
+      (await app.request("/api/profile", { headers: { Cookie: cookie } })).status,
+    /** The token of a reset link mailed to `email` (SMTP on). */
+    resetToken: async (email: string): Promise<string> => {
+      const [mail] = await captureMails(async () => {
+        const res = await post("/request-password-reset", { email, redirectTo: "/reset-password" });
+        if (!res.ok) throw new Error(`request-password-reset answered ${res.status}`);
+      });
+      if (!mail) throw new Error(`no reset link mailed to ${email}`);
+      return firstLink(mail).pathname.split("/").pop()!;
+    },
+  };
+}
+
+/**
+ * For a suite that sets a process-wide slot of `_authHookSlotsForTesting`: start
+ * from none, hand the installed value back.
+ */
+export function restoreAfterSuite<T>(slot: { swapForTesting(next: T | null): T | null }): void {
+  let installed: T | null = null;
+  beforeAll(() => {
+    installed = slot.swapForTesting(null);
+  });
+  afterAll(() => {
+    slot.swapForTesting(installed);
+  });
+}
+
+/**
+ * Records, per recipient, the token of the last magic link issued in each test,
+ * whether its mail goes out or is withheld. The hook already installed still runs.
+ */
+export function captureIssuedMagicLinks(): { tokenFor(email: string): string } {
+  const tokens = new Map<string, string>();
+  const slot = _authHookSlotsForTesting.magicLinkIssued;
+  let installed: ReturnType<typeof slot.get> = null;
+  beforeEach(() => {
+    tokens.clear();
+    installed = slot.swapForTesting(async (info) => {
+      tokens.set(info.email, info.token);
+      return installed ? installed(info) : info.url;
+    });
+  });
+  afterEach(() => {
+    slot.swapForTesting(installed);
+  });
+  return {
+    tokenFor(email) {
+      const token = tokens.get(email.toLowerCase().trim());
+      if (!token) throw new Error(`no magic link issued for ${email}`);
+      return token;
+    },
   };
 }

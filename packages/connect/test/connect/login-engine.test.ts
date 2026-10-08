@@ -261,6 +261,41 @@ describe("runLogin — security limits", () => {
     ).rejects.toMatchObject({ reason: "unresolved_placeholder" });
   });
 
+  it("fails closed on a {$…} expression in the request, before any fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, body: "password={$credential.password}" },
+      },
+    };
+    await expect(
+      runLogin(config, {
+        inputs: { password: "s3cr3t" },
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sends an input value containing {$…} as data, not as an expression", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
+    const config: LoginConfig = {
+      login: { ...baseLogin, request: { ...baseLogin.request, body: "p={{password}}" } },
+    };
+    await runLogin(config, {
+      inputs: { password: "a{$b}c" },
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    });
+    expect(calls[0]!.init.body).toBe("p=a{$b}c");
+  });
+
   it("rejects a non-OK status without echoing the body", async () => {
     const { impl } = fakeFetch([{ status: 401, body: "secret-error-detail" }]);
     const config: LoginConfig = { login: baseLogin };
@@ -357,11 +392,30 @@ describe("runLogin — security limits", () => {
     expect((err as LoginError).cause).toBeInstanceOf(SyntaxError);
   });
 
-  it("extract_failed: a `jwt` extractor whose token ref is absent from scope", async () => {
-    // The `jwt` extractor names `token: {$credential.missing}`, but no other
-    // extractor produced a `missing` value — `scope[field]` is undefined → fail
-    // closed.
-    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
+  it("extract_failed: a `jwt` extractor whose token output extracted nothing", async () => {
+    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ other: "x" }) }]);
+    const config: LoginConfig = {
+      login: {
+        request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
+        outputs: {
+          access_token: "$response.body#/access_token",
+          person_id: { from: "jwt", token: "{$credential.access_token}", path: "/sub" },
+        },
+      },
+    };
+    const err = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect((err as LoginError).reason).toBe("extract_failed");
+  });
+
+  it("invalid_config before any fetch: a `jwt` token naming no declared output", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token", body: "grant=pw" },
@@ -378,8 +432,9 @@ describe("runLogin — security limits", () => {
       fetchImpl: impl,
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("extract_failed");
+    expect(err).toMatchObject({ reason: "invalid_config" });
+    expect((err as LoginError).message).toContain("connect.login.outputs.person_id.token");
+    expect(calls).toHaveLength(0);
   });
 
   it("extract_failed: a `jwt` extractor fed a garbage (undecodable) token", async () => {
@@ -706,5 +761,55 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("bad_status");
+  });
+});
+
+describe("runLogin — runtime expressions (AFPS §7.7)", () => {
+  const run = (
+    outputs: LoginConfig["login"]["outputs"],
+    response: { body?: string; headers?: Record<string, string> },
+  ) =>
+    runLogin(
+      { login: { request: { method: "POST", url: "https://idp.example.com/token" }, outputs } },
+      {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: fakeFetch([{ status: 200, ...response }]).impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    );
+
+  it("regex extractor reads the body named by its source", async () => {
+    const res = await run(
+      { csrf: { from: "regex", source: "$response.body", pattern: "csrf=([a-z0-9]+)" } },
+      { body: "<form>csrf=abc123</form>" },
+    );
+    expect(res.outputs.csrf).toBe("abc123");
+  });
+
+  it("regex extractor reads the header named by its source, not the body", async () => {
+    const res = await run(
+      { sid: { from: "regex", source: "$response.header.Location", pattern: "sid=(\\w+)" } },
+      { body: "sid=from-body", headers: { Location: "https://x/?sid=fromheader" } },
+    );
+    expect(res.outputs.sid).toBe("fromheader");
+  });
+
+  it("regex extractor refuses a source it cannot read", async () => {
+    await expect(
+      run({ x: { from: "regex", source: "{$response.body}", pattern: "(.+)" } }, { body: "a" }),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+  });
+
+  it("refuses an $outputs.<name> output expression", async () => {
+    await expect(
+      run({ t: "$response.body#/t", u: "$outputs.t" }, { body: JSON.stringify({ t: "x" }) }),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+  });
+
+  it("$response.body as an output yields the body text", async () => {
+    const res = await run({ raw: "$response.body" }, { body: "opaque-token" });
+    expect(res.outputs.raw).toBe("opaque-token");
   });
 });

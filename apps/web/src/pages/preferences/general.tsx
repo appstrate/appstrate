@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useUpdateDisplayName } from "../../hooks/use-profile";
-import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
+import { useLocation } from "react-router-dom";
+import { useAuth, EmailChangeError } from "../../hooks/use-auth";
+import { emailChangeLanding } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
 import { Spinner } from "../../components/spinner";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { toast } from "sonner";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { toastError } from "../../lib/mutation-error";
 
 function EmailVerificationBadge() {
   const { t } = useTranslation(["settings", "common"]);
@@ -65,34 +67,43 @@ function EmailVerificationBadge() {
 function EmailRow() {
   const { t } = useTranslation(["settings", "common"]);
   const { user, changeEmail } = useAuth();
-  const { features } = useAppConfig();
   const [isChanging, setIsChanging] = useState(false);
   const [resetVersion, setResetVersion] = useState(0);
+  const [changedHere, setChangedHere] = useState(false);
+  const { search } = useLocation();
   const email = user?.email ?? "";
+  // What the email-change link that led here did, until the row is used again.
+  const landing = user && !changedHere ? emailChangeLanding(search) : null;
 
   const change = async (next: string) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
       setResetVersion((version) => version + 1);
       return;
     }
+    setChangedHere(true);
     setIsChanging(true);
     try {
-      await changeEmail(next);
-      if (features.smtp) {
-        toast.success(t("preferences.emailChangeVerificationSent", { email: next }));
+      const outcome = await changeEmail(next);
+      if (outcome === "confirmation_sent") {
+        toast.success(
+          <Trans
+            ns="settings"
+            i18nKey="preferences.emailChangeConfirmationSent"
+            values={{ email: next }}
+            components={{ strong: <strong /> }}
+          />,
+        );
       } else {
-        await refreshAuth();
         toast.success(t("preferences.emailChanged"));
       }
-      // SMTP keeps the account's current address until the link is verified.
+      // SMTP keeps the account's current address until the change is approved.
       // Remount the uncontrolled field so it tells that truth after success.
       setResetVersion((version) => version + 1);
     } catch (err) {
-      if (err instanceof EmailChangeError && err.conflict) {
+      if (err instanceof EmailChangeError) {
         toast.error(t("preferences.emailConflict"));
       } else {
-        const message = err instanceof Error && err.message ? err.message : t("login.error");
-        toast.error(message);
+        toastError(err);
       }
     } finally {
       setIsChanging(false);
@@ -103,7 +114,26 @@ function EmailRow() {
     <SettingRow
       variant="field"
       label={t("preferences.email")}
-      description={<EmailVerificationBadge />}
+      description={
+        <>
+          <EmailVerificationBadge />
+          {landing === "failed" && (
+            <span className="text-destructive block text-xs">
+              {t("preferences.verificationLinkExpired")}
+            </span>
+          )}
+          {landing === "refused" && (
+            <span className="text-destructive block text-xs">
+              {t("common:apiError.email_change_refused")}
+            </span>
+          )}
+          {landing === "accepted" && (
+            <span className="text-muted-foreground block text-xs">
+              {t("preferences.emailChangeLinkAccepted")}
+            </span>
+          )}
+        </>
+      }
       status={isChanging && <Spinner />}
     >
       <InlineTextSetting
@@ -143,14 +173,7 @@ function DisplayNameRow() {
         onCommit={(name) => {
           const next = name.trim();
           if (!next) return;
-          updateDisplayName.mutate(
-            { body: { displayName: next } },
-            {
-              onError: (error) => {
-                toast.error(t("error.prefix", { message: getErrorMessage(error) }));
-              },
-            },
-          );
+          updateDisplayName.mutate({ body: { displayName: next } });
         }}
       />
     </SettingRow>

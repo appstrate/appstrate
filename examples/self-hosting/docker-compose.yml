@@ -138,7 +138,7 @@ services:
   # happens in the platform's own boot pass, which is another reason not to
   # "optimise" the platform's migration step away.
   migrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.65}
     networks:
       - appstrate-data
     restart: "no"
@@ -151,12 +151,12 @@ services:
 
   # ── Pre-pull runtime images ─────────────────────────────────
   pi-pull:
-    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   sidecar-pull:
-    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
@@ -164,33 +164,33 @@ services:
   # platform) `docker create`s these, and it never issues an image pull — an
   # absent image is a hard failure at integration boot, not a slow first run.
   mcp-runner-node-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-python-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-bun-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-uv-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   mcp-runner-binary-pull:
-    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.65}
     entrypoint: ["true"]
     restart: "no"
 
   # ── Appstrate platform ─────────────────────────────────────
   appstrate:
-    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.64}
+    image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.65}
     networks:
       - appstrate-data
       - appstrate-public
@@ -236,19 +236,19 @@ services:
       # default which points at Docker Hub).
       - PORT=3000
       - DOCKER_SOCKET=/var/run/docker.sock
-      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.64}
-      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.64}
+      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.65}
+      - SIDECAR_IMAGE=ghcr.io/appstrate/appstrate-sidecar:${APPSTRATE_VERSION:-1.0.0-beta.65}
       # Per-integration MCP runner images. The sidecar `docker create`s one of
       # these per LOCAL AFPS integration; the refs are forwarded into the
       # sidecar via SIDECAR_OPERATOR_ENV_KEYS. Without them the sidecar falls
       # back to bare `appstrate-mcp-runner-*:latest` tags, which the daemon
       # tries — and fails — to pull from Docker Hub, so every local
       # integration dies at boot. Same APPSTRATE_VERSION coupling as above.
-      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.64}
-      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.64}
-      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.64}
-      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.64}
-      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.64}
+      - RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:${APPSTRATE_VERSION:-1.0.0-beta.65}
+      - RUNNER_IMAGE_PYTHON=ghcr.io/appstrate/appstrate-mcp-runner-python:${APPSTRATE_VERSION:-1.0.0-beta.65}
+      - RUNNER_IMAGE_BUN=ghcr.io/appstrate/appstrate-mcp-runner-bun:${APPSTRATE_VERSION:-1.0.0-beta.65}
+      - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.65}
+      - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.65}
       # ── Intentional overrides (YAML default ≠ code default) ──────
       # RUN_ADAPTER: code default is `process` for OSS dev — a
       # containerized self-host must run agents in Docker.
@@ -271,13 +271,6 @@ services:
       - SIDECAR_INLINE_TOOL_OUTPUT_TOKENS
       - SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS
       - SIDECAR_API_CALL_CONCURRENCY
-      # ── Defensive workaround for better-auth 1.6+ namespace clash ──
-      # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
-      # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes
-      # boot on a non-CSV value. Empty string is falsy for better-auth and
-      # treated as `{}` by `@appstrate/env`. Set this in `.env` only when
-      # rotating the kid map; see env docstring in `packages/env/src/index.ts`.
-      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-}
       # ── Passthroughs ─────────────────────────────────────────────
       # Defaults live in `packages/env/src/index.ts`. Unset host env
       # falls back to the Zod schema's single source of truth.
@@ -287,6 +280,8 @@ services:
       - TRUST_PROXY
       - LOG_LEVEL
       - MODULES
+      # Live model catalog channel, or `off` (docs/ENV.md). Passthrough: the schema owns the default.
+      - MODEL_CATALOG_URL
       - SYSTEM_PROVIDER_KEYS
       # System integrations offered out of the box (shared OAuth clients, or a
       # client-less entry for DCR-based remote MCP integrations).
@@ -305,7 +300,10 @@ services:
       - AUTH_ALLOWED_SIGNUP_DOMAINS
       - AUTH_BOOTSTRAP_OWNER_EMAIL
       - AUTH_BOOTSTRAP_ORG_NAME
-      - BETTER_AUTH_ACTIVE_KID
+      # One-shot token the installer writes to `.env`; the first owner redeems it
+      # at /claim. Empty/unset = no pending token (normal signup flow).
+      - AUTH_BOOTSTRAP_TOKEN
+      - BETTER_AUTH_SECRETS
       - CONNECTION_ENCRYPTION_KEY_ID
       - CONNECTION_ENCRYPTION_KEYS
       - AFPS_TRUST_ROOT
@@ -317,6 +315,37 @@ services:
       - RUN_WATCHDOG_INTERVAL_SECONDS
       - RUN_BOOT_DEADLINE_SECONDS
       - RUNTIME_IMAGE_WARM_INTERVAL_SECONDS
+      # ── Optional operator settings, documented in `.env.example` ──
+      # Bare passthroughs: an unset host variable stays unset in the container
+      # (the schema owns every default), so none of these changes behaviour
+      # until the operator sets it.
+      - COOKIE_DOMAIN
+      - PROXY_URL
+      - SYSTEM_PROXIES
+      - OIDC_INSTANCE_CLIENTS
+      # Comma-separated hostnames trusted on a private address (SSRF allowlist).
+      - EGRESS_ALLOW_INTERNAL_HOSTS
+      # Social login (opt-in).
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      # SMTP (email verification, magic links, invitations).
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASS
+      - SMTP_FROM
+      - LEGAL_TERMS_URL
+      - LEGAL_PRIVACY_URL
+      # Run limits (validated by apps/api/src/services/run-limits.ts).
+      - PLATFORM_RUN_LIMITS
+      - INLINE_RUN_LIMITS
+      - REMOTE_RUN_REPLAY_WINDOW_SECONDS
+      - REMOTE_RUN_BUFFER_FLUSH_MS
+      - REMOTE_RUN_EVENT_LIMITS
+      - API_BODY_LIMIT_BYTES
+      - S3_PUBLIC_ENDPOINT
       # ── Observability (OpenTelemetry, optional) ──────────────────
       # Off by default; a complete no-op until enabled. Enabling needs
       # @appstrate/module-observability in MODULES plus an endpoint (the vars
