@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   extractAuthOffers,
+  extractRunAndWaitAuthOffers,
   encodeResume,
   parseResume,
   INTEGRATION_RESUME_MARKER,
@@ -147,5 +148,28 @@ describe("extractAuthOffers", () => {
     for (const [name, shape] of legacyShapes) {
       expect(extractAuthOffers(shape), `scraped a URL out of: ${name}`).toEqual([]);
     }
+  });
+});
+
+describe("extractRunAndWaitAuthOffers", () => {
+  const step = (payload: Record<string, unknown>) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    connectOffers: [OFFER],
+  });
+
+  it("withholds a started run's offers until the run ends (#1830)", () => {
+    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: false }))).toEqual([]);
+    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: true }))).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
+  });
+
+  it("shows them on a timed-out wait and on a refused launch", () => {
+    expect(
+      extractRunAndWaitAuthOffers(step({ id: "run_1", done: false, error: "timed out" })),
+    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    expect(extractRunAndWaitAuthOffers(step({ status: 409, body: {} }))).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
   });
 });

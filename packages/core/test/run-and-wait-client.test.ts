@@ -116,6 +116,79 @@ describe("run_and_wait client", () => {
     ]);
   });
 
+  // #1830: the run resource the poll reads does not repeat the launch warnings,
+  // so the client carries them from the 201 onto every step.
+  it("carries the launch warnings onto the preliminary and terminal steps", async () => {
+    const warning = {
+      field: "integrations.@appstrate/gmail",
+      code: "integration_unbound",
+      message: "not connected",
+      auth_key: "primary",
+    };
+    const responses = [
+      jsonResponse({
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "pending",
+        warnings: [warning],
+      }),
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }),
+    ).resolves.toEqual([
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "pending",
+        done: false,
+        warnings: [warning],
+      },
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "success",
+        done: true,
+        warnings: [warning],
+      },
+    ]);
+  });
+
+  it("keeps the launch warnings on a timed-out wait", async () => {
+    const warnings = [{ field: "integrations.@appstrate/gmail", code: "integration_unbound" }];
+    const fetchImpl = fakeFetch(async () =>
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending", warnings }),
+    );
+
+    const steps = await collectSteps(
+      fetchImpl,
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { maxMs: 0 },
+    );
+    expect(steps.at(-1)).toMatchObject({ done: false, error: expect.any(String), warnings });
+  });
+
+  it("omits an empty warnings list", async () => {
+    const responses = [
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending", warnings: [] }),
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    const steps = await collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" });
+    expect(steps.every((step) => !("warnings" in step))).toBe(true);
+  });
+
   it("validates before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");

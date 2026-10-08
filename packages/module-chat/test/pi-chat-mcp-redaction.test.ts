@@ -99,6 +99,40 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
     expect(modelText).toContain("missing_integration_connection");
     expect(modelText).toContain("integrations.@appstrate/gmail");
   });
+
+  // #1830: a run that started without a non-required integration carries the
+  // same connect link on its `integration_unbound` warning.
+  it("splits the warnings of a started run the same way as a 409", () => {
+    const result = toPiToolResult({
+      id: "run_1",
+      packageId: "@acme/digest",
+      status: "success",
+      done: true,
+      warnings: [
+        {
+          field: "integrations.@appstrate/gmail",
+          code: "integration_unbound",
+          message: "not connected",
+          auth_key: "primary",
+          connect_url: "https://app.example.com/api/integrations/connect/start?token=CCC",
+          expiresAt: "2030-03-17T17:46:40.000Z",
+          packageId: "@appstrate/gmail",
+        },
+      ],
+    });
+
+    expect(result.connectOffers).toEqual([
+      {
+        connect_url: "https://app.example.com/api/integrations/connect/start?token=CCC",
+        expiresAt: "2030-03-17T17:46:40.000Z",
+        packageId: "@appstrate/gmail",
+      },
+    ]);
+    const modelText = result.content[0]!.text;
+    expect(modelText).not.toContain("token=CCC");
+    expect(JSON.stringify(result.details)).not.toContain("token=CCC");
+    expect(modelText).toContain("integration_unbound");
+  });
 });
 
 describe("mcpResultToPi (forwarded MCP tool results)", () => {

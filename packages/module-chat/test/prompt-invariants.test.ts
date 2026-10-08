@@ -150,6 +150,18 @@ describe("full persona invariants", () => {
     expect(FULL).not.toMatch(/the 403 names the permission it required/);
   });
 
+  // #1830: a declared integration no longer blocks a run unless `required`.
+  it("teaches `required` and how to read a run that started without an integration", () => {
+    expect(FULL).toContain("`integrations_configuration.<id>.required: true`");
+    expect(REDUCED).not.toContain("`integrations_configuration.<id>.required: true`");
+    for (const persona of [FULL, REDUCED]) {
+      expect(persona).toContain("`integration_unbound`");
+      expect(persona).toMatch(/offer to connect it/);
+      expect(persona).toContain("`required_integration_unbound`");
+      expect(persona).toContain("`[]` runs without that integration");
+    }
+  });
+
   it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {
     expect(FULL).toContain("guides for YOU");
     expect(FULL).toContain("LOAD IT BEFORE acting: call `read_skill` with its `id`");

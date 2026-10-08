@@ -18,7 +18,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { startReportSession, type ReportSource } from "../src/commands/run/report.ts";
+import {
+  ReportStartError,
+  startReportSession,
+  type ReportSource,
+} from "../src/commands/run/report.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 
 const REPORT_CTX = {
@@ -183,5 +187,54 @@ describe("startReportSession — source discrimination", () => {
     const src = stub.calls[0]!.body.source as { stage: string; spec?: string };
     expect(src.stage).toBe("draft");
     expect(src.spec).toBeUndefined();
+  });
+});
+
+// #1830: a non-required integration with nothing to bind starts the run and
+// comes back as a warning; a refused registration reads as its items.
+describe("startReportSession — integration readiness", () => {
+  const SOURCE: ReportSource = { kind: "inline", bundle: makeBundle() };
+  const WARNING = {
+    field: "integrations.@appstrate/gmail",
+    code: "integration_unbound",
+    message: "Integration '@appstrate/gmail' is not connected",
+  };
+  let stub: ReturnType<typeof installStubFetch>;
+
+  afterEach(() => stub.restore());
+
+  it("returns the registration's warnings", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session.warnings).toEqual([WARNING]);
+  });
+
+  it("summarises a 409 missing_integration_connection by item", async () => {
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            status: 409,
+            code: "missing_integration_connection",
+            errors: [{ ...WARNING, code: "required_integration_unbound" }],
+          }),
+          { status: 409, headers: { "Content-Type": "application/problem+json" } },
+        ),
+    );
+    const err = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ReportStartError);
+    expect((err as ReportStartError).responseSnippet).toBe(
+      "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)",
+    );
   });
 });

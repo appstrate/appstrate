@@ -49,6 +49,7 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
+import { connectionRefusalSummary, launchItemLines } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
@@ -275,7 +276,7 @@ export async function runRemote(
       import("node:fs/promises").then((m) => m.writeFile(path, contents, "utf8")));
 
   // ─── 1. Trigger the run ────────────────────────────────────────────
-  const runId = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
+  const { runId, warnings } = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
 
   // Match the local path's preamble verbatim so the user sees the same
   // "→ running ... (reporting to ... as run_xxx)" line in both modes.
@@ -283,9 +284,15 @@ export async function runRemote(
   // also `runCommand.ts` for the source of the format string.
   if (!opts.json) {
     writeStderr(`→ running ${opts.bundleLabel} (reporting to ${opts.instance} as ${runId})\n`);
+    for (const line of launchItemLines(warnings)) writeStderr(`⚠ ${line}\n`);
   } else {
     writeStdout(
-      JSON.stringify({ type: "appstrate.remote.triggered", runId, instance: opts.instance }) + "\n",
+      JSON.stringify({
+        type: "appstrate.remote.triggered",
+        runId,
+        instance: opts.instance,
+        ...(warnings.length > 0 ? { warnings } : {}),
+      }) + "\n",
     );
   }
 
@@ -548,7 +555,11 @@ function apiUrl(opts: RunRemoteOptions, path: string): URL {
   return new URL(path, opts.instance);
 }
 
-async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<string> {
+/** The created run's id, and the launch `warnings` the 201 carries (wire items). */
+async function triggerRun(
+  opts: RunRemoteOptions,
+  deps: HttpDeps,
+): Promise<{ runId: string; warnings: unknown[] }> {
   // Don't encode scope/name. They're already validated by `package-spec.ts`
   // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
@@ -610,7 +621,7 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
             "Verify --api-key / `appstrate login` is current and has agents:run + runs:read permissions."
           : res.status === 404
             ? `Agent ${opts.scope}/${opts.name} not found on ${opts.instance}.`
-            : undefined,
+            : (connectionRefusalSummary(detail) ?? undefined),
     });
   }
 
@@ -622,7 +633,10 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   // legacy `runId` alias). The error body carries the unexpected payload
   // so the user can debug a server mismatch without re-running with
   // extra logging.
-  const payload = (await res.json().catch(() => null)) as { id?: unknown } | null;
+  const payload = (await res.json().catch(() => null)) as {
+    id?: unknown;
+    warnings?: unknown;
+  } | null;
   if (!payload || typeof payload !== "object") {
     throw new RemoteRunError("Trigger returned a non-JSON response", {
       body: payload,
@@ -635,7 +649,7 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
       hint: "Expected the created run resource (`{ id: string, ... }`). The platform may be incompatible with this CLI version.",
     });
   }
-  return payload.id;
+  return { runId: payload.id, warnings: Array.isArray(payload.warnings) ? payload.warnings : [] };
 }
 
 async function fetchRunRecord(

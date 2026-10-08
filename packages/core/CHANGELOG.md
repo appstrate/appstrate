@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`formatBytes(bytes, locale?)`** (`@appstrate/core/format`): the optional
   locale localises the unit names and the decimal separator (`fr` →
   `2,0 Ko`). Without it the output is unchanged.
+- **`CONNECTION_RESOLUTION_WARNING_CODES`**, **`ConnectionResolutionWarningCode`**
+  and **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a
+  declared integration the run starts without (`integration_unbound`), with
+  the same `authKey`, `requiredScopes`, `requiredAuthKey`,
+  `availableAuthKeys` and `candidateConnections` an error carries. (#1830)
+- **`required?: boolean`** on `ManifestIntegrationEntry` and
+  `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4):
+  the agent cannot run without that integration. Read by
+  `parseManifestIntegrations`, written by `writeManifestIntegrations`.
+  Unrelated to an integration auth's `_meta["dev.appstrate/auth"].required`.
+  (#1830, afps-spec#27)
+- **`required_integration_unbound`** in `CONNECTION_RESOLUTION_ERROR_CODES`
+  (`@appstrate/core/integration`): an integration the agent marks `required`
+  whose winning cascade layer binds no connection (`[]`). (#1830)
 
 ### Changed
 
@@ -51,6 +65,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration
   binds in a run.
+
+- **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
+  (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
+  `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
+  connection. A missing key still means inert. A producer of the result must
+  set `warnings`. (#1830)
+- **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
+  configuration onto the one already in the manifest**: keys it does not
+  model (`_meta`, extensions) are kept instead of dropped. (#1830)
 
 - **BREAKING: `ModelSwapBacking` gains a required `dialect`**
   (`PiModelDialect | null`, `@appstrate/core/sidecar-types`): the

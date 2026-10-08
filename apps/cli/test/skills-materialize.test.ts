@@ -436,6 +436,7 @@ describe("materializeAgent", () => {
     expect(body).toContain("`no_published_version`");
     expect(body).toContain(`never call \`${pluginTool("run_and_wait")}\` again`);
     expect(body).toContain("Never call `getRun` on a finished run.");
+    expect(body).toContain("`warnings` items `integration_unbound`");
     // run_and_wait's time cap answers `done: false` WITH an `error`: waiting must win.
     const waitRule = body.indexOf("`done: false`, even with an `error`");
     expect(waitRule).toBeGreaterThan(0);

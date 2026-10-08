@@ -69,6 +69,7 @@ import {
   type ReportSession,
   type ReportSource,
 } from "./run/report.ts";
+import { launchItemLines } from "./run/launch-warnings.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -453,6 +454,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
       : "";
     process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
+    for (const line of launchItemLines(reportSession?.warnings)) {
+      process.stderr.write(`⚠ ${line}\n`);
+    }
   }
 
   // Heartbeat is lifted out of the `try` so the cleanup hook can stop

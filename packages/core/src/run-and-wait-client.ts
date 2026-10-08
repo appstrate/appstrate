@@ -353,6 +353,20 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   return { overrides };
 }
 
+/**
+ * The launch response's `warnings` (e.g. `integration_unbound`: the run started
+ * without a declared, non-required integration), carried onto every step so the
+ * caller can say what the run lacks and offer to connect it. The run resource
+ * the poll reads does not repeat them. Absent when the launch reported none.
+ */
+function withLaunchWarnings(
+  payload: Record<string, unknown>,
+  launchRecord: Record<string, unknown>,
+): Record<string, unknown> {
+  const warnings = launchRecord.warnings;
+  return Array.isArray(warnings) && warnings.length > 0 ? { ...payload, warnings } : payload;
+}
+
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
   return typeof status === "string" && RUN_AND_WAIT_TERMINAL_STATUSES.has(status);
 }
@@ -713,12 +727,15 @@ export async function launchRunAndWait(
       runId,
       launchRecord,
       startedAtMs,
-      preliminary: {
-        id: runId,
-        packageId: asString(launchRecord?.packageId) ?? null,
-        status: asString(launchRecord?.status) ?? null,
-        done: false,
-      },
+      preliminary: withLaunchWarnings(
+        {
+          id: runId,
+          packageId: asString(launchRecord.packageId) ?? null,
+          status: asString(launchRecord.status) ?? null,
+          done: false,
+        },
+        launchRecord,
+      ),
     },
   };
 }
@@ -763,7 +780,9 @@ export async function waitForRunAndWaitCompletion(
     const runRecord = asRecordOrUndefined(run);
     lastRun = runRecord;
     if (isRunAndWaitTerminalStatus(runRecord?.status)) {
-      return { payload: projectRunAndWaitPayload(runRecord, true) };
+      return {
+        payload: withLaunchWarnings(projectRunAndWaitPayload(runRecord, true), launch.launchRecord),
+      };
     }
 
     const pollMs = performance.now() - pollStart;
@@ -773,13 +792,16 @@ export async function waitForRunAndWaitCompletion(
   }
 
   return {
-    payload: {
-      ...projectRunAndWaitPayload(lastRun, false),
-      id: launch.runId,
-      packageId: asString(lastRun?.packageId) ?? asString(launch.launchRecord.packageId) ?? null,
-      status: asString(lastRun?.status) ?? asString(launch.launchRecord.status) ?? null,
-      error: "run_and_wait timed out before the run reached a terminal status.",
-    },
+    payload: withLaunchWarnings(
+      {
+        ...projectRunAndWaitPayload(lastRun, false),
+        id: launch.runId,
+        packageId: asString(lastRun?.packageId) ?? asString(launch.launchRecord.packageId) ?? null,
+        status: asString(lastRun?.status) ?? asString(launch.launchRecord.status) ?? null,
+        error: "run_and_wait timed out before the run reached a terminal status.",
+      },
+      launch.launchRecord,
+    ),
   };
 }
 

@@ -15,6 +15,7 @@
 
 import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 import { readConnectOffers } from "../connect-offer.ts";
+import { asRecord, unwrapResult } from "./tool-result.ts";
 
 export interface AuthOffer {
   authUrl: string;
@@ -117,4 +118,16 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
     ...(offer.state ? { state: offer.state } : {}),
     ...(offer.packageId ? { packageId: offer.packageId } : {}),
   }));
+}
+
+/**
+ * The offers of a `run_and_wait` result, withheld while its run is still in
+ * flight (`done: false` without an `error`). A started run's offers come from
+ * its `integration_unbound` warnings (#1830); a connect completing mid-run would
+ * append a resume turn over the live one, so the cards wait for the call to end.
+ */
+export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
+  const payload = asRecord(unwrapResult(result));
+  if (payload?.done === false && payload.error === undefined) return [];
+  return extractAuthOffers(result);
 }

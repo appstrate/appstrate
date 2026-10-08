@@ -520,7 +520,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Dependencies subkeys**: `skills`, `mcp_servers`, `integrations`
 
-**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
+**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
 
 **Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
 

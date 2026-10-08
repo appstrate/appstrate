@@ -28,6 +28,7 @@
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
+import { connectionRefusalSummary } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -74,6 +75,8 @@ export interface ReportSession {
    * session boundary makes its use auditable.
    */
   runSecret: string;
+  /** The registration's `warnings` (wire items): integrations the run starts without. */
+  warnings: unknown[];
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -190,7 +193,7 @@ export async function startReportSession(
     const snippet = await readSnippet(res);
     throw new ReportStartError(
       `POST /api/runs/remote failed with HTTP ${res.status}`,
-      snippet ?? "(no response body)",
+      refusalSummary(snippet) ?? snippet ?? "(no response body)",
     );
   }
 
@@ -202,6 +205,7 @@ export async function startReportSession(
     finalize_url: string;
     secret: string;
     expiresAt: string;
+    warnings?: unknown;
   };
 
   const httpSink = new HttpSink({
@@ -216,6 +220,7 @@ export async function startReportSession(
     proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
     runSecret: payload.secret,
+    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
   };
 }
 
@@ -291,6 +296,16 @@ function truncateSnapshot(snap: ReportContextSnapshot): Record<string, unknown> 
     );
   }
   return obj;
+}
+
+/** A readable 409 `missing_integration_connection`, or null for any other body. */
+function refusalSummary(snippet: string | null): string | null {
+  if (snippet === null) return null;
+  try {
+    return connectionRefusalSummary(JSON.parse(snippet));
+  } catch {
+    return null;
+  }
 }
 
 async function readSnippet(res: Response): Promise<string | null> {

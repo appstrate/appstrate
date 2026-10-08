@@ -95,6 +95,20 @@ describe("MCP server instructions — connect bullet", () => {
       expect(bullet).toMatch(/authKey: "<the error's auth_key/);
     }
   });
+
+  // #1830: only a `required` integration blocks the launch when nothing is
+  // connected; an optional one lets the run start and comes back as a warning.
+  it("tells a refused launch from a started run that lacks an integration", () => {
+    const chat = connectBullet(true);
+    const external = connectBullet(false);
+    for (const bullet of [chat, external]) {
+      expect(bullet).toMatch(/marks it `required`/);
+      expect(bullet).toContain("`integration_unbound`");
+      expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
+    }
+    expect(chat).toMatch(/connect button from the warning's `connect_url`; do NOT paste/);
+    expect(external).toMatch(/giving the caller the warning's `connect_url`/);
+  });
 });
 
 describe("MCP server instructions — named operations follow their grant", () => {
@@ -156,6 +170,7 @@ describe("MCP server instructions — run guidance", () => {
       "Shortcut —",
       "Connecting or reconnecting an integration before a run",
       "must_choose_connection",
+      "required_integration_unbound",
     ]) {
       expect(withRuns).toContain(marker);
       expect(without).not.toContain(marker);
@@ -232,6 +247,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
     expect(without).not.toContain("building or configuring an agent");
+  });
+
+  it("teaches `required` alongside the tool selection", () => {
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    expect(withWrite).toContain("`integrations_configuration[id].required`");
+    expect(instructionsFor(permissions, true)).not.toContain(
+      "`integrations_configuration[id].required`",
+    );
   });
 
   it("withholds it from a caller who may author but not invoke", () => {
