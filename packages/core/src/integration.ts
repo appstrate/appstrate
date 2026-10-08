@@ -1430,7 +1430,7 @@ export function validateAgentIntegrationScopes(
 // ────────────────────────────────────────────────────────────────────
 
 /** Cap on the connections one declared integration binds in a run, enforced at every write. */
-export const MAX_CONNECTIONS_PER_INTEGRATION = 10;
+export const MAX_CONNECTIONS_PER_INTEGRATION = 20;
 
 /**
  * Per-integration connection picks on `runs.connection_overrides` and

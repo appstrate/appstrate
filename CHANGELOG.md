@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A run binds up to 20 connections per integration** (was 10). The cap
+  holds on every connection set: admin and member pins, space defaults, launch
+  and schedule overrides. Migration `0079` widens the two `connection_ids`
+  CHECKs; the sidecar's `connection` argument description grows to match.
+
 - **BREAKING (API): `POST /api/runs/remote` no longer answers
   `409 agent_not_ready`** (#1783). A connection cascade that changed between
   the readiness check and the run's creation answers

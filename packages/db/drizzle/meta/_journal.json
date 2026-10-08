@@ -554,6 +554,13 @@
       "when": 1791140901828,
       "tag": "0078_notification_type_disabled_reason_model_source",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1791449350201,
+      "tag": "0079_connection_set_cap_20",
+      "breakpoints": true
     }
   ]
 }

@@ -80,10 +80,10 @@ export const integrationPins = pgTable(
     index("idx_integration_pins_user")
       .on(table.userId)
       .where(sql`${table.userId} IS NOT NULL`),
-    // 10 = MAX_CONNECTIONS_PER_INTEGRATION, spelled out for drizzle-kit; no FK on elements, by design.
+    // 20 = MAX_CONNECTIONS_PER_INTEGRATION, spelled out for drizzle-kit; no FK on elements, by design.
     check(
       "integration_pins_connection_ids_cardinality",
-      sql`cardinality(connection_ids) BETWEEN 1 AND 10`,
+      sql`cardinality(connection_ids) BETWEEN 1 AND 20`,
     ),
   ],
 );
