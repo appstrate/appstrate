@@ -400,6 +400,40 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
+  it("maps a connection under a kid the keyring lacks to 503, flagging nothing", async () => {
+    await seedIntegrationWithConnection(ctx);
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("nope", { status: 599 });
+    });
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("encryption_key_unavailable");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
+    expect(upstreamCalls).toBe(0);
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
   it("maps an integration not activated in the space to 404 (not 500)", async () => {
     // Package exists in the org but is NOT inserted into spacePackages,
     // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not

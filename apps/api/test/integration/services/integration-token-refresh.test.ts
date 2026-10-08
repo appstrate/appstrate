@@ -33,6 +33,7 @@ import {
 } from "@appstrate/connect";
 import {
   forceRefreshIntegrationConnection,
+  refreshAndClassify,
   type RefreshTarget,
 } from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
@@ -450,6 +451,23 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .where(eq(integrationConnections.id, connId));
     // The wider set is persisted — high-water-mark moves up.
     expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
+  });
+
+  it("refreshAndClassify throws the 503 for a stored blob under a missing kid (not transient)", async () => {
+    const connId = await seedConnection(["read"]);
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationConnections.id, connId));
+    const outcome = refreshAndClassify(await readTarget(connId), PACKAGE_ID, "primary", {
+      tokenEndpoint: token.url,
+      clientId: "cid",
+      clientSecret: "csec",
+    });
+    await expect(outcome).rejects.toMatchObject({
+      status: 503,
+      code: "encryption_key_unavailable",
+    });
   });
 });
 

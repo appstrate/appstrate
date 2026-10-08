@@ -23,6 +23,7 @@
 import {
   resolveAfpsHttpDelivery,
   buildProxyCredentialsPayload,
+  decryptCredentialsToStringMap,
   RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
@@ -33,6 +34,7 @@ import {
 } from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
+import { decryptStoredCredential } from "../../lib/stored-credential.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 import {
   assertIntegrationActive,
@@ -49,7 +51,6 @@ import {
 } from "../integration-service.ts";
 import {
   buildIntegrationOAuthRefreshContext,
-  decryptIntegrationConnectionFields,
   refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -150,9 +151,9 @@ export async function resolveIntegrationProxyCredentials(
 /**
  * Force-refresh the integration connection's OAuth2 token (the proxy's
  * reactive 401-retry path) and rebuild the payload. `input.connectionId` names
- * the connection the failed call used; the selection still re-checks reach. Never throws for a
- * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
- * a throw would be swallowed and buy nothing. Returns `null` in the five
+ * the connection the failed call used; the selection still re-checks reach. Throws only the
+ * 503 of a key missing from the keyring, which `core.ts` answers instead of the upstream
+ * 401. Returns `null` in the five
  * not-refreshed cases, which are NOT equivalent and are told apart by what
  * they leave behind:
  *
@@ -348,10 +349,9 @@ function buildPayload(
   manifest: IntegrationManifest,
   connection: ResolvedConnectionRow,
 ): ProxyCredentialsPayload {
-  const fields = decryptIntegrationConnectionFields(
-    connection.credentialsEncrypted,
-    integrationId,
-    connection.authKey,
+  const fields = decryptStoredCredential(
+    () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+    { connectionId: connection.id, packageId: integrationId, authKey: connection.authKey },
   );
   if (!fields) {
     throw new IntegrationCredentialNotFoundError(

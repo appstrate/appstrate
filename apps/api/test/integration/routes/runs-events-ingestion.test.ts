@@ -205,6 +205,24 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(logs.length).toBeGreaterThan(0);
   });
 
+  it("answers 503 encryption_key_unavailable when the sink secret is under a missing kid", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
+    await db
+      .update(runs)
+      .set({ sinkSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(runs.id, runId));
+
+    const envelope = buildEnvelope(
+      runId,
+      "appstrate.progress",
+      { message: "hello", timestamp: Date.now() },
+      1,
+    );
+    const res = await postEvent(runId, envelope);
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("encryption_key_unavailable");
+  });
+
   // Retired event type from the removed `report` runtime tool: ingestion still
   // accepts and sequences the envelope (a stale runner must not stall on a
   // rejected POST) but the sink's `default:` branch drops it — no run_logs row.

@@ -6,22 +6,23 @@ Database and authentication layer for the Appstrate platform.
 
 Every `exports` subpath of the package, in manifest order:
 
-| Import                          | Description                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------ |
-| `@appstrate/db/schema`          | Drizzle ORM schema (51 tables, 9 enums)                                                    |
-| `@appstrate/db/run-status`      | Import-free terminal/active run-status sets derived from `@appstrate/core/run-status`      |
-| `@appstrate/db/pricing-status`  | Import-free `pricing_status` literals (`priced` / `partial` / `unpriced`)                  |
-| `@appstrate/db/client`          | `db` instance + `listenClient` for PostgreSQL LISTEN/NOTIFY                                |
-| `@appstrate/db/auth`            | Better Auth config (email/password, Google/GitHub social, email verification, magic links) |
-| `@appstrate/db/auth-policy`     | Pure `AUTH_*`-driven signup/platform-admin policy helpers (no DB access)                   |
-| `@appstrate/db/password-policy` | Import-free password length bounds Better Auth enforces (`MIN_`/`MAX_PASSWORD_LENGTH`)     |
-| `@appstrate/db/bootstrap-org`   | Idempotent root-organization creation for `AUTH_BOOTSTRAP_OWNER_EMAIL`                     |
-| `@appstrate/db/ids`             | Prefixed row-id minting (`prefixedId`) + the strict space-id shape (`SPACE_ID_RE`)         |
-| `@appstrate/db/provision-org`   | In-transaction org/member provisioning: membership, default space, personal space          |
-| `@appstrate/db/storage`         | S3 storage integration                                                                     |
-| `@appstrate/db/notify`          | PostgreSQL notification helpers                                                            |
-| `@appstrate/db/pg-safe`         | `toPgSafe` — replaces NULs and lone surrogates Postgres `text`/`jsonb` refuse              |
-| `@appstrate/db/logger`          | The package's pino logger (`@appstrate/core/logger`), one instance for every file          |
+| Import                            | Description                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------ |
+| `@appstrate/db/schema`            | Drizzle ORM schema (51 tables, 9 enums)                                                    |
+| `@appstrate/db/run-status`        | Import-free terminal/active run-status sets derived from `@appstrate/core/run-status`      |
+| `@appstrate/db/pricing-status`    | Import-free `pricing_status` literals (`priced` / `partial` / `unpriced`)                  |
+| `@appstrate/db/client`            | `db` instance + `listenClient` for PostgreSQL LISTEN/NOTIFY                                |
+| `@appstrate/db/auth`              | Better Auth config (email/password, Google/GitHub social, email verification, magic links) |
+| `@appstrate/db/auth-policy`       | Pure `AUTH_*`-driven signup/platform-admin policy helpers (no DB access)                   |
+| `@appstrate/db/password-policy`   | Import-free password length bounds Better Auth enforces (`MIN_`/`MAX_PASSWORD_LENGTH`)     |
+| `@appstrate/db/bootstrap-org`     | Idempotent root-organization creation for `AUTH_BOOTSTRAP_OWNER_EMAIL`                     |
+| `@appstrate/db/ids`               | Prefixed row-id minting (`prefixedId`) + the strict space-id shape (`SPACE_ID_RE`)         |
+| `@appstrate/db/provision-org`     | In-transaction org/member provisioning: membership, default space, personal space          |
+| `@appstrate/db/storage`           | S3 storage integration                                                                     |
+| `@appstrate/db/notify`            | PostgreSQL notification helpers                                                            |
+| `@appstrate/db/pg-safe`           | `toPgSafe` — replaces NULs and lone surrogates Postgres `text`/`jsonb` refuse              |
+| `@appstrate/db/logger`            | The package's pino logger (`@appstrate/core/logger`), one instance for every file          |
+| `@appstrate/db/encrypted-columns` | Every keyring-ciphertext column + its per-kid inventory (`countByKid`), no DB access       |
 
 ## Usage
 

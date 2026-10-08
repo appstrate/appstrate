@@ -193,8 +193,8 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   }
 
   /**
-   * A connection whose ciphertext no key in this deployment can open — what a
-   * rotated `CONNECTION_ENCRYPTION_KEY` (or a corrupted blob) leaves behind.
+   * A connection whose ciphertext is unreadable whatever the keyring — what a
+   * corrupted blob leaves behind (a missing key is the 503 case, not this one).
    */
   async function seedUndecryptableConnection(integrationId: string): Promise<string> {
     return seedConnectionRow(integrationId, { credentialsEncrypted: "v1:not-a-real-envelope" });
@@ -525,6 +525,31 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("DENY: 503 without flagging when the credentials are under a kid the keyring lacks", async () => {
+    // Operator configuration (a retired key dropped too early, a misspelt kid): restoring
+    // the key makes the same row readable again, so nothing may conclude it is dead.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION, {
+      credentialsEncrypted: "v1:k0gone:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code?: string }).code).toBe("encryption_key_unavailable");
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(false);
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations ?? []).not.toContain(INTEGRATION);
   });
 });
 

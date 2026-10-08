@@ -21,6 +21,7 @@
 
 import {
   resolveAfpsHttpDelivery,
+  decryptCredentialsToStringMap,
   RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
@@ -33,11 +34,11 @@ import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
 import { logger } from "../lib/logger.ts";
+import { decryptStoredCredential } from "../lib/stored-credential.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
   buildIntegrationOAuthRefreshContext,
-  decryptIntegrationConnectionFields,
   refreshAndClassify,
 } from "./integration-token-refresh.ts";
 import {
@@ -96,6 +97,8 @@ interface ResolveLiveCredentialsOptions {
  *     The cached credential may still be valid; the sidecar treats it as
  *     retry-later and the listener's `refreshOnUnauthorized` cooldown
  *     keeps a flapping upstream from hammering this endpoint.
+ *   - 503 `encryption_key_unavailable`: a stored credential or client secret
+ *     it needs is under a key id the keyring lacks — operator config, NOT flagged.
  */
 export async function resolveLiveIntegrationCredentials(
   integrationId: string,
@@ -246,19 +249,13 @@ export async function resolveLiveIntegrationCredentials(
   };
 
   const { variables } = connection;
-  let fields = decryptIntegrationConnectionFields(
-    connection.credentialsEncrypted,
-    integrationId,
-    authKey,
+  let fields = decryptStoredCredential(
+    () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+    { connectionId: connection.id, packageId: integrationId, authKey },
   );
   if (!fields) {
-    // STATE C — the stored ciphertext cannot be decrypted (rotated
-    // `CONNECTION_ENCRYPTION_KEY` without re-encrypting, corrupted blob, an
-    // envelope this build cannot read). A credential nobody can read is dead
-    // regardless of how we got here, so this is the terminal path: flag +
-    // 410. The old silent empty return made this state answer 200 even on a
-    // FORCED refresh — i.e. the sidecar had already seen a 401 and we told it
-    // "nothing to inject, carry on".
+    // STATE C — unreadable ciphertext (a missing key has thrown the 503 instead):
+    // a credential nobody can read is dead — flag + 410, even on a plain read.
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
     await markIntegrationConnectionNeedsReconnection(connection.id);

@@ -261,6 +261,7 @@
   "apiError.connection_not_in_org_default": "Cette connexion ne fait pas partie de celles imposées par l'organisation : {{message}}",
   "apiError.identity_mismatch": "Cette connexion est liée à un autre compte, reconnectez-vous avec le même compte ou créez une nouvelle connexion : {{message}}",
   "apiError.connect_unavailable": "Cette méthode de connexion n'est pas disponible sur cette instance. Contactez votre administrateur.",
+  "apiError.encryption_key_unavailable": "Un identifiant enregistré est chiffré avec une clé que cette instance ne possède pas. Contactez votre administrateur.",
   "apiError.no_billing_account": "Aucun compte de facturation pour cette organisation.",
   "apiError.no_active_subscription": "L'organisation n'a pas d'abonnement actif à modifier.",
   "apiError.subscription_exists": "L'organisation a déjà un abonnement actif.",

@@ -7108,6 +7108,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored. */
+        EncryptionKeyUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Unexpected server error */
         InternalServerError: {
             headers: {
@@ -7946,6 +7955,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listAgentPersistence: {
@@ -8425,6 +8435,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listAgentRuns: {
@@ -8691,6 +8702,7 @@ export interface operations {
             };
             422: components["responses"]["VersionArtifactUnavailable"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listApiKeys: {
@@ -10366,7 +10378,7 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
-            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. RFC 9457 problem+json. */
+            /** @description `enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -10822,6 +10834,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration: nothing was sent, the connection is not flagged, and the call succeeds once the key is restored (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
             504: {
                 headers: {
@@ -10968,6 +10991,17 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
             502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration: nothing was sent, the connection is not flagged, and the call succeeds once the key is restored (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -11132,6 +11166,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration: nothing was sent, the connection is not flagged, and the call succeeds once the key is restored (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `upstream_timeout` — the upstream did not answer, or did not finish a buffered body, within the 30 s deadline (`Proxy-Status` error `http_response_timeout`). */
             504: {
                 headers: {
@@ -11273,6 +11318,17 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
             502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration: nothing was sent, the connection is not flagged, and the call succeeds once the key is restored (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -11428,6 +11484,17 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
             502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration: nothing was sent, the connection is not flagged, and the call succeeds once the key is restored (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -12931,6 +12998,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     initiateIntegrationConnect: {
@@ -14113,6 +14181,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description `encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
             504: {
                 headers: {
@@ -14249,6 +14328,17 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -14403,6 +14493,17 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            /** @description `encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `upstream_timeout` — the upstream sent no response headers in time: `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (default 60 s) for a streaming request, 10 min otherwise (`Proxy-Status` error `http_response_timeout`). No usage recorded. */
             504: {
                 headers: {
@@ -14539,6 +14640,17 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
             /** @description `upstream_unresolvable` — the model's upstream host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed (`destination_unavailable`). Names neither the host nor the cause. No usage recorded. */
             502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `encryption_key_unavailable` — the model's stored credential is encrypted under a key id missing from the platform's keyring. Operator configuration; nothing is sent upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
@@ -15394,6 +15506,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listModelProviderRegistry: {
@@ -15514,6 +15627,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     deleteModelProviderCredential: {
@@ -15604,6 +15718,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     testModelProviderCredential: {
@@ -15636,6 +15751,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     redeemOAuthModelProviderPairing: {
@@ -15952,6 +16068,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ModelAlreadyAdded"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     setDefaultModel: {
@@ -16005,6 +16122,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     searchOpenRouterModels: {
@@ -16165,6 +16283,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     testModelInline: {
@@ -16206,6 +16325,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     deleteModel: {
@@ -16297,6 +16417,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     testModel: {
@@ -16329,6 +16450,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listNotifications: {
@@ -21162,6 +21284,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     streamAgentRuns: {
@@ -21739,6 +21862,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     validateInlineRun: {
@@ -22309,6 +22433,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     finalizeRemoteRun: {
@@ -22405,6 +22530,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     heartbeatRemoteRun: {
@@ -22466,6 +22592,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     fetchRunFilesManifest: {
@@ -22537,6 +22664,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     publishRunFile: {
@@ -22659,6 +22787,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     fetchRunFile: {
@@ -22714,6 +22843,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     extendRunSink: {
@@ -22809,6 +22939,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listSchedules: {
@@ -23022,6 +23153,7 @@ export interface operations {
                 };
             };
             422: components["responses"]["VersionArtifactUnavailable"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     listScheduleRuns: {
@@ -23813,6 +23945,7 @@ export interface operations {
             /** @description Space or configuration not found */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     getSpaceSocialProvider: {
@@ -24308,6 +24441,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     getSpacePackageRunConfig: {
@@ -25189,7 +25323,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials could not be decrypted at all (rotated `CONNECTION_ENCRYPTION_KEY`, corrupted blob) — which is terminal on the plain read too, not only on a forced refresh. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics. */
+            /** @description The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials are unreadable (corrupted blob, failed integrity check, malformed envelope) — which is terminal on the plain read too, not only on a forced refresh. A key id missing from the keyring is NOT one of them: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -25208,6 +25342,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     refreshIntegrationCredentials: {
@@ -25278,6 +25413,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     reportIntegrationUpstreamSuccess: {
@@ -25973,6 +26109,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     refreshOAuthModelProviderToken: {
@@ -26007,6 +26144,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
     getRunHistory: {

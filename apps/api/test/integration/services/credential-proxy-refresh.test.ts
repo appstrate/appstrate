@@ -20,7 +20,7 @@ import {
   seedRun,
   seedPublishedVersion,
 } from "../../helpers/seed.ts";
-import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
@@ -371,6 +371,51 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.status).toBe(401);
     expect(upstreamCalls).toBe(1);
     expect(res.authRefreshed).toBeUndefined();
+  });
+
+  it("answers the 503 — not the upstream 401 — when the refresh meets a missing key", async () => {
+    const packageId = "@cprefreshorg/gmail-missing-kid";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationOauthClients.integrationId, packageId));
+    const fakeFetch = ((url: string, init: RequestInit) =>
+      String(url).startsWith(mockServer.url)
+        ? fetch(url, init)
+        : Promise.resolve(
+            new Response("unauthorized", { status: 401 }),
+          )) as unknown as typeof fetch;
+    const call = (body?: ReadableStream<Uint8Array>) =>
+      proxyCall({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: body ? "POST" : "GET",
+        target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        headers: body ? { "Content-Type": "application/octet-stream" } : {},
+        ...(body ? { body } : {}),
+        fetch: fakeFetch,
+      });
+    const unavailable = { code: "encryption_key_unavailable" };
+
+    // Buffered (replayable) and streaming bodies alike: no relayed 401, no `authRefreshed`.
+    await expect(call()).rejects.toBeInstanceOf(ProxyCallError);
+    await expect(call()).rejects.toMatchObject(unavailable);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("upload-bytes"));
+        controller.close();
+      },
+    });
+    await expect(call(stream)).rejects.toMatchObject(unavailable);
+
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, packageId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("does not retry when upstream returns a non-401 response", async () => {

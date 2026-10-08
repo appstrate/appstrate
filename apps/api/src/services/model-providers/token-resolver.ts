@@ -51,9 +51,8 @@ async function loadCredentialState(
   // ever bypassed by a refactor, the data layer refuses to surface a
   // credential outside the caller's org.
   const loaded = await loadCredentialRow(credentialId, expectedOrgId);
-  // An undecryptable blob is reported as `blob: null` (the raw load keeps the
-  // row alive for metadata-only callers). Here it is indistinguishable from a
-  // missing credential — same 404 as before this path could see one.
+  // An unreadable blob (`blob: null`) is indistinguishable here from a missing
+  // credential — same 404; a missing key has already thrown the 503.
   if (!loaded || !loaded.blob) {
     throw notFound(`OAuth model provider credential not found: ${credentialId}`);
   }

@@ -611,6 +611,7 @@ export const spacesPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
     delete: {

@@ -239,6 +239,7 @@ export const schedulesPaths = {
         "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -411,6 +412,7 @@ export const schedulesPaths = {
           description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
         },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
     delete: {

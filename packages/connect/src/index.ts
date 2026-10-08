@@ -16,6 +16,10 @@ export {
   encryptCredentials,
   decryptCredentials,
   encryptCredentialEnvelope,
+  UnknownKeyIdError,
+  CredentialDecryptError,
+  keyringKids,
+  opensWithKeyring,
 } from "./encryption.ts";
 
 // OAuth2 token-exchange error type (shared by token-exchange.ts + integration OAuth)

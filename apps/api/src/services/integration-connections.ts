@@ -84,6 +84,12 @@ import {
 } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import {
+  decryptForDisplay,
+  decryptStoredCredential,
+  encryptionKeyUnavailable,
+  KEY_UNAVAILABLE,
+} from "../lib/stored-credential.ts";
+import {
   ApiError,
   notFound,
   conflict,
@@ -177,6 +183,8 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   autoProvisioned: boolean;
   /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
   issuer: string | null;
+  /** The secret is under a key id the keyring lacks: connecting answers a 503. */
+  secretKeyUnavailable: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -669,40 +677,22 @@ type IntegrationOAuthClientRow = typeof integrationOauthClients.$inferSelect;
  * `has_client_secret: true` from the column — the persisted, machine-readable
  * marker that says "this row holds a secret nobody can read".
  *
- * The path that would ACT on that client refuses it BY NAME:
- * `assertConnectClientUsable`, before the connect redirect, in a 403 that names
- * `CONNECTION_ENCRYPTION_KEY` and the re-registration. The refresh path does
- * not, and deliberately: `resolveIntegrationClientById` logs the decrypt
- * failure and returns `null`, so the token silently stops being renewed and the
- * connection surfaces as `needs_reconnection` at expiry — the cause is named
- * only in that server log. Refresh is machine-driven with nobody watching, and
- * the recovery it pushes the user toward (reconnect) is the very path that
- * DOES name the key, so the diagnosis is one click away rather than lost.
- * Neither state is inferred away here — this function reports what the row says
- * and nothing more.
+ * The path that would ACT on that client refuses it: `assertConnectClientUsable`,
+ * before the connect redirect — the 503 for a key id missing from the keyring
+ * (`secretKeyUnavailable`), else a 403 naming the key and the re-registration.
  */
 function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAuthClientWithSecret {
-  let secret = "";
-  // A public client stores no ciphertext at all, so there is nothing to
-  // decrypt — and nothing that could fail to decrypt.
-  try {
-    secret =
-      row.clientSecretEncrypted === ""
-        ? ""
-        : (decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted)
-            .client_secret ?? "");
-  } catch (err) {
-    // Logged, not tracked in a flag: `has_client_secret` below reads the
-    // column, so an unreadable ciphertext needs no in-band marker to be
-    // reported as the secret it is. The warning is what tells the operator
-    // WHICH row stopped opening.
-    logger.warn("integration_oauth_client: client_secret decrypt failed", {
-      packageId: row.integrationId,
-      authKey: row.authKey,
-      clientId: row.id,
-      err: String(err),
-    });
-  }
+  // A public client stores no ciphertext at all, so there is nothing to decrypt.
+  const stored =
+    row.clientSecretEncrypted === ""
+      ? null
+      : decryptForDisplay(
+          () => decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted),
+          { packageId: row.integrationId, authKey: row.authKey, clientId: row.id },
+        );
+  const secretKeyUnavailable = stored === KEY_UNAVAILABLE;
+  // Unreadable: "" here, while `has_client_secret` below still reads the column.
+  const secret = stored && stored !== KEY_UNAVAILABLE ? (stored.client_secret ?? "") : "";
   return {
     id: row.id,
     spaceId: row.spaceId,
@@ -730,6 +720,7 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     isDefault: row.isDefault,
     autoProvisioned: row.autoProvisioned,
     issuer: row.issuer,
+    secretKeyUnavailable,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -742,6 +733,7 @@ export function toPublicClient(client: IntegrationOAuthClientWithSecret): Integr
     isDefault: _isDefault,
     autoProvisioned: _auto,
     issuer: _issuer,
+    secretKeyUnavailable: _secretKeyUnavailable,
     ...rest
   } = client;
   return rest;
@@ -1281,6 +1273,13 @@ function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedCo
  * `projectClientWithSecret`): the admin has to see the broken row to fix it.
  */
 function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): void {
+  if (client.secretKeyUnavailable) {
+    throw encryptionKeyUnavailable(null, {
+      packageId: client.integration_package_id,
+      authKey: client.auth_key,
+      clientId: client.id,
+    });
+  }
   const where = `'${client.integration_package_id}' auth '${client.auth_key}'`;
   if (client.has_client_secret && client.clientSecret === "") {
     throw forbidden(
@@ -1376,8 +1375,9 @@ export function resolveConnectClient(
  * row does not declare one; `toSupportedTokenEndpointAuthMethod` narrows it as on the callback.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
- * cross-scope) and for a ciphertext that will not open — the caller skips the
- * refresh, which surfaces as `needs_reconnection` at expiry.
+ * cross-scope) and for an unreadable ciphertext — the caller skips the
+ * refresh, which surfaces as `needs_reconnection` at expiry. A ciphertext under
+ * a key id the keyring lacks throws the 503 instead.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
@@ -1451,18 +1451,12 @@ export async function resolveIntegrationClientById(
     return bound(resolved(row.clientId, "", "none"));
   }
 
-  let clientSecret: string;
-  try {
-    clientSecret =
-      decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ?? "";
-  } catch (err) {
-    logger.warn("Integration custom client_secret decrypt failed", {
-      integrationId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  const stored = decryptStoredCredential(
+    () => decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted),
+    { integrationId, authKey, clientRef },
+  );
+  if (!stored) return null;
+  const clientSecret = stored.client_secret ?? "";
   // A ciphertext that opens to an EMPTY secret is not normalised to `"none"`
   // here — that inference is what sent `client_secret=` (present but empty) to
   // providers that reject it. The pair travels on as it was stored, and the
@@ -2875,7 +2869,8 @@ export async function persistCredentialBundle(
  */
 /**
  * Read and decrypt the stored credential fields for one connection by id.
- * Returns `null` when the row is gone.
+ * Returns `null` when the row is gone or its blob cannot be read (logged): every
+ * caller only enriches a reconnect or a deletion with them.
  *
  * Keyed by id alone — it carries NO ownership, org or space predicate, so it
  * hands back plaintext for any connection in the deployment. Every caller must
@@ -2891,7 +2886,10 @@ export async function getIntegrationConnectionCredentialFields(
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
   if (!row?.credentialsEncrypted) return null;
-  return decryptCredentialsToStringMap(row.credentialsEncrypted);
+  const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
+    connectionId,
+  });
+  return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
 export async function markIntegrationConnectionNeedsReconnection(

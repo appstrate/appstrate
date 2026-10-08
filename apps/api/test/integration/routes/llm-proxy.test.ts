@@ -343,6 +343,28 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
     expect(upstreamCalled).toBe(false);
   });
 
+  it("answers 503 encryption_key_unavailable for a preset whose credential is under a missing kid", async () => {
+    const h = await buildHarness();
+    await db
+      .update(modelProviderCredentials)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(modelProviderCredentials.id, h.credentialId));
+    let upstreamCalled = false;
+    mockUpstream(async () => {
+      upstreamCalled = true;
+      return new Response("should not be called", { status: 599 });
+    });
+    const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(h),
+      body: JSON.stringify({ model: h.presetId, messages: [{ role: "user", content: "hi" }] }),
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("encryption_key_unavailable");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
+    expect(upstreamCalled).toBe(false);
+  });
+
   it("returns 400 when the preset uses a different protocol family", async () => {
     const h = await buildHarness({ apiShape: "anthropic-messages" });
     mockUpstream(async () => new Response("should not be called", { status: 599 }));

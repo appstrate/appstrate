@@ -18,6 +18,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
+import { EncryptionKeyUnavailableError } from "../../../src/lib/stored-credential.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -25,6 +26,7 @@ import {
   listIntegrationClients,
   resolveIntegrationClientById,
   resolveConnectClient,
+  ensureIntegrationOAuthClient,
   setDefaultIntegrationClient,
   type ResolvedOAuthConnect,
 } from "../../../src/services/integration-connections.ts";
@@ -223,6 +225,33 @@ describe("integration multi-client", () => {
         undefined,
       );
       expect(c).toBeNull();
+    });
+
+    it("answers 503 for a secret under a kid the keyring lacks, null for an unreadable one", async () => {
+      // `null` reads as "unrefreshable" and counts the connection toward a reconnect;
+      // a missing key is the operator's to restore, so it must not.
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const setSecret = (clientSecretEncrypted: string) =>
+        db
+          .update(integrationOauthClients)
+          .set({ clientSecretEncrypted })
+          .where(eq(integrationOauthClients.id, customId));
+      const resolve = () =>
+        resolveIntegrationClientById(
+          customId,
+          ctx.defaultSpaceId,
+          INTEGRATION,
+          AUTH_KEY,
+          undefined,
+        );
+
+      await setSecret(`v1:k0gone:${Buffer.alloc(40).toString("base64")}`);
+      await expect(resolve()).rejects.toMatchObject({
+        status: 503,
+        code: "encryption_key_unavailable",
+      });
+      await setSecret("v1:not-a-real-envelope");
+      expect(await resolve()).toBeNull();
     });
 
     it("returns null when the id resolves to neither a system nor a custom client", async () => {
@@ -489,6 +518,7 @@ describe("integration multi-client", () => {
             isDefault,
             autoProvisioned: false,
             issuer: null,
+            secretKeyUnavailable: false,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
@@ -507,6 +537,25 @@ describe("integration multi-client", () => {
         customClient(true),
       );
       expect(out.clientId).toBe("org-client-id");
+    });
+
+    it("answers the 503, not the re-register 403, for a secret under a missing kid", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      await db
+        .update(integrationOauthClients)
+        .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+        .where(eq(integrationOauthClients.id, customId));
+      const resolved = await ensureIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        "https://platform.test/callback",
+      );
+      expect(() =>
+        resolveConnectClient(INTEGRATION, AUTH_KEY, LOCAL_MANIFEST, OAUTH2_AUTH, resolved),
+      ).toThrow(EncryptionKeyUnavailableError);
     });
 
     it("falls to the system client when the custom one is un-flagged", () => {
@@ -552,6 +601,7 @@ describe("integration multi-client", () => {
           isDefault: s.isDefault,
           autoProvisioned: false,
           issuer: null,
+          secretKeyUnavailable: false,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         })),

@@ -45,6 +45,7 @@ import type { AppEnv } from "../types/index.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { getCache } from "../infra/index.ts";
 import { assertRunSinkAuthBudget, recordRunSinkAuthFailure } from "./rate-limit.ts";
+import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
 import {
   assertSinkOpen,
   getRunSinkContext,
@@ -83,7 +84,6 @@ function makeRunSignatureGuard(
     // budget is rejected before the DB is touched at all.
     await assertRunSinkAuthBudget(c);
 
-    let authenticated = false;
     try {
       const runId = c.req.param("runId");
       if (!runId) throw invalidRequest("runId path parameter is required", "runId");
@@ -107,11 +107,12 @@ function makeRunSignatureGuard(
 
       if (opts.consumeMsgId) await claimMsgId(run.id, c.req.header("webhook-id")!);
 
-      authenticated = true;
       c.set("run", run);
       if (opts.exposeWebhookId) c.set("webhookId", c.req.header("webhook-id")!);
-    } finally {
-      if (!authenticated) await recordRunSinkAuthFailure(c);
+    } catch (err) {
+      // A key missing from the keyring says nothing about the caller: not a failed attempt.
+      if (!(err instanceof EncryptionKeyUnavailableError)) await recordRunSinkAuthFailure(c);
+      throw err;
     }
 
     await next();
