@@ -187,6 +187,31 @@ describe("runConnectLogin", () => {
     expect(capture.args.arguments).toEqual({});
   });
 
+  it("renders the connection's variables into the session header (AFPS §7.12)", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [{ type: "text", text: JSON.stringify({ outputs: { session: "S" } }) }],
+    };
+    const { client } = makeFakeClient(canned, () => source.activeInputs());
+    await runConnectLogin({
+      client: client as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      authType: "custom",
+      authorizedUris: ["https://acme.forge.example.com/**"],
+      deliveryHttp: {
+        in: "header",
+        name: "Cookie",
+        value: "tenant={$variable.tenant}; sid={$credential.session}",
+      },
+      variables: { tenant: "acme" },
+    });
+    expect(source.deliveryPlans().primary?.value).toBe("tenant=acme; sid=S");
+  });
+
   // F3 — the login-tool result wire format is canonical snake_case (AFPS §7.x).
   it("accepts snake_case identity_claims / expires_at / scopes_granted in the login-tool result", async () => {
     const source = makeSource();

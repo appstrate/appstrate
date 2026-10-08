@@ -31,6 +31,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { readConnectionVariables } from "./connection-variables.ts";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
@@ -245,6 +246,15 @@ export async function resolveLiveIntegrationCredentials(
     );
   };
 
+  // Read with the ciphertext below: the variables name the upstream THIS credential was acquired for.
+  const variables = await readConnectionVariables(manifest, connection);
+  if (!variables) {
+    // A reconnect rewrote the row since it was loaded: retry-later, never a pairing of halves.
+    throw badGateway(
+      `Integration '${integrationId}' connection ${connection.id} changed while being read; retry`,
+    );
+  }
+
   let fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
     integrationId,
@@ -424,7 +434,12 @@ export async function resolveLiveIntegrationCredentials(
 
   const http = authDef.delivery?.http;
   if (http) {
-    const plan = resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery);
+    const plan = resolveAfpsHttpDelivery(
+      authDef.type,
+      fields,
+      http as ConnectAfpsHttpDelivery,
+      variables,
+    );
     if (plan) {
       out.deliveryPlans[authKey] = plan;
     }
@@ -435,7 +450,7 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     // Rendered from the post-refresh fields.
-    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields, variables)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),

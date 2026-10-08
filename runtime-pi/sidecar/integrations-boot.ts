@@ -613,6 +613,7 @@ export async function runConnectLoginHook(
     authType: cl.authType,
     authorizedUris: cl.authorizedUris,
     deliveryHttp: cl.deliveryHttp,
+    ...(cl.variables ? { variables: cl.variables } : {}),
   };
   await runConnectLogin(loginOpts);
   logger.info("integration connect-login session minted", {
@@ -1950,6 +1951,7 @@ export async function runConnectOnce(
       authType: cl.authType,
       authorizedUris: cl.authorizedUris,
       deliveryHttp: cl.deliveryHttp,
+      ...(cl.variables ? { variables: cl.variables } : {}),
     });
 
     logger.info("connect-run captured session", {

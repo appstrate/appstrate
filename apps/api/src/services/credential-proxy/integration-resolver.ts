@@ -52,6 +52,7 @@ import {
   refreshAndClassify,
 } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { readConnectionVariables, type ConnectionVariables } from "../connection-variables.ts";
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
 export interface ProxyRunSelection extends RunBoundSelection {
@@ -136,7 +137,13 @@ export async function resolveIntegrationProxyCredentials(
     );
   }
 
-  const payload = buildPayload(input.integrationId, manifest, connection);
+  const variables = await readConnectionVariables(manifest, connection);
+  if (!variables) {
+    throw new IntegrationCredentialNotFoundError(
+      `Integration '${input.integrationId}' connection changed while being read; retry the call`,
+    );
+  }
+  const payload = buildPayload(input.integrationId, manifest, connection, variables);
   return {
     payload,
     declaredUris: declaredUrisOf(manifest, connection.authKey),
@@ -156,7 +163,7 @@ export async function resolveIntegrationProxyCredentials(
  * they leave behind:
  *
  *   - transient (discovery blip, upstream 5xx) — row untouched, retry later;
- *   - no accessible connection — nothing to conclude;
+ *   - no accessible connection, or one rewritten while being read — nothing to conclude;
  *   - UNREFRESHABLE (a non-oauth2 auth, or oauth2 whose minting client is gone
  *     or whose manifest can never yield a token endpoint) — the rejection is
  *     counted by `recordUnrefreshableRejection`, as on the sidecar path, and
@@ -179,6 +186,9 @@ export async function forceRefreshIntegrationProxyCredentials(
   if (authDef.type !== "oauth2") {
     return countUnrefreshableRejection(input, connection, `auth type '${authDef.type}'`);
   }
+  // Read with the ciphertext the refresh starts from: a refresh never changes the variables.
+  const variables = await readConnectionVariables(manifest, connection);
+  if (!variables) return null;
 
   let refreshContext;
   try {
@@ -254,7 +264,7 @@ export async function forceRefreshIntegrationProxyCredentials(
   }
 
   const fields = classified.result.fields;
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  const payload = buildPayloadFromFields(manifest, connection.authKey, fields, variables);
   if (!payload) return null;
   return {
     payload,
@@ -343,6 +353,7 @@ function buildPayload(
   integrationId: string,
   manifest: IntegrationManifest,
   connection: ResolvedConnectionRow,
+  variables: ConnectionVariables,
 ): ProxyCredentialsPayload {
   const fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
@@ -354,7 +365,7 @@ function buildPayload(
       `Failed to decrypt credentials for integration '${integrationId}'`,
     );
   }
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  const payload = buildPayloadFromFields(manifest, connection.authKey, fields, variables);
   if (!payload) {
     throw new IntegrationCredentialNotFoundError(
       `Integration '${integrationId}' auth '${connection.authKey}' has no resolvable credentials`,
@@ -376,20 +387,21 @@ function buildPayloadFromFields(
   manifest: IntegrationManifest,
   authKey: string,
   fields: Record<string, string>,
+  variables: ConnectionVariables,
 ): ProxyCredentialsPayload | null {
   const authDef = manifest.auths?.[authKey] as AfpsManifestAuth | undefined;
   if (!authDef) return null;
 
   const http = authDef.delivery?.http;
   const plan = http
-    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery)
+    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery, variables)
     : null;
 
   // Integrations always declare ≥1 authorized_uri unless allow_all_uris is set.
   return buildProxyCredentialsPayload({
     fields,
     plan,
-    authorizedUris: renderAuthAuthorizedUris(authDef, fields),
+    authorizedUris: renderAuthAuthorizedUris(authDef, fields, variables),
     allowAllUris: authDef.allow_all_uris === true,
   });
 }

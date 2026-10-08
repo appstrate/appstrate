@@ -66,6 +66,8 @@ interface RunConnectLoginOptions {
   authorizedUris: readonly string[];
   /** Manifest `delivery.http` block used to render the session header. */
   deliveryHttp: DeliveryHttp;
+  /** The connection's variables (AFPS §7.12), for `{$variable.<name>}` in the header value. */
+  variables?: Readonly<Record<string, string>>;
 }
 
 interface LoginToolResult {
@@ -119,6 +121,7 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
       opts.authType,
       parsed.outputs,
       opts.deliveryHttp as AfpsHttpDelivery,
+      opts.variables ?? {},
     );
     if (plan) {
       opts.source.setSessionOutputs(

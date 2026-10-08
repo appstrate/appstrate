@@ -310,6 +310,69 @@ describe("credential-proxy integration-resolver", () => {
     expect(resolved.payload.authorizedUris).toEqual(["https://tenant.example.com/**"]);
   });
 
+  it("renders authorized_uris and the injected header from the connection's variables (§7.12)", async () => {
+    const FORGE = "@official/forge";
+    await seedPackage({
+      id: FORGE,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        schema_version: "0.1",
+        type: "integration",
+        name: FORGE,
+        version: "1.0.0",
+        display_name: "Forge",
+        source: { kind: "local", server: { name: "@official/forge-server", version: "^1.0.0" } },
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string" }, tenant: { type: "string" } },
+            required: ["base_url", "tenant"],
+          },
+        },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["{$variable.base_url}/api/**"],
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { api_key: { type: "string" } },
+                required: ["api_key"],
+              },
+            },
+            delivery: {
+              http: {
+                in: "header",
+                name: "X-Api-Key",
+                value: "{$variable.tenant}:{$credential.api_key}",
+              },
+            },
+          },
+        },
+      },
+    });
+    await seedPublishedVersion(FORGE, "1.0.0");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, FORGE);
+    await db.insert(integrationConnections).values({
+      integrationId: FORGE,
+      authKey: "primary",
+      accountId: "acct-1",
+      label: "Connexion 1",
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      variables: { base_url: "https://forge.example.com", tenant: "acme" },
+    });
+
+    const resolved = await resolveIntegrationProxyCredentials({ ...input(), integrationId: FORGE });
+    expect(resolved.payload.authorizedUris).toEqual(["https://forge.example.com/api/**"]);
+    expect(resolved.declaredUris).toEqual(["{$variable.base_url}/api/**"]);
+    expect(JSON.stringify(resolved.payload)).toContain("acme:k");
+  });
+
   it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
