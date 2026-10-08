@@ -1,5 +1,5 @@
 {
-  "version": "14.0.0",
+  "version": "15.0.0",
   "exports": [
     "AFPS_SCHEMA_URLS",
     "AFPS_SCHEMA_VERSION",
@@ -256,6 +256,7 @@
     "ParsedPackageZip",
     "PermissionDenialContext",
     "PermissionLevel",
+    "PiModelDialect",
     "PlatformServices",
     "PrincipalKind",
     "PrincipalPermissionContext",
@@ -525,6 +526,7 @@
     "isMcpServerRuntime",
     "isMultipleFileField",
     "isOwnedByOrg",
+    "isPiModelDialect",
     "isPlainObject",
     "isPromptEmpty",
     "isProtectedPackageFile",
