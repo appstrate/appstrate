@@ -174,17 +174,28 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(await refusal([own], own, {})).toEqual(await refusal([unknown], unknown, {}));
     });
 
-    it("refuses an end user's shared row under the shared-only default, with the same answer", async () => {
+    it("refuses an end user's row under the shared-only default, with the same answer", async () => {
       const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: scope.spaceId });
-      const endUserShared = await seedConnection({
+      const endUserRow = await seedConnection({ spaceId: scope.spaceId, endUserId: endUser.id });
+      const unknown = crypto.randomUUID();
+      expect(await refusal([endUserRow], endUserRow, {})).toEqual(
+        await refusal([unknown], unknown, {}),
+      );
+    });
+
+    it("cannot hold an end user's row shared: the database refuses it", async () => {
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: scope.spaceId });
+      // Drizzle hangs the driver error off `cause`; the outer one names only the query.
+      const refused = await seedConnection({
         spaceId: scope.spaceId,
         endUserId: endUser.id,
         sharedWithOrg: true,
-      });
-      const unknown = crypto.randomUUID();
-      expect(await refusal([endUserShared], endUserShared, {})).toEqual(
-        await refusal([unknown], unknown, {}),
+      }).then(
+        () => null,
+        (err: { cause?: { code?: string; message?: string } }) => err.cause,
       );
+      expect(refused?.code).toBe("23514");
+      expect(refused?.message).toContain("integration_connections_end_user_not_shared");
     });
 
     it("accepts allowOwnedBy for the caller's own row beside a shared one", async () => {

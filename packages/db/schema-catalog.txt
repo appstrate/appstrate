@@ -687,6 +687,7 @@ constraint files files_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user
 constraint integration_connections integration_conn_exactly_one_owner CHECK ((((user_id IS NOT NULL) AND (end_user_id IS NULL)) OR ((user_id IS NULL) AND (end_user_id IS NOT NULL))))
 constraint integration_connections integration_connections_auth_key_valid CHECK ((auth_key ~ '^[a-z][a-z0-9_]*$'::text))
 constraint integration_connections integration_connections_end_user_id_end_users_id_fk FOREIGN KEY (end_user_id) REFERENCES end_users(id) ON DELETE CASCADE
+constraint integration_connections integration_connections_end_user_not_shared CHECK (((NOT shared_with_org) OR (user_id IS NOT NULL)))
 constraint integration_connections integration_connections_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_connections integration_connections_label_not_empty CHECK ((label <> ''::text))
 constraint integration_connections integration_connections_pkey PRIMARY KEY (id)

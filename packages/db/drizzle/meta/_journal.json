@@ -561,6 +561,13 @@
       "when": 1791449350201,
       "tag": "0079_connection_set_cap_20",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791500000000,
+      "tag": "0080_integration_connections_end_user_not_shared",
+      "breakpoints": true
     }
   ]
 }

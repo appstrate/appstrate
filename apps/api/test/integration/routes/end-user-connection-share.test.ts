@@ -175,9 +175,18 @@ describe("end-user connections are never shared", () => {
     expect(await isShared(connectionId)).toBe(true);
   });
 
-  it("404s an admin pin and an org default naming an end user's shared connection", async () => {
-    // A share the API no longer allows, written directly as a pre-existing row.
-    const endUserConnection = await seedConnection({ endUserId }, true);
+  it("cannot store an end user's connection shared: the database refuses it", async () => {
+    // Drizzle hangs the driver error off `cause`; the outer one names only the query.
+    const refused = await seedConnection({ endUserId }, true).then(
+      () => null,
+      (err: { cause?: { code?: string; message?: string } }) => err.cause,
+    );
+    expect(refused?.code).toBe("23514");
+    expect(refused?.message).toContain("integration_connections_end_user_not_shared");
+  });
+
+  it("404s an admin pin and an org default naming an end user's connection", async () => {
+    const endUserConnection = await seedConnection({ endUserId }, false);
     const memberConnection = await seedConnection({ userId: ctx.user.id }, true);
 
     for (const res of [

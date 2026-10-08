@@ -17,13 +17,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedAgent,
-  seedEndUser,
-  seedPackage,
-  seedSpace,
-  seedSpaceMember,
-} from "../../helpers/seed.ts";
+import { seedAgent, seedPackage, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -104,8 +98,7 @@ describe("unsharing on access loss", () => {
 
   async function seedConnection(opts: {
     spaceId: string;
-    userId?: string;
-    endUserId?: string;
+    userId: string;
     shared?: boolean;
   }): Promise<string> {
     const [row] = await db
@@ -115,8 +108,7 @@ describe("unsharing on access loss", () => {
         authKey: "primary",
         accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
         spaceId: opts.spaceId,
-        userId: opts.userId ?? null,
-        endUserId: opts.endUserId ?? null,
+        userId: opts.userId,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         sharedWithOrg: opts.shared ?? true,
@@ -150,18 +142,13 @@ describe("unsharing on access loss", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
       });
-      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
-      const endUserShared = await seedConnection({
-        spaceId: ctx.defaultSpaceId,
-        endUserId: endUser.id,
-      });
       // The member's own organization is not the one they leave.
       const { defaultSpaceId: otherOrgSpace } = await createTestOrg(member);
       const otherOrg = await seedConnection({ spaceId: otherOrgSpace, userId: member });
       return {
         member,
         unshared: [inDefault, inPersonal].sort(),
-        kept: [ownerShared, endUserShared, otherOrg].sort(),
+        kept: [ownerShared, otherOrg].sort(),
       };
     }
 
