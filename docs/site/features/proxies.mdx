@@ -69,7 +69,7 @@ The first match wins:
 5. `PROXY_URL`.
 6. No proxy.
 
-An override that points at a deleted or disabled proxy is skipped with a warning and the cascade continues. The label of the proxy a run actually used is stored on the run as `proxy_label`.
+An override that points at a deleted or disabled proxy is skipped with a warning and the cascade continues. A proxy whose stored URL is encrypted under a key the instance does not hold is not skipped: the launch is refused with `503 encryption_key_unavailable`, so a run never leaves without the proxy it was given. The label of the proxy a run actually used is stored on the run as `proxy_label`.
 
 ### Pinning a proxy on an agent
 

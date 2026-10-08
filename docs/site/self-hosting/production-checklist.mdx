@@ -61,7 +61,7 @@ The defaults are conservative: 200 run launches per minute and 50 concurrent run
 Pin one release for every image:
 
 ```bash
-APPSTRATE_VERSION=1.0.0-beta.65
+APPSTRATE_VERSION=1.0.0-beta.66
 ```
 
 Tags have no `v` prefix. `APPSTRATE_VERSION` is a Compose variable that moves the platform, the agent runtime, the sidecar and the MCP runner images together, and the platform refuses to boot if the platform and runtime image versions disagree. If you run your own Compose file, pin all of them yourself. Read [Upgrading](/self-hosting/upgrading) before changing the pin.
@@ -81,6 +81,8 @@ The API process itself also makes outbound requests to `get.appstrate.dev` to re
 Email verification and magic-link sign-in need SMTP. Set `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` together (`SMTP_PORT` defaults to `587`): mail is enabled only when all four are set, and no error is raised when they are not. Test with a magic link or a password reset before go-live.
 
 With SMTP on, the instance also mails account notices: a password change or reset is reported to the account's address, a sign-up with an address that already has an account is answered at that address, and an email change must be approved from the current address before anything is sent to the new one. Without SMTP, an email change applies at once, with no confirmation.
+
+These sign-in and account emails are written in the language of the account's profile, and in French for an address that has no account yet (a magic-link sign-up). When the mail server refuses one, the request still answers as if it had been sent, and the platform logs the warning `auth: auth e-mail not sent` with the template name, addresses masked. Look for it when you test.
 
 The Compose files shipped since 1.0.0-beta.65 forward the SMTP and the Google and GitHub sign-in variables. The tier templates of earlier releases do not, so with an older file check that they are listed under `appstrate.environment` (see [Docker Compose](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
 

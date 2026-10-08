@@ -36,18 +36,19 @@ The API date version is separate from the platform version and has not moved yet
 
 A selection of changes that altered how you use Appstrate. Each is a git tag. `CHANGELOG.md` has sections from `1.0.0-beta.52` onward, so for earlier tags read the GitHub release.
 
-| Version          | Date       | Change                                                                                                                    |
-| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `v1.0.0-beta.17` | 2026-06-04 | AFPS 2.0 and the move from providers to **integrations**: MCP-backed packages that declare their authentication and tools |
-| `v1.0.0-beta.26` | 2026-06-08 | The **MCP module**: the platform API exposed to MCP clients, one endpoint per organization                                |
-| `v1.0.0-beta.34` | 2026-07-03 | The hosted **Connect portal** for integrations, and the chat module                                                       |
-| `v1.0.0-beta.36` | 2026-07-06 | The **Firecracker** run backend: one microVM per run, behind a KVM boundary                                               |
-| `v1.0.0-beta.54` | 2026-08-28 | **Applications became spaces**: `spc_` ids, `X-Space-Id`, `/api/spaces`                                                   |
-| `v1.0.0-beta.62` | 2026-09-25 | API keys use the checksummed **`apst_`** format. Older `ask_` keys stop working                                           |
-| `v1.0.0-beta.64` | 2026-09-30 | An agent can use **several connections of one integration** in a single run                                               |
-| `v1.0.0-beta.65` | 2026-10-07 | A signed **live model catalog**, `appstrate api` with an API key, and a long list of operator pre-flights                 |
+| Version          | Date       | Change                                                                                                                                                                   |
+| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `v1.0.0-beta.17` | 2026-06-04 | AFPS 2.0 and the move from providers to **integrations**: MCP-backed packages that declare their authentication and tools                                                |
+| `v1.0.0-beta.26` | 2026-06-08 | The **MCP module**: the platform API exposed to MCP clients, one endpoint per organization                                                                               |
+| `v1.0.0-beta.34` | 2026-07-03 | The hosted **Connect portal** for integrations, and the chat module                                                                                                      |
+| `v1.0.0-beta.36` | 2026-07-06 | The **Firecracker** run backend: one microVM per run, behind a KVM boundary                                                                                              |
+| `v1.0.0-beta.54` | 2026-08-28 | **Applications became spaces**: `spc_` ids, `X-Space-Id`, `/api/spaces`                                                                                                  |
+| `v1.0.0-beta.62` | 2026-09-25 | API keys use the checksummed **`apst_`** format. Older `ask_` keys stop working                                                                                          |
+| `v1.0.0-beta.64` | 2026-09-30 | An agent can use **several connections of one integration** in a single run                                                                                              |
+| `v1.0.0-beta.65` | 2026-10-07 | A signed **live model catalog**, `appstrate api` with an API key, and a long list of operator pre-flights                                                                |
+| `v1.0.0-beta.66` | 2026-10-08 | **Connection variables**: one integration serves every self-hosted instance of a service. Stricter `authorized_uris` and `connect.login` checks on integration manifests |
 
-Version `1.0.0-beta.65` has an `Operators` section with a new environment variable (`MODEL_CATALOG_URL`), pre-flight scripts and SQL checks to run before the deploy, and behavior changes that need an action. Read it in [`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG.md) before you upgrade from an earlier version.
+Versions `1.0.0-beta.65` and `1.0.0-beta.66` each have an `Operators` section with pre-flight scripts and SQL checks to run before the deploy, and behavior changes that need an action. 1.0.0-beta.65 adds an environment variable (`MODEL_CATALOG_URL`). In 1.0.0-beta.66, `BETTER_AUTH_SECRETS` takes a new format and the boot refuses while a stored credential is encrypted under a key id no configured key carries. Read both in [`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG.md) before you upgrade from an earlier version.
 
 ## Upgrading
 

@@ -112,10 +112,10 @@ A Compose file that predates 1.0.0-beta.65 forwards less. It does not pass `AUTH
 
 ## Pin a version
 
-Image tags are the release version without a leading `v`, for example `1.0.0-beta.65`. The Compose files default to the release they shipped with, and one variable moves every image together:
+Image tags are the release version without a leading `v`, for example `1.0.0-beta.66`. The Compose files default to the release they shipped with, and one variable moves every image together:
 
 ```bash
-echo "APPSTRATE_VERSION=1.0.0-beta.65" >> .env
+echo "APPSTRATE_VERSION=1.0.0-beta.66" >> .env
 ```
 
 `APPSTRATE_VERSION` is read by Compose, not by the application. It applies to `appstrate`, `appstrate-pi`, `appstrate-sidecar` and the five `appstrate-mcp-runner-*` images. Do not rely on `latest`: GHCR only publishes it for non-prerelease versions, and every release so far is a prerelease.

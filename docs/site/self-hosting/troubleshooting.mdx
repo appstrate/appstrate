@@ -30,6 +30,8 @@ Other cross-field checks that stop the boot:
 - **`PLATFORM_RUN_LIMITS`, `INLINE_RUN_LIMITS`, `LLM_PROXY_LIMITS` or `CREDENTIAL_PROXY_LIMITS` contains an unknown key** or a bad value. The error names the key.
 - **`RUN_ADAPTER` names a backend nobody registered.** The error lists the registered ones. `firecracker` needs the `firecracker` module in `MODULES`.
 - **A model in `SYSTEM_PROVIDER_KEYS`** is outside its provider's offer, or a provider needs an API shape the platform does not serve. The error names the entry.
+- **`Missing encryption key(s)`.** The database holds credentials encrypted under a key id that no configured key carries, usually an old key removed from `CONNECTION_ENCRYPTION_KEYS` before the re-encryption script ran. The error names each key id and the columns that use it. Put the key back and restart; the rotation procedure is in [Environment Variables](/self-hosting/environment-variables).
+- **A migration refuses and names a script under `scripts/migration/`.** Some migrations check the data before they change the schema. Follow the release's operator notes: stop the app, take a dump, run the named script, then deploy again.
 
 ## A variable in `.env` has no effect
 
