@@ -48,6 +48,9 @@ import {
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
+import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
+import { activatePackage } from "../../../../services/space-packages.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
@@ -62,8 +65,9 @@ async function callTool(
   headers: Record<string, string>,
   name: string,
   args: Record<string, unknown>,
+  query = "",
 ): Promise<{ isError: boolean; data: Record<string, unknown> }> {
-  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}`, {
+  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}${query}`, {
     method: "POST",
     headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({
@@ -289,4 +293,56 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
+
+  // Only the in-process chat (`?context=injected`) renders a link as a card; any other caller,
+  // an agent run among them, may persist what the tool returns.
+  it("keeps a started run's connect link for the chat only", async () => {
+    const OAUTH = "@mcpconn/oauth-svc";
+    const manifest = localIntegrationManifest({
+      name: OAUTH,
+      serverName: `${OAUTH}-server`,
+      version: "1.0.0",
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationEndpoint: "https://provider.example.com/authorize",
+          tokenEndpoint: "https://provider.example.com/token",
+          defaultScopes: ["base"],
+        },
+      },
+      tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+    }) as unknown as Record<string, unknown>;
+    await seedPackage({
+      id: OAUTH,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackageVersion({ packageId: OAUTH, version: "1.0.0", manifest });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
+    await seedDefaultOrgModel(ctx);
+
+    const warningOf = async (query: string) => {
+      const result = await callTool(
+        headers,
+        "run_and_wait",
+        { kind: "inline", manifest: inlineAgentManifest([OAUTH]), prompt: "do the thing" },
+        query,
+      );
+      expect(result.data.done).toBe(true);
+      const warnings = result.data.warnings as Array<Record<string, unknown>>;
+      return warnings.find((w) => w.field === `integrations.${OAUTH}`)!;
+    };
+
+    const chat = await warningOf("?context=injected");
+    expect(chat).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+    expect(chat.connect_url).toStartWith("http");
+
+    const external = await warningOf("");
+    expect(external).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+    expect(external).not.toHaveProperty("connect_url");
+    expect(external).not.toHaveProperty("expiresAt");
+  }, 60_000);
 });

@@ -56,8 +56,13 @@ export function isIdempotencyAware(handler: unknown): boolean {
  * so we only need to validate length here.
  */
 export function idempotency(
-  replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>,
+  options: {
+    replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
+    /** The response body as it may be stored, and so replayed to any caller reusing the key. */
+    storedBody?: (body: string) => string;
+  } = {},
 ) {
+  const { replay, storedBody } = options;
   const middleware = async (c: Context<AppEnv>, next: Next) => {
     const key = c.req.header("Idempotency-Key");
     if (!key) return next();
@@ -156,11 +161,13 @@ export function idempotency(
     cloned.headers.forEach((v, k) => {
       resHeaders[k] = v;
     });
+    const body = storedBody ? storedBody(resBody) : resBody;
+    if (body !== resBody) delete resHeaders["content-length"];
 
     await storeIdempotencyResult(orgId, spaceId, key, {
       statusCode,
       headers: resHeaders,
-      body: resBody,
+      body,
       requestHash,
     });
   };

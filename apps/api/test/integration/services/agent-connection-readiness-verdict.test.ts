@@ -328,6 +328,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       const entry = await entryOf();
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution).toMatchObject({
+        source: null,
         error_code: null,
         warning_code: "integration_not_active",
         resolved_connection_ids: [],

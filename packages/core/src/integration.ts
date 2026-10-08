@@ -1470,7 +1470,7 @@ export interface ResolvedConnection {
 /**
  * Snapshot of the resolver output for one run. Persisted on
  * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
- * No key: nothing to start (inert, or off in the space); `[]`: started without a connection.
+ * No key: nothing to start (inert); `[]`: started without it (no connection bound, or off in the space).
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 

@@ -418,7 +418,11 @@ describe("launch override — the bound set names the launch it came from", () =
         [`integrations.${INTEGRATION}`, "integration_not_active"],
       ]);
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
-      expect(row!.resolvedConnections).toBeNull();
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+      const read = await app.request(`/api/runs/${body.id}`, { headers: authHeaders(ctx) });
+      expect(
+        ((await read.json()) as { integrations_unbound: string[] }).integrations_unbound,
+      ).toEqual([INTEGRATION]);
       await waitForRunPipelineSettled();
     });
 

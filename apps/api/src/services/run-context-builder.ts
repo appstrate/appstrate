@@ -166,7 +166,7 @@ export async function buildRunContext(params: {
   // agent-page picker models unconnected integrations explicitly) — but it is
   // not silent either: the resolver returns every drop and this function
   // hands it back as `droppedIntegrations`, which the pipeline persists as a
-  // `warn` run log once the run row exists. The resolver reads the version
+  // run log (`warn`, `info` for an unbound one) once the run row exists. The resolver reads the version
   // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({

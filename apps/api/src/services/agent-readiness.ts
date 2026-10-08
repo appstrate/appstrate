@@ -184,9 +184,9 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
 
 /**
  * Validate that an agent is ready for a run. Delegates to
- * `collectAgentReadiness` and throws the first error, preserving the
- * historical fail-fast contract (single ApiError with the original code and
- * human-readable title carried on the field entry). On success returns the
+ * `collectAgentReadiness` and throws the first error, fail-fast (single
+ * ApiError with the original code and human-readable title carried on the
+ * field entry). On success returns the
  * launch `warnings`, with connect links under the same opt-in as the 409's.
  */
 export async function validateAgentReadiness(

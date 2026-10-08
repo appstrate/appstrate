@@ -85,6 +85,8 @@ async function buildDependencyGroups(
     // of spreading the string into `["*"]`.
     ...(e.tools !== undefined ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] } : {}),
     ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
+    ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
+    ...(e.required !== undefined ? { required: e.required } : {}),
   }));
 
   if (opts.summaryOnly) return { integrations };

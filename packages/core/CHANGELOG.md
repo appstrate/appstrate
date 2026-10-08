@@ -34,14 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `integrations_configuration.<id>.required` as a boolean (afps-spec#28): a
   manifest whose `required` is not a boolean fails validation. (#1830)
 - **BREAKING: `ConnectionResolutionErrorCode` gains
-  `required_integration_unbound`** (`@appstrate/core/integration`): an
-  integration the agent marks `required` whose winning cascade layer binds no
-  connection (`[]`). Exhaustive switches over the union must handle it. (#1830)
+  `required_integration_unbound` and `integration_not_active`**
+  (`@appstrate/core/integration`, both in `CONNECTION_RESOLUTION_ERROR_CODES`):
+  an integration the agent marks `required` whose winning cascade layer binds
+  no connection (`[]`), or which is switched off in the space. Exhaustive
+  switches over the union must handle both. (#1830)
 - **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
   (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
   `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
-  connection. A missing key still means inert or switched off. A producer of
-  the result must set `warnings`. (#1830)
+  connection (a non-required integration switched off in the space included).
+  A missing key still means inert. A producer of the result must set
+  `warnings`. (#1830)
 - **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
   configuration onto the one already in the manifest**: keys it does not
   model (`_meta`, extensions) are kept instead of dropped. (#1830)

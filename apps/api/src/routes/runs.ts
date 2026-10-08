@@ -22,7 +22,13 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  conflict,
+  internalError,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import {
   runVisibilityFilter,
   ownRunsFilter,
@@ -62,6 +68,7 @@ import {
 } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
@@ -217,7 +224,16 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
-/** The original 201 body with its run fields re-read; launch-time `warnings` are kept as sent. */
+/** A launch body as the idempotency cache keeps it: `warnings` without connect links. */
+function storedLaunchBody(body: string): string {
+  const parsed = JSON.parse(body) as { warnings?: ResolutionFieldError[] };
+  if (!Array.isArray(parsed.warnings)) return body;
+  return JSON.stringify({ ...parsed, warnings: withoutConnectOffers(parsed.warnings) });
+}
+
+const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
+
+/** The stored 201 body with its run fields re-read; launch-time `warnings` are kept as stored. */
 async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
   if (response.status !== 201) return response;
   const cached = z.looseObject({ id: z.string() }).parse(await response.json());
@@ -251,7 +267,7 @@ export function createRunsRouter() {
     // switched off does not run, a rerun of one of its past runs included —
     // `rerun_from` is a body field of THIS route, so it passes the same door.
     requireActiveAgent(),
-    idempotency(replayRun),
+    runLaunchIdempotency(),
     async (c) => {
       const agent = c.get("package");
       const orgId = c.get("orgId");
@@ -736,7 +752,7 @@ export function createRunsRouter() {
     // The two guards say the caller may compose; every package the posted
     // manifest DEPENDS on is then judged one by one in the handler
     // (`assertPackageDependenciesAccessible`).
-    idempotency(replayRun),
+    runLaunchIdempotency(),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");

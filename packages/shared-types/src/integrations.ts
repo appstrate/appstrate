@@ -258,8 +258,8 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   when the set binds (or there is no verdict).
  *  - `warning_code` — why the run would start without this integration
  *                   (`integration_unbound`, `integration_not_active`), else `null`.
- * Both `null`: the integration manifest could not be loaded, so nothing was
- * resolved.
+ * All three `null` with nothing resolved: an inert integration nothing binds,
+ * or one whose manifest could not be loaded.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;

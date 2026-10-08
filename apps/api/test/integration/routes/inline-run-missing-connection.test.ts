@@ -35,7 +35,12 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { runs } from "@appstrate/db/schema";
 import {
   createFakeOrchestrator,
@@ -530,6 +535,55 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         auth_key: "primary",
         scopes: ["search.read"],
       });
+    });
+
+    it("keeps no connect link in the cached launch an Idempotency-Key replays", async () => {
+      await seedOauthIntegration();
+      await seedDefaultModel();
+      const admin = await memberContext(ctx, "admin");
+      const key = crypto.randomUUID();
+      const field = `integrations.${OAUTH_INTEGRATION}`;
+      const body = JSON.stringify({
+        manifest: inlineManifest([OAUTH_INTEGRATION]),
+        prompt: "do the thing",
+      });
+      const launchAs = (who: TestContext, headers: Record<string, string>) =>
+        app.request("/api/runs/inline", {
+          method: "POST",
+          headers: {
+            ...authHeaders(who),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            ...headers,
+          },
+          body,
+        });
+      const warningOf = async (res: Response) =>
+        ((await res.json()) as { warnings: ValidationFieldError[] }).warnings.find(
+          (w) => w.field === field,
+        )!;
+
+      const original = await launchAs(ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(original.status).toBe(201);
+      const minted = await warningOf(original);
+      expect(minted.connect_url).toStartWith("http");
+      expect(minted.expiresAt).toBeDefined();
+
+      for (const [who, headers] of [
+        [ctx, {}],
+        [ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" }],
+        [admin, {}],
+      ] as const) {
+        const replay = await launchAs(who, headers);
+        expect(replay.status).toBe(201);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+        const warning = await warningOf(replay);
+        expect(warning).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+        expect(warning).not.toHaveProperty("connect_url");
+        expect(warning).not.toHaveProperty("expiresAt");
+        expect(warning).not.toHaveProperty("packageId");
+      }
+      expect(await db.select().from(runs)).toHaveLength(1);
     });
 
     it("never mints on /inline/validate, header or not", async () => {

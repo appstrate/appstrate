@@ -721,11 +721,11 @@ async function resolveAgentIntegrationPick(args: {
     is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
   }));
 
-  // `[]` (bound to none) has no member to name a source.
+  // `[]` (bound to none, or switched off here) has no member to name a source.
   const resolved = resolution.resolved[integrationId] ?? null;
-  // Neither a set nor an error: the integration manifest could not be fetched
-  // (buildRequirement returned null, `includeInert` notwithstanding), so there
-  // is no verdict to report — both fields stay null rather than guessed.
+  // Neither a set nor an error only when the integration manifest could not be
+  // fetched (buildRequirement returned null, `includeInert` notwithstanding):
+  // no verdict to report, so both fields stay null rather than guessed.
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
   const warning = args.runWarnings.find((w) => w.integrationId === integrationId) ?? null;
 

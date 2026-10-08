@@ -28227,7 +28227,7 @@
         "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
-        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `integration_unbound` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human.",
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `integration_unbound` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it.",
         "schema": {
           "type": "string",
           "enum": ["1"]
@@ -29920,7 +29920,7 @@
           },
           "integrations_unbound": {
             "type": ["array", "null"],
-            "description": "Declared integrations this run started without — bound to no connection (an explicit none, or a non-required integration nothing served). Sorted ids; empty when every one was bound; null when the run has no connection snapshot.",
+            "description": "Declared integrations this run started without — bound to no connection (an explicit none, a non-required integration nothing served, or one switched off in the space). Sorted ids; empty when every one was bound; null when the run has no connection snapshot.",
             "items": {
               "type": "string"
             }

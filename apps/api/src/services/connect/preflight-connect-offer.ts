@@ -181,3 +181,18 @@ export async function attachConnectOffers(params: {
     }),
   );
 }
+
+/**
+ * `items` without the fields {@link attachConnectOffers} adds. A link connects
+ * as the actor it was minted for, so a response that is stored — and replayed
+ * to whoever reuses its `Idempotency-Key` — must not keep one.
+ */
+export function withoutConnectOffers(items: ResolutionFieldError[]): ResolutionFieldError[] {
+  return items.map((item) => {
+    const copy = { ...item };
+    delete copy.connect_url;
+    delete copy.expiresAt;
+    delete copy.packageId;
+    return copy;
+  });
+}

@@ -1064,9 +1064,12 @@ before and after, so the owners can be told.
 unless the agent sets `integrations_configuration.<id>.required: true` (#1830): a run whose
 optional integration has no usable connection, is pinned to none or is switched off in the space
 starts without it, with a launch warning, where it used to be refused. Ambiguity and breakage
-still refuse. `0039` lists the agents this touches — draft and `latest` published version, each
-declared integration printed `required` or `optional` — and the enabled schedules firing them, so
-the authors who need a refusal can mark the integration `required` before the deploy:
+still refuse. `0039` lists the agents this touches — draft, `latest` published version and the
+version an enabled schedule's `version_override` pins, each declared integration printed
+`required` or `optional` — and the enabled schedules firing them, so the authors who need a
+refusal can mark the integration `required` before the deploy. It also counts the enabled
+schedules whose `connection_overrides` hold an empty set, which no write could store before this
+release: expected 0.
 `DATABASE_URL=<platform> bun scripts/migration/0039-report-integration-deps.ts`. Exit 0.
 
 ## Log

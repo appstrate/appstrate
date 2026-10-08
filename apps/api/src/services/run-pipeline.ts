@@ -201,8 +201,8 @@ export async function resolveRunPreflight(params: {
 
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
-  // Readiness reads every declared integration's manifest three times over
-  // (manifest-health gate, activation gate, connection cascade), all
+  // Readiness reads every declared integration's manifest twice over
+  // (manifest-health gate, connection cascade), both
   // through this memo. Unseeded, `fetchIntegrationManifest` falls through to
   // `packages.draft_manifest` — so readiness judged manifest health, required
   // scopes and auth keys against the integration AUTHOR'S LIVE DRAFT, while
@@ -697,9 +697,9 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     });
   });
 
-  // Degradation marker — one `warn` run log per integration the agent
-  // declared but that could not be resolved (not active / not connected /
-  // unresolvable reference), and per stored generation setting the model
+  // Degradation marker — one run log per integration the agent declared but
+  // the run starts without (`warn`; `info` when it is merely unbound), and
+  // per stored generation setting the model
   // refuses. Without it a degraded run is indistinguishable from a healthy
   // one: an agent that chose not to call a tool, a setting that took effect.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is

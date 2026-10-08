@@ -234,9 +234,9 @@ router.get(
 /**
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
- * The persisted replacement for the R5 localStorage pick: when an agent
- * has >1 candidate connection on a required integration, the member's pick is stored
- * here and read by the resolver on every run (cascade layer 4).
+ * When an agent has >1 candidate connection on a declared integration, the
+ * member's pick is stored here and read by the resolver on every run (cascade
+ * layer 4).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run

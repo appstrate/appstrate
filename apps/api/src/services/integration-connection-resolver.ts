@@ -17,8 +17,9 @@
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
  * naming anything outside it is `override_outranked`. A shared connection is never bound
  * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
- * bind (or switched off in the space), a `required` integration is an error, any other a
- * warning. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
+ * bind (or switched off in the space), a `required` integration is an error, any other is
+ * bound to none with a warning. `resolveConnections()` is pure; `resolveConnectionsForRun()`
+ * loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -117,7 +118,7 @@ interface ResolveConnectionsInput {
   actorEndUserId?: string | null;
   /** Also resolve INERT integrations (never spawned): the agent-page picker still manages them. */
   includeInert?: boolean;
-  /** Declared integrations switched off in the space: never resolved. */
+  /** Declared integrations switched off in the space: never walked through the cascade. */
   inactiveIntegrationIds?: ReadonlySet<string>;
 }
 
@@ -139,8 +140,13 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       const item = { integrationId: req.integrationId, code: "integration_not_active" as const };
       const notActive = `Integration '${req.integrationId}' is not active in this space`;
-      if (req.required) errors.push({ ...item, message: `${notActive}.` });
-      else warnings.push({ ...item, message: `${notActive}; the run proceeds without it.` });
+      if (req.required) {
+        errors.push({ ...item, message: `${notActive}.` });
+      } else {
+        // Bound to none, so the run's snapshot lists it with the launch's other unbound ones.
+        resolved[req.integrationId] = [];
+        warnings.push({ ...item, message: `${notActive}; the run proceeds without it.` });
+      }
       continue;
     }
     // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
@@ -782,9 +788,8 @@ const CONNECT_FLOW_CODES: ReadonlySet<ResolutionItem["code"]> = new Set([
  * Map a resolution error (a 409 item) or warning (a launch `warnings` item) to the wire-format
  * `ResolutionFieldError` (a `ValidationFieldError` plus the resolution smuggle fields).
  *
- * Field path: `integrations.{packageId}` — one error per integration in
- * the flat model. The dashboard's MissingConnectionsModal parses on the
- * same prefix so existing UI plumbing still works.
+ * Field path: `integrations.{packageId}` — one item per integration; the
+ * dashboard's MissingConnectionsModal reads the same prefix.
  */
 export function translateResolutionError(e: ResolutionItem): ResolutionFieldError {
   const title = TITLE_BY_CODE[e.code];

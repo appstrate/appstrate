@@ -228,8 +228,8 @@ async function renderConnectionRemoteUrl(
  * agent whose integrations are only partly connected (the pre-flight picker
  * models it explicitly via the readiness verdict's `error_code`), so this must not throw.
  * But the caller MUST carry `dropped` somewhere the user can see it;
- * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a
- * `warn` run log. This function itself stays pure of DB writes so it remains
+ * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a run
+ * log (`warn`, `info` for an unbound one). This function itself stays pure of DB writes so it remains
  * unit-testable without a run row.
  */
 export async function resolveIntegrationSpawns(

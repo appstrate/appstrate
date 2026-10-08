@@ -1707,7 +1707,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
   });
 });
 
-// ─────────────────────── Connection SETS (1..N per integration) ───────────────
+// ─────────────────────── Connection SETS (N per integration) ──────────────────
 
 /**
  * Every cascade layer binds a SET. Each case below pairs the N>1 behaviour
@@ -2230,7 +2230,7 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
 describe("resolveConnections — integration switched off in the space", () => {
   const inactive = { inactiveIntegrationIds: new Set([INTEG]) };
 
-  it("non-required: not resolved, warned `integration_not_active`, whatever would bind", () => {
+  it("non-required: bound to none, warned `integration_not_active`, whatever would bind", () => {
     const c = conn({});
     for (const pins of [[], [pin(c.id)], [pin([])]]) {
       const result = resolveConnections({
@@ -2240,8 +2240,8 @@ describe("resolveConnections — integration switched off in the space", () => {
         ...inactive,
       });
       expect(result.errors).toEqual([]);
-      // No key: the spawn drops it as `not_active` before reading the snapshot.
-      expect(result.resolved).toEqual({});
+      // Listed unbound on the run; the spawn still drops it as `not_active`.
+      expect(result.resolved).toEqual({ [INTEG]: [] });
       expect(result.warnings).toEqual([
         {
           integrationId: INTEG,
@@ -2260,6 +2260,7 @@ describe("resolveConnections — integration switched off in the space", () => {
       ...inactive,
     });
     expect(result.warnings).toEqual([]);
+    expect(result.resolved).toEqual({});
     expect(result.errors).toEqual([
       {
         integrationId: INTEG,
