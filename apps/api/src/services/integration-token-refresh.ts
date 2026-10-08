@@ -29,6 +29,7 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -38,6 +39,7 @@ import {
   recordIntegrationRefreshFailure,
   resolveIntegrationClientById,
 } from "./integration-connections.ts";
+import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
 
 interface IntegrationRefreshResult {
@@ -83,6 +85,18 @@ class UnrefreshableConnectionError extends Error {
 }
 
 /**
+ * A connection as its caller read it. The refresh context was built from its upstream (`clientRef`,
+ * `oauthResource`; a reconnect cannot move its variables to another instance, AFPS §7.12), so the
+ * refresh runs only while the row, re-read under the lock, still names that upstream.
+ */
+export interface RefreshTarget {
+  id: string;
+  credentialsEncrypted: string;
+  clientRef: string | null;
+  oauthResource: string | null;
+}
+
+/**
  * Refresh the OAuth2 access token for an integration connection.
  * No-op (returns current creds) when the manifest auth isn't OAuth2 or its
  * pinned OAuth client no longer resolves (`refreshContext` absent). When the auth
@@ -105,13 +119,13 @@ class UnrefreshableConnectionError extends Error {
  * the post-lock freshness short-circuit — see {@link dedupedRefresh}.
  */
 export async function forceRefreshIntegrationConnection(
-  connectionId: string,
+  connection: RefreshTarget,
   packageIdForLog: string,
   authKeyForLog: string,
-  credentialsEncrypted: string,
   refreshContext?: IntegrationRefreshContext,
   options: { force?: boolean } = {},
 ): Promise<IntegrationRefreshResult> {
+  const { id: connectionId, credentialsEncrypted } = connection;
   if (!refreshContext) {
     return {
       fields: decryptCredentialsToStringMap(credentialsEncrypted),
@@ -127,7 +141,9 @@ export async function forceRefreshIntegrationConnection(
   // we refresh against the freshest stored ciphertext (a peer may have rotated
   // the refresh_token even if the access token is near expiry).
   let freshCiphertext = credentialsEncrypted;
-  return dedupedRefresh<IntegrationRefreshResult>(connectionId, {
+  // Callers that read different upstreams of the row never share a flight's result.
+  const upstream = JSON.stringify([connection.clientRef, connection.oauthResource]);
+  return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${upstream}`, {
     lockKey: `intg-refresh:${connectionId}`,
     lockLabel: "intg-refresh",
     force: options.force ?? true,
@@ -136,15 +152,27 @@ export async function forceRefreshIntegrationConnection(
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
           expiresAt: integrationConnections.expiresAt,
+          clientRef: integrationConnections.clientRef,
+          oauthResource: integrationConnections.oauthResource,
         })
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
+      if (
+        !row ||
+        row.clientRef !== connection.clientRef ||
+        row.oauthResource !== connection.oauthResource
+      ) {
+        throw new RefreshError(
+          `Integration connection '${connectionId}' was reconnected or removed while its refresh waited (transient)`,
+          "transient",
+        );
+      }
       // The read happens even when forced — `doRefresh` must spend the
       // freshest stored refresh_token, not the one the caller was holding.
-      if (row?.credentialsEncrypted) freshCiphertext = row.credentialsEncrypted;
+      freshCiphertext = row.credentialsEncrypted;
       if (force) return null;
-      if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
+      if (row.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
@@ -155,12 +183,18 @@ export async function forceRefreshIntegrationConnection(
       return null;
     },
     doRefresh: () =>
-      doRefresh(connectionId, packageIdForLog, authKeyForLog, freshCiphertext, refreshContext),
+      doRefresh(
+        { connectionId, clientRef: connection.clientRef },
+        packageIdForLog,
+        authKeyForLog,
+        freshCiphertext,
+        refreshContext,
+      ),
   });
 }
 
 async function doRefresh(
-  connectionId: string,
+  { connectionId, clientRef }: { connectionId: string; clientRef: string | null },
   packageId: string,
   authKey: string,
   credentialsEncrypted: string,
@@ -278,8 +312,9 @@ async function doRefresh(
   // only when the IdP authoritatively echoed a `scope` field; otherwise it is
   // omitted so persistCredentialBundle leaves the high-water-mark untouched.
   // accountId/identityClaims are likewise omitted → never clobbered by refresh.
-  await persistCredentialBundle(
-    { kind: "update-by-id", connectionId },
+  // Compare-and-set: a row reconnected (or flagged) meanwhile keeps what it holds.
+  const written = await persistCredentialBundle(
+    { kind: "update-by-id", connectionId, expect: { clientRef, credentialsEncrypted } },
     {
       credentials: newCreds,
       expiresAt,
@@ -287,6 +322,12 @@ async function doRefresh(
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     },
   );
+  if (!written) {
+    throw new RefreshError(
+      `Integration connection '${connectionId}' changed while its token was refreshed (transient)`,
+      "transient",
+    );
+  }
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
@@ -324,19 +365,17 @@ type RefreshClassification =
  * credentials resolver and the credential-proxy resolver.
  */
 export async function refreshAndClassify(
-  connectionId: string,
+  connection: RefreshTarget,
   packageIdForLog: string,
   authKeyForLog: string,
-  credentialsEncrypted: string,
   refreshContext: IntegrationRefreshContext,
   options: { force?: boolean } = {},
 ): Promise<RefreshClassification> {
   try {
     const result = await forceRefreshIntegrationConnection(
-      connectionId,
+      connection,
       packageIdForLog,
       authKeyForLog,
-      credentialsEncrypted,
       refreshContext,
       options,
     );
@@ -390,27 +429,40 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  /**
-   * The minting client pinned on the connection
-   * (`integration_connections.client_ref`): a flat client id — the env id of a
-   * system client or the `integration_oauth_clients.id` of a custom client.
-   * Resolves WHICH client's credentials refresh the tokens — the same one that
-   * minted them. `null` only for non-oauth2 connections, which never reach this
-   * function (guarded below).
-   */
-  clientRef: string | null,
+  /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
+  connection: { clientRef: string | null; oauthResource: string | null },
+  /** Seam for tests. */
+  discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
-  // only an `issuer` (Drive/OneDrive and other issuer-only providers), resolve
-  // the endpoint with the SAME OIDC/RFC-8414 discovery the authorize flow uses
-  // (`resolveOAuthEndpoints`, cached per-issuer). Without this, issuer-only
-  // connections connect fine but can NEVER refresh — they die when the access
-  // token expires (~1h) and the user is stuck re-connecting hourly.
+  const { clientRef, oauthResource } = connection;
   const afpsAuth = authDef;
-  const { tokenEndpoint } = await resolveOAuthEndpoints({
-    issuer: afpsAuth.issuer,
-    tokenEndpoint: afpsAuth.token_endpoint,
+  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // Resolve the SAME client that minted the connection by its pinned id (system
+  // env or space/org custom row), with the cross-scope escalation guard.
+  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
+  const client =
+    clientRef === null
+      ? null
+      : await resolveIntegrationClientById(
+          clientRef,
+          spaceId,
+          packageId,
+          authKey,
+          manifestAuthMethod,
+        );
+
+  // AFPS §7.3: refresh POSTs to the token endpoint of the server the connection was acquired from —
+  // the one its client is bound to (metadata only), else the manifest's, discovered from an
+  // issuer-only declaration (Drive/OneDrive). A templated issuer names no server by itself.
+  const boundIssuer = client?.issuer;
+  const issuer = boundIssuer ?? (isVariableTemplate(afpsAuth.issuer) ? undefined : afpsAuth.issuer);
+  const { tokenEndpoint } = await discover({
+    issuer,
+    ...(boundIssuer === undefined && !isVariableTemplate(afpsAuth.issuer)
+      ? { tokenEndpoint: afpsAuth.token_endpoint }
+      : {}),
   });
   if (!tokenEndpoint) {
     // An `issuer`-only manifest (Drive/OneDrive …) whose discovery yielded no
@@ -421,7 +473,7 @@ export async function buildIntegrationOAuthRefreshContext(
     // longer negatively-caches, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
-    if (afpsAuth.issuer) {
+    if (issuer) {
       throw new RefreshError(
         `Integration '${packageId}' auth '${authKey}' token_endpoint discovery yielded none (transient)`,
         "transient",
@@ -433,7 +485,27 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint is re-checked
+  // (its metadata may have changed). An unresolvable host is a blip; any other refusal is terminal.
+  if (boundIssuer !== undefined) {
+    const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
+    if (!egress.ok) {
+      if (egress.detail === "resolution-failed") {
+        throw new RefreshError(
+          `Integration '${packageId}' auth '${authKey}' token endpoint did not resolve (transient)`,
+          "transient",
+        );
+      }
+      logger.warn("Integration auth refresh skipped — token endpoint refused by egress controls", {
+        packageId,
+        authKey,
+        tokenEndpoint,
+        reason: egress.reason,
+      });
+      return null;
+    }
+  }
 
   // INVARIANT: an oauth2 connection always pins its minting client. A null here
   // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
@@ -446,17 +518,6 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-
-  // Resolve the SAME client that minted the connection by its pinned id (system
-  // env or space/org custom row), with the cross-scope escalation guard.
-  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
-  const client = await resolveIntegrationClientById(
-    clientRef,
-    spaceId,
-    packageId,
-    authKey,
-    manifestAuthMethod,
-  );
   if (!client) {
     logger.info("Integration auth refresh skipped — pinned client unresolved", {
       packageId,
@@ -468,5 +529,10 @@ export async function buildIntegrationOAuthRefreshContext(
   // The resolver returns the method already paired with the secret it hands
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
-  return { tokenEndpoint, ...client };
+  const { issuer: _boundIssuer, ...credentials } = client;
+  return {
+    tokenEndpoint,
+    ...credentials,
+    ...(oauthResource !== null ? { resource: oauthResource } : {}),
+  };
 }

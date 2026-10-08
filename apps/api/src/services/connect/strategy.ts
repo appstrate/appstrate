@@ -32,6 +32,11 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
+  /**
+   * The connection variables submitted (AFPS §7.12); absent when none were. Every strategy
+   * validates them (`resolveConnectionVariables`) before use and persists what that returns.
+   */
+  variables?: Readonly<Record<string, string>>;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */

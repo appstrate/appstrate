@@ -521,6 +521,62 @@ describe("resolveLiveIntegrationCredentials", () => {
     ]);
   });
 
+  it("renders authorized_uris and the delivery value from the connection's variables (§7.12)", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          ...(localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: {
+              primary: {
+                type: "api_key",
+                authorizedUris: ["{$variable.base_url}/api/v4/**"],
+                credentialFields: ["api_key"],
+                delivery: {
+                  http: {
+                    in: "header",
+                    name: "X-Forge-Key",
+                    value: "{$variable.base_url}|{$credential.api_key}",
+                  },
+                },
+              },
+            },
+          }) as unknown as Record<string, unknown>),
+          variables: {
+            schema: {
+              type: "object",
+              properties: { base_url: { type: "string" } },
+              required: ["base_url"],
+            },
+          },
+        },
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        label: "Connexion 1",
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        variables: { base_url: "https://forge.example.com/" },
+      })
+      .returning({ id: integrationConnections.id });
+
+    const result = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(conn!.id),
+      {},
+    );
+    expect(result.auths[0]!.authorizedUris).toEqual(["https://forge.example.com/api/v4/**"]);
+    expect(result.deliveryPlans.primary?.value).toBe("https://forge.example.com/|k");
+  });
+
   it("a reconnect resets the rejection count of an unrefreshable auth", async () => {
     await db
       .update(packages)

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionOptionLabel, toggleCapped } from "../../lib/connection-set";
+import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
 import type { IntegrationConnection } from "../../hooks/use-integrations";
 
 /**
@@ -38,7 +39,10 @@ export function ConnectionSetChecklist({
               onCheckedChange={() => onChange(toggleCapped(value, c.id))}
               data-testid={id}
             />
-            <label htmlFor={id}>{connectionOptionLabel(c)}</label>
+            <label htmlFor={id} className="min-w-0">
+              {connectionOptionLabel(c)}
+              <ConnectionVariablesLine variables={c.variables} />
+            </label>
           </div>
         );
       })}

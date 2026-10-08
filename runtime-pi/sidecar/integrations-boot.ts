@@ -50,7 +50,10 @@ import {
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
-import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
+import {
+  compileEgressPolicy,
+  matchesAuthorizedUriSpec,
+} from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -465,8 +468,11 @@ export async function connectRemoteHttpIntegration(
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
   // (api_key) just return the same value forever.
-  const planInjection = (callerHeaderNames: readonly string[]) => {
-    const plan = source.snapshot().deliveryPlans[authKey];
+  const planInjection = (
+    snapshot: ReturnType<typeof source.snapshot>,
+    callerHeaderNames: readonly string[],
+  ) => {
+    const plan = snapshot.deliveryPlans[authKey];
     return plan ? planHttpDeliveryInjection(plan, callerHeaderNames) : { kind: "none" as const };
   };
 
@@ -495,10 +501,30 @@ export async function connectRemoteHttpIntegration(
         credentialAnswered: boolean;
         credentialRevision: string | undefined;
       }> => {
-        const credentialRevision = source.snapshot().credentialRevision;
+        const snapshot = source.snapshot();
+        const credentialRevision = snapshot.credentialRevision;
         const headers = new Headers(init?.headers);
-        const injection = planInjection([...headers.keys()]);
+        const injection = planInjection(snapshot, [...headers.keys()]);
+        // `guardedFetch` accepts `string | URL`; the MCP transports always
+        // call with a URL/string target (headers/body ride in `init`), so a
+        // stray `Request` is normalised to its URL for the type.
+        const target: string | URL =
+          typeof input === "string" || input instanceof URL ? input : input.url;
+        // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
+        // hop that still carries it (same origin as the first; another origin strips it).
+        let validateHop: ((url: URL) => void) | undefined;
         if (injection.kind === "inject") {
+          const authorizedUris =
+            snapshot.auths.find((a) => a.authKey === authKey)?.authorizedUris ?? [];
+          const origin = new URL(String(target)).origin;
+          validateHop = (url) => {
+            if (url.origin !== origin) return;
+            if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
+              throw new Error(
+                `integration ${spec.integrationId}: ${url.href} is outside the authorized URIs of its connection; the credential is not sent`,
+              );
+            }
+          };
           headers.set(injection.header.name, injection.header.value);
         }
         const sensitiveHeaderName =
@@ -507,11 +533,6 @@ export async function connectRemoteHttpIntegration(
             : injection.kind === "caller_override"
               ? injection.headerName
               : null;
-        // `guardedFetch` accepts `string | URL`; the MCP transports always
-        // call with a URL/string target (headers/body ride in `init`), so a
-        // stray `Request` is normalised to its URL for the type.
-        const target: string | URL =
-          typeof input === "string" || input instanceof URL ? input : input.url;
         // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
         // by the platform) skip only the host blocklist — without this, a remote
         // MCP server the platform-side spawn validation just allowed (internal
@@ -528,6 +549,7 @@ export async function connectRemoteHttpIntegration(
             // declare it, or a hostile server 302ing cross-origin would carry
             // the credential to another origin.
             ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
+            ...(validateHop ? { validateHop } : {}),
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );
@@ -614,6 +636,7 @@ export async function runConnectLoginHook(
     authType: cl.authType,
     authorizedUris: cl.authorizedUris,
     deliveryHttp: cl.deliveryHttp,
+    variables: cl.variables,
   };
   await runConnectLogin(loginOpts);
   logger.info("integration connect-login session minted", {
@@ -1951,6 +1974,7 @@ export async function runConnectOnce(
       authType: cl.authType,
       authorizedUris: cl.authorizedUris,
       deliveryHttp: cl.deliveryHttp,
+      variables: cl.variables,
     });
 
     logger.info("connect-run captured session", {

@@ -28,8 +28,10 @@ import {
 } from "@appstrate/core/integration";
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
+import { isVariableTemplate, renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
 /**
@@ -211,6 +213,7 @@ const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 /**
  * Render an AFPS `{$credential.<field>}` value template (used by
  * `delivery.env` / `delivery.files`) against a decrypted credential bag.
+ * `{$variable.<name>}` renders from the connection's variables.
  * Unknown refs render empty — a missing field means "nothing to inject".
  * Returns `null` when the template resolves to an empty string (so callers can
  * skip env vars / files whose backing credential field is absent), mirroring
@@ -223,16 +226,18 @@ const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 export function renderCredentialTemplate(
   template: string,
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>>,
 ): string | null {
-  return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
+  return renderCredentialTemplateCore(template, fields, { emptyAs: "null", variables });
 }
 
 /** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
 export function renderAuthAuthorizedUris(
   auth: Pick<AfpsManifestAuth, "authorized_uris">,
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>>,
 ): string[] {
-  return renderAuthorizedUris(auth.authorized_uris ?? [], fields);
+  return renderAuthorizedUris(auth.authorized_uris ?? [], fields, variables);
 }
 
 /** Local runner egress policy; `undefined` when the auth declares no outbound surface. */
@@ -407,6 +412,33 @@ export function getRemoteSource(
   if (typeof url !== "string") return null;
   if (transport !== "streamable-http" && transport !== "sse") return null;
   return { url, transport };
+}
+
+/** `source.remote` rendered for one connection (AFPS §7.12); `null` when absent or unrenderable. */
+export function renderRemoteSource(
+  manifest: IntegrationManifest,
+  variables: Readonly<Record<string, string>> | null,
+): { url: string; transport: "streamable-http" | "sse" } | null {
+  const remote = getRemoteSource(manifest);
+  if (!remote) return null;
+  const url = renderUrlTemplate(remote.url, variables ?? {});
+  return url === null ? null : { url, transport: remote.transport };
+}
+
+export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObject | null {
+  const schema = (manifest as { variables?: { schema?: unknown } }).variables?.schema;
+  return typeof schema === "object" && schema !== null && !Array.isArray(schema)
+    ? (schema as JSONSchemaObject)
+    : null;
+}
+
+/** Whether an oauth2 auth's server is chosen per connection (AFPS §7.3): a templated issuer or URL. */
+export function hasPerConnectionAuthServer(
+  manifest: IntegrationManifest,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
+): boolean {
+  if (auth.type !== "oauth2") return false;
+  return isVariableTemplate(auth.issuer) || isVariableTemplate(getRemoteSource(manifest)?.url);
 }
 
 /** Read the Appstrate orchestrated-tool extension off a connect block. */

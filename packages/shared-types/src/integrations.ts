@@ -84,6 +84,8 @@ export interface IntegrationConnection {
    * clients list to show which client minted each connection.
    */
   client_ref: string | null;
+  /** Connection variables (AFPS §7.12); `null` when the integration declares none. */
+  variables: Record<string, string> | null;
   createdAt: string;
   updatedAt: string;
 }

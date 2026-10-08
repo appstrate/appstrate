@@ -2471,3 +2471,137 @@ describe("selectedApiCallConfigs", () => {
     expect(authKeys(["search"])).toEqual([]);
   });
 });
+
+describe("connection variables (§7.12) — rule (1g) and the write-path rules", () => {
+  const bearer = {
+    http: {
+      in: "header",
+      name: "Authorization",
+      prefix: "Bearer ",
+      value: "{$credential.access_token}",
+    },
+  };
+  const variables = {
+    schema: {
+      type: "object",
+      properties: { base_url: { type: "string", format: "uri" }, tenant: { type: "string" } },
+      required: ["base_url", "tenant"],
+    },
+  };
+  function selfHosted(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({
+      source: {
+        kind: "remote",
+        remote: { url: "{$variable.base_url}/api/v4/mcp", transport: "streamable-http" },
+      },
+      variables,
+      auths: { oauth: { type: "oauth2", delivery: bearer, ...auth } },
+    });
+  }
+  function apiKey(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({
+      source: { kind: "none" },
+      variables,
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["token"],
+              properties: { token: { type: "string" } },
+            },
+          },
+          delivery: {
+            http: { in: "header", name: "Authorization", value: "{$credential.token}" },
+          },
+          ...auth,
+        },
+      },
+    });
+  }
+  const messagesAt = (raw: Record<string, unknown>, path: string) =>
+    (integrationManifestSchema.safeParse(raw).error?.issues ?? [])
+      .filter((i) => i.path.join(".") === path)
+      .map((i) => i.message);
+
+  it("accepts an oauth2 authorized_uris entry on the variable choosing its upstream", () => {
+    const m = selfHosted({ authorized_uris: ["{$variable.base_url}/api/v4/**"] });
+    expect(errorPaths(m)).toEqual([]);
+    expect(findUnboundedInjectedCredentials(m)).toEqual([]);
+    expect(findUnevaluableExpressions(m)).toEqual([]);
+  });
+
+  it("still refuses a {$credential} entry on oauth2", () => {
+    const m = selfHosted({
+      authorized_uris: ["{$variable.base_url}/api/v4/**", "{$credential.site}/**"],
+    });
+    expect(messagesAt(m, "auths.oauth.authorized_uris.1")).toContainEqual(
+      expect.stringContaining("forbidden on an oauth2 auth"),
+    );
+    expect(messagesAt(m, "auths.oauth.authorized_uris.0")).toEqual([]);
+  });
+
+  it("accepts variable entries in the URL form and in the host of the authority form", () => {
+    const m = apiKey({
+      authorized_uris: ["{$variable.base_url}/**", "https://{$variable.tenant}.example.com/**"],
+    });
+    expect(errorPaths(m)).toEqual([]);
+    expect(findUnboundedInjectedCredentials(m)).toEqual([]);
+    expect(findUnevaluableExpressions(m)).toEqual([]);
+  });
+
+  it("leaves the form of a variable entry to @afps-spec/schema, once", () => {
+    const m = apiKey({
+      authorized_uris: [
+        "https://api.example.com/{$variable.tenant}/**",
+        "{$variable.tenant}.example.com/**",
+      ],
+    });
+    for (const i of [0, 1]) {
+      expect(messagesAt(m, `auths.key.authorized_uris.${i}`)).toEqual([
+        expect.stringContaining("takes the URL form or the authority form"),
+      ]);
+    }
+  });
+
+  it("findUnevaluableExpressions accepts declared variables and refuses undeclared ones", () => {
+    const m = apiKey({
+      authorized_uris: ["{$variable.base_url}/**", "{$variable.other}/**"],
+      delivery: {
+        env: {
+          BASE: { value: "{$variable.base_url}" },
+          OTHER: { value: "{$variable.missing}" },
+          BAD: { value: "{$variables.base_url}" },
+        },
+      },
+    });
+    expect(findUnevaluableExpressions(m).map((v) => [v.path.join("."), v.message])).toEqual([
+      ["auths.key.delivery.env.OTHER", expect.stringContaining("{$variable.missing}")],
+      ["auths.key.delivery.env.BAD", expect.stringContaining("'{$variables.base_url}'")],
+      ["auths.key.authorized_uris.1", expect.stringContaining("{$variable.other}")],
+    ]);
+    const { variables: _, ...undeclared } = m;
+    expect(findUnevaluableExpressions(undeclared).map((v) => v.path.join("."))).toEqual([
+      "auths.key.delivery.env.BASE",
+      "auths.key.delivery.env.OTHER",
+      "auths.key.delivery.env.BAD",
+      "auths.key.authorized_uris.0",
+      "auths.key.authorized_uris.1",
+    ]);
+  });
+
+  it("findUnevaluableExpressions refuses a variable in a login request url", () => {
+    const login = {
+      login: {
+        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
+        outputs: { token: "$response.body#/token" },
+      },
+    };
+    expect(
+      findUnevaluableExpressions({ ...customWithConnect(login), variables }).map((v) =>
+        v.path.join("."),
+      ),
+    ).toEqual(["auths.session.connect.login.request.url"]);
+  });
+});

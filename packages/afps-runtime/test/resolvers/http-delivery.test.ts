@@ -204,3 +204,24 @@ describe("planHttpDeliveryInjection", () => {
     ).toEqual({ kind: "caller_override", headerName: "X-Api-Key" });
   });
 });
+
+describe("resolveHttpDelivery — connection variables (AFPS §7.12)", () => {
+  it("renders {$variable.<name>} beside {$credential.<field>} in the value template", () => {
+    const plan = resolveHttpDelivery(
+      "api_key",
+      { api_key: "k" },
+      { headerName: "X-Key", valueFrom: { template: "{$variable.tenant}/{$credential.api_key}" } },
+      { tenant: "acme" },
+    );
+    expect(plan!.value).toBe("acme/k");
+  });
+
+  it("renders a variable the connection does not hold as empty, like a missing field", () => {
+    const plan = resolveHttpDelivery(
+      "api_key",
+      {},
+      { headerName: "X-Key", valueFrom: { template: "{$variable.tenant}" } },
+    );
+    expect(plan!.value).toBe("");
+  });
+});

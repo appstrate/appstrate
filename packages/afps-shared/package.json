@@ -40,6 +40,7 @@
     "./semver-resolve": "./src/semver-resolve.ts",
     "./integrity": "./src/integrity.ts",
     "./credential-template": "./src/credential-template.ts",
+    "./connection-variables": "./src/connection-variables.ts",
     "./authorized-uris": "./src/authorized-uris.ts",
     "./delivery-http": "./src/delivery-http.ts",
     "./api-tool-naming": "./src/api-tool-naming.ts",

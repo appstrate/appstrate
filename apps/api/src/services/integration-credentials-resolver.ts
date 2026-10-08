@@ -245,6 +245,7 @@ export async function resolveLiveIntegrationCredentials(
     );
   };
 
+  const { variables } = connection;
   let fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
     integrationId,
@@ -281,7 +282,7 @@ export async function resolveLiveIntegrationCredentials(
         authKey,
         authDef,
         context.spaceId,
-        connection.clientRef,
+        connection,
       );
     } catch (err) {
       // Transient token-endpoint discovery failure on an issuer-only manifest —
@@ -318,10 +319,9 @@ export async function resolveLiveIntegrationCredentials(
       // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
       // already gated type=oauth2, so this is the only refreshable auth.
       const classified = await refreshAndClassify(
-        connection.id,
+        connection,
         integrationId,
         authKey,
-        connection.credentialsEncrypted,
         refreshContext,
         // A forced refresh follows an upstream 401: the post-lock freshness
         // short-circuit must not answer it with the very token that 401'd.
@@ -424,7 +424,12 @@ export async function resolveLiveIntegrationCredentials(
 
   const http = authDef.delivery?.http;
   if (http) {
-    const plan = resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery);
+    const plan = resolveAfpsHttpDelivery(
+      authDef.type,
+      fields,
+      http as ConnectAfpsHttpDelivery,
+      variables,
+    );
     if (plan) {
       out.deliveryPlans[authKey] = plan;
     }
@@ -435,7 +440,7 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     // Rendered from the post-refresh fields.
-    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields, variables)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),

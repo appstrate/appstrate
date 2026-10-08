@@ -303,7 +303,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        SYSTEM_ID,
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("sys-client.apps.googleusercontent.com");
@@ -317,7 +317,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        customId,
+        { clientRef: customId, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("custom-client-id");
@@ -330,7 +330,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        "removed-id",
+        { clientRef: "removed-id", oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -344,7 +344,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        null,
+        { clientRef: null, oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -356,7 +356,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         PUBLIC_AUTH,
         ctx.defaultSpaceId,
-        SYSTEM_ID,
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientSecret).toBe("");
@@ -374,7 +374,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        pinned,
+        { clientRef: pinned, oauthResource: null },
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");
     });
@@ -488,6 +488,7 @@ describe("integration multi-client", () => {
             redirect_uri: null,
             isDefault,
             autoProvisioned: false,
+            issuer: null,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
@@ -550,6 +551,7 @@ describe("integration multi-client", () => {
           redirect_uri: null,
           isDefault: s.isDefault,
           autoProvisioned: false,
+          issuer: null,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         })),

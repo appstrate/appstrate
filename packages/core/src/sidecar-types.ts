@@ -490,6 +490,8 @@ export interface IntegrationSpawnSpec {
     authorizedUris: readonly string[];
     /** Manifest `delivery.http` block used to render the session header. */
     deliveryHttp: ManifestDeliveryHttp;
+    /** Connection variables (AFPS §7.12) for `{$variable.<name>}`. */
+    variables: Record<string, string>;
     /** Decrypted login secret — sidecar-only, used for proxy-side substitution. */
     inputs: Record<string, string>;
     /**

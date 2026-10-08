@@ -23,8 +23,12 @@ import { type TokenErrorKind } from "./token-utils.ts";
  * - `"client_unavailable"`: the OAuth client the flow was started with no
  *   longer resolves (deleted, out of reach, undecryptable), so no exchange was
  *   attempted. Retrying cannot help until an admin restores or re-registers it.
+ *
+ * - `"issuer_mismatch"`: the authorization response does not provably come from the
+ *   authorization server the request was sent to (RFC 9207 `iss`, or a per-server redirect URI —
+ *   RFC 9700 §4.4 mix-up defence), so the code is never exchanged.
  */
-type OAuthCallbackErrorKind = TokenErrorKind | "client_unavailable";
+type OAuthCallbackErrorKind = TokenErrorKind | "client_unavailable" | "issuer_mismatch";
 
 export class OAuthCallbackError extends Error {
   constructor(

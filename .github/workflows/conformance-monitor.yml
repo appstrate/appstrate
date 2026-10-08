@@ -41,6 +41,13 @@ jobs:
           # e.g. {"@appstrate/stripe":"sk_test_..."}. Absent → auth-gated
           # servers report a "skipped" WARN instead of being tested.
           CONFORMANCE_TOKENS: ${{ secrets.CONFORMANCE_TOKENS }}
+          # Instances for integrations whose remote URL is a connection-variable
+          # template (AFPS §7.12): JSON map of package id → { variable: value },
+          # e.g. {"@appstrate/coolify-mcp":{"base_url":"https://coolify.example.com"}}.
+          # A repository variable, not a secret: an instance URL is not
+          # confidential. Absent → each variable's schema default; a variable
+          # with none → that package reports a "skipped" WARN.
+          CONFORMANCE_VARIABLES: ${{ vars.CONFORMANCE_VARIABLES }}
         run: |
           # `set +e` keeps a failing harness from killing the step, so the
           # report below still gets written and the issue still gets filed.

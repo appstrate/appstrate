@@ -27,6 +27,8 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
+import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 export class FieldsStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -54,14 +56,23 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
         "credentials",
       );
     }
+    const variables = await resolveConnectionVariables(
+      manifest,
+      auth as unknown as AfpsManifestAuth,
+      ctx.variables,
+    );
     // #1627: an `authorized_uris` entry the submitted fields cannot render would refuse every
     // later call, so the connection is refused now. Never echoes the value.
-    const unrenderable = unrenderableAuthorizedUriFields(auth.authorized_uris ?? [], credentials);
+    const unrenderable = unrenderableAuthorizedUriFields(
+      auth.authorized_uris ?? [],
+      credentials,
+      variables ?? {},
+    );
     if (unrenderable.length > 0) {
       throw validationFailed(
-        unrenderable.map(({ field, expected }) => ({
-          field: `credentials.${field}`,
-          code: "unrenderable_authorized_uri",
+        unrenderable.map(({ root, field, expected }) => ({
+          field: root === "variable" ? `variables.${field}` : `credentials.${field}`,
+          code: root === "variable" ? "unrenderable_variable" : "unrenderable_authorized_uri",
           title: "Invalid Connection Field",
           message: `must be ${expected}`,
         })),
@@ -81,6 +92,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       credentials,
       identityClaims,
       actor: ctx.actor,
+      variables,
       ...(labelHint ? { labelHint } : {}),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });

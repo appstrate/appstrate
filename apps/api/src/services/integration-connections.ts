@@ -28,7 +28,10 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
+  lt,
+  notExists,
   or,
   sql,
   type SQL,
@@ -54,9 +57,16 @@ import {
   discoverProtectedResourceMetadata,
   registerDynamicClient,
   DynamicClientRegistrationError,
+  OAUTH_STATE_TTL_SECONDS,
+  sameUrlIdentifier,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
+import {
+  isVariableTemplate,
+  renderUrlTemplate,
+  variableRefs,
+} from "@appstrate/afps-shared/connection-variables";
+import { egressGuardedFetch, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -73,7 +83,14 @@ import {
   type Tx,
 } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  ApiError,
+  notFound,
+  conflict,
+  invalidRequest,
+  forbidden,
+  validationFailed,
+} from "../lib/errors.ts";
 import {
   evaluateJsonPath,
   JsonPathSyntaxError,
@@ -86,7 +103,10 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
+import {
+  integrationCallbackUrl,
+  integrationCallbackUrlFor,
+} from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
@@ -100,9 +120,12 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   getLocalServerRef,
   getRemoteSource,
+  hasPerConnectionAuthServer,
+  renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
@@ -152,6 +175,8 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   isDefault: boolean;
   /** `true` for a DCR/CIMD-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
+  /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
+  issuer: string | null;
 }
 
 // ─────────────────────────────────────────────
@@ -205,6 +230,24 @@ interface ActorConnectionRow {
    */
   clientRef: string | null;
   refreshFailureCount: number;
+  /** Read with `credentialsEncrypted`: the upstream that credential is for. */
+  variables: ConnectionVariables;
+  oauthResource: string | null;
+}
+
+/** Whether two connections name the same upstream: the same variables, the same values. */
+function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
+  const entries = Object.entries(a);
+  return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
+}
+
+/** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
+function connectionVariablesOf(value: unknown): ConnectionVariables {
+  const out: Record<string, string> = {};
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
+  }
+  return Object.freeze(out);
 }
 
 /**
@@ -288,6 +331,8 @@ export async function loadAccessibleConnectionById(
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
       refreshFailureCount: integrationConnections.refreshFailureCount,
+      variables: integrationConnections.variables,
+      oauthResource: integrationConnections.oauthResource,
     })
     .from(integrationConnections)
     .where(
@@ -312,8 +357,8 @@ export async function loadAccessibleConnectionById(
         (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
     );
   }
-  const { integrationId: _integrationId, ...resolved } = row;
-  return resolved;
+  const { integrationId: _integrationId, variables, ...resolved } = row;
+  return { ...resolved, variables: connectionVariablesOf(variables) };
 }
 
 /** The `X-Run-Id` run; `boundSet` re-checks it on every selection, the 401 refresh included. */
@@ -446,6 +491,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables,
+    oauthResource,
   } = row;
   return {
     id,
@@ -455,6 +502,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables: connectionVariablesOf(variables),
+    oauthResource,
   };
 }
 
@@ -680,6 +729,7 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     redirect_uri: row.redirectUri,
     isDefault: row.isDefault,
     autoProvisioned: row.autoProvisioned,
+    issuer: row.issuer,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -691,6 +741,7 @@ export function toPublicClient(client: IntegrationOAuthClientWithSecret): Integr
     clientSecret: _clientSecret,
     isDefault: _isDefault,
     autoProvisioned: _auto,
+    issuer: _issuer,
     ...rest
   } = client;
   return rest;
@@ -751,6 +802,11 @@ function assertClientAuth(
   if (auth.type !== "oauth2") {
     throw invalidRequest(
       `Auth '${authKey}' is type '${auth.type}', not oauth2: it has no OAuth clients`,
+    );
+  }
+  if (!autoProvisioned && hasPerConnectionAuthServer(manifest, auth)) {
+    throw invalidRequest(
+      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically with each server (DCR); a manual client, bound to one server, must not be registered.`,
     );
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
@@ -824,14 +880,15 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 }
 
 /**
- * Load the single auto-provisioned (DCR/CIMD) client for `(packageId, authKey)`,
- * if any. The partial unique `idx_ioc_one_auto` guarantees at most one — this is
- * the find half of the DCR find-or-create.
+ * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any (`null`
+ * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
+ * the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
   scope: SpaceScope,
   packageId: string,
   authKey: string,
+  issuer: string | null,
 ): Promise<IntegrationOAuthClientWithSecret | null> {
   const [row] = await db
     .select()
@@ -840,6 +897,9 @@ async function getAutoProvisionedClient(
       and(
         tierAuthFilter(scope, packageId, authKey),
         eq(integrationOauthClients.autoProvisioned, true),
+        issuer === null
+          ? isNull(integrationOauthClients.issuer)
+          : eq(integrationOauthClients.issuer, issuer),
       ),
     )
     .limit(1);
@@ -973,15 +1033,18 @@ export async function createIntegrationOAuthClient(
     /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
     tokenEndpointAuthMethod?: string;
   },
-  opts: { autoProvisioned?: boolean } = {},
+  opts: { autoProvisioned?: boolean; issuer?: string | null } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const autoProvisioned = opts.autoProvisioned ?? false;
+  const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
-  // An auto-provisioned client is the sole client for its auth → default. A
-  // classic client wins the default only when none already holds it.
-  const isDefault = autoProvisioned ? true : !(await hasTierDefault(owner, packageId, authKey));
+  // An auto-provisioned client of the manifest's server is the default; one per issuer is selected
+  // by its issuer (several coexist). A classic client wins the default only when none holds it.
+  const isDefault = autoProvisioned
+    ? issuer === null
+    : !(await hasTierDefault(owner, packageId, authKey));
 
   // Creation always supplies the field (blank means "register a public
   // client"), so the encoder never returns the preserve sentinel here.
@@ -1001,6 +1064,7 @@ export async function createIntegrationOAuthClient(
         redirectUri: input.redirectUri ?? null,
         isDefault: asDefault,
         autoProvisioned,
+        issuer,
         createdAt: now,
         updatedAt: now,
       })
@@ -1354,6 +1418,7 @@ export async function resolveIntegrationClientById(
       clientId: integrationOauthClients.clientId,
       clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
       tokenEndpointAuthMethod: integrationOauthClients.tokenEndpointAuthMethod,
+      issuer: integrationOauthClients.issuer,
     })
     .from(integrationOauthClients)
     .where(
@@ -1372,6 +1437,8 @@ export async function resolveIntegrationClientById(
     )
     .limit(1);
   if (!row) return null;
+  const bound = (client: ResolvedOAuthClient | null): ResolvedOAuthClient | null =>
+    client && row.issuer !== null ? { ...client, issuer: row.issuer } : client;
 
   // The row's declaration wins; the manifest stands in when it has none.
   const method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
@@ -1381,7 +1448,7 @@ export async function resolveIntegrationClientById(
   // with any other declared method unrepresentable, so emptiness here always
   // arrives as `"none"`.
   if (method === "none") {
-    return resolved(row.clientId, "", "none");
+    return bound(resolved(row.clientId, "", "none"));
   }
 
   let clientSecret: string;
@@ -1403,7 +1470,7 @@ export async function resolveIntegrationClientById(
   // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
   // so a secret-based (or unstated) method with no secret throws
   // `ClientAuthInvariantError` before anything reaches the wire.
-  return resolved(row.clientId, clientSecret, method);
+  return bound(resolved(row.clientId, clientSecret, method));
 }
 
 /**
@@ -1622,41 +1689,60 @@ export function usesAutoProvisionedClient(
   return (
     auth.type === "oauth2" &&
     auth.token_endpoint_auth_method === "none" &&
-    getRemoteSource(manifest) !== null
+    (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
   );
 }
 
-/**
- * `fetch` wrapper that refuses SSRF-unsafe targets before every request. The
- * remote-MCP discovery chain probes manifest- and *server*-derived URLs (RFC
- * 9728 well-known + the `WWW-Authenticate` challenge's `resource_metadata`,
- * then RFC 8414 metadata), so each GET must be guarded — not just the
- * registration POST.
- *
- * Delegates to the shared {@link guardedFetch} primitive, which does per-hop
- * DNS resolution + blocklist checks and follows redirects MANUALLY (each hop
- * re-checked), strips userinfo/fragment, and rejects non-http(s) schemes. This
- * is strictly stronger than the previous literal-only `isBlockedUrl` + raw
- * `fetch` posture, which resolved no DNS (a public host with an A record
- * pointing at `169.254.169.254`/RFC1918 sailed through) and left `redirect`
- * unpinned (Bun follows 3xx by default, so a `302` to a private host was
- * followed unchecked — SSRF + DNS-rebind). `discoverProtectedResourceMetadata`
- * is best-effort (swallows fetch errors → returns `null`), so a blocked URL
- * cleanly degrades to "discovery failed" rather than throwing.
- */
-const ssrfGuardedFetch = (async (
-  input: Parameters<typeof fetch>[0],
-  init?: Parameters<typeof fetch>[1],
-) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return guardedFetch(url, init, { logger });
-  // `preconnect` is never invoked by the discovery helpers; cast to satisfy the
-  // `typeof fetch` shape Bun's lib declares.
-}) as typeof fetch;
+/** Discovery and DCR URLs are manifest-, user- (AFPS §8.7) and server-derived: every hop guarded. */
+const egressFetch = (opts?: { maxRedirects: number }) =>
+  ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    egressGuardedFetch(
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      init,
+      opts,
+    )) as typeof fetch;
+const ssrfGuardedFetch = egressFetch();
+/** The DCR POST is never redirected (a 3xx bounces the registration). */
+const dcrGuardedFetch = egressFetch({ maxRedirects: 0 });
 
 /** Drop a URL that targets a blocked (loopback/RFC1918/link-local/metadata) host. */
 function safeUrl(url: string | undefined): string | undefined {
-  return url && !isBlockedUrl(url) ? url : undefined;
+  return url && !isBlockedEgressUrl(url) ? url : undefined;
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
+ * the auth's authorization server contradicts — its client is presented to that server only.
+ */
+export function assertEndpointsMatchMetadata(
+  packageId: string,
+  authKey: string,
+  auth: Pick<AfpsManifestAuth, "authorization_endpoint" | "token_endpoint">,
+  metadata: { issuer?: string; authorizationEndpoint?: string; tokenEndpoint?: string },
+): void {
+  if (metadata.issuer === undefined) return;
+  const contradicted = (
+    [
+      ["authorization_endpoint", auth.authorization_endpoint, metadata.authorizationEndpoint],
+      ["token_endpoint", auth.token_endpoint, metadata.tokenEndpoint],
+    ] as const
+  ).find(
+    ([, declared, validated]) =>
+      declared !== undefined && validated !== undefined && declared !== validated,
+  )?.[0];
+  if (contradicted) {
+    throw invalidRequest(
+      `Integration '${packageId}' auth '${authKey}' declares a ${contradicted} that the metadata of its authorization server (${metadata.issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
+    );
+  }
 }
 
 /**
@@ -1666,15 +1752,14 @@ function safeUrl(url: string | undefined): string | undefined {
  * the connector, the first actor clicks Connect, and Appstrate self-registers
  * — no hand-created OAuth app, no client secret.
  *
- * Discovery chain (when the manifest doesn't declare endpoints):
+ * Discovery chain:
  *   `source.remote.url` → RFC 9728 protected-resource metadata
  *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
  *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
  *
- * Best-effort: any discovery/registration failure returns the existing client
- * (or `null`), letting the caller fall back to the classic "register a client"
- * error. Never throws for the dynamic path — classic (non-remote) integrations
- * are unaffected: they early-return with the existing lookup.
+ * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
+ * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
+ * Classic (non-auto) auths early-return with the existing lookup.
  */
 export async function ensureIntegrationOAuthClient(
   scope: SpaceScope,
@@ -1683,7 +1768,11 @@ export async function ensureIntegrationOAuthClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   redirectUri: string,
+  variables: ConnectionVariables = {},
 ): Promise<ResolvedOAuthConnect> {
+  if (hasPerConnectionAuthServer(manifest, auth)) {
+    return ensurePerConnectionOAuthClient(scope, packageId, authKey, manifest, auth, variables);
+  }
   // Classic path: not a remote MCP oauth2 auth — load ALL space and org clients (the
   // connect resolver picks the default among the N); endpoints come from the
   // manifest in the caller.
@@ -1693,7 +1782,7 @@ export async function ensureIntegrationOAuthClient(
   }
 
   // Auto-provisioned path: there is exactly one machine client (DCR/CIMD).
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey);
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
   // (RFC 9728) is authoritative for the canonical `resource` (the token's
@@ -1723,7 +1812,7 @@ export async function ensureIntegrationOAuthClient(
   // at internal infra. `resolveOAuthEndpoints` fetches the well-known on the
   // issuer host, so guarding the issuer host guards those probes; a blocked
   // issuer degrades to "no discovery".
-  if (issuer && isBlockedUrl(issuer)) {
+  if (issuer && isBlockedEgressUrl(issuer)) {
     logger.warn("auto-DCR: discovered issuer blocked by SSRF guard", {
       packageId,
       authKey,
@@ -1732,13 +1821,14 @@ export async function ensureIntegrationOAuthClient(
     issuer = undefined;
   }
 
-  // Fill authorize/token/registration endpoints from issuer discovery
-  // (RFC 8414). Manifest endpoints, when declared, win.
-  const endpoints = await resolveOAuthEndpoints({
-    ...(issuer ? { issuer } : {}),
-    ...(auth.authorization_endpoint ? { authorizationEndpoint: auth.authorization_endpoint } : {}),
-    ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-  });
+  // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
+  const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
+  assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
+  const endpoints = {
+    ...discovered,
+    authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
+    tokenEndpoint: discovered.tokenEndpoint ?? auth.token_endpoint,
+  };
 
   // SSRF: a discovery document is server-controlled and can advertise endpoints
   // on internal hosts. The token endpoint is fetched server-side at exchange,
@@ -1757,16 +1847,201 @@ export async function ensureIntegrationOAuthClient(
   // Client already registered — nothing to mint; just return discovered config.
   if (existing) return resolved;
 
+  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+    registrationEndpoint: endpoints.registrationEndpoint,
+    grantTypesSupported: endpoints.grantTypesSupported,
+    redirectUri,
+    issuer: null,
+    resolved,
+  });
+}
+
+/**
+ * The OAuth connect config of an auth whose authorization server is chosen per connection (AFPS
+ * §7.3). Every URL here is rendered from the user's variables or learned from a response to one,
+ * so it is egress-checked, never trusted as author-declared (§8.6, §8.7):
+ *
+ *   - remote source: RFC 9728 metadata of the rendered URL; the advertised server must equal the
+ *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
+ *     `resource` is sent (RFC 8707).
+ *   - otherwise the rendered `issuer`, no resource.
+ *   - endpoints from that server's RFC 8414 metadata only; a public DCR client per issuer with a
+ *     redirect URI of its own (`<callback>/<tag>`).
+ *
+ * A failure the user's choice explains is a 400 on the variable that chose it.
+ */
+async function ensurePerConnectionOAuthClient(
+  scope: SpaceScope,
+  packageId: string,
+  authKey: string,
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+  variables: ConnectionVariables,
+): Promise<ResolvedOAuthConnect> {
+  if (auth.token_endpoint_auth_method !== "none") {
+    throw invalidRequest(
+      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically as a public client (RFC 7591): the auth must declare token_endpoint_auth_method 'none'.`,
+    );
+  }
+  const remoteTemplate = getRemoteSource(manifest)?.url;
+  // The template the user's server is chosen by: the remote URL when it is one, else the issuer.
+  const chooser = isVariableTemplate(remoteTemplate) ? remoteTemplate : auth.issuer!;
+  const refuse = (code: string, message: string): ApiError => {
+    const [name] = variableRefs(chooser);
+    return validationFailed([
+      { field: `variables.${name}`, code, title: "Invalid Connection Variable", message },
+    ]);
+  };
+  // Both render: the caller's `resolveConnectionVariables` refused any value that would not.
+  const remote = renderRemoteSource(manifest, variables);
+  const declaredIssuer =
+    auth.issuer === undefined ? undefined : renderUrlTemplate(auth.issuer, variables)!;
+
+  let candidate: string;
+  let resource: string | undefined;
+  if (remote) {
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: remote.url,
+      fetchImpl: ssrfGuardedFetch,
+    });
+    if (!md) {
+      throw refuse(
+        "authorization_server_unavailable",
+        `the server at ${remote.url} publishes no OAuth protected-resource metadata for it (RFC 9728)`,
+      );
+    }
+    const named = md.authorizationServers.find((advertised) =>
+      declaredIssuer === undefined
+        ? sameOrigin(advertised, remote.url)
+        : sameUrlIdentifier(advertised, declaredIssuer),
+    );
+    if (named === undefined) {
+      throw refuse(
+        "authorization_server_mismatch",
+        `the server at ${remote.url} names no authorization server ${
+          declaredIssuer === undefined
+            ? `on ${new URL(remote.url).origin}`
+            : `equal to ${declaredIssuer}`
+        } (it names ${md.authorizationServers.join(", ")})`,
+      );
+    }
+    candidate = named;
+    resource = md.resource;
+  } else {
+    candidate = declaredIssuer!;
+  }
+
+  if (!(await isUserUrlReachable(candidate))) {
+    throw refuse(
+      "egress_blocked",
+      `names the authorization server ${candidate}, which this platform does not reach`,
+    );
+  }
+  const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
+  if (!endpoints.issuer || !endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
+    throw refuse(
+      "authorization_server_unavailable",
+      `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
+    );
+  }
+  for (const url of [
+    endpoints.authorizationEndpoint,
+    endpoints.tokenEndpoint,
+    ...(endpoints.registrationEndpoint ? [endpoints.registrationEndpoint] : []),
+  ]) {
+    if (!(await isUserUrlReachable(url))) {
+      throw refuse(
+        "egress_blocked",
+        `the authorization server ${candidate} advertises the endpoint ${url}, which this platform does not reach`,
+      );
+    }
+  }
+
+  const issuer = endpoints.issuer;
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
+  const resolved: ResolvedOAuthConnect = {
+    spaceClients: existing ? [existing] : [],
+    orgClients: [],
+    issuer,
+    authorizationEndpoint: endpoints.authorizationEndpoint,
+    tokenEndpoint: endpoints.tokenEndpoint,
+    ...(resource ? { resource } : {}),
+  };
+  if (existing) return resolved;
+  await pruneUnusedPerConnectionClients(scope, packageId, authKey);
+  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+    registrationEndpoint: endpoints.registrationEndpoint,
+    grantTypesSupported: endpoints.grantTypesSupported,
+    redirectUri: integrationCallbackUrlFor(issuer),
+    issuer,
+    resolved,
+  });
+}
+
+/**
+ * Delete the per-connection-server clients of this auth that minted no connection: whoever opens a
+ * connect flow chooses the server. One younger than an OAuth state may still await its callback.
+ */
+async function pruneUnusedPerConnectionClients(
+  scope: SpaceScope,
+  packageId: string,
+  authKey: string,
+): Promise<void> {
+  await db.delete(integrationOauthClients).where(
+    and(
+      tierAuthFilter(scope, packageId, authKey),
+      eq(integrationOauthClients.autoProvisioned, true),
+      isNotNull(integrationOauthClients.issuer),
+      lt(integrationOauthClients.createdAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
+      notExists(
+        db
+          .select({ id: integrationConnections.id })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.clientRef, sql`${integrationOauthClients.id}::text`)),
+      ),
+    ),
+  );
+}
+
+/**
+ * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer` (`null` =
+ * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
+ */
+async function registerAutoProvisionedClient(
+  scope: SpaceScope,
+  packageId: string,
+  authKey: string,
+  auth: AfpsManifestAuth,
+  input: {
+    registrationEndpoint: string | undefined;
+    grantTypesSupported: string[] | undefined;
+    redirectUri: string;
+    issuer: string | null;
+    resolved: ResolvedOAuthConnect;
+  },
+): Promise<ResolvedOAuthConnect> {
+  const { registrationEndpoint, redirectUri, issuer, resolved } = input;
+  // A server chosen per connection takes no manual client: the remedy is on its side.
+  const manualRemedy =
+    issuer === null
+      ? "register an OAuth client manually for this integration"
+      : "a server chosen per connection must support it";
+
   // No registration endpoint discovered — can't auto-register; let the caller
   // surface the existing "register a client" error.
-  const registrationEndpoint = endpoints.registrationEndpoint;
   if (!registrationEndpoint) {
-    logger.warn("auto-DCR: no registration_endpoint discovered", { packageId, authKey, issuer });
+    logger.warn("auto-DCR: no registration_endpoint discovered", {
+      packageId,
+      authKey,
+      issuer: resolved.issuer,
+    });
     return {
       ...resolved,
       provisioningFailure: {
         message:
-          "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it",
+          issuer === null
+            ? "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it"
+            : `the authorization server ${issuer} does not advertise dynamic client registration (RFC 7591), which a server chosen per connection requires`,
       },
     };
   }
@@ -1774,11 +2049,8 @@ export async function ensureIntegrationOAuthClient(
   // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
   // it. This LITERAL check (no DNS) exists to surface the friendly
   // provisioningFailure below for obviously-internal targets; the authoritative
-  // guard is `registerDynamicClient` itself, whose default transport is
-  // `guardedFetch` (per-hop DNS resolution + blocklist, `maxRedirects: 0`), so
-  // a public hostname rebinding to an internal address is refused at connect
-  // time even though it passes this literal check.
-  if (isBlockedUrl(registrationEndpoint)) {
+  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
+  if (isBlockedEgressUrl(registrationEndpoint)) {
     logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
       packageId,
       authKey,
@@ -1787,15 +2059,14 @@ export async function ensureIntegrationOAuthClient(
     return {
       ...resolved,
       provisioningFailure: {
-        message:
-          "the discovered registration endpoint was refused as an unsafe (loopback/internal) target; register an OAuth client manually instead",
+        message: `the discovered registration endpoint was refused as an unsafe (loopback/internal) target; ${manualRemedy}`,
       },
     };
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (space, package, authKey).
-  const racedClient = await getAutoProvisionedClient(scope, packageId, authKey);
+  // registered a client for the same (space, package, authKey, issuer).
+  const racedClient = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   if (racedClient) return { ...resolved, spaceClients: [racedClient] };
 
   const host = (() => {
@@ -1820,7 +2091,7 @@ export async function ensureIntegrationOAuthClient(
     // token (Claude Code #7744) and the connection can't self-renew. Conditional,
     // not unconditional: a server that lacks the grant (e.g. ClickUp MCP) may
     // reject a registration that requests it.
-    const grantTypes = endpoints.grantTypesSupported?.includes("refresh_token")
+    const grantTypes = input.grantTypesSupported?.includes("refresh_token")
       ? ["authorization_code", "refresh_token"]
       : ["authorization_code"];
     const registration = await registerDynamicClient({
@@ -1832,6 +2103,7 @@ export async function ensureIntegrationOAuthClient(
         ? { scopes: auth.default_scopes }
         : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
+      fetchImpl: dcrGuardedFetch,
     });
     // RFC 7591 §3.2.1: the RESPONSE, not the request, states what the server
     // registered — an AS "MAY replace any invalid values with suitable default
@@ -1878,7 +2150,7 @@ export async function ensureIntegrationOAuthClient(
           message:
             `the authorization server ${did} although Appstrate requested a public client ` +
             `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
-            `register an OAuth client manually for this integration`,
+            manualRemedy,
         },
       };
     }
@@ -1899,11 +2171,11 @@ export async function ensureIntegrationOAuthClient(
           tokenEndpointAuthMethod: "none",
           redirectUri,
         },
-        { autoProvisioned: true },
+        { autoProvisioned: true, issuer },
       );
     } catch (insertErr) {
       // Concurrent auto-DCR: a parallel Connect for the same (space, package,
-      // authKey) registered its client between our `racedClient` re-check above
+      // authKey, issuer) registered its client between our `racedClient` re-check above
       // and this insert. The partial unique `idx_ioc_one_auto` rejects the
       // second auto-provisioned row (Postgres 23505) — catch it and re-select
       // the winner instead of surfacing a 500. Our own upstream registration is
@@ -1914,7 +2186,7 @@ export async function ensureIntegrationOAuthClient(
         "code" in insertErr &&
         (insertErr as { code: string }).code === "23505"
       ) {
-        const winner = await getAutoProvisionedClient(scope, packageId, authKey);
+        const winner = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
         if (winner) {
           logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
             packageId,
@@ -1930,6 +2202,7 @@ export async function ensureIntegrationOAuthClient(
       packageId,
       authKey,
       clientId: registration.clientId,
+      ...(issuer ? { issuer } : {}),
     });
     return { ...resolved, spaceClients: [client] };
   } catch (err) {
@@ -2257,6 +2530,9 @@ interface StoreConnectionInput {
    * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
    */
   clientRef?: string | null;
+  /** See {@link PersistCredentialInput}. */
+  variables?: Record<string, string> | null;
+  oauthResource?: string;
 }
 
 /**
@@ -2270,10 +2546,11 @@ interface StoreConnectionInput {
  *                      `notFound` when the row isn't the caller's OR belongs to
  *                      a different integration/auth (a caller-supplied id can
  *                      never overwrite an unrelated connection of theirs).
- *   - `update-by-id` — system write-back (proactive token refresh). Keyed by
- *                      id only — the id came from an already-authorized
- *                      resolution — and silently no-ops when the row is gone
- *                      (matches the pre-convergence refresh behaviour).
+ *   - `update-by-id` — system write-back (token refresh). Keyed by id — the id
+ *                      came from an already-authorized resolution — and a
+ *                      compare-and-set on `expect`, the client and ciphertext
+ *                      the refresh spent: it writes nothing when the row is
+ *                      gone or was reconnected meanwhile.
  */
 export type PersistTarget =
   | { kind: "insert"; scope: SpaceScope; actor: Actor }
@@ -2287,7 +2564,11 @@ export type PersistTarget =
       packageId: string;
       authKey: string;
     }
-  | { kind: "update-by-id"; connectionId: string };
+  | {
+      kind: "update-by-id";
+      connectionId: string;
+      expect: { clientRef: string | null; credentialsEncrypted: string };
+    };
 
 /**
  * Persist input for the credential columns.
@@ -2333,6 +2614,10 @@ interface PersistCredentialInput {
    * non-oauth2 writes → persists NULL.
    */
   clientRef?: string | null;
+  /** AFPS §7.12, written with the credential they were acquired with; the refresh omits it. */
+  variables?: Record<string, string> | null;
+  /** RFC 8707 `resource` of the oauth2 token: every acquisition writes it, the refresh leaves it. */
+  oauthResource?: string;
 }
 
 /**
@@ -2373,8 +2658,7 @@ async function firstFreeLabel(
  * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
  * `needs_reconnection`) on `integration_connections`. Every acquisition and
  * refresh path converges here (spec §4.1 — "1 writer"). Returns the persisted
- * summary for INSERT / `update-owned`; `null` for `update-by-id` (the refresh
- * write-back consumes its own result shape and ignores this).
+ * summary; `null` only for an `update-by-id` that wrote nothing.
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
  * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
@@ -2440,6 +2724,8 @@ export async function persistCredentialBundle(
           scopesGranted: input.scopesGranted ?? [],
           needsReconnection: input.needsReconnection ?? false,
           clientRef: input.clientRef ?? null,
+          variables: input.variables ?? null,
+          oauthResource: input.oauthResource ?? null,
           expiresAt: input.expiresAt ?? null,
           label: labelValue,
           createdAt: now,
@@ -2473,8 +2759,10 @@ export async function persistCredentialBundle(
   // Re-stamp the minting client on reconnect (acquisition UPDATE passes it);
   // the refresh write-back omits it so the high-water client_ref is preserved.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
+  if (input.variables !== undefined) set.variables = input.variables;
 
   if (target.kind === "update-owned") {
+    set.oauthResource = input.oauthResource ?? null;
     await assertSpaceInScope(target.scope);
     const ownerPredicate = actorFilter(target.actor, integrationConnections);
     // Owner-scoped reconnect: id + space + actor identity, PLUS the
@@ -2498,27 +2786,49 @@ export async function persistCredentialBundle(
     // data-integrity and access surprise. Only enforced between two real
     // identities; "default" (identity-less) never blocks an upgrade.
     //
+    // The variables (AFPS §7.12) name the instance the account lives on: same rule.
+    //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
     // them and slip a different-account clobber past the guard. Do both in one
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
+    const checksAccount =
+      input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
+    const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID) {
+      if (checksAccount || checksVariables) {
         const [existing] = await tx
-          .select({ accountId: integrationConnections.accountId })
+          .select({
+            accountId: integrationConnections.accountId,
+            variables: integrationConnections.variables,
+          })
           .from(integrationConnections)
           .where(ownerScope)
           .limit(1)
           .for("update");
         if (
           existing &&
+          checksAccount &&
           existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
           existing.accountId !== input.accountId
         ) {
           throw conflict(
             "identity_mismatch",
             `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+          );
+        }
+        if (
+          existing?.variables &&
+          checksVariables &&
+          !sameConnectionVariables(connectionVariablesOf(existing.variables), input.variables!)
+        ) {
+          const instance = Object.entries(existing.variables)
+            .map(([name, value]) => `${name}=${value}`)
+            .join(", ");
+          throw conflict(
+            "identity_mismatch",
+            `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
           );
         }
       }
@@ -2535,7 +2845,7 @@ export async function persistCredentialBundle(
     return serializeIntegrationConnection(row);
   }
 
-  // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
+  // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
   // Monotonic clear: the proactive refresh write-back always passes
   // `needsReconnection: false`, which would race-clobber a `true` set
   // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
@@ -2544,14 +2854,17 @@ export async function persistCredentialBundle(
   // refresh simply no-ops on that row (a flagged connection's cached credentials
   // are stale anyway, so skipping the write-back is harmless). An explicit
   // `true` write (or any non-clearing write) stays unconditional.
-  const byIdWhere = clearsReconnection
-    ? and(
-        eq(integrationConnections.id, target.connectionId),
-        eq(integrationConnections.needsReconnection, false),
-      )
-    : eq(integrationConnections.id, target.connectionId);
-  await db.update(integrationConnections).set(set).where(byIdWhere);
-  return null;
+  const { clientRef, credentialsEncrypted } = target.expect;
+  const byIdWhere = and(
+    eq(integrationConnections.id, target.connectionId),
+    clientRef === null
+      ? isNull(integrationConnections.clientRef)
+      : eq(integrationConnections.clientRef, clientRef),
+    eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
+    clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
+  );
+  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
+  return row ? serializeIntegrationConnection(row) : null;
 }
 
 /**
@@ -2726,6 +3039,8 @@ export async function saveIntegrationConnection(
     expiresAt: input.expiresAt ?? null,
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
+    variables: input.variables ?? null,
+    ...(input.oauthResource !== undefined ? { oauthResource: input.oauthResource } : {}),
   };
   const summary = input.connectionId
     ? await persistCredentialBundle(
@@ -3211,9 +3526,22 @@ export function serializeIntegrationConnection(
     // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
     // UI can show, per connection, exactly which client is in use.
     client_ref: row.clientRef,
+    variables: row.variables ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
+export async function getIntegrationConnectionVariables(
+  connectionId: string,
+): Promise<Record<string, string> | null> {
+  const [row] = await db
+    .select({ variables: integrationConnections.variables })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.variables ?? null;
 }
 
 // ─────────────────────────────────────────────

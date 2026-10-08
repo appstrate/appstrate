@@ -49,6 +49,7 @@ import {
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
 import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -57,6 +58,7 @@ import {
   isIntegrationActive,
   loadAccessibleConnectionById,
 } from "./integration-connections.ts";
+import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,
   resolveMcpServerForSpawn,
@@ -66,6 +68,7 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
+  renderRemoteSource,
   getAppstrateConnectMeta,
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
@@ -116,6 +119,8 @@ export type IntegrationDropReason =
   | "invalid_manifest"
   | "not_active"
   | "remote_source_invalid"
+  | "remote_url_unrenderable"
+  | "remote_url_blocked"
   | "local_server_ref_missing"
   | "mcp_server_unresolved"
   | "mcp_server_not_runnable"
@@ -157,6 +162,55 @@ interface ResolveOneResult {
 
 function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult {
   return { specs: [], drops: [{ reason, ...(detail !== undefined ? { detail } : {}) }] };
+}
+
+/**
+ * Why a remote MCP URL may not be opened, `null` when it may: the canonical egress guard with
+ * the remote-MCP scheme tier — an operator-trusted internal host may use plain http (LAN
+ * services routinely lack TLS), every other host must be https AND pass the DNS-aware SSRF
+ * gate (private / loopback / link-local / cloud-metadata → blocked; fails closed). One shared
+ * decision site, so this resolver cannot drift from the other egress paths. A URL rendered
+ * from connection variables is user-supplied (AFPS §8.6): it gets no more trust than this.
+ */
+async function remoteUrlRefusal(
+  integrationId: string,
+  url: string,
+  origin: "declared" | "rendered",
+): Promise<string | null> {
+  const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
+  if (egress.ok) return null;
+  const subject = `remote-source integration '${integrationId}'`;
+  const verb = origin === "declared" ? "declares" : "renders for this connection";
+  if (egress.reason === "invalid-url") return `${subject} ${verb} an invalid source.remote.url`;
+  if (egress.reason === "blocked-scheme") {
+    return `${subject} ${verb} a disallowed source.remote.url scheme (only https://, or http:// for an operator-trusted internal host)`;
+  }
+  const field = origin === "declared" ? "source.remote.url" : "rendered source.remote.url";
+  return `${subject} ${field} host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`;
+}
+
+/** `source.remote.url` rendered from one connection's variables (AFPS §7.12), egress-checked. */
+async function renderConnectionRemoteUrl(
+  integrationId: string,
+  manifest: IntegrationManifest,
+  variables: ConnectionVariables,
+): Promise<{ url: string } | IntegrationDrop> {
+  const remote = renderRemoteSource(manifest, variables);
+  if (!remote) {
+    return {
+      reason: "remote_url_unrenderable",
+      detail: `source.remote.url does not render from the connection's variables; reconnect '${integrationId}' with valid values`,
+    };
+  }
+  const refusal = await remoteUrlRefusal(integrationId, remote.url, "rendered");
+  if (refusal !== null) {
+    logger.warn("remote MCP URL rendered for a connection is refused by the egress guard", {
+      integrationId,
+      detail: refusal,
+    });
+    return { reason: "remote_url_blocked", detail: refusal };
+  }
+  return { url: remote.url };
 }
 
 /**
@@ -358,6 +412,7 @@ async function resolveOne(
       }
     | undefined;
   let referencedMcpServer: McpServerManifest | null = null;
+  let perConnectionRemoteUrl = false;
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
@@ -372,33 +427,15 @@ async function resolveOne(
       });
       return drop("remote_source_invalid");
     }
-    // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
-    // opens a credential-bearing Streamable HTTP / SSE client against this URL,
-    // so validate it here (import/boot resolution) before it reaches the wire.
-    // Route it through the canonical egress guard with the remote-MCP scheme
-    // tier (`requireHttpsForUntrustedHost`): an operator-trusted internal host
-    // may use plain http (LAN services routinely lack TLS), every other host
-    // must be https AND pass the DNS-aware SSRF gate (private / loopback /
-    // link-local / cloud-metadata → blocked; DNS-rebind-safe, fails closed) —
-    // one shared decision site, so this resolver can't drift from the other
-    // egress paths. A malformed / wrong-scheme / blocked URL throws a clear
-    // error; the caller (`resolveIntegrationSpawns`) turns it into a logged
-    // per-integration skip, so the run never spawns an unguarded MCP client.
-    const egress = await checkEgressUrl(remote.url, { requireHttpsForUntrustedHost: true });
-    if (!egress.ok) {
-      if (egress.reason === "invalid-url") {
-        throw new Error(
-          `remote-source integration '${integrationId}' declares an invalid source.remote.url`,
-        );
-      }
-      if (egress.reason === "blocked-scheme") {
-        throw new Error(
-          `remote-source integration '${integrationId}' declares a disallowed source.remote.url scheme (only https://, or http:// for an operator-trusted internal host)`,
-        );
-      }
-      throw new Error(
-        `remote-source integration '${integrationId}' source.remote.url host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`,
-      );
+    // P0-2 — SSRF floor on the remote MCP URL: the sidecar opens a credential-bearing client
+    // against it, so it is checked here, before it reaches the wire (see `remoteUrlRefusal`).
+    // A URL template (AFPS §7.12) names a different upstream per connection: it is rendered and
+    // checked per connection below, where a refusal drops that connection only.
+    if (isVariableTemplate(remote.url)) {
+      perConnectionRemoteUrl = true;
+    } else {
+      const refusal = await remoteUrlRefusal(integrationId, remote.url, "declared");
+      if (refusal !== null) throw new Error(refusal);
     }
     // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`, forwarded
     // verbatim so the sidecar can pick the right MCP client transport.
@@ -411,7 +448,10 @@ async function resolveOne(
     // `server.type` is intentionally omitted — the sidecar dispatches on
     // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide
     // with the AFPS `mcpServerTypeEnum` (`node|python|binary|uv`).
-    serverSpec = { url: remote.url, transport: remote.transport };
+    serverSpec = {
+      ...(perConnectionRemoteUrl ? {} : { url: remote.url }),
+      transport: remote.transport,
+    };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {
@@ -521,6 +561,16 @@ async function resolveOne(
         requiredAuthKey,
       );
       if (!deliveries) return { reason: "no_delivery", connectionLabel: pick.label };
+      let server = serverSpec;
+      if (perConnectionRemoteUrl) {
+        const rendered = await renderConnectionRemoteUrl(
+          integrationId,
+          manifest,
+          deliveries.variables,
+        );
+        if ("reason" in rendered) return { ...rendered, connectionLabel: pick.label };
+        server = { ...serverSpec, url: rendered.url };
+      }
       const apiCalls = selectedApiCalls.filter((cfg) => cfg.authKey === deliveries.authKey);
 
       // Per connection: the login primitive belongs to the connection's AUTH.
@@ -553,15 +603,15 @@ async function resolveOne(
         manifest: {
           name: manifest.name,
           version: manifest.version,
-          ...(serverSpec
+          ...(server
             ? {
                 server: {
-                  ...(serverSpec.type ? { type: serverSpec.type } : {}),
-                  ...(serverSpec.entry_point ? { entry_point: serverSpec.entry_point } : {}),
-                  ...(serverSpec.packageId ? { packageId: serverSpec.packageId } : {}),
-                  ...(serverSpec.version ? { version: serverSpec.version } : {}),
-                  ...(serverSpec.url ? { url: serverSpec.url } : {}),
-                  ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
+                  ...(server.type ? { type: server.type } : {}),
+                  ...(server.entry_point ? { entry_point: server.entry_point } : {}),
+                  ...(server.packageId ? { packageId: server.packageId } : {}),
+                  ...(server.version ? { version: server.version } : {}),
+                  ...(server.url ? { url: server.url } : {}),
+                  ...(server.transport ? { transport: server.transport } : {}),
                 },
               }
             : {}),
@@ -633,6 +683,8 @@ function resolveWorkspaceMount(
 interface ResolvedDeliveries {
   /** The auth the connection was made on — selects which api_call tools its spec carries. */
   authKey: string;
+  /** The connection's variables (AFPS §7.12): `resolveOne` renders its remote URL from them. */
+  variables: ConnectionVariables;
   spawnEnv: Record<string, string>;
   httpDeliveryAuths?: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]>;
   /**
@@ -699,6 +751,8 @@ async function resolveDeliveries(
     return null;
   }
 
+  const { variables } = row;
+
   // ─── connect.tool + run_at:"run-start" — store-the-secret acquisition ───
   // The injectable outputs plane is empty at rest: only the login secret was
   // persisted (NON-injectable `inputs`). The sidecar mints the session at
@@ -752,13 +806,15 @@ async function resolveDeliveries(
       auth.type,
       {},
       httpDecl0 as ConnectAfpsHttpDelivery,
+      variables,
     ) ?? {
       headerName: "",
       headerPrefix: "",
       value: "",
       allowServerOverride: false,
     };
-    const authorizedUris = auth.authorized_uris ?? [];
+    // A connect auth's entries carry no credential field, only variables (AFPS §7.9).
+    const authorizedUris = renderAuthAuthorizedUris(auth, {}, variables);
     const loginEgress =
       getIntegrationSourceKind(manifest) === "local"
         ? runnerEgressFor(auth, authorizedUris)
@@ -773,6 +829,7 @@ async function resolveDeliveries(
     };
     return {
       authKey: row.authKey,
+      variables,
       spawnEnv: {},
       httpDeliveryAuths,
       connectLogin: {
@@ -782,6 +839,7 @@ async function resolveDeliveries(
         authType: auth.type,
         authorizedUris: [...authorizedUris],
         deliveryHttp: httpDecl0,
+        variables: { ...variables },
         inputs,
         ...(connectMeta.reauth_on ? { reauthOn: [...connectMeta.reauth_on] } : {}),
       },
@@ -801,7 +859,7 @@ async function resolveDeliveries(
     return null;
   }
 
-  const renderedUris = renderAuthAuthorizedUris(auth, fields);
+  const renderedUris = renderAuthAuthorizedUris(auth, fields, variables);
   const spawnEnv: Record<string, string> = {};
   const httpDeliveryAuths: NonNullable<IntegrationSpawnSpec["httpDeliveryAuths"]> = {};
   const fileMounts: NonNullable<IntegrationSpawnSpec["fileMounts"]> = {};
@@ -821,7 +879,7 @@ async function resolveDeliveries(
   const userConfigSubstitutions: Record<string, string> = {};
   if (envMap && Object.keys(envMap).length > 0) {
     for (const [envKey, conf] of Object.entries(envMap)) {
-      const value = renderCredentialTemplate(conf.value, fields);
+      const value = renderCredentialTemplate(conf.value, fields, variables);
       if (value === null) {
         logger.info("delivery.env value template resolved empty on credentials", {
           integrationId,
@@ -883,7 +941,7 @@ async function resolveDeliveries(
         });
         continue;
       }
-      const value = renderCredentialTemplate(conf.value, fields);
+      const value = renderCredentialTemplate(conf.value, fields, variables);
       if (value === null) {
         logger.info("delivery.files value template resolved empty on credentials", {
           integrationId,
@@ -921,7 +979,12 @@ async function resolveDeliveries(
   // ─── delivery.http (Phase 1.5) ───
   const httpDecl = auth.delivery?.http;
   if (httpDecl) {
-    const plan = resolveAfpsHttpDelivery(auth.type, fields, httpDecl as ConnectAfpsHttpDelivery);
+    const plan = resolveAfpsHttpDelivery(
+      auth.type,
+      fields,
+      httpDecl as ConnectAfpsHttpDelivery,
+      variables,
+    );
     if (!plan) {
       logger.info("delivery.http produced no plan (auth missing required fields)", {
         integrationId,
@@ -974,6 +1037,7 @@ async function resolveDeliveries(
   if (!resolvedAtLeastOne && !apiCallAuthKeys.has(row.authKey)) return null;
   return {
     authKey: row.authKey,
+    variables,
     spawnEnv,
     ...(Object.keys(httpDeliveryAuths).length > 0 ? { httpDeliveryAuths } : {}),
     ...(Object.keys(fileMounts).length > 0 ? { fileMounts } : {}),

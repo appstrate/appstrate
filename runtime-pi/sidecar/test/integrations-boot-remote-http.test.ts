@@ -55,12 +55,13 @@ function wire(
       allowServerOverride?: boolean;
     }
   >,
+  authorizedUris: string[] = ["https://mcp.example.com/**", "https://internal-mcp.invalid/**"],
 ): IntegrationCredentialsWire {
   return {
     auths: auths.map((a) => ({
       ...a,
       fields: {},
-      authorizedUris: [],
+      authorizedUris,
     })),
     deliveryPlans: Object.fromEntries(
       Object.entries(deliveryPlans).map(([k, p]) => [
@@ -313,6 +314,86 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(calls).toBe(1); // refresh returned false → no retry
     expect(getRefreshCalls()).toBe(1);
     expect(status).toBe(401);
+  });
+
+  it("never sends a credential outside the authorized URIs of its connection", async () => {
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" } },
+      ["https://other.example.com/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let fetchCalls = 0;
+    await withGlobalFetch(
+      (async () => {
+        fetchCalls += 1;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+          /outside the authorized URIs/,
+        );
+      },
+    );
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("never follows a same-origin redirect off the authorized URIs with the credential", async () => {
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" } },
+      ["https://mcp.example.com/mcp/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    const fetched: string[] = [];
+    await withGlobalFetch(
+      (async (input: string) => {
+        fetched.push(new URL(input).pathname);
+        return new Response(null, { status: 307, headers: { location: "/admin" } });
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+          /outside the authorized URIs/,
+        );
+      },
+    );
+    expect(fetched).toEqual(["/mcp/v1"]);
+  });
+
+  // A reconnect to another upstream mid-run: the refreshed snapshot carries that upstream's
+  // credential and URIs, while the transport still targets the server rendered at spawn.
+  it("refuses the retry when the refreshed credential is for another upstream", async () => {
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
+    });
+    const reconnected = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "OTHER" } },
+      ["https://other.example.com/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => {
+      Object.assign(initial, reconnected);
+      return true;
+    });
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    const seen: Array<string | null> = [];
+    await withGlobalFetch(
+      (async (_input: unknown, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers).get("authorization"));
+        return new Response("{}", { status: 401 });
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+          /outside the authorized URIs/,
+        );
+      },
+    );
+    expect(seen).toEqual(["Bearer TOKEN"]);
   });
 
   it("blocks a private-address target even when a transport factory is injected", async () => {

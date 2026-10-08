@@ -2131,6 +2131,7 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/approve 200",
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
+  "GET /api/integrations/callback/{tag} 200",
   // The three `/api/llm-proxy/*` 200s used to sit here, on the reasoning that a
   // verbatim upstream passthrough "has no stable schema to declare". It does:
   // `openapi/paths/llm-proxy.ts` declares a permissive `{ type: "object",

@@ -26,6 +26,7 @@ import { resolveAccessToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 import { listAllTools, type LiveTool } from "./mcp-list.ts";
 import { writeSnapshot } from "./snapshot.ts";
+import { renderForConformance } from "./variables.ts";
 
 const CHECK = "mcp-remote-parity";
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -69,8 +70,8 @@ export async function checkMcpRemoteParity(
   opts: RemoteParityOptions = {},
 ): Promise<Finding[]> {
   const manifest = entry.manifest;
-  const url = remoteUrl(manifest);
-  if (!url) {
+  const declaredUrl = remoteUrl(manifest);
+  if (!declaredUrl) {
     return [
       {
         packageId: entry.packageId,
@@ -80,6 +81,14 @@ export async function checkMcpRemoteParity(
       },
     ];
   }
+
+  // A URL template (AFPS §7.12) is tested against one instance: the variables' defaults or
+  // CONFORMANCE_VARIABLES. Without one there is nothing to contact — a "couldn't test".
+  const rendered = renderForConformance(entry, declaredUrl);
+  if ("skip" in rendered) {
+    return [{ packageId: entry.packageId, check: CHECK, severity: "warn", message: rendered.skip }];
+  }
+  const url = rendered.url;
 
   const declared = toolsPolicyKeys(manifest);
   const allowUndeclared = allowsUndeclared(manifest);

@@ -50,6 +50,7 @@ import {
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
+import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
@@ -370,10 +371,11 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     });
 
-    // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
-    // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
-    // (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only tokens in the
-    // bundle). Allowed on api_call: its consumers pin only the declared literal entries.
+    // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
+    // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
+    // with `connect` (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only
+    // tokens in the bundle). Allowed on api_call: its consumers pin only the declared literal
+    // entries. Entries carrying `{$variable.<name>}` are `@afps-spec/schema`'s (§7.9, §7.12).
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
     const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));
@@ -669,13 +671,19 @@ interface DeliveryView {
 
 /**
  * List the templates and runtime expressions the platform cannot evaluate: a `{$…}` other than
- * `{$credential.<field>}` in a delivery template (http, env, files) or in `authorized_uris`, and a
- * `connect.login` expression outside {@link loginBlockIssues}. A WRITE-path policy, not part of
+ * `{$credential.<field>}` or a declared `{$variable.<name>}` in a delivery template (http, env,
+ * files) or in `authorized_uris`, and a `connect.login` expression outside
+ * {@link loginBlockIssues}. A WRITE-path policy, not part of
  * {@link integrationManifestSchema}; rendering and the login engine refuse the same at run time.
  */
 export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
-  const auths = (manifest as { auths?: unknown } | null)?.auths;
+  const m = manifest as { auths?: unknown; variables?: { schema?: { properties?: unknown } } };
+  const auths = m?.auths;
   if (typeof auths !== "object" || auths === null) return [];
+  const properties = m.variables?.schema?.properties;
+  const declaredVariables = new Set(
+    typeof properties === "object" && properties !== null ? Object.keys(properties) : [],
+  );
   const found: AuthManifestIssue[] = [];
   for (const [authKey, raw] of Object.entries(auths)) {
     const auth = (raw ?? {}) as {
@@ -704,12 +712,20 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
         ["authorized_uris", i],
       ]),
     ];
+    const login = auth.connect?.login;
+    const undeclaredVariables = (template: string | undefined, at: IssuePath) => {
+      for (const name of variableRefs(template ?? "")) {
+        if (!declaredVariables.has(name)) {
+          push(`'{$variable.${name}}' names no declared connection variable`, at);
+        }
+      }
+    };
     for (const [template, at] of templates) {
       for (const expr of unsupportedTemplateExpressions(template ?? "")) {
-        push(`'${expr}' is not a {$credential.<field>} reference`, at);
+        push(`'${expr}' is neither a {$credential.<field>} nor a {$variable.<name>} reference`, at);
       }
+      undeclaredVariables(template, at);
     }
-    const login = auth.connect?.login;
     for (const issue of login ? loginBlockIssues(login) : []) {
       push(issue.message, ["connect", "login", ...issue.path]);
     }

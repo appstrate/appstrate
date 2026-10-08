@@ -1483,6 +1483,79 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
   });
 });
 
+describe("LocalIntegrationResolver — connection variables (AFPS §7.12)", () => {
+  async function toolFor(variables: Record<string, string> | undefined) {
+    const hits: { url: string; headers: Headers }[] = [];
+    const integ = makePackage("@acme/forge", "1.0.0", "integration", {
+      "integration.json": JSON.stringify({
+        schema_version: "0.1",
+        type: "integration",
+        source: { kind: "none" },
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string" }, tenant: { type: "string" } },
+            required: ["base_url", "tenant"],
+          },
+        },
+        _meta: { "dev.appstrate/api": { auths: { main: {} } } },
+        auths: {
+          main: {
+            type: "api_key",
+            authorized_uris: ["{$variable.base_url}/api/**"],
+            credentials: { schema: {} },
+            delivery: {
+              http: {
+                in: "header",
+                name: "X-Api-Key",
+                value: "{$variable.tenant}:{$credential.api_key}",
+              },
+            },
+          },
+        },
+      }),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: {
+        version: 1,
+        integrations: {
+          "@acme/forge": { fields: { api_key: "k" }, ...(variables ? { variables } : {}) },
+        },
+      },
+      fetch: ((url: string, init?: RequestInit) => {
+        hits.push({ url, headers: new Headers(init?.headers) });
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/forge", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const call = (target: string) => tools[0]!.execute({ method: "GET", target }, makeCtx().ctx);
+    return { call, hits };
+  }
+
+  it("matches the allowlist rendered from the variables and renders them into the header", async () => {
+    const { call, hits } = await toolFor({ base_url: "https://forge.example.com/", tenant: "t1" });
+    await call("https://forge.example.com/api/v4/projects");
+    expect(hits.map((h) => h.url)).toEqual(["https://forge.example.com/api/v4/projects"]);
+    expect(hits[0]!.headers.get("X-Api-Key")).toBe("t1:k");
+    await expect(call("https://other.example.com/api/v4/projects")).rejects.toMatchObject({
+      code: "unauthorized_target",
+    });
+    expect(hits).toHaveLength(1);
+  });
+
+  it("refuses every target when the connection carries no variables to render", async () => {
+    const { call, hits } = await toolFor(undefined);
+    await expect(call("https://forge.example.com/api/x")).rejects.toMatchObject({
+      code: "unauthorized_target",
+    });
+    expect(hits).toEqual([]);
+  });
+});
+
 describe("LocalIntegrationResolver — the failure codes of every api_call path (#1761)", () => {
   /** One `GET target` via an auth allowing `https://*.acme.com/**`; `tok` is no field value. */
   async function fail(

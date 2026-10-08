@@ -135,6 +135,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `_meta["dev.appstrate/api-call-error"]`, whichever path served it.
   `appstrate run --integrations=local` reports the same codes; its retired
   codes are listed in `packages/afps-runtime/CHANGELOG.md`.
+- **Remote MCP OAuth checks the protected-resource metadata and the
+  authorization response more strictly.** The RFC 9728 document's `resource`
+  must now be identical (modulo trailing `/`) to the identifier its location
+  was derived from — the MCP URL for a `WWW-Authenticate` challenge or the
+  path-inserted location, its origin for the root location — instead of
+  merely sharing its origin; a document that does not match is skipped for the
+  next location. For every integration OAuth flow, an `iss` authorization
+  response parameter (RFC 9207) must equal the `issuer` of the validated
+  metadata of the server the request was sent to, and a response without one
+  is refused when that server advertises
+  `authorization_response_iss_parameter_supported`.
+
+### Added
+
+- **Connection variables (AFPS §7.12)**: an integration may declare
+  `variables.schema` and use `{$variable.<name>}` in `source.remote.url`, an
+  oauth2 `issuer`, `authorized_uris` and delivery templates, so one package serves every self-hosted instance. The user enters
+  the values when connecting (`variables` on `POST …/connect/fields`,
+  `…/connect/oauth2` and the hosted portal's `/connect/submit`); they are
+  stored in plaintext with the connection (`variables` on the connection DTO)
+  and change only through a reconnect. A URL rendered from them is
+  egress-checked per connection. When the authorization server is chosen per
+  connection, the platform registers one public client per server, integration
+  and space by
+  Dynamic Client Registration (new `integration_oauth_clients.issuer`) and
+  sends each server's responses to a redirect URI of its own
+  (`GET /api/integrations/callback/{tag}`). Migration `0082` adds the two
+  columns; existing rows keep `NULL`. Authoring guide:
+  `docs/guides/writing-an-integration-with-connect.md` → "Connection
+  variables".
+- **System integrations `@appstrate/gitlab-mcp`, `@appstrate/twenty-mcp` and
+  `@appstrate/coolify-mcp`**, backed by each product's own MCP server:
+  GitLab.com or any self-managed instance over OAuth (dynamic client
+  registration, scope `mcp`); Twenty Cloud or a self-hosted server over OAuth
+  or an API key; a Coolify instance over a team API token, after an
+  administrator enables its MCP server.
 
 ### Fixed
 

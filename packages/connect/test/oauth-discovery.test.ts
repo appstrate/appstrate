@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { resolveOAuthEndpoints, __clearOAuthDiscoveryCache } from "../src/oauth-discovery.ts";
+import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { resolveOAuthEndpoints } from "../src/oauth-discovery.ts";
 
 beforeEach(() => {
   // Reset the per-issuer discovery cache so each test sees a clean slate.
-  __clearOAuthDiscoveryCache();
+  clearAllCachesLocally();
 });
 
 // The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
@@ -499,5 +500,60 @@ describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)"
       (fetchImpl) => resolveOAuthEndpoints({ fetchImpl, issuer: "https://idp.example.com" }),
     );
     expect(result.registrationEndpoint).toBeUndefined();
+  });
+});
+
+describe("resolveOAuthEndpoints — the validated issuer and RFC 9207", () => {
+  it("returns the validated document's issuer verbatim and its iss-parameter support", async () => {
+    // A URL-form template renders with a trailing `/`: the server is identified by what its
+    // metadata says, not by the string that found it.
+    const fetchImpl = (async () =>
+      jsonResponse({
+        issuer: "https://forge.example.com",
+        authorization_endpoint: "https://forge.example.com/oauth/authorize",
+        token_endpoint: "https://forge.example.com/oauth/token",
+        authorization_response_iss_parameter_supported: true,
+      })) as unknown as typeof fetch;
+    const first = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://forge.example.com/" });
+    expect(first.issuer).toBe("https://forge.example.com");
+    expect(first.authorizationResponseIssParameterSupported).toBe(true);
+    // Served from the cache the same way.
+    const cached = await resolveOAuthEndpoints({
+      fetchImpl: (async () => {
+        throw new Error("no network on a cache hit");
+      }) as unknown as typeof fetch,
+      issuer: "https://forge.example.com",
+    });
+    expect(cached.issuer).toBe("https://forge.example.com");
+    expect(cached.authorizationResponseIssParameterSupported).toBe(true);
+  });
+
+  it("names no issuer when no document passes the issuer check", async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        issuer: "https://gitlab.com",
+        authorization_endpoint: "https://gitlab.com/oauth/authorize",
+        token_endpoint: "https://gitlab.com/oauth/token",
+      })) as unknown as typeof fetch;
+    const result = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://forge.example.com" });
+    expect(result.issuer).toBeUndefined();
+    expect(result.tokenEndpoint).toBeUndefined();
+  });
+});
+
+describe("resolveOAuthEndpoints — body cap", () => {
+  it("refuses a discovery document larger than 64 KiB", async () => {
+    const doc = {
+      issuer: "https://idp.example.com",
+      authorization_endpoint: "https://idp.example.com/authorize",
+      token_endpoint: "https://idp.example.com/token",
+      padding: "x".repeat(64 * 1024),
+    };
+    const result = await resolveOAuthEndpoints({
+      fetchImpl: (async () => jsonResponse(doc)) as unknown as typeof fetch,
+      issuer: "https://idp.example.com",
+    });
+    expect(result.issuer).toBeUndefined();
+    expect(result.tokenEndpoint).toBeUndefined();
   });
 });

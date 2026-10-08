@@ -78,6 +78,7 @@ async function setup(
     tokenEndpointAuthMethod: "client_secret_post" | "client_secret_basic" | "none";
     authorizationParams?: Record<string, string>;
     refreshTokenIssuance?: "default" | "not_supported";
+    resource?: string;
   },
   client: { clientId: string; clientSecret: string },
   tier: "space" | "org" = "space",
@@ -103,6 +104,7 @@ async function setup(
           ...(manifest.refreshTokenIssuance
             ? { refreshTokenIssuance: manifest.refreshTokenIssuance }
             : {}),
+          ...(manifest.resource ? { resource: manifest.resource } : {}),
           delivery: httpHeaderDelivery({
             name: "Authorization",
             prefix: "Bearer ",
@@ -196,16 +198,10 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
     AUTH_KEY,
     auth as AfpsManifestAuth,
     ctx.defaultSpaceId,
-    row.clientRef,
+    row,
   );
   expect(context).not.toBeNull();
-  await forceRefreshIntegrationConnection(
-    connectionId,
-    INTEGRATION,
-    AUTH_KEY,
-    row.credentialsEncrypted,
-    context!,
-  );
+  await forceRefreshIntegrationConnection(row, INTEGRATION, AUTH_KEY, context!);
 }
 
 /** The single connection row, or null. */
@@ -273,6 +269,53 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(decryptCredentialsToStringMap(refreshed!.credentialsEncrypted).access_token).toBe(
       provider.issuedAccessTokens[1]!,
     );
+  });
+
+  it("sends the RFC 8707 resource on authorize, code exchange and refresh (AFPS §8.6)", async () => {
+    const resource = "https://api.probe.example/v1";
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", resource },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const connection = await storedConnection();
+    expect(connection!.oauthResource).toBe(resource);
+
+    await refresh(ctx, connection!.id);
+    expect(provider.authorizeRequests[0]!.params.resource).toBe(resource);
+    expect(provider.tokenRequests.map((r) => [r.grantType, r.params.resource])).toEqual([
+      ["authorization_code", resource],
+      ["refresh_token", resource],
+    ]);
+    // The refresh write-back keeps the resource the next refresh sends.
+    expect((await storedConnection())!.oauthResource).toBe(resource);
+  });
+
+  it("sends no resource on refresh when none was sent on the connect", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const connection = await storedConnection();
+    expect(connection!.oauthResource).toBeNull();
+
+    await refresh(ctx, connection!.id);
+    expect(provider.tokenRequests.map((r) => "resource" in r.params)).toEqual([false, false]);
   });
 
   it("connects with client_secret_basic", async () => {

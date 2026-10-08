@@ -4,7 +4,7 @@
 /**
  * AFPS `authorized_uris` rules — the SINGLE source of truth for the URL-pattern
  * grammar: parsing and canonicalising an entry, rendering its
- * `{$credential.<field>}` placeholders for one connection, the host-bound rule
+ * `{$credential.<field>}` and `{$variable.<name>}` placeholders for one connection, the host-bound rule
  * (judged with the Public Suffix List at write and at run time), the URL
  * matcher and the compiled (URL, host:port) egress policy. Consumers import
  * this module directly.
@@ -12,28 +12,42 @@
 
 import { getDomain } from "tldts";
 import {
-  CREDENTIAL_REF,
+  EXPECTED_HOST_VALUE,
+  EXPECTED_URL_VALUE,
+  HOST_LABEL,
+  renderHostVariable,
+  renderUrlVariable,
+  VARIABLE_REF,
+  variableRefs,
+} from "./connection-variables.ts";
+import {
   credentialTemplateRefs,
   substituteCredentialRefs,
+  TEMPLATE_REF,
 } from "./credential-template.ts";
 
 /** A rendered value may only be a literal host label run or port digits, never dots alone. */
 const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
 
-const URL_FORM_HEAD = new RegExp(`^${CREDENTIAL_REF.source}`);
+const URL_FORM_HEAD = new RegExp(`^(?:${TEMPLATE_REF.source})`);
+const HAS_TEMPLATE_REF = new RegExp(TEMPLATE_REF.source);
+
+export type TemplateRoot = "credential" | "variable";
 
 /**
  * Split a URL-form pattern (#1627): exactly one placeholder at index 0, followed by nothing or
  * a `/` suffix without placeholders. `null` for any other pattern.
  */
-export function parseUrlFormPattern(pattern: string): { field: string; suffix: string } | null {
+export function parseUrlFormPattern(
+  pattern: string,
+): { root: TemplateRoot; field: string; suffix: string } | null {
   const head = URL_FORM_HEAD.exec(pattern);
   if (!head) return null;
   const suffix = pattern.slice(head[0].length);
-  if (suffix !== "" && (!suffix.startsWith("/") || credentialTemplateRefs(suffix).length > 0)) {
-    return null;
-  }
-  return { field: head[1]!, suffix };
+  if (suffix !== "" && (!suffix.startsWith("/") || HAS_TEMPLATE_REF.test(suffix))) return null;
+  return head[1] !== undefined
+    ? { root: "credential", field: head[1], suffix }
+    : { root: "variable", field: head[2]!, suffix };
 }
 
 /** `scheme://`, the scheme possibly globbed (`**://`). */
@@ -160,7 +174,7 @@ type EntryReading =
 /** A template reads as one literal label; `literal` is `null` for a host without wildcard. */
 function readEntry(pattern: string): EntryReading {
   if (parseUrlFormPattern(pattern)) return { kind: "url-form" };
-  const parsed = parseAuthorizedUriPattern(pattern.replace(CREDENTIAL_REF, "x"));
+  const parsed = parseAuthorizedUriPattern(pattern.replace(TEMPLATE_REF, "x"));
   if (parsed.kind !== "url") return parsed;
   const host = normalisedHost(parsed.host);
   const literal = host.includes("*") ? wildcardLiteral(host) : null;
@@ -230,25 +244,57 @@ function renderUrlValue(value: unknown, allowQuery: boolean): string | null {
 const EXPECTED_AUTHORITY = "a host name or port (letters, digits, '.' and '-' only)";
 const EXPECTED_URL =
   "an absolute http:// or https:// URL without userinfo, fragment ('#'), empty '?' or '*'";
-const EXPECTED_URL_NO_QUERY =
-  "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
 
 /** A field that keeps its `authorized_uris` entry from rendering, and the form it must take. */
 export interface UnrenderableUriField {
+  root: TemplateRoot;
   field: string;
   expected: string;
+}
+
+/** §7.9 authority entry whose host starts with a variable, then literal labels and a port. */
+const VARIABLE_AUTHORITY_ENTRY = new RegExp(
+  `^([A-Za-z][A-Za-z0-9+.-]*:\\/\\/)${VARIABLE_REF.source}((?:\\.${HOST_LABEL})*)((?::[0-9]+)?(?:\\/[^{}]*)?)$`,
+);
+
+function renderVariableEntry(
+  pattern: string,
+  variables: Readonly<Record<string, unknown>>,
+  urlForm: { field: string; suffix: string } | null,
+): { uri: string } | UnrenderableUriField {
+  if (urlForm) {
+    const uri = renderUrlVariable(variables, urlForm.field, urlForm.suffix);
+    return uri === null
+      ? { root: "variable", field: urlForm.field, expected: EXPECTED_URL_VALUE }
+      : { uri };
+  }
+  const entry = VARIABLE_AUTHORITY_ENTRY.exec(pattern);
+  const host = entry && renderHostVariable(variables, entry[2]!, entry[3]!);
+  if (!entry || host === null) {
+    const field = entry?.[2] ?? variableRefs(pattern)[0]!;
+    return { root: "variable", field, expected: EXPECTED_HOST_VALUE };
+  }
+  return { uri: entry[1]! + host + entry[4]! };
 }
 
 function renderPattern(
   pattern: string,
   fields: Readonly<Record<string, unknown>>,
+  variables: Readonly<Record<string, unknown>>,
 ): { uri: string } | UnrenderableUriField {
   const urlForm = parseUrlFormPattern(pattern);
+  if (urlForm?.root === "variable" || (!urlForm && variableRefs(pattern).length > 0)) {
+    return renderVariableEntry(pattern, variables, urlForm);
+  }
   if (urlForm) {
     const bare = urlForm.suffix === "";
     const base = renderUrlValue(fields[urlForm.field], bare);
     if (base === null) {
-      return { field: urlForm.field, expected: bare ? EXPECTED_URL : EXPECTED_URL_NO_QUERY };
+      return {
+        root: "credential",
+        field: urlForm.field,
+        expected: bare ? EXPECTED_URL : EXPECTED_URL_VALUE,
+      };
     }
     // A suffix brings its own `/`; a bare entry keeps the value's exact path (`…/hook/`).
     return { uri: bare ? base : base.replace(/\/$/, "") + urlForm.suffix };
@@ -257,7 +303,7 @@ function renderPattern(
     const value = fields[ref];
     return typeof value !== "string" || !AUTHORITY_VALUE.test(value);
   });
-  if (bad !== undefined) return { field: bad, expected: EXPECTED_AUTHORITY };
+  if (bad !== undefined) return { root: "credential", field: bad, expected: EXPECTED_AUTHORITY };
   // A pattern is not a delivery template: anything but a checked field stays literal, narrowing it.
   return { uri: substituteCredentialRefs(pattern, fields) };
 }
@@ -266,32 +312,37 @@ function renderPattern(
  * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
  * referenced field fails {@link AUTHORITY_VALUE} (or, for the URL form, {@link renderUrlValue}),
  * so a value cannot add a wildcard, a separator or another host. Import validation confines
- * placeholders to the host and port, or to the head of a URL-form pattern.
+ * placeholders to the host and port, or to the head of a URL-form pattern. A variable must pass
+ * the §7.12 value rule of its form.
  */
 export function renderAuthorizedUris(
   patterns: readonly string[],
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>> = {},
 ): string[] {
   return patterns.flatMap((pattern) => {
-    const rendered = renderPattern(pattern, fields);
+    const rendered = renderPattern(pattern, fields, variables);
     return "uri" in rendered ? [rendered.uri] : [];
   });
 }
 
 /**
- * The fields whose value would make {@link renderAuthorizedUris} drop an entry, once per field,
+ * The fields and variables whose value would make {@link renderAuthorizedUris} drop an entry,
  * so a connection can be refused when it is written rather than on every later call (#1627).
  */
 export function unrenderableAuthorizedUriFields(
   patterns: readonly string[],
   fields: Readonly<Record<string, unknown>>,
+  variables: Readonly<Record<string, unknown>> = {},
 ): UnrenderableUriField[] {
-  const byField = new Map<string, UnrenderableUriField>();
+  const byRef = new Map<string, UnrenderableUriField>();
   for (const pattern of patterns) {
-    const rendered = renderPattern(pattern, fields);
-    if (!("uri" in rendered) && !byField.has(rendered.field)) byField.set(rendered.field, rendered);
+    const rendered = renderPattern(pattern, fields, variables);
+    if ("uri" in rendered) continue;
+    const key = `${rendered.root}.${rendered.field}`;
+    if (!byRef.has(key)) byRef.set(key, rendered);
   }
-  return [...byField.values()];
+  return [...byRef.values()];
 }
 
 /**

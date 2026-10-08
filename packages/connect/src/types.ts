@@ -62,6 +62,12 @@ export interface OAuthStateRecord {
      * INSERT.
      */
     connectionId?: string;
+    /** The validated metadata's `issuer` (RFC 8414): a response's `iss` must name it (RFC 9207). */
+    issuer?: string;
+    issParameterSupported?: boolean;
+    /** `/callback/<tag>` of a server chosen per connection (AFPS §7.3); absent = `/callback`. */
+    redirectTag?: string;
+    variables?: Record<string, string>;
   };
 }
 
@@ -71,6 +77,8 @@ export interface ResolvedOAuthClient {
   /** Empty for a public client (`token_endpoint_auth_method=none`). */
   clientSecret: string;
   tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+  /** The server chosen per connection the client is bound to (AFPS §7.3). */
+  issuer?: string;
 }
 
 /** A `clientRef` → its current credentials within the state's space; `null` = gone. */

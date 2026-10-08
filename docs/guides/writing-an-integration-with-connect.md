@@ -6,7 +6,7 @@ selects a strategy purely from the manifest. This guide maps each declaration to
 strategy it selects, shows the minimal manifest for each, and covers the surrounding
 v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 
-> Spec: [`afps-spec/spec.md`](../../../afps-spec/spec.md) §3.5 + §7.1–§7.10.
+> Spec: [`afps-spec/spec.md`](../../../afps-spec/spec.md) §3.5 + §7.1–§7.12.
 > Canonical examples: [`afps-spec/examples/integration-oauth2`](../../../afps-spec/examples/integration-oauth2/manifest.json),
 > [`integration-apikey`](../../../afps-spec/examples/integration-apikey/manifest.json),
 > [`integration-basic`](../../../afps-spec/examples/integration-basic/manifest.json).
@@ -17,7 +17,8 @@ v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 All manifest field names below are **snake_case** — the AFPS wire convention.
 All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`.
 A `connect` block's outputs are the connection's credential fields, so they are
-referenced as `{$credential.<name>}` too.
+referenced as `{$credential.<name>}` too. An integration that declares connection
+variables also references them as `{$variable.<name>}` ([Connection variables](#connection-variables-variables)).
 
 ```jsonc
 {
@@ -65,6 +66,9 @@ reached. The authentication layer (`auths`) is applied on top, regardless of sou
 
 // remote — hosted MCP endpoint
 "source": { "kind": "remote", "remote": { "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "streamable-http" } }
+
+// remote — one endpoint per connection (self-hosted instance): see "Connection variables"
+"source": { "kind": "remote", "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" } }
 
 // none — serverless: no MCP server
 "source": { "kind": "none" }
@@ -124,9 +128,11 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
-e.g. `{$credential.access_token}`. Any other `{$…}` expression (`{$outputs.token}`, …)
-is refused when the manifest is saved or imported, since the platform does not evaluate
-it.
+e.g. `{$credential.access_token}`, or `{$variable.<name>}` for a declared
+[connection variable](#connection-variables-variables) (on an `oauth2` or `connect` auth,
+only one the [origin rule](#authorized_uris-and-delivery-the-origin-rule) allows). Any other `{$…}` expression
+(`{$outputs.token}`, an undeclared variable, …) is refused when the manifest is saved or
+imported, since the platform does not evaluate it.
 
 ```jsonc
 // http — Bearer (OAuth2 / API key)
@@ -472,14 +478,17 @@ Each `outputs` entry is one of:
 The login request's `url`, `body` and `headers` carry the user's login inputs as
 `{{name}}` (a field of `credentials.schema`); a `{$…}` expression there is refused at
 import, as is a runtime expression or selector `context` the login engine cannot
-evaluate.
+evaluate. That includes `{$variable.<name>}`: a login request takes no connection
+variable, so a declarative login cannot target a per-connection upstream.
 
 `success_criteria` is an array of Arazzo Criterion objects (`{ condition, context?, type? }`).
 When omitted, success defaults to HTTP 2xx (AFPS-defined; Arazzo leaves HTTP success
 undefined).
 
 **Gating rule** (§7.7): a `delivery.*` value template MAY only reference declared
-`connect.outputs` (or, for the orchestrated `tool` mode, its declared `produces`).
+`connect.outputs` (or, for the orchestrated `tool` mode, its declared `produces`), and
+only those connection variables the [origin rule](#authorized_uris-and-delivery-the-origin-rule)
+allows — none when the auth's upstream is fixed.
 Referencing a bootstrap login secret like `{$credential.password}` directly in
 `delivery.http.value` is a manifest error — the platform decouples acquisition from
 delivery.
@@ -777,10 +786,236 @@ connection field with `{$credential.<field>}`:
 The field must be declared and listed in `credentials.schema.required`, and the entry
 must start with `scheme://` with its placeholders in the host and port only (never in
 the path or query) — or be a URL-form entry (`{$credential.site_url}/**`, above).
-Templates are refused on an `oauth2` auth and on an auth that declares `connect`. At run
+Credential templates are refused on an `oauth2` auth and on an auth that declares
+`connect`, whose credential the user does not supply; such an auth bounds a per-connection
+upstream with a [connection variable](#connection-variables-variables) instead. At run
 time a host or port value containing anything but letters, digits, `.` and `-`, or made
 only of dots, drops the pattern, so a user cannot add a wildcard, a separator or another
 host.
+
+---
+
+## Connection variables (`variables`)
+
+Use connection variables when **where** the integration connects depends on the
+connection: a product offered both as a hosted service and self-hosted (GitLab, Twenty),
+a product that is only ever self-hosted (Coolify), a tenant subdomain. The user enters the
+values when creating the connection, **before** any authorization step, and every auth of
+the integration shares them — so one package serves every instance, and each connection
+reaches only its own (AFPS §7.12).
+
+Variables are not credentials. The platform stores them in plaintext, shows them on the
+connection and may log them; never declare a secret as a variable — a token belongs in
+`credentials.schema`. Prefer a variable over a `{$credential.<field>}` URL as soon as the
+value must choose the MCP endpoint or the OAuth authorization server: a credential
+field can do neither, and is not allowed at all on an `oauth2` auth.
+
+```jsonc
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://",
+        "title": "URL de l'instance GitLab",
+        "description": "Racine de votre instance, sans chemin (ex. https://gitlab.example.com).",
+        "default": "https://gitlab.com"
+      }
+    },
+    "required": ["base_url"]
+  }
+}
+```
+
+- `variables.schema` is a self-contained JSON Schema 2020-12 object (local `$ref` only)
+  with at least one property. Each property is a variable: its name matches
+  `^[a-z][a-z0-9_]*$`, its `type` is `"string"`, and it is listed in `required` — which
+  names nothing else. Constrain the value with `format`, `pattern` or `enum`.
+- `title` and `description` label the form field (French for an Appstrate system
+  package, like every other user-facing string). `default` only prefills the form; a
+  connection's value is always one the user submitted.
+- Variables and credential fields are separate namespaces and may share a name.
+
+### Where a variable may appear
+
+`{$variable.<name>}` is accepted in exactly these places, and every reference must name a
+declared variable — anything else is refused when the manifest is saved, published or
+imported:
+
+| Field                                                                                   | Form                               |
+| --------------------------------------------------------------------------------------- | ---------------------------------- |
+| `source.remote.url`                                                                     | URL template                       |
+| `auths.<key>.issuer` (`oauth2`)                                                         | URL template                       |
+| `auths.<key>.authorized_uris[i]`                                                        | URL form or authority form (below) |
+| `auths.<key>.delivery.http.value`, `delivery.env.<n>.value`, `delivery.files.<p>.value` | value template, raw substitution   |
+
+Endpoints (`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`), `resource`,
+`setup_guide` and every other field stay literal: an endpoint chosen apart from the
+issuer would receive the client credentials of the issuer's client.
+
+### URL templates: URL form vs host form
+
+A URL template takes one of two forms:
+
+- **URL form** — the placeholder, then nothing or a path: `{$variable.base_url}/api/v4/mcp`.
+  The value is a whole URL: absolute, `http` or `https`, a host, no userinfo, no query
+  (not even an empty `?`), no fragment, no `*`. With a path, the template renders as the
+  value's origin and path with every trailing `/` removed, followed by the template's
+  path: `https://git.example.com/gitlab/` renders
+  `https://git.example.com/gitlab/api/v4/mcp`. Without one, it renders as the value
+  itself, normalised (`https://gitlab.com` → `https://gitlab.com/`). Use it when users
+  type an address — it covers a server under a path prefix.
+- **Host form** — `https://`, the placeholder, literal labels, then nothing or a path:
+  `https://{$variable.tenant}.example.com/mcp`. The value is one or more labels of
+  letters, digits and `-` (no leading or trailing `-`); the rendered host is at most 253
+  characters, and is lowercased like every rendered host (the platform uses the WHATWG
+  serialisation). Use it for a tenant name on the vendor's
+  own domain.
+
+A path is `/`-prefixed segments of letters, digits and `-._~!$&'()+,;=:@` (no empty,
+`.` or `..` segment), optionally ending with `/`. Rendering is plain concatenation,
+never relative resolution.
+
+The value must be `https` in practice: the platform's egress check refuses a rendered
+`http` URL unless the operator lists its host in `EGRESS_ALLOW_INTERNAL_HOSTS`, and
+refuses a private, loopback or metadata address whatever the scheme. Declaring
+`"pattern": "^https?://"` keeps that operator option open; `"^https://"` closes it in
+the form.
+
+A connection whose values would leave a template its auth uses unrenderable is refused
+when it is created (400 `validation_failed` on `variables.<name>`), and a value can only
+change through a reconnect, which acquires a new credential for the new upstream.
+
+### `authorized_uris` and delivery: the origin rule
+
+An `authorized_uris` entry carrying a variable takes the URL form
+(`{$variable.base_url}/api/v4/**`, rendered like a URL template followed by the suffix)
+or the authority form with the variable filling the host, alone or before literal labels,
+and no port (`https://{$variable.tenant}.example.com/**`).
+
+On an `oauth2` auth, or one that declares `connect`, the credential is issued for an
+upstream, and a URL template may choose it:
+
+| Auth                       | Template that chooses the upstream                                        |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `oauth2`                   | a templated `source.remote.url` (the resource), else a templated `issuer` |
+| `custom` + `connect.tool`  | a templated `source.remote.url`                                           |
+| `custom` + `connect.login` | none — a login request takes no variable, so its upstream is fixed        |
+
+Two rules follow, both so that a credential reaches only the origin it was issued for:
+
+- each `authorized_uris` entry carrying a variable must **share that template's origin**:
+  the same leading placeholder in the URL form; in the authority form, the same scheme
+  and host as a host-form template. With `"url": "{$variable.base_url}/api/v4/mcp"`,
+  `{$variable.base_url}/api/v4/**` qualifies and `https://{$variable.base_url}/**` or an
+  entry over another variable does not;
+- a `delivery` value template may reference only the variables of that template.
+
+When the upstream is fixed — no templated remote URL or issuer, or a `connect.login`
+auth — neither an entry nor a delivery template of the auth may carry a variable: it
+would send a fixed issuer's credential wherever the user points. On an `api_key`,
+`basic`, `mtls` or `custom` auth without `connect` the user supplies the credential
+itself, and any declared variable may bound or shape it.
+
+### OAuth against the server the user named
+
+When `source.remote.url` (or an `oauth2` `issuer`) is a template, the authorization
+server is the user's choice, not yours. Declare no endpoint and no `resource`. For a
+templated remote URL the platform fetches the RFC 9728 protected-resource metadata of the
+rendered URL in the MCP order — the `resource_metadata` of a `WWW-Authenticate`
+challenge, the path-inserted well-known location, the root one — and uses a document only
+when its `resource` is the identifier that location was derived from (the rendered URL,
+or its origin for the root location), trying the next location otherwise. It then takes
+the entry of `authorization_servers` equal to the rendered `issuer` when you declare one
+— a template over the remote URL's variables — and otherwise one with the rendered URL's
+origin, and refuses the connection when there is none. Endpoints come from RFC 8414
+discovery of that server alone, and the RFC 8707 `resource` is always sent for a remote
+source. The client is registered by RFC 7591 Dynamic Client Registration as a public
+client, one per authorization server and integration (and space), and the redirect URI
+is distinct per server.
+
+Declare `issuer` when the product may be served under a path prefix: its authorization
+server is then `https://host/prefix`, which does not have the origin of the rendered URL.
+`@appstrate/gitlab-mcp` declares `"issuer": "{$variable.base_url}"` for that reason.
+
+A server without dynamic client registration cannot be connected: an admin cannot
+register a client by hand for an auth whose server each connection names. Declare
+`token_endpoint_auth_method: "none"` and the scopes the server expects in
+`default_scopes`.
+
+### Examples
+
+GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by URL
+(`scripts/system-packages/integration-gitlab-mcp-1.0.0/manifest.json`):
+
+```jsonc
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://", "default": "https://gitlab.com" }
+    },
+    "required": ["base_url"]
+  }
+},
+"auths": {
+  "oauth": {
+    "type": "oauth2",
+    "issuer": "{$variable.base_url}",                // the instance, path prefix included
+    "token_endpoint_auth_method": "none",
+    "code_challenge_methods_supported": ["S256"],
+    "default_scopes": ["mcp"],
+    "authorized_uris": ["{$variable.base_url}/api/v4/**"],
+    "delivery": {
+      "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.access_token}" }
+    }
+  }
+}
+```
+
+Coolify — always self-hosted, so no `default`, and a team token the user pastes
+(`scripts/system-packages/integration-coolify-mcp-1.0.0/manifest.json`):
+
+```jsonc
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://" }
+    },
+    "required": ["base_url"]
+  }
+},
+"auths": {
+  "api_key": {
+    "type": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": { "token": { "type": "string" } },
+        "required": ["token"]
+      }
+    },
+    "authorized_uris": ["{$variable.base_url}/**"],
+    "delivery": {
+      "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.token}" }
+    }
+  }
+}
+```
+
+`@appstrate/twenty-mcp` combines both shapes: one OAuth auth and one API-key auth over
+the same `base_url`.
 
 ---
 
@@ -798,6 +1033,13 @@ OAuth client.
   ]
 }
 ```
+
+Steps are static: a step's `label` and `url` cannot reference a connection variable.
+They are admin setup for registering an OAuth app, so a remote MCP integration whose
+client is registered dynamically, or one with no OAuth auth, ships none. What a user
+needs while connecting — where to find the instance URL, which screen creates the token,
+what the server's administrator must enable first — goes in the `description` of the
+variable or credential field, which the connect form renders next to its input.
 
 `callback_url_hint` is auth-method-scoped (`auths.<key>.callback_url_hint`), since the
 callback URL depends on the OAuth client registered with the IdP. Use the
@@ -843,6 +1085,10 @@ rejects it.
   source server has no business reading the credential.
 - For OAuth discovery, the consumer MUST validate `issuer` equality before using any
   endpoint from a `.well-known/` document (§7.3, §8.7).
+- A URL rendered from connection variables is chosen by the user who creates the
+  connection, not by the author (§7.12, §8.6): the platform egress-checks it like any
+  user-supplied URL, and treats every URL a response to it hands back (discovery
+  documents, `WWW-Authenticate`, redirects) the same way.
 
 ## What changed since 1.x
 

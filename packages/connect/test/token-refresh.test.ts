@@ -174,6 +174,34 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
   });
 });
 
+describe("performRefreshTokenExchange — RFC 8707 resource (AFPS §8.6)", () => {
+  async function refreshBody(resource?: string): Promise<URLSearchParams> {
+    let body = "";
+    await withStub(
+      (async (_url, init) => {
+        body = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      { ...ctx, ...(resource !== undefined ? { resource } : {}) },
+      (c) => performRefreshTokenExchange(c, "rt_abc", { label: "refresh" }),
+    );
+    return new URLSearchParams(body);
+  }
+
+  it("sends the resource the token was requested for", async () => {
+    const body = await refreshBody("https://forge.example.com/mcp");
+    expect(body.getAll("resource")).toEqual(["https://forge.example.com/mcp"]);
+    expect(body.get("grant_type")).toBe("refresh_token");
+  });
+
+  it("sends no resource when none was requested", async () => {
+    expect((await refreshBody()).has("resource")).toBe(false);
+  });
+});
+
 describe("performRefreshTokenExchange — failure classification", () => {
   it("classifies HTTP 400 invalid_grant as revoked", async () => {
     const err = await captureError(
@@ -230,7 +258,7 @@ describe("performRefreshTokenExchange — failure classification", () => {
 
   it("attaches the parse failure as the cause of a non-JSON 2xx body", async () => {
     // Delete-to-fail: without `{ cause }` the thrown error says only
-    // "<label> returned non-JSON response". `response.json()` already consumed
+    // "<label> returned non-JSON response". The read already consumed
     // the stream at that point, so the `body` field built for this cannot be
     // filled in and the SyntaxError is the only description of what came back.
     const err = await captureError(
@@ -246,6 +274,14 @@ describe("performRefreshTokenExchange — failure classification", () => {
     expect((err as RefreshError).message).toContain("non-JSON");
     expect((err as RefreshError).cause).toBeInstanceOf(SyntaxError);
     expect((err as RefreshError).status).toBe(200);
+  });
+
+  it("refuses a 2xx body past the token-response cap without parsing it", async () => {
+    const huge = JSON.stringify({ access_token: "x", padding: "a".repeat(600 * 1024) });
+    const err = await captureError(responding(() => new Response(huge, { status: 200 })));
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
+    expect((err as RefreshError).cause).toBeInstanceOf(RangeError);
   });
 });
 

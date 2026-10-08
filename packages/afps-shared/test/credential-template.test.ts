@@ -56,3 +56,22 @@ describe("credentialTemplateRefs", () => {
     expect(credentialTemplateRefs("https://api.example.com/**")).toEqual([]);
   });
 });
+
+describe("connection variables (§7.12) in value templates", () => {
+  it("accepts {$variable.<name>} in the grammar, not a malformed name", () => {
+    const t = "{$variable.base_url}{$variable.Base}{$variables.x}{$credential.a}";
+    expect(unsupportedTemplateExpressions(t)).toEqual(["{$variable.Base}", "{$variables.x}"]);
+  });
+
+  it("substitutes the raw value, in one pass, a missing one empty", () => {
+    expect(
+      renderCredentialTemplate(
+        "{$variable.base_url}/{$credential.token}/{$variable.missing}",
+        { token: "{$variable.base_url}" },
+        { variables: { base_url: "https://A.example.com/" } },
+      ),
+    ).toBe("https://A.example.com//{$variable.base_url}/");
+    expect(renderCredentialTemplate("[{$variable.constructor}]", {})).toBe("[]");
+    expect(renderCredentialTemplate("{$variable.x}", {}, { emptyAs: "null" })).toBeNull();
+  });
+});

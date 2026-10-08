@@ -18,6 +18,7 @@ import { ConfirmModal } from "../confirm-modal";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { ConnectionTeardownSteps } from "../integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../integration-connect/connection-delete-impact";
+import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import {
   connectionLockHintKey,
@@ -245,6 +246,10 @@ function ConnectionTableRow({
               )}
             </div>
           )}
+          <ConnectionVariablesLine
+            variables={connection.variables}
+            testId={`connection-variables-${connection.id}`}
+          />
         </TableCell>
 
         {/* Status — connected / needs reconnection (+ renew) + expiry */}

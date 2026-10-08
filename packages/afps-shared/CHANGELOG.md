@@ -14,6 +14,43 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+Breaking (0.x minor): `parseUrlFormPattern` and `unrenderableAuthorizedUriFields`
+return a `root` with each field.
+
+### Added
+
+- **`./connection-variables`** (AFPS §7.12): `VARIABLE_REF`, `variableRefs`,
+  `isVariableTemplate`, `parseUrlTemplate`, `HOST_LABEL`, `renderUrlVariable` /
+  `renderHostVariable` (one variable under its form's value rule), and
+  `renderUrlTemplate` / `unrenderableUrlTemplateVariables` (each blamed
+  variable with the form it must take, `EXPECTED_URL_VALUE` / `EXPECTED_HOST_VALUE`),
+  which render a URL-valued field (`source.remote.url`, an oauth2 `issuer`) for one connection. URL form: the value is an absolute `http`/`https` URL with a host
+  and no userinfo, query, fragment or `*`; it renders as its serialization, or
+  as its origin and path, every trailing `/` removed, then the template's path.
+  Host form: `.`-separated labels of 1 to 63 letters, digits and `-`, none
+  starting or ending with `-`, lowercased, the rendered host at most 253
+  characters. A value without any `{$…}` renders as itself.
+- **`{$variable.<name>}` in value templates** (`./credential-template`):
+  `unsupportedTemplateExpressions` accepts it, `renderCredentialTemplate`
+  substitutes `opts.variables`, and `substituteCredentialRefs` takes the
+  connection's variables as an optional third argument, rendering both roots
+  in one pass (a variable missing from it renders empty). `TEMPLATE_REF`
+  matches either reference.
+- **`{$variable.<name>}` in `authorized_uris`** (`./authorized-uris`):
+  `renderAuthorizedUris` / `unrenderableAuthorizedUriFields` take the
+  connection's variables. A variable entry renders in the URL form under the
+  URL-form rules, or fills the host of the authority form (alone or ahead of
+  literal labels, before an optional literal port) under the host-form rules;
+  any other entry carrying a variable is dropped. `isHostUnboundedUriPattern`
+  bounds a variable placeholder like a credential one.
+
+### Changed
+
+- **BREAKING: `parseUrlFormPattern`** returns `{ root, field, suffix }` and
+  **`UnrenderableUriField`** gains `root` (`"credential" | "variable"`, exported
+  as `TemplateRoot`), so a caller tells a credential field from a variable of
+  the same name.
+
 ## [0.11.0] — 2026-10-08
 
 Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new

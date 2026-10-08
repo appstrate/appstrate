@@ -42,6 +42,7 @@ import {
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
   type ResolvedIntegrationVersion,
@@ -179,7 +180,6 @@ export async function forceRefreshIntegrationProxyCredentials(
   if (authDef.type !== "oauth2") {
     return countUnrefreshableRejection(input, connection, `auth type '${authDef.type}'`);
   }
-
   let refreshContext;
   try {
     refreshContext = await buildIntegrationOAuthRefreshContext(
@@ -187,7 +187,7 @@ export async function forceRefreshIntegrationProxyCredentials(
       connection.authKey,
       authDef,
       input.spaceId,
-      connection.clientRef,
+      connection,
     );
   } catch (err) {
     // Transient token-endpoint discovery failure (issuer-only manifest) —
@@ -213,10 +213,9 @@ export async function forceRefreshIntegrationProxyCredentials(
   // its default (true): this whole function IS the proxy's 401-retry hook, so
   // the stored token is known-bad and its remaining lifetime proves nothing.
   const classified = await refreshAndClassify(
-    connection.id,
+    connection,
     input.integrationId,
     connection.authKey,
-    connection.credentialsEncrypted,
     refreshContext,
   );
   if (classified.status === "terminal") {
@@ -254,7 +253,12 @@ export async function forceRefreshIntegrationProxyCredentials(
   }
 
   const fields = classified.result.fields;
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  const payload = buildPayloadFromFields(
+    manifest,
+    connection.authKey,
+    fields,
+    connection.variables,
+  );
   if (!payload) return null;
   return {
     payload,
@@ -354,7 +358,12 @@ function buildPayload(
       `Failed to decrypt credentials for integration '${integrationId}'`,
     );
   }
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  const payload = buildPayloadFromFields(
+    manifest,
+    connection.authKey,
+    fields,
+    connection.variables,
+  );
   if (!payload) {
     throw new IntegrationCredentialNotFoundError(
       `Integration '${integrationId}' auth '${connection.authKey}' has no resolvable credentials`,
@@ -376,20 +385,21 @@ function buildPayloadFromFields(
   manifest: IntegrationManifest,
   authKey: string,
   fields: Record<string, string>,
+  variables: ConnectionVariables,
 ): ProxyCredentialsPayload | null {
   const authDef = manifest.auths?.[authKey] as AfpsManifestAuth | undefined;
   if (!authDef) return null;
 
   const http = authDef.delivery?.http;
   const plan = http
-    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery)
+    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery, variables)
     : null;
 
   // Integrations always declare ≥1 authorized_uri unless allow_all_uris is set.
   return buildProxyCredentialsPayload({
     fields,
     plan,
-    authorizedUris: renderAuthAuthorizedUris(authDef, fields),
+    authorizedUris: renderAuthAuthorizedUris(authDef, fields, variables),
     allowAllUris: authDef.allow_all_uris === true,
   });
 }

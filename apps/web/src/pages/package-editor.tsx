@@ -24,7 +24,7 @@ import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-grou
 import { JsonEditor } from "../components/json-editor";
 import { PackageFilesEditor } from "../components/package-files/package-files-editor";
 import { SourceSection } from "../components/integration-editor/source-section";
-import { getSource } from "../components/integration-editor/utils";
+import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { ToolsPolicySection } from "../components/integration-editor/tools-policy-section";
 import { Spinner } from "../components/spinner";
@@ -505,7 +505,7 @@ function IntegrationEditorInner({
         return { error: t("editor.errorRequired"), tab: "general" };
       }
       const source = getSource(s.manifest);
-      if (source.kind === "remote" && !URL.canParse(source.remoteUrl)) {
+      if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
         return { error: t("integrationEditor.source.errorRemoteUrl"), tab: "source" };
       }
       return null;
