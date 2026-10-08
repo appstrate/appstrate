@@ -529,10 +529,13 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
                 );
                 setFormError(null);
               }}
-              hint={(permission) =>
-                [requiredBy(permission), sessionOnly.has(permission) && t("roles.sessionOnly")]
-                  .filter(Boolean)
-                  .join(" ") || null
+              hint={requiredBy}
+              // The exception, marked where it applies: most permissions an API
+              // key holding this role can use, these only a signed-in person.
+              tag={(permission) =>
+                sessionOnly.has(permission)
+                  ? { label: t("roles.sessionOnly"), title: t("roles.sessionOnlyHelp") }
+                  : null
               }
               labels={{
                 all: t("roles.allPermissions"),

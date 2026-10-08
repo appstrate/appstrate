@@ -31,8 +31,10 @@ interface ScopeMultiSelectProps {
   selected: string[];
   onChange: (scopes: string[]) => void;
   labels?: ScopeMultiSelectLabels;
-  /** A note under an entry, such as a permission that cannot be delegated. */
+  /** A note under an entry, such as the action that requires it. */
   hint?: (scope: string) => string | null;
+  /** A short mark at the end of an entry, its meaning in `title`: a property, not a sentence. */
+  tag?: (scope: string) => { label: string; title: string } | null;
 }
 
 interface ResourceGroup {
@@ -70,6 +72,7 @@ export function ScopeMultiSelect({
   onChange,
   labels,
   hint,
+  tag,
 }: ScopeMultiSelectProps) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
@@ -132,15 +135,25 @@ export function ScopeMultiSelect({
                     const action = scope.split(":")[1]!;
                     const isSelected = selected.includes(scope);
                     const note = hint?.(scope);
+                    const mark = tag?.(scope);
                     return (
                       <CommandItem key={scope} value={scope} onSelect={() => toggle(scope)}>
                         <Check
                           className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
                         />
-                        <span className="flex min-w-0 flex-col">
+                        <span className="flex min-w-0 flex-1 flex-col">
                           <span>{action}</span>
                           {note && <span className="text-muted-foreground text-xs">{note}</span>}
                         </span>
+                        {mark && (
+                          <Badge
+                            variant="outline"
+                            className="text-muted-foreground ml-2 shrink-0 font-normal"
+                            title={mark.title}
+                          >
+                            {mark.label}
+                          </Badge>
+                        )}
                       </CommandItem>
                     );
                   })}
