@@ -11,12 +11,9 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { setPostBootstrapOrgHook } from "@appstrate/db/auth";
+import { setPostBootstrapOrgHook, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
-import {
-  restorePostBootstrapOrgHookAfterSuite,
-  restoreRealmResolverAfterSuite,
-} from "../helpers/auth.ts";
+import { restoreAfterSuite } from "../helpers/auth.ts";
 import { useAuthEnv } from "../helpers/auth-env.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { organizations, organizationMembers, user } from "@appstrate/db/schema";
@@ -38,8 +35,8 @@ async function redeem(body: Record<string, unknown>) {
   });
 }
 
-restoreRealmResolverAfterSuite();
-restorePostBootstrapOrgHookAfterSuite();
+restoreAfterSuite(_authHookSlotsForTesting.realmResolver);
+restoreAfterSuite(_authHookSlotsForTesting.postBootstrapOrg);
 
 describe("POST /api/auth/bootstrap/redeem", () => {
   beforeEach(async () => {

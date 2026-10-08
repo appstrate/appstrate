@@ -4,48 +4,25 @@ import { APIError } from "better-auth/api";
 import { and, eq, isNull, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { createLogger } from "@appstrate/core/logger";
 import { db } from "./client.ts";
+import { hookSlot } from "./hook-slot.ts";
 import { modelProviderPairings, session, verification } from "./schema/index.ts";
 
 const logger = createLogger("info");
 
 export const CREDENTIAL_CHANGE_REVOCATION_FAILED = "credential_change_revocation_failed";
 
-/** The part of Better Auth's internal adapter that ends sessions through its delete hooks. */
 interface SessionStore {
   deleteSessions(sessionTokens: string[]): Promise<unknown>;
 }
 
-/**
- * Better Auth runs a delete's hooks only on the rows a `findMany` returns, which
- * its adapter caps at 100 (`defaultFindManyLimit`), while the delete itself is
- * uncapped: past 100 sessions in one call, the rest would end without hooks.
- */
+// Better Auth runs a delete's hooks only on the rows its `findMany` returns,
+// capped at 100 (`defaultFindManyLimit`); the delete itself is not capped.
 const SESSION_DELETE_BATCH = 100;
 
-// ─── Module half (injected at boot by the OIDC module) ───
-//
-// Core ends what it owns; the credentials a module issues are revoked by the
-// hook it installs here: the OIDC module's OAuth tokens, CLI session families
-// and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`).
+/** The OIDC module's half: `apps/api/src/modules/oidc/services/credential-change.ts`. */
+export const credentialChangeHook = hookSlot<(userId: string) => Promise<void>>();
+export const setCredentialChangeHook = credentialChangeHook.set;
 
-type CredentialChangeHook = (userId: string) => Promise<void>;
-
-let _credentialChangeHook: CredentialChangeHook | null = null;
-
-export function setCredentialChangeHook(hook: CredentialChangeHook): void {
-  _credentialChangeHook = hook;
-}
-
-/** Test-only: swap the hook (null = no OIDC module) and return the previous one. */
-export function _swapCredentialChangeHookForTesting(
-  hook: CredentialChangeHook | null,
-): CredentialChangeHook | null {
-  const previous = _credentialChangeHook;
-  _credentialChangeHook = hook;
-  return previous;
-}
-
-/** Through Better Auth rather than SQL so its session-delete hooks run (back-channel logout). */
 async function endOtherSessions(
   sessions: SessionStore,
   userId: string,
@@ -59,36 +36,24 @@ async function endOtherSessions(
         ? and(eq(session.userId, userId), ne(session.id, keepSessionId))
         : eq(session.userId, userId),
     );
+  // Through Better Auth so its session-delete hooks run (back-channel logout).
   for (let i = 0; i < others.length; i += SESSION_DELETE_BATCH) {
     await sessions.deleteSessions(others.slice(i, i + SESSION_DELETE_BATCH).map((s) => s.token));
   }
 }
 
-/** A `verification` value read as JSON, or NULL when the row's value is not JSON. */
 function jsonValue(path: SQL): SQL {
   return sql`CASE WHEN pg_input_is_valid(${verification.value}, 'jsonb') THEN ${path} END`;
 }
 
 /**
- * Once a password has been changed or reset: ends the account's sessions other
- * than `keepSessionId`, deletes the stored links that would sign in or attach a
- * sign-in method (reset links, magic links, social-link states) and the
- * unredeemed model-provider pairing tokens, runs the module hook, then ends the
- * other sessions once more. Signed emailed links and linked accounts are left
- * as they are.
+ * After a password change or reset: ends the account's other sessions, its
+ * stored reset links, magic links, social-link states and unredeemed pairing
+ * tokens, then what the module hook revokes. Sessions go first so none can mint
+ * a token while the rest runs; the last sweep ends any minted in between.
  *
- * Sessions go first, so a session about to end can no longer authorize a new
- * token or approve a device code by the time the hook runs; the second sweep
- * ends a session minted while the steps ran (a magic link verified in between,
- * Better Auth's own `/device/token`, a sign-in that checked the old password
- * before the write). What remains open is a token minted without a session
- * after the last step: an OAuth refresh rotation whose new row lands after the
- * hook's UPDATE. A CLI rotation in that window revokes itself (sibling check in
- * `cli-tokens.ts`).
- *
- * Runs after Better Auth has written the password, which it does outside any
- * transaction. A failure is logged and fails the request: answering success
- * would tell the user the other devices are signed out when they may not be.
+ * Better Auth has already written the password: a failure fails the request,
+ * since a success would claim the other devices are signed out.
  */
 export async function endOtherAccessAfterCredentialChange(
   sessions: SessionStore,
@@ -100,9 +65,6 @@ export async function endOtherAccessAfterCredentialChange(
   try {
     await endOtherSessions(sessions, userId, keepSessionId);
     step = "sign_in_links";
-    // `reset-password:<token>` → user id; `magic-link:<token>` → `{"email": …}`
-    // as typed, hence `lower`; `auth-state:<state>` → `{"link": {"userId": …}}`
-    // for a social account being linked from a session.
     await db
       .delete(verification)
       .where(
@@ -126,9 +88,10 @@ export async function endOtherAccessAfterCredentialChange(
       .where(
         and(eq(modelProviderPairings.userId, userId), isNull(modelProviderPairings.consumedAt)),
       );
-    if (_credentialChangeHook) {
+    const moduleHook = credentialChangeHook.get();
+    if (moduleHook) {
       step = "module";
-      await _credentialChangeHook(userId);
+      await moduleHook(userId);
     }
     step = "sessions_again";
     await endOtherSessions(sessions, userId, keepSessionId);

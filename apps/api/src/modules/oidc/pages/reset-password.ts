@@ -51,26 +51,6 @@ export function renderInvalidTokenPage(props: InvalidTokenPageProps): RawHtml {
   return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });
 }
 
-/**
- * The password is written and the link spent, but not every device was signed
- * out. A space's end user has no settings page: a new reset runs the sign-out again.
- */
-export function renderRevocationFailedPage(props: InvalidTokenPageProps): RawHtml {
-  const forgotUrl = `/api/oauth/forgot-password${props.queryString}`;
-  const title = `Mot de passe modifié — ${props.branding.name}`;
-  const bodyHtml = html`
-    <h1>Mot de passe modifié</h1>
-    <p>
-      Votre mot de passe a été modifié, mais vos autres appareils n'ont pas tous pu être
-      déconnectés. Demandez un nouveau lien de réinitialisation pour terminer.
-    </p>
-    <div class="footer-links">
-      <a href="${forgotUrl}">Demander un nouveau lien</a>
-    </div>
-  `;
-  return renderLayout({ branding: props.branding, title, maxWidth: 400, bodyHtml });
-}
-
 export function renderResetPasswordPage(props: ResetPasswordPageProps): RawHtml {
   const action = `/api/oauth/reset-password${props.queryString}`;
   const loginUrl = `/api/oauth/login${props.queryString}`;

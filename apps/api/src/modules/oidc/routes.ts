@@ -111,11 +111,7 @@ import { renderMagicLinkPage } from "./pages/magic-link.ts";
 import { renderMagicLinkConfirmPage } from "./pages/magic-link-confirm.ts";
 import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
-import {
-  renderResetPasswordPage,
-  renderInvalidTokenPage,
-  renderRevocationFailedPage,
-} from "./pages/reset-password.ts";
+import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
 import {
@@ -2136,12 +2132,22 @@ export function createOidcRouter() {
         status: resetResponse.status,
         body: bodyText.slice(0, 200),
       });
+      let code: unknown;
+      try {
+        code = (JSON.parse(bodyText) as { code?: unknown }).code;
+      } catch {
+        // Not a Better Auth error body.
+      }
       // The password is written and the token spent: not an invalid link.
-      if (readErrorCode(bodyText) === CREDENTIAL_CHANGE_REVOCATION_FAILED) {
-        return c.html(
-          renderRevocationFailedPage({ queryString: forwardQuery, branding: ctx.branding }).value,
-          500,
-        );
+      if (code === CREDENTIAL_CHANGE_REVOCATION_FAILED) {
+        const page = renderErrorPage({
+          title: "Mot de passe modifié",
+          message:
+            "Vos autres connexions n'ont pas toutes pu être révoquées. " +
+            "Demandez un nouveau lien de réinitialisation.",
+          branding: ctx.branding,
+        });
+        return c.html(page.value, 500);
       }
       return c.html(
         renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
@@ -2791,18 +2797,6 @@ function stripResetParams(params: URLSearchParams): string {
   clone.delete("error");
   const s = clone.toString();
   return s ? `?${s}` : "";
-}
-
-/** The `code` of a Better Auth error body, or `null` when the body carries none. */
-function readErrorCode(body: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const code = (parsed as { code?: unknown }).code;
-    return typeof code === "string" ? code : null;
-  } catch {
-    return null;
-  }
 }
 
 function readFormString(

@@ -1,27 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Changing or resetting a password reaches what ending a session does not:
- * an OAuth refresh token issued with `offline_access` (an MCP client's here),
- * an opaque OAuth access token, a CLI session family, which is bound to no
- * session, and a device code already approved but not yet exchanged. Each path that
- * changes or resets a password is driven end to end (`/api/auth/change-password`,
- * `/api/auth/reset-password`, the hosted `/api/oauth/reset-password` page)
- * against two browser sessions, a CLI login and an MCP client. The platform-only
- * half (sessions) is `test/integration/auth/password-change-sessions.test.ts`.
+ * The OIDC module's half of a password change or reset, on each of its three
+ * paths: what ending a session does not reach (an `offline_access` refresh
+ * token, an opaque access token, a CLI family, an approved device code). Core's
+ * half: `test/integration/auth/password-change-sessions.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  CREDENTIAL_CHANGE_REVOCATION_FAILED,
-  _swapCredentialChangeHookForTesting,
-} from "@appstrate/db/credential-change";
+import { _authHookSlotsForTesting } from "@appstrate/db/auth";
+import { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "@appstrate/db/credential-change";
 import { deviceCode, oauthAccessToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
+import {
+  authClientFor,
+  createTestOrg,
+  createTestUser,
+  sessionCookieOf,
+} from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import {
   enableSmtpForSuite,
@@ -57,25 +56,7 @@ afterAll(() => {
   restoreProtectedResources(protectedResourcesSnapshot);
 });
 
-function postAuth(path: string, body: unknown, cookie?: string): Promise<Response> {
-  return Promise.resolve(
-    app.request(`/api/auth${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-function sessionCookie(res: Response): string {
-  const token = /better-auth\.session_token=([^;]+)/.exec(res.headers.get("set-cookie") ?? "");
-  if (!token) throw new Error("no session cookie");
-  return `better-auth.session_token=${token[1]}`;
-}
-
-async function profileStatus(cookie: string): Promise<number> {
-  return (await app.request("/api/profile", { headers: { Cookie: cookie } })).status;
-}
+const { post: postAuth, signIn, profileStatus } = authClientFor(app);
 
 function base64url(bytes: Uint8Array): string {
   let binary = "";
@@ -266,9 +247,7 @@ async function signInEverywhere(): Promise<SignedInEverywhere> {
     .values({ id: crypto.randomUUID(), identifier: resource, name: "MCP endpoint" })
     .onConflictDoNothing({ target: oauthResource.identifier });
 
-  const signIn = await postAuth("/sign-in/email", { email: user.email, password: PASSWORD });
-  expect(signIn.status).toBe(200);
-  const sessionB = sessionCookie(signIn);
+  const sessionB = await signIn(user.email, PASSWORD);
 
   // Each credential is used once before the change, so a failure afterwards
   // can only come from the change. Both rotate: keep the token handed back.
@@ -436,14 +415,15 @@ describe("a password change or reset revokes the account's other access", () => 
   });
 
   describe("when revoking fails", () => {
-    let previousHook: ReturnType<typeof _swapCredentialChangeHookForTesting>;
+    const moduleSlot = _authHookSlotsForTesting.credentialChange;
+    let previousHook: ReturnType<typeof moduleSlot.get>;
     beforeEach(() => {
-      previousHook = _swapCredentialChangeHookForTesting(async () => {
+      previousHook = moduleSlot.swapForTesting(async () => {
         throw new Error("revocation store unavailable");
       });
     });
     afterEach(() => {
-      _swapCredentialChangeHookForTesting(previousHook);
+      moduleSlot.swapForTesting(previousHook);
     });
 
     async function expectRevocationFailed(res: Response): Promise<void> {
@@ -474,7 +454,7 @@ describe("a password change or reset revokes the account's other access", () => 
       );
 
       await expectRevocationFailed(res);
-      expect(await profileStatus(sessionCookie(res))).toBe(200);
+      expect(await profileStatus(sessionCookieOf(res))).toBe(200);
     });
 
     it("a reset answers 500 with its code", async () => {
@@ -486,17 +466,16 @@ describe("a password change or reset revokes the account's other access", () => 
       await expectRevocationFailed(res);
     });
 
-    it("the hosted page says the password changed and offers a new link", async () => {
+    it("the hosted page says the password changed and asks for a new link", async () => {
       const user = await createTestUser({ emailVerified: true, password: PASSWORD });
       const { defaultSpaceId } = await createTestOrg(user.id);
 
       const res = await resetOnHostedPage(defaultSpaceId, user.email);
 
       expect(res.status).toBe(500);
-      // Whitespace-normalised: the copy is reflowed by the formatter.
-      const page = (await res.text()).replace(/\s+/g, " ");
+      const page = await res.text();
+      expect(page).toContain("Mot de passe modifié");
       expect(page).toContain("Demandez un nouveau lien de réinitialisation");
-      expect(page).toContain('href="/api/oauth/forgot-password?');
     });
   });
 });

@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Core's half of a password change or reset, with the OIDC module's hook taken
- * out: the account's other sessions end, and its stored reset links, magic
- * links, social-link states and pending pairing tokens stop working.
- * The OAuth tokens, CLI sessions and device codes the OIDC module revokes are
- * covered by
- * `apps/api/src/modules/oidc/test/integration/services/password-change-revocation.test.ts`.
+ * Core's half of a password change or reset, OIDC module hook removed. The
+ * module's half: `modules/oidc/test/integration/services/password-change-revocation.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq, like } from "drizzle-orm";
-import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
-import { _swapCredentialChangeHookForTesting } from "@appstrate/db/credential-change";
+import { _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { modelProviderPairings, session as sessionTable, verification } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { createTestOrg, createTestUser, SESSION_TTL_MS } from "../../helpers/auth.ts";
+import {
+  authClientFor,
+  createTestOrg,
+  createTestUser,
+  restoreAfterSuite,
+  sessionCookieOf,
+  SESSION_TTL_MS,
+} from "../../helpers/auth.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite, captureMails, firstLink } from "../../helpers/smtp.ts";
 
@@ -24,47 +26,19 @@ const app = getTestApp({ modules: [] });
 const PASSWORD = "TestPassword123!";
 const NEW_PASSWORD = "BrandNewPassword456!";
 
+const { post: postAuth, signIn, profileStatus } = authClientFor(app);
+
 // Core alone, as on an instance whose `MODULES` omits `oidc`.
-let oidcRevocation: ReturnType<typeof _swapCredentialChangeHookForTesting>;
-beforeAll(() => {
-  oidcRevocation = _swapCredentialChangeHookForTesting(null);
-});
-afterAll(() => {
-  _swapCredentialChangeHookForTesting(oidcRevocation);
-});
-
-function postAuth(path: string, body: unknown, cookie?: string): Promise<Response> {
-  return Promise.resolve(
-    app.request(`/api/auth${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
-      body: JSON.stringify(body),
-    }),
-  );
-}
-
-/** A second browser: a real sign-in, next to the session `createTestUser` seeds. */
-async function signIn(email: string): Promise<string> {
-  const res = await postAuth("/sign-in/email", { email, password: PASSWORD });
-  expect(res.status).toBe(200);
-  const token = /better-auth\.session_token=([^;]+)/.exec(res.headers.get("set-cookie") ?? "");
-  if (!token) throw new Error("sign-in set no session cookie");
-  return `better-auth.session_token=${token[1]}`;
-}
-
-async function profileStatus(cookie: string): Promise<number> {
-  return (await app.request("/api/profile", { headers: { Cookie: cookie } })).status;
-}
+restoreAfterSuite(_authHookSlotsForTesting.credentialChange);
 
 async function twoBrowsers(): Promise<{ id: string; email: string; a: string; b: string }> {
   const user = await createTestUser({ emailVerified: true, password: PASSWORD });
-  const b = await signIn(user.email);
+  const b = await signIn(user.email, PASSWORD);
   expect(await profileStatus(user.cookie)).toBe(200);
   expect(await profileStatus(b)).toBe(200);
   return { id: user.id, email: user.email, a: user.cookie, b };
 }
 
-/** More sessions than Better Auth lists or plans hooks for in one read (100). */
 async function seedSessions(userId: string, count: number): Promise<void> {
   await db.insert(sessionTable).values(
     Array.from({ length: count }, () => ({
@@ -186,9 +160,7 @@ describe("password change without SMTP", () => {
     expect(res.status).toBe(200);
     const { token } = (await res.json()) as { token: string | null };
     expect(token).toBeTruthy();
-    const rotated = /better-auth\.session_token=([^;]+)/.exec(res.headers.get("set-cookie") ?? "");
-    expect(rotated).not.toBeNull();
-    expect(await profileStatus(`better-auth.session_token=${rotated![1]}`)).toBe(200);
+    expect(await profileStatus(sessionCookieOf(res))).toBe(200);
     expect(await profileStatus(a)).toBe(401);
     expect(await profileStatus(b)).toBe(401);
   });
@@ -246,12 +218,13 @@ describe("password reset links (SMTP on)", () => {
   });
 
   describe("magic links", () => {
-    let oidcHook: ReturnType<typeof _swapMagicLinkIssuedHookForTesting>;
+    const magicLinkSlot = _authHookSlotsForTesting.magicLinkIssued;
+    let oidcHook: ReturnType<typeof magicLinkSlot.get>;
     beforeEach(() => {
-      oidcHook = _swapMagicLinkIssuedHookForTesting(null);
+      oidcHook = magicLinkSlot.swapForTesting(null);
     });
     afterEach(() => {
-      _swapMagicLinkIssuedHookForTesting(oidcHook);
+      magicLinkSlot.swapForTesting(oidcHook);
     });
 
     it("a reset spends the magic links still outstanding", async () => {

@@ -109,8 +109,7 @@ const oidcModule: AppstrateModule = {
       await bindIssuedMagicLink(info);
       return toMagicLinkConfirmUrl(info.url, info.email);
     });
-    // A password change or reset revokes the tokens and device codes this
-    // module issues, after core has ended the other sessions.
+    // A password change or reset also revokes this module's tokens and device codes.
     setCredentialChangeHook(revokeOidcAccessAfterCredentialChange);
     // Auto-provision the instance-level first-party OIDC client for the
     // platform dashboard SPA. Idempotent — skips if one already exists.

@@ -32,15 +32,10 @@ import {
   setBeforeSignupHook,
   setPostBootstrapOrgHook,
   setRealmResolver,
+  _authHookSlotsForTesting,
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
-import {
-  captureIssuedMagicLinks,
-  createTestContext,
-  restoreBeforeSignupHookAfterSuite,
-  restorePostBootstrapOrgHookAfterSuite,
-  restoreRealmResolverAfterSuite,
-} from "../helpers/auth.ts";
+import { captureIssuedMagicLinks, createTestContext, restoreAfterSuite } from "../helpers/auth.ts";
 import { useAuthEnv } from "../helpers/auth-env.ts";
 import { db, truncateAll } from "../helpers/db.ts";
 import { flushRedis } from "../helpers/redis.ts";
@@ -147,9 +142,9 @@ async function expectRootOrgOwnedBy(email: string, slug: string) {
   expect(membership).toMatchObject({ role: "owner", orgId: orgs[0]!.id });
 }
 
-restoreRealmResolverAfterSuite();
-restorePostBootstrapOrgHookAfterSuite();
-restoreBeforeSignupHookAfterSuite();
+restoreAfterSuite(_authHookSlotsForTesting.realmResolver);
+restoreAfterSuite(_authHookSlotsForTesting.postBootstrapOrg);
+restoreAfterSuite(_authHookSlotsForTesting.beforeSignup);
 
 describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
   beforeEach(async () => {

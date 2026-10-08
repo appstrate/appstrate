@@ -122,7 +122,7 @@
   "apiError.failed_to_unlink_last_account": "Vous ne pouvez pas dissocier votre dernier moyen de connexion.",
   "apiError.social_account_already_linked": "Ce compte est déjà associé à un autre utilisateur.",
   "apiError.credential_account_not_found": "Ce compte n'a pas de mot de passe.",
-  "apiError.credential_change_revocation_failed": "Votre mot de passe a été modifié et le nouveau est désormais votre mot de passe actuel, mais vos autres connexions n'ont pas toutes pu être révoquées. Modifiez-le à nouveau pour réessayer, ou contactez un administrateur.",
+  "apiError.credential_change_revocation_failed": "Votre mot de passe a été modifié, mais vos autres connexions n'ont pas toutes pu être révoquées. Demandez un nouveau lien de réinitialisation, ou modifiez-le à nouveau depuis vos paramètres.",
   "apiError.signup_disabled": "Les inscriptions sont fermées sur cette instance : un administrateur doit vous inviter.",
   "apiError.signup_domain_not_allowed": "Les inscriptions ne sont pas ouvertes aux adresses email de ce domaine.",
   "apiError.email_change_refused": "Cette adresse email ne peut pas être utilisée.",

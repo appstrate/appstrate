@@ -27,7 +27,8 @@ import {
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
-import { endOtherAccessAfterCredentialChange } from "./credential-change.ts";
+import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./credential-change.ts";
+import { hookSlot } from "./hook-slot.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -73,20 +74,9 @@ export interface PostBootstrapOrgInfo {
 
 type PostBootstrapOrgHook = (info: PostBootstrapOrgInfo) => Promise<void>;
 
-let _postBootstrapOrgHook: PostBootstrapOrgHook | null = null;
+const postBootstrapOrgHook = hookSlot<PostBootstrapOrgHook>();
 
-export function setPostBootstrapOrgHook(hook: PostBootstrapOrgHook): void {
-  _postBootstrapOrgHook = hook;
-}
-
-/** Test-only: swap the hook (null = none) and return the previous one. */
-export function _swapPostBootstrapOrgHookForTesting(
-  hook: PostBootstrapOrgHook | null,
-): PostBootstrapOrgHook | null {
-  const previous = _postBootstrapOrgHook;
-  _postBootstrapOrgHook = hook;
-  return previous;
-}
+export const setPostBootstrapOrgHook = postBootstrapOrgHook.set;
 
 /**
  * Auto-create the bootstrap organization when the freshly-signed-up user
@@ -119,12 +109,13 @@ async function maybeBootstrapOrgForOwner(
       orgId: result.orgId,
       slug: result.slug,
     });
-    if (_postBootstrapOrgHook) {
+    const postBootstrap = postBootstrapOrgHook.get();
+    if (postBootstrap) {
       // Side effects (event emit, default space, default agent) run in
       // apps/api. Failures here are logged but never break signup — the
       // org itself is already committed.
       try {
-        await _postBootstrapOrgHook({
+        await postBootstrap({
           orgId: result.orgId,
           slug: result.slug,
           userId,
@@ -165,24 +156,16 @@ async function maybeBootstrapOrgForOwner(
 
 type BeforeSignupHook = (email: string, ctx: BeforeSignupContext) => void | Promise<void>;
 
-let _beforeSignupHook: BeforeSignupHook | null = null;
+type AfterSignupHook = (
+  user: { id: string; email: string },
+  ctx: AfterSignupContext,
+) => void | Promise<void>;
 
-let _afterSignupHook:
-  ((user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>) | null =
-  null;
+const beforeSignupHook = hookSlot<BeforeSignupHook>();
+const afterSignupHook = hookSlot<AfterSignupHook>();
 
-export function setBeforeSignupHook(hook: BeforeSignupHook): void {
-  _beforeSignupHook = hook;
-}
-
-/** Test-only: swap the hook (null = none) and return the previous one. */
-export function _swapBeforeSignupHookForTesting(
-  hook: BeforeSignupHook | null,
-): BeforeSignupHook | null {
-  const previous = _beforeSignupHook;
-  _beforeSignupHook = hook;
-  return previous;
-}
+export const setBeforeSignupHook = beforeSignupHook.set;
+export const setAfterSignupHook = afterSignupHook.set;
 
 // ─── Realm resolver (injected at boot, typically by the OIDC module) ───
 //
@@ -229,25 +212,17 @@ export interface RealmResolutionContext {
  */
 export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
-let _realmResolver: RealmResolver | null = null;
+const realmResolver = hookSlot<RealmResolver>();
 
-export function setRealmResolver(resolver: RealmResolver): void {
-  _realmResolver = resolver;
-}
-
-/** Test-only: swap the resolver (null = no OIDC module) and return the previous one. */
-export function _swapRealmResolverForTesting(resolver: RealmResolver | null): RealmResolver | null {
-  const previous = _realmResolver;
-  _realmResolver = resolver;
-  return previous;
-}
+export const setRealmResolver = realmResolver.set;
 
 // A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
 async function assertMagicLinkAudience(
   userId: string,
   context: GenericEndpointContext | null,
 ): Promise<void> {
-  if (context?.path !== "/magic-link/verify" || !_realmResolver) return;
+  const resolver = realmResolver.get();
+  if (context?.path !== "/magic-link/verify" || !resolver) return;
   const [account] = await db
     .select({ realm: user.realm })
     .from(user)
@@ -255,7 +230,7 @@ async function assertMagicLinkAudience(
     .limit(1);
   if (!account) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
-  const expected = await _realmResolver({
+  const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
@@ -296,20 +271,19 @@ export interface MagicLinkIssuedInfo {
 /** Returns the URL to put in the email. */
 type MagicLinkIssuedHook = (info: MagicLinkIssuedInfo) => Promise<string>;
 
-let _magicLinkIssuedHook: MagicLinkIssuedHook | null = null;
+const magicLinkIssuedHook = hookSlot<MagicLinkIssuedHook>();
 
-export function setMagicLinkIssuedHook(hook: MagicLinkIssuedHook): void {
-  _magicLinkIssuedHook = hook;
-}
+export const setMagicLinkIssuedHook = magicLinkIssuedHook.set;
 
-/** Test-only: swap the hook (null = no OIDC module) and return the previous one. */
-export function _swapMagicLinkIssuedHookForTesting(
-  hook: MagicLinkIssuedHook | null,
-): MagicLinkIssuedHook | null {
-  const previous = _magicLinkIssuedHook;
-  _magicLinkIssuedHook = hook;
-  return previous;
-}
+/** Test-only: every injection slot, each with its `swapForTesting` (null = no module). */
+export const _authHookSlotsForTesting = {
+  postBootstrapOrg: postBootstrapOrgHook,
+  beforeSignup: beforeSignupHook,
+  afterSignup: afterSignupHook,
+  realmResolver,
+  magicLinkIssued: magicLinkIssuedHook,
+  credentialChange: credentialChangeHook,
+};
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
@@ -444,12 +418,6 @@ export function enterSocialOverride(override: SocialOverride): void {
 /** Return the active social override, if any. Called from the getters below. */
 export function getSocialOverride(): SocialOverride | undefined {
   return socialOverrideStore.getStore();
-}
-
-export function setAfterSignupHook(
-  hook: (user: { id: string; email: string }, ctx: AfterSignupContext) => void | Promise<void>,
-): void {
-  _afterSignupHook = hook;
 }
 
 /**
@@ -619,8 +587,9 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
                 // with the other signup-hook channels.
                 const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
                 // A throw aborts the send via the surrounding catch — fail closed.
-                const url = _magicLinkIssuedHook
-                  ? await _magicLinkIssuedHook({
+                const issued = magicLinkIssuedHook.get();
+                const url = issued
+                  ? await issued({
                       token,
                       email: normalizedEmail,
                       url: rawUrl,
@@ -806,10 +775,9 @@ function buildAuth(options: CreateAuthOptions) {
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
       requireEmailVerification: !!smtpTransport,
-      // Every reset path (`/reset-password`, and the hosted OIDC page calling
-      // it) lands here, after Better Auth has written the new password.
+      // Every reset path lands here. Revoke before the mail, so a slow
+      // transport cannot widen the window.
       onPasswordReset: async ({ user }): Promise<void> => {
-        // Revoke before the mail: a slow transport must not widen the window.
         try {
           const { internalAdapter } = await auth.$context;
           await endOtherAccessAfterCredentialChange(internalAdapter, user, null);
@@ -904,18 +872,14 @@ function buildAuth(options: CreateAuthOptions) {
       },
     }),
 
-    // The one credential change Better Auth has no callback for. Enforced
-    // here rather than through the client's `revokeOtherSessions`, so every
-    // caller gets it.
+    // Server-side rather than the client's `revokeOtherSessions`, so every caller gets it.
     hooks: {
       after: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/change-password") return;
         if (isAPIError(ctx.context.returned)) return;
-        // Set by the route's `sensitiveSessionMiddleware`: a change never succeeds without it.
         const caller = ctx.context.session;
         if (!caller) throw new Error("/change-password succeeded without a session in context");
-        // The caller's session, or the one Better Auth swapped it for when
-        // the caller passed `revokeOtherSessions`: the cookie it now holds.
+        // With `revokeOtherSessions`, Better Auth swapped the caller's session for a new one.
         const kept = ctx.context.newSession ?? caller;
         try {
           await endOtherAccessAfterCredentialChange(
@@ -1191,16 +1155,18 @@ function buildAuth(options: CreateAuthOptions) {
               path: string | null;
               query: Record<string, unknown> | null;
             } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
-            if (_beforeSignupHook) {
-              await _beforeSignupHook(user.email, signupHookCtx);
+            const beforeSignup = beforeSignupHook.get();
+            if (beforeSignup) {
+              await beforeSignup(user.email, signupHookCtx);
             }
             // No resolver (no OIDC module) means "platform". A bootstrap-token
             // redeem is "platform" whatever the request carries: an
             // instance-owner row in another realm is unrecoverable.
+            const resolver = realmResolver.get();
             const realm = bootstrapTokenBypass
               ? "platform"
-              : _realmResolver
-                ? await _realmResolver({
+              : resolver
+                ? await resolver({
                     headers,
                     path: ctx?.path ?? null,
                     query: ctx?.query ?? null,
@@ -1232,7 +1198,8 @@ function buildAuth(options: CreateAuthOptions) {
                 error: err instanceof Error ? err.message : String(err),
               });
             }
-            if (_afterSignupHook) {
+            const afterSignup = afterSignupHook.get();
+            if (afterSignup) {
               const ctx = context as
                 | {
                     headers?: Headers;
@@ -1250,7 +1217,7 @@ function buildAuth(options: CreateAuthOptions) {
                 path: string | null;
                 query: Record<string, unknown> | null;
               } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
-              await _afterSignupHook({ id: user.id, email: user.email }, afterCtx);
+              await afterSignup({ id: user.id, email: user.email }, afterCtx);
             }
           },
         },

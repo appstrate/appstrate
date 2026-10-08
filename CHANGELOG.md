@@ -29,39 +29,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Changing or resetting a password ends the account's other sessions and
-  sign-in tokens.** A change ends every other session of the account and
-  invalidates its stored password-reset links, magic links, in-progress
-  social-account links and unredeemed model-provider pairing tokens; with the
-  OIDC module it also revokes the account's OAuth refresh and access tokens
-  (`offline_access` ones included), its CLI sessions
-  (`revoked_reason: password_changed`) and its device codes, approved or not. The session that made the change stays signed in, whichever client
-  sent it. A reset, through `/api/auth/reset-password` or the hosted
-  `/api/oauth/reset-password` page, does the same and ends every session. The
-  "password changed" email now leaves after the revocation. An MCP client or
-  the CLI signs in again afterwards; a CLI access token stops at once. If
-  revoking fails once the password is written, the error is logged and the
-  change or reset answers `500 credential_change_revocation_failed`; the
-  dashboard and the hosted page then say the password was changed but not
-  every device could be signed out, and the reset pages offer a new reset link
-  instead of reporting an invalid one. Deliberately not ended:
-  - API keys, which authenticate as their creator rather than as a session:
-    review them in the settings after a reset;
+  sign-in tokens.** A change ends the account's other sessions and invalidates
+  its stored password-reset links, magic links, in-progress social-account links
+  and unredeemed model-provider pairing tokens; with the OIDC module, also its
+  OAuth refresh and access tokens (`offline_access` included), CLI sessions
+  (`revoked_reason: password_changed`) and device codes. The session that made
+  the change stays signed in. A reset (`/api/auth/reset-password` or the hosted
+  `/api/oauth/reset-password` page) does the same and ends every session. The
+  "password changed" email leaves after the revocation. If revoking fails once
+  the password is written, the request answers
+  `500 credential_change_revocation_failed` and the pages say so. Deliberately
+  not ended:
+  - API keys, which act as their creator rather than as a session: review them
+    in the settings after a reset;
   - SSE streams already open;
-  - sign-in methods already linked to the account (a social account linked from
-    another session stays linked: review linked accounts in the security
-    settings after a reset);
+  - linked sign-in methods (a social account linked from another session stays
+    linked): review them in the security settings after a reset;
   - emailed verification and change-email links, signed tokens with nothing
-    stored to delete. A verified account's change of address is first approved
-    from its current address, but an unverified account's change-email link goes
-    straight to the new address and signs in when opened, for up to one hour;
-  - setting a first password on a social-only account
-    (`POST /api/profile/password`), which replaces no credential;
+    stored. A verified account's change of address is approved from its current
+    address first; an unverified account's link goes straight to the new address
+    and signs in when opened, for up to one hour;
+  - a first password set on a social-only account
+    (`POST /api/profile/password`), which replaces nothing;
   - an OAuth access token already issued as a JWT, valid until it expires (one
-    hour by default, Better Auth's `accessTokenExpiresIn`);
+    hour by default);
   - with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), a revoked
     session whose cached copy has not expired: it passes every authentication
-    check until then and can still act, for example approve a device code,
-    create an API key or link an account.
+    check until then (approve a device code, create an API key, link an
+    account).
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`
