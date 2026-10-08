@@ -34,6 +34,7 @@ import {
   credentialUrlPolicy,
   fetchApiCall,
   prepareApiCallRequest,
+  PREPARE_REFUSAL_CODE,
   redactionFields,
   templateHost,
   URL_POLICY_REFUSAL_CODE,
@@ -222,10 +223,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     bodyTemplates: bodyTemplate !== null ? [bodyTemplate] : [],
     fields,
   });
-  if (!prepared.ok) {
-    const { kind, message } = prepared.refusal;
-    throw new ProxyCallError(kind === "invalid_header" ? "invalid_request" : kind, message);
-  }
+  if (!prepared.ok) throw prepareRefusalError(prepared.refusal);
   const { url: target, templates } = prepared.request;
 
   const authorizedUris = resolved.authorizedUris ?? [];
@@ -486,6 +484,14 @@ export function bodyReadError(err: unknown, redactedHost: string): ProxyCallErro
   return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream));
 }
 
+/** `prepareApiCallRequest`'s refusal, as the proxy's typed error. */
+function prepareRefusalError(refusal: {
+  kind: keyof typeof PREPARE_REFUSAL_CODE;
+  message: string;
+}): ProxyCallError {
+  return new ProxyCallError(PREPARE_REFUSAL_CODE[refusal.kind], refusal.message);
+}
+
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
 function toProxyCallError(
   err: unknown,
@@ -578,3 +584,6 @@ function capResponseBody(
 
 /** @internal Exported for unit testing */
 export const _capResponseBodyForTesting = capResponseBody;
+
+/** @internal Exported for unit testing */
+export const _proxyCallErrorsForTesting = { prepareRefusalError, toProxyCallError };

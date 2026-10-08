@@ -9,7 +9,6 @@
 
 import { describe, it, expect, mock, afterEach } from "bun:test";
 import {
-  API_CALL_FAILURE_STATUS,
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
@@ -17,7 +16,10 @@ import {
   ApiCallRefusedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
-import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/credential-guard.ts";
+import {
+  PREPARE_REFUSAL_CODE,
+  URL_POLICY_REFUSAL_CODE,
+} from "../../src/resolvers/api-call-failure-codes.ts";
 import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
@@ -91,16 +93,23 @@ describe("fetchApiCall — a transport error", () => {
     expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
   });
 
-  it("keeps a system code, and only that shape, on a templated call", async () => {
-    const refused = Object.assign(bunError("refused SeCrEt-path-7"), { code: "ECONNREFUSED" });
-    const out = await sendFailing(refused, { api_key: "SeCrEt-path-7" });
-    expect(classifyApiCallFailure(out)).toMatchObject({
-      code: "upstream_unreachable",
-      errno: "ECONNREFUSED",
-      message: "refused {{api_key}}",
-    });
+  it.each(["ConnectionRefused", "ECONNREFUSED"])(
+    "keeps the system code %s on a templated call",
+    async (systemCode) => {
+      const refused = Object.assign(bunError("refused SeCrEt-path-7"), { code: systemCode });
+      const out = await sendFailing(refused, { api_key: "SeCrEt-path-7" });
+      expect(classifyApiCallFailure(out)).toMatchObject({
+        code: "upstream_unreachable",
+        systemCode,
+        message: "refused {{api_key}}",
+      });
+    },
+  );
+
+  it("drops a code that is no system code on a templated call", async () => {
     const odd = Object.assign(bunError(), { code: "SeCrEt-path-7" });
-    expect(classifyApiCallFailure(await sendFailing(odd, { api_key: "x" })).errno).toBeUndefined();
+    const out = await sendFailing(odd, { api_key: "x" });
+    expect(classifyApiCallFailure(out).systemCode).toBeUndefined();
   });
 
   it("is rethrown untouched on an untemplated call", async () => {
@@ -723,31 +732,30 @@ describe("classifyApiCallFailure", () => {
       code: "upstream_unreachable",
       redirect: false,
       message: "refused",
-      errno: "ECONNREFUSED",
+      systemCode: "ECONNREFUSED",
     });
   });
 
   // The one vocabulary of the three paths: a change here is a change of every path's wire.
-  it("pins each kind's shared code and status", () => {
+  it("pins each kind's shared code", () => {
     const pinned = [
-      [new ApiCallRefusedError("not_authorized", "m"), "unauthorized_target", 403],
-      [new ApiCallRefusedError("ssrf", "m"), "blocked_target", 403],
-      [new ApiCallRefusedError("unresolvable", "m"), "upstream_unresolvable", 502],
-      [new InvalidHeaderValueError("X-Api-Key"), "credential_unusable", 502],
-      [new DOMException("late", "TimeoutError"), "upstream_timeout", 504],
-      [new Error("reset"), "upstream_unreachable", 502],
+      [new ApiCallRefusedError("not_authorized", "m"), "unauthorized_target"],
+      [new ApiCallRefusedError("ssrf", "m"), "blocked_target"],
+      [new ApiCallRefusedError("unresolvable", "m"), "upstream_unresolvable"],
+      [new InvalidHeaderValueError("X-Api-Key"), "credential_unusable"],
+      [new DOMException("late", "TimeoutError"), "upstream_timeout"],
+      [new Error("reset"), "upstream_unreachable"],
     ] as const;
-    for (const [err, code, status] of pinned) {
-      const failure = classifyApiCallFailure(err);
-      expect(failure.code).toBe(code);
-      expect(API_CALL_FAILURE_STATUS[failure.code]).toBe(status);
-    }
+    for (const [err, code] of pinned) expect(classifyApiCallFailure(err).code).toBe(code);
     expect(URL_POLICY_REFUSAL_CODE).toEqual({
       unrendered: "unauthorized_target",
       unauthorized: "unauthorized_target",
       exfiltration: "credential_exfiltration_refused",
     });
-    expect(API_CALL_FAILURE_STATUS.credential_exfiltration_refused).toBe(403);
+    expect(PREPARE_REFUSAL_CODE).toEqual({
+      unresolved_placeholder: "unresolved_placeholder",
+      invalid_header: "invalid_request",
+    });
   });
 });
 

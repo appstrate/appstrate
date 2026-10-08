@@ -9,7 +9,7 @@
  * "Removed — five unraised error classes" entry). Three of its assertions
  * covered code that did NOT go away and were lost with it:
  *
- *   - `ApiCallFailureError`'s code, and that `details` preserves `provider`
+ *   - the api_call failure error's code, and that `details` preserves `provider`
  *     and `target`. That object IS the allowlist-refusal audit record — the
  *     only place the refused target is written down — so a change that stopped
  *     carrying it would be a silent loss of security evidence.

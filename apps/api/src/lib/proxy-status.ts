@@ -7,10 +7,7 @@
  */
 
 import type { MiddlewareHandler } from "hono";
-import {
-  API_CALL_FAILURE_STATUS,
-  type ApiCallFailureCode,
-} from "@appstrate/afps-runtime/resolvers";
+import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError } from "./errors.ts";
 
@@ -46,47 +43,42 @@ interface ProxyProblem {
 /**
  * Each problem a platform proxy answers itself: status, title, the RFC 9209 §2.3 error type
  * when it is more precise than the one {@link proxyStatusMarker} appends for the status, and
- * for an upstream failure the phrase that completes its detail. A failure every `api_call` path
- * shares takes its status from afps-runtime's {@link API_CALL_FAILURE_STATUS}.
+ * for an upstream failure the phrase that completes its detail.
  */
 const PROXY_PROBLEMS = {
   unauthorized_target: {
-    status: API_CALL_FAILURE_STATUS.unauthorized_target,
+    status: 403,
     title: "Unauthorized Target",
     proxyError: "http_request_denied",
   },
-  blocked_target: {
-    status: API_CALL_FAILURE_STATUS.blocked_target,
-    title: "Blocked Target",
-    proxyError: "destination_ip_prohibited",
-  },
+  blocked_target: { status: 403, title: "Blocked Target", proxyError: "destination_ip_prohibited" },
   credential_exfiltration_refused: {
-    status: API_CALL_FAILURE_STATUS.credential_exfiltration_refused,
+    status: 403,
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
   credential_not_found: { status: 404, title: "Credential Not Found" },
   credential_unusable: {
-    status: API_CALL_FAILURE_STATUS.credential_unusable,
+    status: 502,
     title: "Credential Unusable",
     proxyError: "proxy_configuration_error",
   },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {
-    status: API_CALL_FAILURE_STATUS.upstream_unresolvable,
+    status: 502,
     title: "Upstream Unresolvable",
     proxyError: "dns_error",
     failure: "could not be resolved",
   },
   upstream_unreachable: {
-    status: API_CALL_FAILURE_STATUS.upstream_unreachable,
+    status: 502,
     title: "Upstream Unreachable",
     proxyError: "destination_unavailable",
     failure: "could not be reached",
   },
   upstream_timeout: {
-    status: API_CALL_FAILURE_STATUS.upstream_timeout,
+    status: 504,
     title: "Upstream Timeout",
     proxyError: "http_response_timeout",
     failure: "did not answer in time",

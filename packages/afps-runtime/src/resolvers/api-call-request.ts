@@ -4,6 +4,7 @@
 /** The caller half of an `api_call`, prepared the same way by the platform proxy, the sidecar and the local CLI. */
 
 import { InvalidHeaderValueError, isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
+import type { PREPARE_REFUSAL_CODE } from "./api-call-failure-codes.ts";
 import { substituteVars, unresolvedPlaceholders } from "./template-vars.ts";
 
 export interface PreparedApiCallRequest {
@@ -19,7 +20,7 @@ export interface PreparedApiCallRequest {
 type Prepared =
   | { ok: true; request: PreparedApiCallRequest }
   /** `message` names placeholder keys and header names, never a value. */
-  | { ok: false; refusal: { kind: "unresolved_placeholder" | "invalid_header"; message: string } };
+  | { ok: false; refusal: { kind: keyof typeof PREPARE_REFUSAL_CODE; message: string } };
 
 function unresolved(where: string, keys: readonly string[]): Prepared {
   return {

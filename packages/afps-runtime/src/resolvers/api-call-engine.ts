@@ -21,6 +21,7 @@ import {
 } from "@appstrate/afps-shared/delivery-http";
 import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
+import { ENGINE_FAILURE_CODE } from "./api-call-failure-codes.ts";
 
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
@@ -87,48 +88,23 @@ export class ApiCallRefusedError extends Error {
   }
 }
 
-/** The failure codes of every `api_call` path (platform, sidecar, CLI) and their HTTP status. */
-export const API_CALL_FAILURE_STATUS = {
-  unauthorized_target: 403,
-  blocked_target: 403,
-  credential_exfiltration_refused: 403,
-  upstream_unresolvable: 502,
-  credential_unusable: 502,
-  upstream_unreachable: 502,
-  upstream_timeout: 504,
-} as const;
-
-export type ApiCallFailureCode = keyof typeof API_CALL_FAILURE_STATUS;
-
-/** Each {@link ApiCallFailureClass} kind's code. */
-const FAILURE_CODE = {
-  not_authorized: "unauthorized_target",
-  ssrf: "blocked_target",
-  unresolvable: "upstream_unresolvable",
-  /** A header value is no HTTP field value; nothing was sent. */
-  invalid_header: "credential_unusable",
-  timeout: "upstream_timeout",
-  transport: "upstream_unreachable",
-} as const satisfies Record<string, ApiCallFailureCode>;
-
 /** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
 export interface ApiCallFailureClass {
-  kind: keyof typeof FAILURE_CODE;
-  /** The shared code of `kind`; its status is in {@link API_CALL_FAILURE_STATUS}. */
-  code: (typeof FAILURE_CODE)[keyof typeof FAILURE_CODE];
+  kind: keyof typeof ENGINE_FAILURE_CODE;
+  code: (typeof ENGINE_FAILURE_CODE)[keyof typeof ENGINE_FAILURE_CODE];
   /** A redirect hop was refused, not the initial target. */
   redirect: boolean;
   /** The refusal's message (hosts redacted); a transport error's own message. */
   message: string;
-  /** A transport error's own code (`ECONNREFUSED`, …). */
-  errno?: string;
+  /** A transport error's system code: Bun's `ConnectionRefused`, Node's `ECONNREFUSED`. */
+  systemCode?: string;
 }
 
 /** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
 export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
   const failure = (kind: ApiCallFailureClass["kind"], message: string, redirect = false) => ({
     kind,
-    code: FAILURE_CODE[kind],
+    code: ENGINE_FAILURE_CODE[kind],
     redirect,
     message,
   });
@@ -136,10 +112,10 @@ export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
   if (err instanceof InvalidHeaderValueError) return failure("invalid_header", err.message);
   const error = err instanceof Error ? err : new Error(String(err));
   if (error.name === "TimeoutError") return failure("timeout", error.message);
-  const errno = (error as { code?: unknown }).code;
+  const systemCode = (error as { code?: unknown }).code;
   return {
     ...failure("transport", error.message),
-    ...(typeof errno === "string" ? { errno } : {}),
+    ...(typeof systemCode === "string" ? { systemCode } : {}),
   };
 }
 
@@ -191,15 +167,16 @@ function redactCredentialMessage(
 
 /**
  * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
- * message scrubbed and a system `code` (`ECONNREFUSED`) kept, nothing else — Bun keeps the full URL
- * on `.path` even when the message has none.
+ * message scrubbed and a system `code` kept, nothing else — Bun keeps the full URL on `.path` even
+ * when the message has none.
  */
 function scrubTransportError(err: unknown, fields: Readonly<Record<string, string>>): unknown {
   if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
   const code = (err as { code?: unknown }).code;
-  if (typeof code === "string" && /^E[A-Z0-9_]+$/.test(code)) Object.assign(clean, { code });
+  if (typeof code === "string" && /^[A-Za-z][A-Za-z0-9_]*$/.test(code))
+    Object.assign(clean, { code });
   return clean;
 }
 

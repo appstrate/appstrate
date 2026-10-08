@@ -33,7 +33,7 @@ import {
   BundleSignaturePolicyError,
   type SignaturePolicyReason,
 } from "./bundle/signature-policy.ts";
-import type { ApiCallFailureCode } from "./resolvers/api-call-engine.ts";
+import type { ApiCallFailureCode } from "./resolvers/api-call-failure-codes.ts";
 
 /** Machine-readable codes for {@link ResolverError} — the generic resolver
  * wiring taxonomy shared by the runtime and the standalone `afps` CLI. */
@@ -44,9 +44,7 @@ export type ResolverErrorCode =
   | "RESOLVER_BODY_INVALID"
   | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
   | "RESOLVER_PATH_SYMLINK_REFUSED"
-  | "RESOLVER_PATH_INVALID"
-  // An agent-written header value is no HTTP field value.
-  | "RESOLVER_HEADER_INVALID";
+  | "RESOLVER_PATH_INVALID";
 
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =

@@ -53,13 +53,13 @@ import {
   normaliseMcpToolNamespace,
 } from "@appstrate/afps-shared/mcp-naming";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
+import { classifyApiCallFailure, fetchApiCall, forwardableHeaders } from "./api-call-engine.ts";
 import {
-  classifyApiCallFailure,
-  fetchApiCall,
-  forwardableHeaders,
+  PREPARE_REFUSAL_CODE,
+  URL_POLICY_REFUSAL_CODE,
   type ApiCallFailureCode,
-} from "./api-call-engine.ts";
-import { ApiCallFailureError, ResolverError } from "../errors.ts";
+} from "./api-call-failure-codes.ts";
+import { ApiCallFailureError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -77,7 +77,6 @@ import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
-  URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
 } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
@@ -473,10 +472,12 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       });
       if (!prepared.ok) {
         const { kind, message } = prepared.refusal;
-        if (kind === "invalid_header") throw headerInvalid(meta.name, message);
-        throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
-          integration: meta.name,
-        });
+        throw apiCallFailure(
+          PREPARE_REFUSAL_CODE[kind],
+          `Integration ${meta.name}: ${message}`,
+          meta,
+          req.target,
+        );
       }
       const { url: target, headers, credentialHeaders, templates } = prepared.request;
       // Inject the credential header locally and capture its name so the
@@ -547,17 +548,12 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         });
         res = result.response;
       } catch (err) {
-        // `prepareApiCallRequest` judged the caller's headers: an invalid one here is the
-        // credential's. A refusal names a host only (a redirect target may carry `?token=…`).
-        const { code, message, redirect, errno } = classifyApiCallFailure(err);
-        throw apiCallFailure(
-          code,
-          `Integration ${meta.name}: ${message}`,
-          meta,
-          req.target,
-          { redirect, ...(errno ? { errno } : {}) },
-          err,
-        );
+        // No `cause`: Bun's error keeps the full URL (a redirect's `?token=…`) on `.path`.
+        const { code, message, redirect, systemCode } = classifyApiCallFailure(err);
+        throw apiCallFailure(code, `Integration ${meta.name}: ${message}`, meta, req.target, {
+          redirect,
+          ...(systemCode ? { systemCode } : {}),
+        });
       }
 
       return serializeFetchResponse(res, {
@@ -576,20 +572,12 @@ function apiCallFailure(
   meta: ApiCallIntegrationMeta,
   target: string,
   extra: Record<string, unknown> = {},
-  cause?: unknown,
 ): ApiCallFailureError {
-  return new ApiCallFailureError(
-    code,
-    message,
-    { integration: meta.name, target, allowlist: meta.authorizedUris, ...extra },
-    cause === undefined ? undefined : { cause },
-  );
-}
-
-/** An agent header value that is no HTTP field value (the message names the header only). */
-function headerInvalid(integration: string, message: string): ResolverError {
-  return new ResolverError("RESOLVER_HEADER_INVALID", `Integration ${integration}: ${message}`, {
-    integration,
+  return new ApiCallFailureError(code, message, {
+    integration: meta.name,
+    target,
+    allowlist: meta.authorizedUris,
+    ...extra,
   });
 }
 
@@ -734,7 +722,14 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       try {
         agentHeaders = forwardableHeaders({ headers: req.headers });
       } catch (err) {
-        if (err instanceof InvalidHeaderValueError) throw headerInvalid(meta.name, err.message);
+        if (err instanceof InvalidHeaderValueError) {
+          throw apiCallFailure(
+            PREPARE_REFUSAL_CODE.invalid_header,
+            `Integration ${meta.name}: ${err.message}`,
+            meta,
+            req.target,
+          );
+        }
         throw err;
       }
       for (const name of RESERVED_TRANSPORT_HEADERS) agentHeaders.delete(name);

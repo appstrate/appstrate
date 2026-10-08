@@ -463,7 +463,7 @@ describe("LocalIntegrationResolver", () => {
     expect(h["x-api-key"]).toBe("secret");
   });
 
-  it("raises RESOLVER_HEADER_INVALID, unsent, on an agent header that is no HTTP field value", async () => {
+  it("raises invalid_request, unsent, on an agent header that is no HTTP field value", async () => {
     let calls = 0;
     const integ = makePackage("@acme/api", "1.0.0", "integration", {
       "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
@@ -485,7 +485,7 @@ describe("LocalIntegrationResolver", () => {
       { method: "GET", target: "https://api.acme.com/v1/me", headers: { "X-Custom": "a\u0001b" } },
       ctx,
     );
-    await expect(call).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
+    await expect(call).rejects.toMatchObject({ code: "invalid_request" });
     expect(calls).toBe(0);
   });
 
@@ -1232,7 +1232,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
         },
         makeCtx().ctx,
       ),
-    ).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
+    ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("refuses a templated secret to another endpoint on a URL-valued field's origin", async () => {
@@ -1496,9 +1496,27 @@ describe("LocalIntegrationResolver — the failure codes of every api_call path 
     expect(err).toMatchObject({ code, details: { integration: "@acme/api", redirect: false } });
   });
 
-  it("keeps a transport error's own code in details", async () => {
+  it("keeps a transport error's system code in details", async () => {
     const err = await fail("https://api.acme.com/x", { fetch: () => Promise.reject(refused()) });
-    expect(err.details).toMatchObject({ errno: "ECONNREFUSED" });
+    expect(err.details).toMatchObject({ systemCode: "ECONNREFUSED" });
+  });
+
+  // The codes the platform proxy answers for `prepareApiCallRequest`'s refusals.
+  it.each([
+    ["unresolved_placeholder", "unresolved_placeholder", "https://api.acme.com/{{missing}}", {}],
+    ["invalid_header", "invalid_request", "https://api.acme.com/x", { "X-Bad": "a\u0001b" }],
+  ] as const)("%s → %s, unsent", async (_kind, code, target, headers) => {
+    let sent = 0;
+    const err = await fail(target, {
+      headers,
+      fetch: () => {
+        sent += 1;
+        return Promise.resolve(new Response("{}"));
+      },
+    });
+    expect(err.name).toBe("ApiCallFailureError");
+    expect(err).toMatchObject({ code, details: { integration: "@acme/api", target } });
+    expect(sent).toBe(0);
   });
 
   it("refuses a redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
@@ -1666,7 +1684,7 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     expect(h.get("Authorization")).toBe("Bearer ask_test");
   });
 
-  it("raises RESOLVER_HEADER_INVALID, unsent, on an agent header that is no HTTP field value", async () => {
+  it("raises invalid_request, unsent, on an agent header that is no HTTP field value", async () => {
     let calls = 0;
     const tool = await remoteTool((() => {
       calls += 1;
@@ -1677,7 +1695,11 @@ describe("RemoteAppstrateIntegrationResolver", () => {
       { method: "GET", target: "https://api.acme.com/v1/me", headers: { "X-Custom": "a\u0001b" } },
       ctx,
     );
-    await expect(call).rejects.toMatchObject({ code: "RESOLVER_HEADER_INVALID" });
+    await expect(call).rejects.toMatchObject({
+      name: "ApiCallFailureError",
+      code: "invalid_request",
+      details: { integration: "@acme/api", target: "https://api.acme.com/v1/me" },
+    });
     expect(calls).toBe(0);
   });
 

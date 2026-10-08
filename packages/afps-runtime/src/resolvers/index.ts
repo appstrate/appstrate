@@ -61,7 +61,6 @@ export { prepareApiCallRequest, type PreparedApiCallRequest } from "./api-call-r
 export {
   credentialUrlPolicy,
   redactionFields,
-  URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
   type CredentialUrlPolicy,
   type UrlPolicyRefusal,
@@ -100,14 +99,19 @@ export {
 // allowlist + SSRF gate per hop, pinned transport, credential rule across
 // redirects, cookie capture, deadline.
 export {
-  API_CALL_FAILURE_STATUS,
   API_CALL_TIMEOUT_MS,
   classifyApiCallFailure,
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
   redactCredentialHost,
-  type ApiCallFailureCode,
 } from "./api-call-engine.ts";
+
+// The failure codes every `api_call` path reports, and what maps onto them.
+export {
+  PREPARE_REFUSAL_CODE,
+  URL_POLICY_REFUSAL_CODE,
+  type ApiCallFailureCode,
+} from "./api-call-failure-codes.ts";
 
 // Sticky-cookie jar shared by both credential proxies and the redirect follower.
 export { cookieScope, type CookieJar, type CookieScope } from "./cookie-jar.ts";
