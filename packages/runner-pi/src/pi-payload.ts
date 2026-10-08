@@ -11,6 +11,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { ModelReasoningOff } from "@appstrate/core/model-generation";
 import { piModelDialect } from "./pi-model.ts";
 import type { Api, Model } from "./pi-sdk.ts";
 
@@ -47,6 +48,25 @@ export async function capturePayload(
     throw new Error(`${model.provider}/${model.id}: ${result.errorMessage}`);
   }
   return payload as Payload;
+}
+
+/**
+ * What level `off` really puts on the wire, read off Pi itself: `unsent` when
+ * its payload is the one Pi builds for the same model declared non-reasoning.
+ * Pi's session hands `off` to the request as no reasoning option at all. The
+ * OpenAI shapes also pick the instruction role (`developer` or `system`) off
+ * `reasoning`: it is pinned on both sides so only reasoning parameters differ.
+ */
+export async function observedReasoningOff(model: Model<Api>): Promise<ModelReasoningOff> {
+  const pinned = {
+    ...model,
+    compat: { ...model.compat, supportsDeveloperRole: false },
+  } as Model<Api>;
+  const [off, plain] = await Promise.all([
+    capturePayload(pinned),
+    capturePayload({ ...pinned, reasoning: false }),
+  ]);
+  return Bun.deepEquals(off, plain) ? "unsent" : "disables";
 }
 
 /** A registry record as the platform resolves it for a builder: its dialect and its own values. */
