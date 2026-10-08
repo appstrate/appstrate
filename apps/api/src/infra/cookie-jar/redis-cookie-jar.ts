@@ -10,7 +10,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 
 /**
  * {@link CookieJarStore} backed by the shared {@link KeyValueCache} (Redis
- * in Tier 2+). Keys are scoped under `cp:cookies:`; the value is the jar's
+ * in Tier 2+). Keys are scoped under `cp:cookie-jar:`; the value is the jar's
  * entries as JSON, encrypted with the connection-credential keyring (upstream
  * session cookies are credentials). An entry that does not decrypt reads as
  * an empty jar. TTL is refreshed on every set.
@@ -27,7 +27,7 @@ export class RedisCookieJarStore implements CookieJarStore {
   }
 
   private cacheKey(sessionId: string, connectionId: string): string {
-    return `cp:cookies:${sessionId}:${connectionId}`;
+    return `cp:cookie-jar:${sessionId}:${connectionId}`;
   }
 
   async get(sessionId: string, connectionId: string): Promise<CookieJar> {

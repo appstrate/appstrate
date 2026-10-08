@@ -5,17 +5,25 @@
 
 import { hostLiterallyAllowlisted } from "./http-call-core.ts";
 
-/** Bucket key -> cookie pairs (`name=value`, attributes stripped). */
-export type CookieJar = Map<string, string[]>;
+/** One stored cookie: `name=value` (attributes stripped) and its RFC 6265 §5.3 expiry
+ *  (epoch ms; absent = session cookie, kept for the jar's lifetime). */
+export interface StoredCookie {
+  pair: string;
+  expiresAt?: number;
+}
+
+/** Bucket key -> stored cookies. */
+export type CookieJar = Map<string, StoredCookie[]>;
 
 /** One integration's view of a {@link CookieJar} under one call's URL policy. */
 export interface CookieScope {
-  /** One Cookie header for `url` (undefined when empty). By name: literal-allowlist sibling
-   *  origins < `base` (injected credential / caller cookies) < `url`'s own origin. A cookie
-   *  captured over https never reaches a non-https `url`. */
+  /** One Cookie header for `url` (undefined when empty), expired cookies excluded. By name:
+   *  literal-allowlist sibling origins < `base` (injected credential / caller cookies) < `url`'s
+   *  own origin. A cookie captured over https never reaches a non-https `url`. */
   header(url: string, base: string | null | undefined): string | undefined;
-  /** Merge `url`'s Set-Cookie into its own bucket; an expired cookie deletes the name. */
-  capture(url: string, setCookieHeaders: string[]): void;
+  /** Merge `url`'s Set-Cookie into its own bucket, storing each expiry and purging expired
+   *  entries; an already-expired cookie deletes the name. `now`: receipt time (default: now). */
+  capture(url: string, setCookieHeaders: string[], now?: number): void;
 }
 
 type Gate = "allowlist" | "open";
@@ -26,6 +34,9 @@ const SEP = "\u0000";
 /** RFC 6265 §6.1's per-domain floor; bounds a bucket an upstream minting per-request names grows. */
 const MAX_COOKIES_PER_ORIGIN = 50;
 
+/** RFC 6265bis §5.6.2 caps Max-Age at 400 days (also keeps the expiry finite, hence JSON-safe). */
+const MAX_AGE_SECONDS = 400 * 86_400;
+
 function originOf(url: string): string {
   try {
     return new URL(url).origin;
@@ -34,15 +45,24 @@ function originOf(url: string): string {
   }
 }
 
+const nameOf = (pair: string) => pair.split("=")[0]!.trim();
+
 function fold(byName: Map<string, string>, pairs: Iterable<string>): void {
   for (const raw of pairs) {
     const pair = raw.trim();
-    if (pair) byName.set(pair.split("=")[0]!.trim(), pair);
+    if (pair) byName.set(nameOf(pair), pair);
   }
 }
 
-/** RFC 6265 §5.2.1–5.2.2: Max-Age takes precedence over Expires. */
-function isDeletion(attributes: string[]): boolean {
+const alive = (c: StoredCookie, now: number) => c.expiresAt === undefined || c.expiresAt > now;
+
+/** Pairs of `entries` not expired at `now` (RFC 6265 §5.4 step 1). */
+function* live(entries: readonly StoredCookie[] | undefined, now: number): Iterable<string> {
+  for (const c of entries ?? []) if (alive(c, now)) yield c.pair;
+}
+
+/** RFC 6265 §5.2.1–5.2.2: absolute expiry; a valid Max-Age takes precedence over Expires. */
+function expiryOf(attributes: string[], now: number): number | undefined {
   let maxAge: number | undefined;
   let expires: number | undefined;
   for (const attr of attributes) {
@@ -56,8 +76,7 @@ function isDeletion(attributes: string[]): boolean {
       if (!Number.isNaN(t)) expires = t;
     }
   }
-  if (maxAge !== undefined) return maxAge <= 0;
-  return expires !== undefined && expires <= Date.now();
+  return maxAge !== undefined ? now + Math.min(maxAge, MAX_AGE_SECONDS) * 1000 : expires;
 }
 
 /** `literalAllowlist`: the DECLARED (unrendered) authorized_uris when an allowlist gated the call,
@@ -73,36 +92,41 @@ export function cookieScope(
 
   return {
     header(url, base) {
+      const now = Date.now();
       const origin = originOf(url);
       const byName = new Map<string, string>();
       if (gate(url) === "allowlist") {
         const siblings = key("allowlist", "");
         const secure = origin.startsWith("https:");
-        for (const [k, pairs] of jar) {
+        for (const [k, entries] of jar) {
           if (!k.startsWith(siblings) || k === key("allowlist", origin)) continue;
-          // RFC 6265 `Secure` for every https-captured cookie (attributes are not stored).
+          // RFC 6265 `Secure` for every https-captured cookie (`Secure` itself is not stored).
           if (!secure && k.slice(siblings.length).startsWith("https:")) continue;
-          fold(byName, pairs);
+          fold(byName, live(entries, now));
         }
       }
       fold(byName, base?.split(";") ?? []);
-      fold(byName, jar.get(key("open", origin)) ?? []);
-      fold(byName, jar.get(key("allowlist", origin)) ?? []);
+      fold(byName, live(jar.get(key("open", origin)), now));
+      fold(byName, live(jar.get(key("allowlist", origin)), now));
       return byName.size ? [...byName.values()].join("; ") : undefined;
     },
 
-    capture(url, setCookieHeaders) {
+    capture(url, setCookieHeaders, now = Date.now()) {
       if (!setCookieHeaders.length) return;
       const k = key(gate(url), originOf(url));
-      const byName = new Map<string, string>();
-      fold(byName, jar.get(k) ?? []);
+      const byName = new Map<string, StoredCookie>();
+      for (const c of jar.get(k) ?? []) if (alive(c, now)) byName.set(nameOf(c.pair), c);
       for (const header of setCookieHeaders) {
         const [pair = "", ...attributes] = header.split(";");
         const eq = pair.indexOf("=");
         const name = pair.slice(0, eq).trim();
         if (eq < 0 || !name) continue;
         byName.delete(name); // re-set moves the name to the newest position
-        if (!isDeletion(attributes)) byName.set(name, `${name}=${pair.slice(eq + 1).trim()}`);
+        const stored: StoredCookie = {
+          pair: `${name}=${pair.slice(eq + 1).trim()}`,
+          expiresAt: expiryOf(attributes, now),
+        };
+        if (alive(stored, now)) byName.set(name, stored);
       }
       for (const name of byName.keys()) {
         if (byName.size <= MAX_COOKIES_PER_ORIGIN) break;

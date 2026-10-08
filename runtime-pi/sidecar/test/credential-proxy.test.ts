@@ -2636,7 +2636,7 @@ describe("executeApiCall — two connections of one integration", () => {
   // `integrations-boot.ts` layers one credential pair per connection on them.
   function sharedRunDeps(fetchFn: typeof fetch) {
     const shared = {
-      cookieJar: new Map<string, string[]>(),
+      cookieJar: new Map(),
       reportedAuthFailures: new Set<string>(),
     };
     const refreshA = mock(async () => null);

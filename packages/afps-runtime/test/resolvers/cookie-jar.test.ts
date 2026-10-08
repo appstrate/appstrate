@@ -5,7 +5,7 @@
  * credential proxies, and for the redirect follower's use of it.
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, afterEach, setSystemTime } from "bun:test";
 import { cookieScope, type CookieJar } from "../../src/resolvers/cookie-jar.ts";
 import { fetchApiCall } from "../../src/resolvers/api-call-engine.ts";
 import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
@@ -160,6 +160,76 @@ describe("cookieScope.header", () => {
     cookieScope(jar, "other", LITERAL).capture(API, ["a=1"]);
     cookieScope(jar, "other", LITERAL).capture(CONTENT, ["b=1"]);
     expect(cookieScope(jar, "i", LITERAL).header(API, null)).toBeUndefined();
+  });
+});
+
+describe("cookieScope — expiry (RFC 6265 §5.3 step 3, §5.4)", () => {
+  const T0 = Date.parse("2030-01-01T00:00:00Z");
+  const at = (seconds: number) => setSystemTime(new Date(T0 + seconds * 1000));
+  afterEach(() => setSystemTime());
+
+  it.each([
+    ["Max-Age=60", "a=1; Max-Age=60"],
+    ["an Expires 60 s ahead", "a=1; Expires=Tue, 01 Jan 2030 00:01:00 GMT"],
+    [
+      "Max-Age=60 over a far-future Expires",
+      "a=1; Expires=Fri, 01 Jan 2999 00:00:00 GMT; Max-Age=60",
+    ],
+  ])("sends a cookie with %s until it expires", (_label, header) => {
+    const jar: CookieJar = new Map();
+    at(0);
+    cookieScope(jar, "i", null).capture(API, [header]);
+    at(59);
+    expect(ownCookies(jar, API)).toBe("a=1");
+    at(61);
+    expect(ownCookies(jar, API)).toBeUndefined();
+  });
+
+  it("hands the name back to the base once the masking cookie expires", () => {
+    const scope = cookieScope(new Map(), "i", null);
+    at(0);
+    scope.capture(API, ["s=rotated; Max-Age=60"]);
+    expect(scope.header(API, "s=injected")).toBe("s=rotated");
+    at(61);
+    expect(scope.header(API, "s=injected")).toBe("s=injected");
+  });
+
+  it("stores the expiry and purges expired entries on the next capture", () => {
+    const jar: CookieJar = new Map();
+    const scope = cookieScope(jar, "i", null);
+    at(0);
+    scope.capture(API, ["a=1; Max-Age=60", "b=2"]);
+    expect([...jar.values()]).toEqual([[{ pair: "a=1", expiresAt: T0 + 60_000 }, { pair: "b=2" }]]);
+    at(61);
+    scope.capture(API, ["c=3"]);
+    expect([...jar.values()]).toEqual([[{ pair: "b=2" }, { pair: "c=3" }]]);
+  });
+
+  it("caps an overflowing Max-Age so the expiry survives a JSON round-trip", () => {
+    const jar: CookieJar = new Map();
+    at(0);
+    cookieScope(jar, "i", null).capture(API, [`a=1; Max-Age=${"9".repeat(400)}`]);
+    const restored: CookieJar = new Map(JSON.parse(JSON.stringify([...jar])));
+    expect(ownCookies(restored, API)).toBe("a=1");
+  });
+
+  it("drops an expired cookie from a literal sibling and from the allowlist own origin", () => {
+    const scope = cookieScope(new Map(), "i", LITERAL);
+    at(0);
+    scope.capture(CONTENT, ["cdn=1; Max-Age=60", "keep=1"]);
+    scope.capture(API, ["own=1; Max-Age=60"]);
+    expect(scope.header(API, null)).toBe("cdn=1; keep=1; own=1");
+    at(61);
+    expect(scope.header(API, null)).toBe("keep=1");
+  });
+
+  it("dates Max-Age from an explicit receipt time", () => {
+    const jar: CookieJar = new Map();
+    at(30);
+    cookieScope(jar, "i", null).capture(API, ["a=1; Max-Age=60"], T0);
+    expect(ownCookies(jar, API)).toBe("a=1");
+    at(61);
+    expect(ownCookies(jar, API)).toBeUndefined();
   });
 });
 
