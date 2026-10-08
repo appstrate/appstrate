@@ -159,8 +159,7 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
   // An instance serves the derived `off`: a record the rule does not cover or
   // misreads is dropped rather than served with no label or a wrong one.
   if (takesOff) {
-    // What an instance serves: derived without the endpoint a run never sees.
-    const derived = piReasoningOff({ ...built, baseUrl: "" });
+    const derived = piReasoningOff(built);
     if (!derived) return "reasoning off: not derivable";
     const observed = await observedReasoningOff(built);
     if (observed !== derived) return `reasoning off: derived "${derived}", observed "${observed}"`;

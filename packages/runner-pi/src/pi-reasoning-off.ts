@@ -5,11 +5,14 @@
  * each request builder of the pinned `@earendil-works/pi-ai`: Pi's session
  * hands `off` to the request as no reasoning option at all, and each API then
  * sends an explicit disable or nothing. Kept synchronous and request-free so
- * the catalog can serve it. Only the branches Pi's registry reaches are
- * restated; anything else (an API, a chat-completions thinking format, template
- * arguments) is "not known" (`undefined`), never a failed listing. Parity with
- * the payloads Pi really builds is pinned by `test/pi-reasoning-off-parity.test.ts`,
- * which fails on a Pi bump that reaches an unrestated branch.
+ * the catalog can serve it. It answers for the model as a run builds it: runs
+ * reach the provider through the sidecar or the llm-proxy, so the upstream URL
+ * never matters and only the provider and `compat` decide. Only the branches
+ * Pi's registry reaches are restated; anything else (an API, a chat-completions
+ * thinking format, template arguments) is "not known" (`undefined`), never a
+ * failed listing. Parity with the payloads Pi really builds is pinned by
+ * `test/pi-reasoning-off-parity.test.ts`, which fails on a Pi bump that
+ * reaches an unrestated branch.
  */
 
 import type { ModelReasoningOff } from "@appstrate/core/model-generation";
@@ -80,32 +83,26 @@ function onlyThinkingEnabled(values: Record<string, unknown> = {}): boolean {
   );
 }
 
-/** Pi's `detectCompat`, reduced to the two fields that decide `off`. */
-function detectedCompletionsDialect({ provider, baseUrl }: Model<Api>) {
-  const is = (providers: string[], hosts: string[]) =>
-    providers.includes(provider) || hosts.some((host) => baseUrl.includes(host));
-  const deepseek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
-  const zai = is(["zai", "zai-coding-cn"], ["api.z.ai", "open.bigmodel.cn"]);
-  const together = is(["together"], ["api.together.ai", "api.together.xyz"]);
-  const antLing = is(["ant-ling"], ["api.ant-ling.com"]);
-  const openRouter = is(["openrouter"], ["openrouter.ai"]);
+/**
+ * Pi's `detectCompat`, reduced to the two fields that decide `off` and to its
+ * provider half: behind the proxy no upstream host is ever matched.
+ */
+function detectedCompletionsDialect({ provider }: Model<Api>) {
+  const is = (...providers: string[]) => providers.includes(provider);
+  const zai = is("zai", "zai-coding-cn");
   const noEffort =
     zai ||
-    together ||
-    antLing ||
-    is(["xai"], ["api.x.ai"]) ||
-    is(["moonshotai", "moonshotai-cn"], ["api.moonshot."]) ||
-    is(["cloudflare-ai-gateway"], ["gateway.ai.cloudflare.com"]) ||
-    is(["nvidia"], ["integrate.api.nvidia.com"]);
-  const thinkingFormat = deepseek
+    is("together", "ant-ling", "xai", "moonshotai", "moonshotai-cn") ||
+    is("cloudflare-ai-gateway", "nvidia");
+  const thinkingFormat = is("deepseek")
     ? "deepseek"
     : zai
       ? "zai"
-      : together
+      : is("together")
         ? "together"
-        : antLing
+        : is("ant-ling")
           ? "ant-ling"
-          : openRouter
+          : is("openrouter")
             ? "openrouter"
             : "openai";
   return { thinkingFormat, supportsReasoningEffort: !noEffort };

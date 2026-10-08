@@ -18,37 +18,26 @@ import { piReasoningOff } from "../src/pi-reasoning-off.ts";
 import { PROVIDER_BY_API } from "../src/provider-map.ts";
 import { nativeModel } from "./pi-payload.ts";
 
-// At run time the container talks to the sidecar: only provider-based detection fires.
+// What `piReasoningOff` answers for: a run's Pi talks to the sidecar or the llm-proxy.
 const PROXY = "http://sidecar.test/llm";
-// Azure records carry no baseUrl (it names the operator's resource), and Pi
-// refuses to build a request without one.
-const AZURE_RESOURCE = "https://resource.openai.azure.com/openai/v1";
 
 const RECORDS = getBuiltinProviders().flatMap(
   (provider) => getBuiltinModels(provider) as Model<Api>[],
 );
 
-/** A registry record built the way the platform builds it. */
-function platformModel(record: Model<Api>, baseUrl: string): Model<Api> {
+/** A registry record built the way a run builds it. */
+function platformModel(record: Model<Api>): Model<Api> {
   return buildPiModel({
     id: record.id,
     apiShape: record.api,
     piProvider: record.provider,
-    baseUrl,
+    baseUrl: PROXY,
     ...recordSpec(record),
   });
 }
 
-function nativeBaseUrl(record: Model<Api>): string {
-  return record.provider === "azure" && !record.baseUrl ? AZURE_RESOURCE : record.baseUrl;
-}
-
-const unrecorded = (
-  apiShape: string,
-  piProvider?: string,
-  dialect: PiModelDialect | null = null,
-  baseUrl = PROXY,
-) => buildPiModel({ id: "my-model", dialect, apiShape, piProvider, baseUrl, reasoning: true });
+const unrecorded = (apiShape: string, piProvider?: string, dialect: PiModelDialect | null = null) =>
+  buildPiModel({ id: "my-model", dialect, apiShape, piProvider, baseUrl: PROXY, reasoning: true });
 
 async function mismatches(models: Array<[string, Model<Api>]>): Promise<string[]> {
   const found = await Promise.all(
@@ -71,15 +60,12 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
     (record) => record.reasoning && piReasoningLevels(record).includes("off"),
   );
 
-  it("agrees on every reasoning record Pi keeps that takes off, at its own URL and behind the proxy", async () => {
+  it("agrees on every reasoning record Pi keeps that takes off", async () => {
     expect(offRecords.length).toBeGreaterThan(0);
-    const models = offRecords.flatMap((record): Array<[string, Model<Api>]> => {
-      const name = `${record.provider}/${record.id}`;
-      return [
-        [`${name} @ native`, platformModel(record, nativeBaseUrl(record))],
-        [`${name} @ proxy`, platformModel(record, PROXY)],
-      ];
-    });
+    const models = offRecords.map((record): [string, Model<Api>] => [
+      `${record.provider}/${record.id}`,
+      platformModel(record),
+    ]);
     expect(await mismatches(models)).toEqual([]);
   });
 
@@ -88,14 +74,6 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
     (pair) => pair.split(" ") as [string, string],
   );
 
-  // Pi's chat-completions dialect detection also reads the base URL.
-  const hosts = [
-    ...new Set(
-      RECORDS.filter((record) => record.api === "openai-completions" && record.baseUrl).map(
-        (record) => record.baseUrl,
-      ),
-    ),
-  ];
   const gatewayShapes = [...shapes].filter((shape) => shape in PROVIDER_BY_API);
   // A string `off` is what makes Pi's per-provider `reasoning_effort` detection decide.
   const DIALECTS: Array<[string, PiModelDialect | null]> = [
@@ -108,7 +86,7 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
   });
 
   for (const [label, dialect] of DIALECTS) {
-    it(`agrees on a model Pi keeps no record of with ${label}, per API shape, provider and host`, async () => {
+    it(`agrees on a model Pi keeps no record of with ${label}, per API shape and provider`, async () => {
       const models: Array<[string, Model<Api>]> = [
         ...gatewayShapes.map((shape): [string, Model<Api>] => [
           `gateway ${shape}`,
@@ -117,10 +95,6 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
         ...pairs.map(([shape, provider]): [string, Model<Api>] => [
           `${provider} ${shape}`,
           unrecorded(shape, provider, dialect),
-        ]),
-        ...hosts.map((host): [string, Model<Api>] => [
-          `gateway at ${host}`,
-          unrecorded("openai-completions", undefined, dialect, host),
         ]),
       ];
       expect(await mismatches(models)).toEqual([]);
@@ -132,7 +106,7 @@ describe("piReasoningOff on the cases the UI names", () => {
   const record = (provider: string, id: string) => {
     const found = nativeModel(provider, id);
     if (!found) throw new Error(`Pi keeps no ${provider}/${id} record`);
-    return platformModel(found, PROXY);
+    return platformModel(found);
   };
   const CASES: Array<[string, () => Model<Api>, ReturnType<typeof piReasoningOff>]> = [
     // openai-completions with no string `off` in its map: Pi sends no reasoning_effort.

@@ -899,9 +899,7 @@ function unrecordedGeneration({
     dialect: null,
     apiShape,
     piProvider: resolvePiProvider(providerId),
-    // A non-aliased model's Pi talks to the sidecar or the llm-proxy, never the
-    // upstream URL, so only the provider shapes its request. An alias's
-    // capabilities are projected anyway.
+    // Required by the builder; nothing derived here reads it.
     baseUrl: "",
     reasoning,
   });
