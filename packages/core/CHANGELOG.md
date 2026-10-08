@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `providerId`. A producer of `ModelSwap` descriptors must set it, `null`
   when Pi keeps no record of the backing. (#1706)
 
+### Fixed
+
+- **`parseBody` (`./api-errors`) reports a missing body field as
+  `errors[].code: "required"`**, as the `FieldErrorCode` union and the docs
+  always promised. It reported `invalid_type` since Zod 4, whose issues no
+  longer carry the `received` property the check relied on. A caller of
+  `zodIssuesToFieldErrors` that parses itself gets `required` only with
+  `safeParse(…, { reportInput: true })`, otherwise it keeps `invalid_type`.
+  A client that read `invalid_type` as "missing" should branch on
+  `required`; a wrong-typed field is unchanged. (#1790)
+
 ## [14.0.0] — 2026-10-05
 
 ### Added
