@@ -13,7 +13,8 @@
  *   - --max-time → exit 28
  *
  * Pattern: drive `apiCommand()` directly with a captured-IO adapter.
- * No subprocess spawn; the two Bun.serve() instances + the CLI all run
+ * No subprocess spawn (except the #1824 pipe test, which needs the real
+ * process exit); the two Bun.serve() instances + the CLI all run
  * in-process so tests are fast and deterministic.
  */
 
@@ -276,6 +277,37 @@ describe("apiCommand integration — binary download", () => {
     expect(captured.exitCode.value).toBe(0);
     expect(sha256(allBytes(captured.stdout))).toBe(sha256(primary.binaryPayload));
   });
+
+  it("the real CLI delivers the whole body to a slow pipe reader (#1824)", async () => {
+    // The reader waits for the CLI to exit (3 s cap, for a CLI blocked on the
+    // full pipe), so unfixed code exits with bytes still queued. A Bun.spawn
+    // pipe can't stand in: the parent drains it eagerly.
+    const script =
+      '{ "$0" src/cli.ts api GET /binary; echo "exit=$?" >&2; touch "$1"; } | ' +
+      '(i=0; while [ ! -e "$1" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; cat)';
+    const exited = join(configHome.dir(), "cli-exited");
+    const proc = Bun.spawn(["sh", "-c", script, process.execPath, exited], {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: configHome.dir(),
+        APPSTRATE_INSTANCE: primary.url,
+        APPSTRATE_API_KEY: "test-key",
+        APPSTRATE_NO_DUAL_INSTALL_CHECK: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [out, stderr] = await Promise.all([
+      new Response(proc.stdout).arrayBuffer(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    expect(stderr).toBe("exit=0\n");
+    const body = new Uint8Array(out);
+    expect(body.byteLength).toBe(primary.binaryPayload.byteLength);
+    expect(sha256(body)).toBe(sha256(primary.binaryPayload));
+  }, 15_000);
 });
 
 describe("apiCommand integration — redirect + Authorization", () => {

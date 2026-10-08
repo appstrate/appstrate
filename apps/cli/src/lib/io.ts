@@ -44,11 +44,15 @@
  * migrated onto it — `sink.ts` and `commands/run/remote-runner.ts` each still
  * declare their own writer pair, for the bridge reason above.
  *
- * Four members, deliberately — no colour, TTY or logger abstraction. A
- * command that needs more than "write bytes, exit" keeps that logic in the
- * command; widening the seam would put it in everyone's way. (The one TTY
- * decision the CLI does make — repaint or plain lines — lives in
- * `lib/ui.ts`'s `spinner`, which reads `process.stdout.isTTY` directly.)
+ * Four members plus an optional `flush`, deliberately — no colour, TTY or
+ * logger abstraction. A command awaits `flush` before a tail `exit` that may
+ * follow more output than a pipe holds: `exit` cannot flush itself, because
+ * non-tail `io.exit` callers rely on `never` and a sync write to a pipe fails
+ * with EAGAIN (#1824). A command that needs more than "write bytes, exit"
+ * keeps that logic in the command; widening the seam would put it in
+ * everyone's way. (The one TTY decision the CLI does make — repaint or plain
+ * lines — lives in `lib/ui.ts`'s `spinner`, which reads
+ * `process.stdout.isTTY` directly.)
  */
 
 import * as clack from "@clack/prompts";
@@ -66,7 +70,15 @@ export interface CommandIO {
    * that nothing but its own test could reach.
    */
   cancel: (message: string) => void;
+  /** Settles once earlier writes are out, or failed on a closed reader (#1824). */
+  flush?: () => Promise<void>;
 }
+
+// Bun queues what a pipe cannot take yet and `process.exit` drops that queue
+// (#1824). On success write callbacks fire in order, so the latest one settles
+// last; on a closed reader they all settle with an error, and nobody reads.
+let stdoutFlushed: Promise<void> = Promise.resolve();
+let stderrFlushed: Promise<void> = Promise.resolve();
 
 /**
  * Production wiring — what every command gets when the caller injects
@@ -80,15 +92,18 @@ export interface CommandIO {
 export const DEFAULT_IO: CommandIO = {
   stdout: {
     write(chunk) {
-      process.stdout.write(chunk);
+      stdoutFlushed = new Promise((resolve) => process.stdout.write(chunk, () => resolve()));
     },
   },
   stderr: {
     write(chunk) {
-      process.stderr.write(chunk);
+      stderrFlushed = new Promise((resolve) => process.stderr.write(chunk, () => resolve()));
     },
   },
   exit: (code) => process.exit(code),
+  flush: async () => {
+    await Promise.all([stdoutFlushed, stderrFlushed]);
+  },
   // Wrapped rather than passed by reference so the seam pins the one-argument
   // form regardless of what else clack's export carries.
   cancel: (message) => {

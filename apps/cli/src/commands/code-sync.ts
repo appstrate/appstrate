@@ -277,7 +277,10 @@ export async function codeSyncCommand(
 
   const failed = printPath ? runFailures > 0 || !pluginOk : runFailures + skillFailures > 0;
   if (!failed && printPath) io.stdout.write(`${targetRoot("claude-plugin")}\n`);
-  if (failed) io.exit(1);
+  if (failed) {
+    await io.flush?.();
+    io.exit(1);
+  }
 }
 
 /** An error that carries a fix is the run's problem, never one package's. */

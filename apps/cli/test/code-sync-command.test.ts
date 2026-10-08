@@ -484,9 +484,23 @@ describe("code sync — unmanaged destinations", () => {
 
     createSkillServer(ONE_SKILL).install();
     const { io, stderr } = createMemoryIO();
+    const events: string[] = [];
+    const sink = {
+      ...io,
+      flush: async () => {
+        await Bun.sleep(0); // so a flush called but not awaited loses the race
+        events.push("flush");
+      },
+      exit: (code: number): never => {
+        events.push("exit");
+        return io.exit(code);
+      },
+    };
 
-    await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(codeSyncCommand({ target: ["codex"] }, sink)).rejects.toBeInstanceOf(ExitError);
 
+    // The report goes out before the exit (#1824).
+    expect(events).toEqual(["flush", "exit"]);
     expect(await readText(join(mine, "SKILL.md"))).toBe("hand written\n");
     expect(stderr()).toContain(
       `Skipped @acme/pdf-tools on codex: ${mine} exists and is not managed by appstrate — remove or rename it`,
