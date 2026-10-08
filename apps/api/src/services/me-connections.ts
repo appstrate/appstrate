@@ -16,12 +16,11 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { and, arrayContains, asc, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import {
   spacePackages,
   packageShares,
   integrationConnections,
-  integrationPins,
   organizationMembers,
   organizations,
   packages,
@@ -39,7 +38,7 @@ import {
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { connectionLocks, scheduleOverridesName } from "./integration-connections.ts";
+import { connectionLocks, planConnectionForget } from "./integration-connections.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -299,7 +298,7 @@ interface OwnScheduleHoldingConnection {
    * override and disables the schedule (never a silent fall-back for an unattended run).
    */
   connection_count: number;
-  /** True exactly when this delete disables the schedule: it is enabled and the set is this connection alone. */
+  /** True when the delete disables this schedule: it is enabled and one of its sets empties. */
   disables: boolean;
 }
 
@@ -310,99 +309,64 @@ export interface ConnectionDeleteImpact {
 }
 
 /**
- * The caller's own member pins and schedules naming `connectionId` — exactly the
- * rows `deleteIntegrationConnection` rewrites, so the confirmation can say what
- * the delete does to each. A bound credential sees its org (and space) only.
+ * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
+ * and per (schedule, integration) naming `connectionId`. Empty for an unknown connection, one the
+ * caller does not own, or one outside a bound credential's org (and space); a bound credential sees
+ * only the owner's schedules of its org (and space), though the delete rewrites the others too. A
+ * pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
   actor: Actor,
   connectionId: string,
   authority: MeConnectionAuthority,
 ): Promise<ConnectionDeleteImpact> {
-  const [pins, ownSchedules] = await Promise.all([
-    listOwnPinsHoldingConnection(actor, connectionId, authority),
-    listOwnSchedulesHoldingConnection(actor, connectionId, authority),
-  ]);
-  return { pins, schedules: ownSchedules };
-}
-
-async function listOwnPinsHoldingConnection(
-  actor: Actor,
-  connectionId: string,
-  authority: MeConnectionAuthority,
-): Promise<OwnPinHoldingConnection[]> {
-  // Member pins are a member's own: an end user holds none.
-  if (actor.type !== "user") return [];
-  const rows = await db
-    .select({
-      agentPackageId: integrationPins.packageId,
-      integrationId: integrationPins.integrationId,
-      connectionIds: integrationPins.connectionIds,
-      draftManifest: packages.draftManifest,
-    })
-    .from(integrationPins)
-    .innerJoin(packages, eq(packages.id, integrationPins.packageId))
-    .innerJoin(spaces, eq(spaces.id, integrationPins.spaceId))
+  const [row] = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
     .where(
       and(
-        eq(integrationPins.userId, actor.id),
-        arrayContains(integrationPins.connectionIds, [connectionId]),
-        authorityFilter(authority, spaces.orgId, integrationPins.spaceId),
+        eq(integrationConnections.id, connectionId),
+        actorFilter(actor, integrationConnections),
+        authorityFilter(authority, spaces.orgId, integrationConnections.spaceId),
       ),
     )
-    .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
-  return rows.map((r) => ({
-    agent_package_id: r.agentPackageId,
-    agent_display_name: getPackageDisplayName({
-      id: r.agentPackageId,
-      draftManifest: r.draftManifest,
-    }),
-    integration_package_id: r.integrationId,
-    connection_count: r.connectionIds.length,
-  }));
-}
-
-/** One entry per (schedule, integration) whose override set names the connection. */
-async function listOwnSchedulesHoldingConnection(
-  actor: Actor,
-  connectionId: string,
-  authority: MeConnectionAuthority,
-): Promise<OwnScheduleHoldingConnection[]> {
-  const rows = await db
-    .select({
-      id: schedules.id,
-      name: schedules.name,
-      enabled: schedules.enabled,
-      agentPackageId: schedules.packageId,
-      connectionOverrides: schedules.connectionOverrides,
-      draftManifest: packages.draftManifest,
-    })
-    .from(schedules)
-    .innerJoin(packages, eq(packages.id, schedules.packageId))
-    .where(
-      and(
-        actorFilter(actor, schedules),
-        scheduleOverridesName(connectionId),
-        authorityFilter(authority, schedules.orgId, schedules.spaceId),
-      ),
-    )
-    .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
-  return rows.flatMap((r) => {
-    const agentDisplayName = getPackageDisplayName({
-      id: r.agentPackageId,
-      draftManifest: r.draftManifest,
-    });
-    return Object.entries(r.connectionOverrides ?? {})
-      .filter(([, ids]) => ids.includes(connectionId))
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([integrationId, ids]) => ({
-        scheduleId: r.id,
-        schedule_name: r.name,
-        agent_package_id: r.agentPackageId,
-        agent_display_name: agentDisplayName,
-        integration_package_id: integrationId,
-        connection_count: ids.length,
-        disables: r.enabled && ids.length === 1,
-      }));
-  });
+    .limit(1);
+  if (!row) return { pins: [], schedules: [] };
+  // Member pins need no such filter: a pin write requires its connections in the pin's own space.
+  const plan = await planConnectionForget(
+    db,
+    { id: row.id, owner: actor },
+    { scheduleFilter: authorityFilter(authority, schedules.orgId, schedules.spaceId) },
+  );
+  const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];
+  const agents =
+    agentIds.length === 0
+      ? []
+      : await db
+          .select({ id: packages.id, draftManifest: packages.draftManifest })
+          .from(packages)
+          .where(inArray(packages.id, agentIds));
+  const displayNames = new Map(agents.map((pkg) => [pkg.id, getPackageDisplayName(pkg)]));
+  // The id stands in for an agent deleted between the two reads.
+  const displayName = (id: string) => displayNames.get(id) ?? id;
+  return {
+    pins: plan.pins.map((pin) => ({
+      agent_package_id: pin.agentPackageId,
+      agent_display_name: displayName(pin.agentPackageId),
+      integration_package_id: pin.integrationId,
+      connection_count: pin.connectionIds.length,
+    })),
+    schedules: plan.schedules.flatMap((schedule) =>
+      schedule.entries.map((entry) => ({
+        scheduleId: schedule.id,
+        schedule_name: schedule.name,
+        agent_package_id: schedule.agentPackageId,
+        agent_display_name: displayName(schedule.agentPackageId),
+        integration_package_id: entry.integrationId,
+        connection_count: entry.connectionCount,
+        disables: schedule.disables,
+      })),
+    ),
+  };
 }

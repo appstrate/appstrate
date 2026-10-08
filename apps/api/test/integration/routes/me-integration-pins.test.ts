@@ -32,11 +32,22 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedEndUser, seedApiKey, seedSchedule } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedEndUser,
+  seedApiKey,
+  seedSchedule,
+  seedSpace,
+} from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
-import { auditEvents, integrationConnections, schedules } from "@appstrate/db/schema";
-import { asc, eq, inArray } from "drizzle-orm";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationPins,
+  schedules,
+} from "@appstrate/db/schema";
+import { asc, eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
@@ -86,17 +97,21 @@ function buildIntegrationManifest() {
 describe("/api/me/integration-pins", () => {
   let ctx: TestContext;
 
-  /** Seed a private integration connection owned by `userId`. */
-  async function seedConnectionFor(userId: string): Promise<string> {
+  /** Seed an integration connection owned by `userId` (or `endUserId`), private unless `shared`. */
+  async function seedConnectionFor(
+    userId: string | null,
+    opts: { endUserId?: string; spaceId?: string; shared?: boolean } = {},
+  ): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION,
         authKey: "primary",
-        accountId: `acct-${userId.slice(0, 6)}`,
-        spaceId: ctx.defaultSpaceId,
+        accountId: `acct-${(userId ?? opts.endUserId)!.slice(0, 6)}`,
+        spaceId: opts.spaceId ?? ctx.defaultSpaceId,
         userId,
-        endUserId: null,
+        endUserId: opts.endUserId ?? null,
+        sharedWithOrg: opts.shared ?? false,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -531,6 +546,30 @@ describe("/api/me/integration-pins", () => {
       });
     }
 
+    function readPins() {
+      return db
+        .select({
+          id: integrationPins.id,
+          agent: integrationPins.packageId,
+          integration: integrationPins.integrationId,
+          connectionIds: integrationPins.connectionIds,
+          updatedAt: integrationPins.updatedAt,
+        })
+        .from(integrationPins);
+    }
+
+    function readSchedules() {
+      return db
+        .select({
+          id: schedules.id,
+          enabled: schedules.enabled,
+          connectionOverrides: schedules.connectionOverrides,
+          nextRunAt: schedules.nextRunAt,
+          updatedAt: schedules.updatedAt,
+        })
+        .from(schedules);
+    }
+
     beforeEach(async () => {
       await seedPackage({
         id: OTHER_AGENT,
@@ -584,91 +623,258 @@ describe("/api/me/integration-pins", () => {
       expect(await impactOf(spare!)).toEqual({ pins: [], schedules: [] });
     });
 
-    it("lists exactly the pins and schedules the delete then rewrites", async () => {
+    it("announces exactly the rewrites the delete then makes, read back from the rows", async () => {
       const [web, gone] = [
         await seedConnectionFor(ctx.user.id),
         await seedConnectionFor(ctx.user.id),
       ];
-      await pinSet([web!, gone!]);
-      await pinSet([gone!], OTHER_AGENT);
-      const shrinks = await scheduleFor([web!, gone!], { userId: ctx.user.id });
-      const resets = await scheduleFor([gone!], { userId: ctx.user.id });
+      const owner = { userId: ctx.user.id };
+      await pinSet([gone!]);
+      await pinSet([web!, gone!], OTHER_AGENT);
+      const alone = await scheduleFor([gone!], owner, "alone");
+      await db
+        .update(schedules)
+        .set({ nextRunAt: new Date(Date.now() + 3_600_000) })
+        .where(eq(schedules.id, alone.id));
+      const several = await scheduleFor([web!, gone!], owner, "several");
+      await scheduleFor([gone!], owner, "off", false);
+      const unknown = crypto.randomUUID();
+      await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        name: "two integrations",
+        enabled: true,
+        ...owner,
+        connectionOverrides: {
+          [INTEGRATION]: [gone!],
+          "@pinorg/other-svc": [unknown],
+        },
+      });
+      // A stored empty set (no write accepts one): the delete drops it, so it disables the schedule
+      // though the connection's own set keeps a member.
+      const emptySibling = await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        name: "empty sibling",
+        enabled: true,
+        ...owner,
+        connectionOverrides: { [INTEGRATION]: [gone!, web!], "@pinorg/other-svc": [] },
+      });
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id);
+      await scheduleFor([gone!], { userId: colleague.id }, "colleague");
+
+      const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
       const announced = await impactOf(gone!);
-      expect(announced.pins.map((p) => p.agent_package_id)).toEqual([AGENT, OTHER_AGENT]);
-      expect(
-        Object.fromEntries(announced.schedules.map((s) => [s.scheduleId, s.disables])),
-      ).toEqual({ [shrinks.id]: false, [resets.id]: true });
+      // An id no connection carries previews nothing, though one of the caller's schedules names it.
+      expect(await impactOf(unknown)).toEqual({ pins: [], schedules: [] });
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
       expect(del.status).toBe(204);
+      const pinsAfter = new Map((await readPins()).map((p) => [p.id, p]));
+      const schedulesAfter = new Map((await readSchedules()).map((s) => [s.id, s]));
 
-      for (const pin of announced.pins) {
-        const res = await app.request(
-          `/api/me/integration-pins?agent_package_id=${encodeURIComponent(pin.agent_package_id)}`,
-          { headers: authHeaders(ctx) },
-        );
-        const after = ((await res.json()) as { data: { connection_ids: string[] }[] }).data;
-        const left = after.flatMap((p) => p.connection_ids);
-        expect(left).toHaveLength(pin.connection_count - 1);
-        expect(left).not.toContain(gone);
-      }
-      const rows = await db
-        .select({
-          id: schedules.id,
-          connectionOverrides: schedules.connectionOverrides,
-          enabled: schedules.enabled,
-          nextRunAt: schedules.nextRunAt,
-        })
-        .from(schedules)
-        .where(inArray(schedules.id, [shrinks.id, resets.id]));
-      const after = new Map(rows.map((r) => [r.id, r]));
+      const sortedBy = <T>(rows: T[], key: (row: T) => string) =>
+        [...rows].sort((a, b) => key(a).localeCompare(key(b)));
+      const rewrittenPins = pinsBefore
+        .filter((before) => !Bun.deepEquals(pinsAfter.get(before.id), before))
+        .map((before) => ({
+          agent_package_id: before.agent,
+          integration_package_id: before.integration,
+          connection_count: before.connectionIds.length,
+        }));
+      const rewrittenSchedules = schedulesBefore.flatMap((before) => {
+        const after = schedulesAfter.get(before.id)!;
+        if (Bun.deepEquals(after, before)) return [];
+        return Object.entries(before.connectionOverrides ?? {})
+          .filter(([, ids]) => ids.includes(gone!))
+          .map(([id, ids]) => ({
+            scheduleId: before.id,
+            integration_package_id: id,
+            connection_count: ids.length,
+            disables: before.enabled && !after.enabled,
+          }));
+      });
+      // Not vacuous: both pins, and one entry per schedule of the owner's naming the connection.
+      expect(announced.pins).toHaveLength(2);
+      expect(announced.schedules).toHaveLength(5);
+      expect(
+        sortedBy(
+          announced.pins.map(({ agent_display_name: _name, ...pin }) => pin),
+          (p) => p.agent_package_id,
+        ),
+      ).toEqual(sortedBy(rewrittenPins, (p) => p.agent_package_id));
+      expect(
+        sortedBy(
+          announced.schedules.map(
+            ({ scheduleId, integration_package_id, connection_count, disables }) => ({
+              scheduleId,
+              integration_package_id,
+              connection_count,
+              disables,
+            }),
+          ),
+          (s) => s.scheduleId + s.integration_package_id,
+        ),
+      ).toEqual(sortedBy(rewrittenSchedules, (s) => s.scheduleId + s.integration_package_id));
+
+      // The ids the delete reports disabled are the ones the preview said it would.
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.connection.deleted"));
+      const { disabledScheduleIds } = audit!.after as { disabledScheduleIds: string[] };
+      const disabling = announced.schedules.filter((s) => s.disables);
+      expect([...disabledScheduleIds].sort()).toEqual(
+        [...new Set(disabling.map((s) => s.scheduleId))].sort(),
+      );
+
       // A set that only shrinks stays armed; an emptied one disables its schedule instead of
       // letting it fall back to another account unattended.
-      expect(after.get(shrinks.id)).toMatchObject({
+      expect(schedulesAfter.get(several.id)).toMatchObject({
         connectionOverrides: { [INTEGRATION]: [web!] },
         enabled: true,
       });
-      expect(after.get(resets.id)).toMatchObject({
+      expect(schedulesAfter.get(alone.id)).toMatchObject({
         connectionOverrides: null,
         enabled: false,
         nextRunAt: null,
       });
-      expect(await impactOf(gone!)).toEqual({ pins: [], schedules: [] });
+      expect(schedulesAfter.get(emptySibling.id)).toMatchObject({
+        connectionOverrides: { [INTEGRATION]: [web!] },
+        enabled: false,
+      });
     });
 
-    it("does not announce a disable for a schedule that is already off", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
-      const off = await scheduleFor([connectionId], { userId: ctx.user.id }, null, false);
-      expect((await impactOf(connectionId)).schedules).toEqual([
-        expect.objectContaining({ scheduleId: off.id, connection_count: 1, disables: false }),
-      ]);
-    });
-
-    it("leaves out a colleague's schedule, which the delete does not rewrite", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
+    it("is empty for a colleague's shared connection the caller pinned and scheduled, which the delete refuses", async () => {
       const colleague = await createTestUser();
       await addOrgMember(ctx.orgId, colleague.id);
-      await scheduleFor([connectionId], { userId: colleague.id });
-      expect(await impactOf(connectionId)).toEqual({ pins: [], schedules: [] });
+      const shared = await seedConnectionFor(colleague.id, { shared: true });
+      await pinSet([shared]);
+      await scheduleFor([shared], { userId: ctx.user.id });
+      const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
+
+      expect(await impactOf(shared)).toEqual({ pins: [], schedules: [] });
+      const del = await app.request(`/api/me/connections/${shared}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(404);
+      expect(await readPins()).toEqual(pinsBefore);
+      expect(await readSchedules()).toEqual(schedulesBefore);
+    });
+
+    it("is empty for a key bound to one space on the creator's connection of another", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+      const elsewhere = await seedConnectionFor(ctx.user.id, { spaceId: spaceB.id });
+      // A disabled schedule of the creator's own in the key's space names it: no reach check
+      // guards a self write to a disabled schedule.
+      const inKeySpace = await scheduleFor([elsewhere], { userId: ctx.user.id }, null, false);
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read", "integrations:disconnect"],
+      });
+      const keyHeaders = {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+      };
+
+      expect(await impactOf(elsewhere, keyHeaders)).toEqual({ pins: [], schedules: [] });
+      // Unbound, the same caller sees the schedule: the empty answer is the binding's.
+      expect((await impactOf(elsewhere)).schedules.map((s) => s.scheduleId)).toEqual([
+        inKeySpace.id,
+      ]);
+      // The key's delete is refused by its binding too, not by its ceiling: a 204 that writes nothing.
+      const schedulesBefore = await readSchedules();
+      const del = await app.request(`/api/me/connections/${elsewhere}`, {
+        method: "DELETE",
+        headers: keyHeaders,
+      });
+      expect(del.status).toBe(204);
+      expect(await readSchedules()).toEqual(schedulesBefore);
+      const kept = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, elsewhere));
+      expect(kept).toHaveLength(1);
+    });
+
+    it("hides from a key bound to the connection's space the creator's schedule of another space", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+      const connectionId = await seedConnectionFor(ctx.user.id);
+      // A disabled schedule of the creator's own in space B names it: no reach check guards a
+      // self write to a disabled schedule.
+      const inOtherSpace = await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: spaceB.id,
+        name: "space B",
+        enabled: false,
+        userId: ctx.user.id,
+        connectionOverrides: { [INTEGRATION]: [connectionId] },
+      });
+      const inKeySpace = await scheduleFor([connectionId], { userId: ctx.user.id });
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+
+      const bound = await impactOf(connectionId, {
+        Authorization: `Bearer ${apiKey.rawKey}`,
+        "X-Space-Id": ctx.defaultSpaceId,
+      });
+      expect(bound.schedules.map((s) => s.scheduleId)).toEqual([inKeySpace.id]);
+      // Unbound, the same caller sees both.
+      expect((await impactOf(connectionId)).schedules.map((s) => s.scheduleId).sort()).toEqual(
+        [inKeySpace.id, inOtherSpace.id].sort(),
+      );
+    });
+
+    it("lists a connection an admin pinned, whose delete answers 409 connection_pinned", async () => {
+      const connectionId = await seedConnectionFor(ctx.user.id, { shared: true });
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        createdBy: ctx.user.id,
+        connectionIds: [connectionId],
+      });
+      const schedule = await scheduleFor([connectionId], { userId: ctx.user.id });
+
+      expect((await impactOf(connectionId)).schedules.map((s) => s.scheduleId)).toEqual([
+        schedule.id,
+      ]);
+      const del = await app.request(`/api/me/connections/${connectionId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(409);
+      expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
     });
 
     it("is empty for an id that is not a UUID", async () => {
       expect(await impactOf("not-a-uuid")).toEqual({ pins: [], schedules: [] });
     });
 
-    it("gives an end user no pins, only its own schedules", async () => {
-      const connectionId = await seedConnectionFor(ctx.user.id);
-      await pinSet([connectionId]);
-      await scheduleFor([connectionId], { userId: ctx.user.id });
+    it("gives an end user previewing its own connection only its own schedules", async () => {
       const endUser = await seedEndUser({
         spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-eu-delete-impact",
       });
+      const connectionId = await seedConnectionFor(null, { endUserId: endUser.id });
       const own = await scheduleFor([connectionId], { endUserId: endUser.id });
+      await scheduleFor([connectionId], { userId: ctx.user.id });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -681,7 +887,6 @@ describe("/api/me/integration-pins", () => {
         "X-Space-Id": ctx.defaultSpaceId,
         "Appstrate-User": endUser.id,
       });
-      expect(impact.pins).toEqual([]);
       expect(impact.schedules.map((s) => s.scheduleId)).toEqual([own.id]);
     });
   });

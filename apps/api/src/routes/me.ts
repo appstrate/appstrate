@@ -210,7 +210,8 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 
 /**
  * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
- * schedules the delete would rewrite. A non-UUID id answers empty lists.
+ * schedules the delete would rewrite. Empty for a non-UUID, unknown or not-owned id, or a connection
+ * outside a bound credential's org (and space); a pinned connection is listed (its delete is a 409).
  */
 router.get(
   "/connections/:connectionId/delete-impact",
