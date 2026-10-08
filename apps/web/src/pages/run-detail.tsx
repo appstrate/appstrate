@@ -37,12 +37,11 @@ import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
 import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight, CircleAlert, CircleSlash } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { Badge } from "../components/status-badge";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import type { JournalOverviewFilter } from "../components/log-viewer";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { isQueryInFlight } from "../lib/query-state";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
@@ -309,20 +308,6 @@ export function RunDetailPage() {
       >
         <RunHeaderSummary run={enrichedRun} />
       </PageHeader>
-
-      {/* What ended the run belongs to the run, not to one tab: a failure, a
-          timeout or a cancellation each carries its cause, in the band between
-          the header and the tabs where the agent page says what blocks it. */}
-      {isTerminal && run.status !== "success" && run.error && (
-        <Alert
-          variant={run.status === "cancelled" ? "default" : "destructive"}
-          className="mb-4"
-          data-testid="run-error-banner"
-        >
-          {run.status === "cancelled" ? <CircleSlash aria-hidden /> : <CircleAlert aria-hidden />}
-          <AlertDescription className="break-words">{run.error}</AlertDescription>
-        </Alert>
-      )}
 
       {agent && canReadAgent && (
         <RunModal

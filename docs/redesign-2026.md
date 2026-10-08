@@ -1633,13 +1633,19 @@ detail/`, filled with the redesign's content (one OAuth client table, lock
   first; "Conversation introuvable" for a gone id.
 - Runs and schedules: a schedule's disabled reason (warning Alert + badge
   tooltip), a run's failure cause, Relancer disabled with its reason,
-  org-level webhooks marked. Review (8 October): both alerts left the tabs
-  for the band between the header and the tabs, where the agent page already
-  says what blocks it (model, deactivated here, draft): they speak of the run
-  or the schedule, not of one tab. A schedule switched off over a lost
-  connection carries "Choisir les connexions", which opens its edit form on
-  the connection choice (`#connections`). The run page no longer shows the
-  unread dot on its own status: the page is the reading.
+  org-level webhooks marked. Review (8 October), one rule: the band between
+  the header and the tabs holds a PRESENT state that blocks and asks for an
+  act (the agent page's no model, deactivated here, draft; a schedule the
+  platform switched off), and the overview tells what HAPPENED. So the
+  schedule's alert moved up into that band and carries "Choisir les
+  connexions" when a connection was lost (its edit form opens on the
+  connection choice, `#connections`), while main's run banner became the run
+  overview's first card, "Problème" (the agent page's Diagnostic card, a link
+  to the journal filtered on errors), for a failure or a timeout; a
+  cancellation is no problem and is an "Arrêt" fact of the Exécution card.
+  The status badge already says the outcome on every tab, and the journal
+  carries the terminal error line. The run page no longer shows the unread
+  dot on its own status: the page is the reading.
 - Every Alert is shadcn's grid alert: the icon sits on the middle of the
   text's first line, one line or several (the old absolute icon sat 5px
   low). An alert with a button in its row centres the button on that line

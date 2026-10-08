@@ -30,6 +30,7 @@ import { OverviewCardAction } from "../overview-card-action";
 import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
 import { DetailSectionCard as RunDetailCard } from "../detail-section-card";
+import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 
 export function RunSnapshotInspector({
   run,
@@ -93,6 +94,12 @@ export function RunSnapshotInspector({
       (entry.kind === "tool" && ["failed", "interrupted"].includes(entry.status)),
   ).length;
   const structuredFieldCount = Object.keys(structuredOutput ?? {}).length;
+  // What ended the run is part of its story, so it is told here, not in a
+  // banner over every tab: a failure or a timeout opens the overview as its
+  // problem card (the agent page's Diagnostic card); a cancellation is no
+  // problem and says who stopped it among the execution facts.
+  const problem = run.error && (run.status === "failed" || run.status === "timeout");
+  const stopped = run.error && run.status === "cancelled" ? run.error : null;
 
   return (
     <>
@@ -100,6 +107,28 @@ export function RunSnapshotInspector({
         data-run-snapshot
         className={contained ? undefined : cardHeaders ? "py-4 md:py-6" : "p-4 md:p-6"}
       >
+        {problem && (
+          <div className="mb-6">
+            <HealthCard
+              title={t("run.overview.problem")}
+              tone="blocking"
+              cardHeaders={cardHeaders}
+              badge={null}
+            >
+              <ul className={cardHeaders ? "px-4" : "mt-3"}>
+                <HealthCardItem
+                  title={run.error}
+                  cardHeaders={cardHeaders}
+                  actions={
+                    <HealthAction onClick={() => onOpenJournal("errors")}>
+                      {t("run.overview.problemJournal")}
+                    </HealthAction>
+                  }
+                />
+              </ul>
+            </HealthCard>
+          </div>
+        )}
         <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
             <RunDetailCard
@@ -152,6 +181,7 @@ export function RunSnapshotInspector({
                 {run.proxy_label && (
                   <SnapshotFact label={t("run.infoProxy")} value={run.proxy_label} />
                 )}
+                {stopped && <SnapshotFact label={t("run.infoStopped")} value={stopped} />}
               </SnapshotFacts>
             </RunDetailCard>
 
