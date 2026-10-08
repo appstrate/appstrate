@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A cookie is no longer sent once its `Max-Age` or `Expires` has passed**
+  (#1778). The sidecar and the platform credential proxy kept sending a
+  cookie set with a positive `Max-Age` or a future `Expires` after it
+  expired, so a short-lived cookie could keep masking the connection's
+  credential; it is now dropped and the call falls back to the credential.
+  On deploy, in-flight platform proxy sessions lose their upstream cookies
+  once.
+
 ## [1.0.0-beta.65] - 2026-10-07
 
 ### Operators

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a sticky cookie expires (#1778)
+
+- `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at
+  400 days, RFC 6265bis §5.6.2, so it stays finite through JSON), else
+  `Expires` (RFC 6265 §5.2.1–5.2.2), as an absolute time taken at capture.
+  `header` never sends an expired cookie, so an expired same-name cookie no
+  longer masks the injected credential; expired entries are purged from a
+  bucket at its next capture. A cookie with neither attribute lives as long
+  as the jar. Before, only `Max-Age <= 0` or a past `Expires` was honoured,
+  at capture, and any other cookie was replayed indefinitely.
+- **BREAKING:** `CookieJar` is `Map<string, StoredCookie[]>`, where
+  `StoredCookie = { pair: string; expiresAt?: number }` (epoch ms), no longer
+  `Map<string, string[]>`.
+
 ### Changed — no longer published to npm
 
 - The package is `"private": true`: it is not published to npm. It is
