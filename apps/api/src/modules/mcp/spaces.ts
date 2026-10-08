@@ -47,10 +47,15 @@ export interface OrgWideSpaces {
   current: McpSpace;
 }
 
-/** Pinned: a strategy fixed the space, the client sent one, or the principal is an end-user (one space, RBAC spec §3.6). */
+/** Pinned: a strategy fixed the space, the client sent one, or the principal is an end-user (one space, RBAC spec §3.6) or holds no org role. */
 export function isPinnedConnection(c: Context<AppEnv>): boolean {
+  // Fails closed: a principal without an org role, whatever its kind, stays on
+  // the single-space path rather than being listed spaces it has no role for.
   return Boolean(
-    c.get("spaceId") || c.req.header("X-Space-Id") || c.get("principalKind") === "end_user",
+    c.get("spaceId") ||
+    c.req.header("X-Space-Id") ||
+    c.get("principalKind") === "end_user" ||
+    !callerOrgRole(c),
   );
 }
 
