@@ -352,6 +352,26 @@ describe("parseManifestIntegrations", () => {
     expect(out[0]!.tools).toEqual(["good", "another"]);
     expect(out[0]!.scopes).toEqual(["s1", "s2"]);
   });
+
+  it("reads a boolean `required` from integrations_configuration (§4.4)", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/on": "^1.0.0", "@acme/off": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/on": { required: true },
+        "@acme/off": { required: false },
+      },
+    });
+    expect(out.find((e) => e.id === "@acme/on")!.required).toBe(true);
+    expect(out.find((e) => e.id === "@acme/off")!.required).toBe(false);
+  });
+
+  it("ignores a non-boolean `required`", () => {
+    const out = parseManifestIntegrations({
+      dependencies: { integrations: { "@acme/gmail-mcp": "^1.0.0" } },
+      integrations_configuration: { "@acme/gmail-mcp": { required: "true" } },
+    });
+    expect(out[0]!.required).toBeUndefined();
+  });
 });
 
 describe("writeManifestIntegrations", () => {
@@ -542,6 +562,75 @@ describe("writeManifestIntegrations", () => {
       },
     });
     expect(out[0]!.tools).toBeUndefined();
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // Merge onto the existing configuration
+  // ───────────────────────────────────────────────────────────────────
+
+  it("writes `required` only when true", () => {
+    const m: Record<string, unknown> = {};
+    writeManifestIntegrations(m, [
+      { id: "@acme/on", version: "^1.0.0", required: true },
+      { id: "@acme/off", version: "^1.0.0", required: false },
+    ]);
+    expect(m.integrations_configuration).toEqual({ "@acme/on": { required: true } });
+    expect(parseManifestIntegrations(m).find((e) => e.id === "@acme/on")!.required).toBe(true);
+  });
+
+  it("preserves `_meta` and unknown keys across a parse → write round trip", () => {
+    const m: Record<string, unknown> = {
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": {
+          tools: ["list_issues"],
+          required: true,
+          _meta: { "dev.vendor/x": { a: 1 } },
+          x_vendor: "kept",
+        },
+      },
+    };
+    writeManifestIntegrations(m, parseManifestIntegrations(m));
+    expect(m.integrations_configuration).toEqual({
+      "@acme/github-mcp": {
+        tools: ["list_issues"],
+        required: true,
+        _meta: { "dev.vendor/x": { a: 1 } },
+        x_vendor: "kept",
+      },
+    });
+  });
+
+  it("removes the modelled keys the entry leaves unset, keeping the rest", () => {
+    const m: Record<string, unknown> = {
+      dependencies: { integrations: { "@acme/github-mcp": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/github-mcp": {
+          tools: ["list_issues"],
+          scopes: ["repo"],
+          auth_key: "pat",
+          required: true,
+          _meta: { "dev.vendor/x": true },
+        },
+      },
+    };
+    writeManifestIntegrations(m, [{ id: "@acme/github-mcp", version: "^1.0.0", required: false }]);
+    expect(m.integrations_configuration).toEqual({
+      "@acme/github-mcp": { _meta: { "dev.vendor/x": true } },
+    });
+  });
+
+  it("drops a configuration left empty and one for an integration no longer declared", () => {
+    const m: Record<string, unknown> = {
+      dependencies: { integrations: { "@acme/kept": "^1.0.0", "@acme/gone": "^1.0.0" } },
+      integrations_configuration: {
+        "@acme/kept": { tools: ["x"] },
+        "@acme/gone": { tools: ["y"], _meta: { "dev.vendor/x": true } },
+      },
+    };
+    writeManifestIntegrations(m, [{ id: "@acme/kept", version: "^1.0.0" }]);
+    expect(m.integrations_configuration).toBeUndefined();
+    expect(m.dependencies).toEqual({ integrations: { "@acme/kept": "^1.0.0" } });
   });
 
   it('writeManifestIntegrations round-trips the wildcard `"*"` literal', () => {

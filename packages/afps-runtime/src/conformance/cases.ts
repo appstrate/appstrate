@@ -656,7 +656,7 @@ const L1_INTEGRATION_MUTUAL_EXCLUSION: ConformanceCase = {
 
 // L1.8 — flat `dependencies` maps + `integrations_configuration` (§4.1/§4.4).
 // Every dependency value is a bare semver range string; per-integration agent
-// configuration (`tools`/`scopes`/`auth_key`) lives in the top-level
+// configuration (`tools`/`scopes`/`auth_key`/`required`) lives in the top-level
 // `integrations_configuration` map. The agent schema MUST accept this shape
 // and preserve the configuration.
 const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
@@ -686,6 +686,7 @@ const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
           tools: ["search"],
           scopes: ["read", "write"],
           auth_key: "primary",
+          required: true,
         },
       },
     };
@@ -704,8 +705,18 @@ const L1_DEPENDENCIES_AND_CONFIG: ConformanceCase = {
     if (!config || typeof config !== "object") {
       return fail("integrations_configuration entry dropped during parse");
     }
-    const obj = config as { tools?: unknown; scopes?: unknown; auth_key?: string };
-    if (obj.auth_key !== "primary" || !Array.isArray(obj.scopes) || !Array.isArray(obj.tools)) {
+    const obj = config as {
+      tools?: unknown;
+      scopes?: unknown;
+      auth_key?: string;
+      required?: unknown;
+    };
+    if (
+      obj.auth_key !== "primary" ||
+      obj.required !== true ||
+      !Array.isArray(obj.scopes) ||
+      !Array.isArray(obj.tools)
+    ) {
       return fail(`integrations_configuration payload not preserved: ${JSON.stringify(obj)}`);
     }
     return pass();

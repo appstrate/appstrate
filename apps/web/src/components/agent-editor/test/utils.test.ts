@@ -184,6 +184,27 @@ describe("getResourceEntries / setResourceEntries", () => {
       expect(config["@vendor/github-mcp"]!.tools).toBe("*");
     });
 
+    it("keeps `required` and `_meta` through an editor get → set round trip", () => {
+      const m: Record<string, unknown> = {
+        dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
+        integrations_configuration: {
+          "@vendor/gmail": {
+            tools: ["list_messages"],
+            required: true,
+            _meta: { "dev.vendor/x": { a: 1 } },
+          },
+        },
+      };
+      setResourceEntries(m, "integrations", getResourceEntries(m, "integrations"));
+      expect(m.integrations_configuration).toEqual({
+        "@vendor/gmail": {
+          tools: ["list_messages"],
+          required: true,
+          _meta: { "dev.vendor/x": { a: 1 } },
+        },
+      });
+    });
+
     it("round-trips the wildcard tools literal through set → get", () => {
       const m: Record<string, unknown> = { dependencies: {} };
       setResourceEntries(m, "integrations", [

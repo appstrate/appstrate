@@ -277,6 +277,12 @@ export interface ResourceEntry {
    * Ignored for non-integration resource types.
    */
   auth_key?: string;
+  /**
+   * AFPS §4.4 — the agent needs ≥1 bound connection for this integration;
+   * absent/false = the run may start without it. Ignored for
+   * non-integration resource types.
+   */
+  required?: boolean;
 }
 
 // --- Run Types ---
