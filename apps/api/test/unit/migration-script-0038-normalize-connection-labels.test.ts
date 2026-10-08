@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Drizzle `0083`'s label CHECK against the TS label rule (`connectionLabelProblem` +
- * `CONNECTION_LABEL_MAX`), and `scripts/migration/0038-normalize-connection-labels.sql` on a
+ * `scripts/migration/0038-normalize-connection-labels.sql` and drizzle `0083`'s guard, on a
  * private PGlite replayed to `0082` — the schema it runs against, one migration short of `0083`,
  * which is also the only place a label outside the rule is seedable. `0083` is refused there first,
- * then the script runs twice and `0083` lands on top.
+ * then the script runs twice and `0083` lands on top. The CHECK itself is held to the TS label rule
+ * by `lib/connection-label-check.test.ts`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -47,7 +47,7 @@ const accepted = (label: string) =>
 
 /**
  * [connection, integration, label seeded, created_at, label after `0038`]. The GMAIL group holds
- * 18 rows, so a deduped base has room for 80 − " (37)" = 75 units.
+ * 20 rows, so a deduped base has room for 80 − " (41)" = 75 units.
  */
 const ROWS: [number, string, string, string, string][] = [
   // a kept label never yields, even to an older rewrite
@@ -74,9 +74,12 @@ const ROWS: [number, string, string, string, string][] = [
   // legal labels are verbatim: inner runs and NBSP included
   [17, GMAIL, "Two  spaces", "2026-01-01", "Two  spaces"],
   [18, GMAIL, `No${NBSP}break`, "2026-01-01", `No${NBSP}break`],
+  // a base cut on a space separator drops it before " (n)"
+  [19, GMAIL, `${"y".repeat(74)}${NBSP}yyyyy`, "2026-01-01", `${"y".repeat(74)}${NBSP}yyyyy`],
   // two rewrites colliding with each other, in another group
   [20, SLACK, `Same${ZWSP}`, "2026-01-01", "Same"],
   [21, SLACK, `Same${BOM}`, "2026-01-02", "Same (2)"],
+  [22, GMAIL, `${"y".repeat(74)}${NBSP}yyyyy${ZWSP}`, "2026-01-02", `${"y".repeat(74)} (2)`],
 ];
 
 const migration = await Bun.file(MIGRATION_0083).text();
@@ -128,26 +131,6 @@ async function apply0083(): Promise<Error | null> {
   }
 }
 
-/** The code points the CHECK refuses in `wrap(code point)`, by the migration's own predicate. */
-async function refusedBySql(wrap: string): Promise<number[]> {
-  const { rows } = await pg.query<{ cp: number }>(
-    `SELECT g.cp FROM generate_series(1, 1114111) AS g(cp)
-     CROSS JOIN LATERAL (SELECT ${wrap} AS label) t
-     WHERE g.cp NOT BETWEEN 55296 AND 57343 AND NOT (${PREDICATE})
-     ORDER BY g.cp`,
-  );
-  return rows.map((r) => r.cp);
-}
-
-function refusedByTs(wrap: (ch: string) => string): number[] {
-  const out: number[] = [];
-  for (let c = 1; c <= 0x10ffff; c++) {
-    if (c >= 0xd800 && c <= 0xdfff) continue;
-    if (!accepted(wrap(cp(c)))) out.push(c);
-  }
-  return out;
-}
-
 beforeAll(async () => {
   pg = await journalPGlite({ through: REPLAY_THROUGH });
   await pg.exec(`
@@ -180,41 +163,11 @@ afterAll(async () => {
   await pg.close();
 });
 
-describe("drizzle 0083 — the label CHECK is the TS label rule", () => {
-  it("guards with the predicate it adds, and 0038's pre-flight counts with it too", async () => {
+describe("drizzle 0083 — its guard", () => {
+  it("guards with the predicate it adds, which 0038 counts with in its pre-flight and its after line", async () => {
     expect(migration).toContain(`WHERE NOT (${PREDICATE}))`);
-    expect(await Bun.file(SCRIPT).text()).toContain(`WHERE NOT (${PREDICATE});`);
-  });
-
-  it("refuses, alone or at either end, exactly the code points connectionLabelProblem refuses", async () => {
-    for (const [sql, ts] of [
-      ["'a' || chr(g.cp) || 'a'", (ch: string) => `a${ch}a`],
-      ["chr(g.cp) || 'a'", (ch: string) => `${ch}a`],
-      ["'a' || chr(g.cp)", (ch: string) => `a${ch}`],
-      ["chr(g.cp)", (ch: string) => ch],
-    ] as const) {
-      expect(await refusedBySql(sql)).toEqual(refusedByTs(ts));
-    }
-  }, 120_000);
-
-  it("refuses the empty label, and counts length in UTF-16 units", async () => {
-    const cases: [string, boolean][] = [
-      ["", false],
-      ["a".repeat(80), true],
-      ["a".repeat(81), false],
-      [EMOJI, true],
-      [`${EMOJI}a`, false],
-      [`${"a".repeat(78)}${cp(0x1f600)}`, true],
-      [`${"a".repeat(79)}${cp(0x1f600)}`, false],
-      [`${"a".repeat(79)}${cp(0xe9)}`, true],
-      [`${"a".repeat(80)}${cp(0xe9)}`, false],
-    ];
-    const { rows } = await pg.query<{ ok: boolean }>(
-      `SELECT (${PREDICATE}) AS ok FROM unnest($1::text[]) WITH ORDINALITY AS t(label, i) ORDER BY i`,
-      [cases.map(([label]) => label)],
-    );
-    expect(rows.map((r) => r.ok)).toEqual(cases.map(([, ok]) => ok));
-    expect(cases.map(([label]) => accepted(label))).toEqual(cases.map(([, ok]) => ok));
+    const script = await Bun.file(SCRIPT).text();
+    expect(script.split(`FROM integration_connections WHERE NOT (${PREDICATE})`)).toHaveLength(4);
   });
 
   it("refuses the batch on a label outside the rule, naming 0038", () => {
@@ -227,10 +180,10 @@ describe("drizzle 0083 — the label CHECK is the TS label rule", () => {
 describe("scripts/migration/0038 — labels normalized, deduped, minted", () => {
   it("prints the size of every step, and 0 after", () => {
     expect(firstRun.counts).toEqual({
-      labels_to_normalize_before: 14,
+      labels_to_normalize_before: 15,
       labels_emptied_before: 1,
       labels_normalized: 8,
-      labels_deduped: 5,
+      labels_deduped: 6,
       labels_minted: 1,
       labels_to_normalize_after: 0,
     });
@@ -245,7 +198,7 @@ describe("scripts/migration/0038 — labels normalized, deduped, minted", () => 
     const rewritten = ROWS.filter(([, , before, , after]) => before !== after).map(
       ([n, , before, , after]) => [conn(n), before, after],
     );
-    expect(listed.sort()).toEqual(rewritten);
+    expect(listed.sort()).toEqual(rewritten.sort());
     expect(rows.filter((r) => !accepted(r.label))).toEqual([]);
   });
 

@@ -6,8 +6,9 @@
 -- no longer run there (it reads the `connection_id` columns `0077` drops).
 --
 -- Prerequisite: the database has `0077` (beta.65) — this file relies on its NOT NULL label and
--- unique index `idx_integration_conn_label`. psql or any client, a UTF8 database (the code points
--- are read with `ascii()`; the file refuses otherwise).
+-- unique index `idx_integration_conn_label`. psql or any client, PostgreSQL 16+ (the `0x…` integer
+-- literals, `regexp_count`), a UTF8 database (the code points are read with `ascii()`; the file
+-- refuses otherwise).
 --
 -- Pre-flight, read-only, on production or a restored dump — the CHECK `0083` adds:
 --
@@ -53,9 +54,9 @@ END $$;
 
 -- ═══ 1. NORMALIZE ═══
 --
--- A VIEW, so the "after" line re-evaluates it. `ascii()` is the code point (UTF8 database);
--- `regexp_split_to_table(…, '')` splits by code point. `ws` is what JS `trim()` strips that the
--- mapping leaves: U+0020 and the other Zs space separators. NULL: normalization empties it.
+-- `ascii()` is the code point (UTF8 database); `regexp_split_to_table(…, '')` splits by code
+-- point. `ws` is what JS `trim()` strips that the mapping leaves: U+0020 and the other Zs space
+-- separators. NULL: normalization empties it.
 CREATE TEMP VIEW _0038_label_norm AS
 SELECT c.id, c.space_id, c.integration_package_id, c.created_at, c.label, cut.label AS normalized
 FROM integration_connections c
@@ -132,7 +133,7 @@ plain AS (
 ),
 moved AS (
   SELECT r.id, r.space_id, r.integration_package_id, r.created_at, r.size,
-         CASE WHEN w.width <= r.room THEN r.normalized ELSE rtrim(w.prefix) END AS base
+         CASE WHEN w.width <= r.room THEN r.normalized ELSE rtrim(w.prefix, U&' \00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\202F\205F\3000') END AS base
   FROM ranked r
   -- UTF-16 width, as `CONNECTION_LABEL_MAX` counts it: the whole label's, and
   -- its longest prefix that fits the room
@@ -216,15 +217,13 @@ SET label = r.label,
 FROM _0038_label_rewrites r
 WHERE c.id = r.id;
 
--- ═══ After — re-derived from the table ═══
+-- ═══ After — the CHECK `0083` adds, so a 0 here is `0083` applying ═══
 
-SELECT count(*) AS labels_to_normalize_after
-FROM _0038_label_norm
-WHERE normalized IS DISTINCT FROM label;
+SELECT count(*) AS labels_to_normalize_after FROM integration_connections WHERE NOT (label <> '' AND label !~ '^[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]|[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]$' AND label !~ '[\u0001-\u001F\u007F-\u009F\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\U000E0000-\U000E007F]' AND char_length(label) + regexp_count(label, '[\U00010000-\U0010FFFF]') <= 80);
 
 DO $$
 DECLARE
-  v_left bigint := (SELECT count(*) FROM _0038_label_norm WHERE normalized IS DISTINCT FROM label);
+  v_left bigint := (SELECT count(*) FROM integration_connections WHERE NOT (label <> '' AND label !~ '^[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]|[ \u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]$' AND label !~ '[\u0001-\u001F\u007F-\u009F\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0\U000E0000-\U000E007F]' AND char_length(label) + regexp_count(label, '[\U00010000-\U0010FFFF]') <= 80));
 BEGIN
   IF v_left > 0 THEN
     RAISE EXCEPTION '0038: % label(s) still outside the label rule — aborting', v_left;

@@ -3,7 +3,7 @@
 // A label reaches the model verbatim (the tools' `connection` enum), so it
 // carries no line break, control, invisible or bidi character. The database holds the same rule
 // (CHECK `integration_connections_label_normalized`): a change here is a migration there,
-// `migration-script-0038-normalize-connection-labels.test.ts` fails until both agree.
+// `test/unit/lib/connection-label-check.test.ts` fails until both agree.
 
 import { isHiddenCodePoint } from "@appstrate/mcp-transport";
 

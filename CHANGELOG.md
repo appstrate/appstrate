@@ -44,8 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   nothing to do. Otherwise stop the app container (`docker stop`), `pg_dump`,
   run
   `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0038-normalize-connection-labels.sql`,
-  deploy: it normalizes those labels, renames the duplicates it creates and
-  lists every label it rewrites, for their owners.
+  deploy: it normalizes those labels, renames the duplicates it creates, turns
+  a label left empty into `Connexion N`, and lists every label it rewrites,
+  for their owners.
 
 ### Changed
 

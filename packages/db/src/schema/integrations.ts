@@ -186,7 +186,7 @@ export const integrationConnections = pgTable(
     check("integration_connections_auth_key_valid", sql`"auth_key" ~ '^[a-z][a-z0-9_]*$'`),
     // `connectionLabelProblem` + `CONNECTION_LABEL_MAX` (apps/api/src/lib/connection-label.ts):
     // not empty, no edge `trim()` whitespace, no control, invisible or bidi code point, ≤ 80 UTF-16
-    // units. Pinned to the TS rule by `migration-script-0038-normalize-connection-labels.test.ts`.
+    // units. Pinned to the TS rule by `apps/api/test/unit/lib/connection-label-check.test.ts`.
     check(
       "integration_connections_label_normalized",
       sql`label <> '' AND label !~ '^[ \\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]|[ \\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]$' AND label !~ '[\\u0001-\\u001F\\u007F-\\u009F\\u00AD\\u115F\\u1160\\u17B4\\u17B5\\u180E\\u200B-\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFEFF\\uFFA0\\U000E0000-\\U000E007F]' AND char_length(label) + regexp_count(label, '[\\U00010000-\\U0010FFFF]') <= 80`,
