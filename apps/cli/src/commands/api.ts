@@ -113,8 +113,9 @@ export async function apiCommand(
     metrics.tEnd ??= performance.now();
     io.stdout.write(formatWriteOut(opts.writeOut, metrics));
   };
-  const exit = (code: number): never => {
+  const exit = async (code: number): Promise<never> => {
     emitWriteOut(code);
+    await io.flush?.();
     return io.exit(code);
   };
 
@@ -134,7 +135,7 @@ export async function apiCommand(
   // the former free-standing `handleStreamError` — inlined as a
   // closure so it can funnel through `exit(code)` and emit `-w`
   // output with the right exit code.
-  const handleErr = (err: unknown): never => {
+  const handleErr = (err: unknown): Promise<never> => {
     if (ac.signal.aborted || sigintFired || (err instanceof Error && err.name === "AbortError")) {
       const reason = ac.signal.reason ?? (err as { cause?: unknown })?.cause;
       const isTimeout = reason instanceof Error && reason.name === "TimeoutError" && !sigintFired;
@@ -313,25 +314,10 @@ export async function apiCommand(
 
   // Single source of cleanup — `--max-time` spans fetch() AND the
   // body-stream read loop, so we can't clear the timeout inside a
-  // per-phase try/finally. Every exit path (success, error, abort)
-  // funnels through `cleanup()` exactly once.
-  let cleanedUp = false;
-  const cleanup = (): void => {
-    if (cleanedUp) return;
-    cleanedUp = true;
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-    if (connectTimeoutHandle) clearTimeout(connectTimeoutHandle);
-    if (opts.insecure) restoreTls(prevTlsReject);
-  };
-
-  // Top-level try/finally guarantees cleanup() fires even if a sync
-  // throw escapes the output phase (e.g. `io.stdout.write` blowing up
-  // on a closed pipe). Without this the TLS env override could leak
-  // into any subsequent fetch in the same process. The inner
-  // cleanup() calls stay because `io.exit` == `process.exit` in
-  // production terminates before finally runs — they handle the
-  // normal path; the outer finally handles exceptional ones.
-  // cleanup() is idempotent (cleanedUp flag).
+  // per-phase try/finally. The top-level finally covers every path,
+  // exits included (`exit` awaits a flush before `io.exit`), and an
+  // unexpected throw in the output phase. Without it the TLS env
+  // override could leak into any subsequent fetch in the same process.
   try {
     // P3a — retry loop extracted into `executeWithRetry`. It returns
     // the final Response (even for retryable-but-exhausted statuses
@@ -364,10 +350,9 @@ export async function apiCommand(
       });
     } catch (err) {
       // Sync the local handle with whatever executeWithRetry cleared
-      // so cleanup() doesn't double-clear. (Ref pattern avoids a
+      // so the finally doesn't double-clear. (Ref pattern avoids a
       // dangling timer if fetch threw after the handle was cleared.)
       connectTimeoutHandle = connectTimeoutRef.current;
-      cleanup();
       return handleErr(err);
     }
     connectTimeoutHandle = connectTimeoutRef.current;
@@ -441,7 +426,6 @@ export async function apiCommand(
     if (opts.head) {
       // RFC 9110 §9.3.2 — HEAD responses MUST NOT have a body. Bun/undici
       // still delivers an (empty) stream; we deliberately don't touch it.
-      cleanup();
       return exit(0);
     }
 
@@ -467,17 +451,17 @@ export async function apiCommand(
           await writer.close();
         }
       } catch (err) {
-        cleanup();
         return handleErr(err);
       }
     }
 
-    cleanup();
     // 11. Final exit code.
     const code = failMode ? (res.status >= 500 ? 25 : 22) : 0;
     return exit(code);
   } finally {
-    cleanup();
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    if (connectTimeoutHandle) clearTimeout(connectTimeoutHandle);
+    if (opts.insecure) restoreTls(prevTlsReject);
   }
 }
 
