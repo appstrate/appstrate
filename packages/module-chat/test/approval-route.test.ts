@@ -18,7 +18,11 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { awaitApproval } from "../src/approval-registry.ts";
+import { awaitReply } from "../src/reply-registry.ts";
+import type { AskUserReply } from "../src/ask-user-reply.ts";
+
+const awaitApproval = (id: string, sessionId: string, signal: AbortSignal) =>
+  awaitReply("approval", id, sessionId, signal, { approved: false });
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 
 const app = getTestApp();
@@ -103,5 +107,97 @@ describe("POST /api/chat/sessions/:id/approvals/:approvalId", () => {
 
     turn.abort();
     expect(await waiting).toEqual({ approved: false });
+  });
+});
+
+describe("POST /api/chat/sessions/:id/questions/:toolCallId", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "chatquestion" });
+  });
+
+  async function createSession(): Promise<string> {
+    const res = await app.request("/api/chat/sessions", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  function reply(sessionId: string, toolCallId: string, body: unknown, headers = authHeaders(ctx)) {
+    return app.request(`/api/chat/sessions/${sessionId}/questions/${toolCallId}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  const awaitAnswers = (id: string, sessionId: string, signal: AbortSignal) =>
+    awaitReply<AskUserReply>("question", id, sessionId, signal, { status: "cancelled" });
+
+  it("hands a signed-in person's answers to the waiting turn", async () => {
+    const sessionId = await createSession();
+    const turn = new AbortController();
+    const waiting = awaitAnswers("call_ok", sessionId, turn.signal);
+    const answers = { target: { selected: ["Veille"], text: "et vite" } };
+
+    const res = await reply(sessionId, "call_ok", { status: "answered", answers });
+    expect(res.status).toBe(204);
+    expect(await waiting).toEqual({ status: "answered", answers });
+  });
+
+  it("shows the session as awaiting input while a question waits", async () => {
+    const sessionId = await createSession();
+    const turn = new AbortController();
+    const awaiting = async () => {
+      const res = await app.request("/api/chat/sessions", { headers: authHeaders(ctx) });
+      const body = (await res.json()) as { data: Array<{ id: string; awaiting_input: boolean }> };
+      return body.data.find((s) => s.id === sessionId)?.awaiting_input;
+    };
+    expect(await awaiting()).toBe(false);
+
+    const waiting = awaitAnswers("call_badge", sessionId, turn.signal);
+    expect(await awaiting()).toBe(true);
+
+    expect((await reply(sessionId, "call_badge", { status: "cancelled" })).status).toBe(204);
+    await waiting;
+    expect(await awaiting()).toBe(false);
+  });
+
+  it("does not answer a pending approval with the same id", async () => {
+    const sessionId = await createSession();
+    const turn = new AbortController();
+    const approval = awaitReply("approval", "shared_id", sessionId, turn.signal, {
+      approved: false,
+    });
+
+    expect((await reply(sessionId, "shared_id", { status: "cancelled" })).status).toBe(404);
+    turn.abort();
+    expect(await approval).toEqual({ approved: false });
+  });
+
+  it("refuses the model's own loopback bearer", async () => {
+    const sessionId = await createSession();
+    const turn = new AbortController();
+    const waiting = awaitAnswers("call_self", sessionId, turn.signal);
+    const token = mintMcpLoopbackToken({
+      userId: ctx.user.id,
+      email: ctx.user.email,
+      name: ctx.user.name,
+      orgId: ctx.orgId,
+      orgRole: "owner",
+      permissions: ["chat:read", "chat:write"],
+    });
+    const res = await reply(sessionId, "call_self", { status: "cancelled" }, {
+      Authorization: `Bearer ${token}`,
+      "X-Org-Id": ctx.orgId,
+      "X-Space-Id": ctx.defaultSpaceId,
+    } as never);
+    expect(res.status).toBe(403);
+    turn.abort();
+    expect(await waiting).toEqual({ status: "cancelled" });
   });
 });

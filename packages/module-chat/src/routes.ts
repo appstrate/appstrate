@@ -36,7 +36,7 @@ import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream, type ChatEnv } from "./chat-stream.ts";
 import { stopStream } from "./stop-registry.ts";
-import { resolveApproval } from "./approval-registry.ts";
+import { hasPendingReply, resolveReply } from "./reply-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -66,6 +66,20 @@ export const approvalResponseSchema = z.object({
   reason: z.string().max(2000).optional(),
 });
 
+export const questionReplySchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("answered"),
+    answers: z.record(
+      z.string().max(40),
+      z.strictObject({
+        selected: z.array(z.string().max(80)).max(4),
+        text: z.string().max(2000).optional(),
+      }),
+    ),
+  }),
+  z.strictObject({ status: z.literal("cancelled") }),
+]);
+
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
 
@@ -78,6 +92,10 @@ function toSessionDto(row: SessionRow) {
     // conversation the user has left, and detect when it finishes. Never leaks
     // the raw stream id.
     generating: row.activeStreamId != null,
+    // True while a live turn waits on the person (a tool approval or questions):
+    // the sidebar badges the conversation. Read from this node's pending
+    // replies, like the approval and questions routes.
+    awaiting_input: hasPendingReply(row.id),
     // Computed server-side from the two message-pointer watermarks so only a
     // boolean crosses the wire — no clock anywhere. Unread = an assistant
     // message landed past the owner's read marker.
@@ -381,8 +399,28 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       }
       const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
       const decision = parseBody(approvalResponseSchema, await c.req.json().catch(() => null));
-      if (!resolveApproval(c.req.param("approvalId"), session.id, decision)) {
+      if (!resolveReply("approval", c.req.param("approvalId"), session.id, decision)) {
         throw notFound("No pending approval with this id in this session");
+      }
+      return c.body(null, 204);
+    },
+  );
+
+  // POST /api/chat/sessions/:id/questions/:toolCallId — the person's answers to
+  // an `ask_user` call the session's live turn is waiting on (or "cancelled"
+  // when they skip it). Same rule as approvals: a signed-in person only.
+  router.post(
+    "/api/chat/sessions/:id/questions/:toolCallId",
+    rateLimited(60),
+    requireModulePermission("chat", "write"),
+    async (c) => {
+      if (c.get("authMethod") !== "session") {
+        throw forbidden("Questions are answered from a signed-in session only");
+      }
+      const session = await getOwnedSession(c.req.param("id"), sessionScope(c));
+      const reply = parseBody(questionReplySchema, await c.req.json().catch(() => null));
+      if (!resolveReply("question", c.req.param("toolCallId"), session.id, reply)) {
+        throw notFound("No pending question with this id in this session");
       }
       return c.body(null, 204);
     },

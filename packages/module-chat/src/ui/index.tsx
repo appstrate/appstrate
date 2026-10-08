@@ -29,6 +29,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AssistantRuntimeProvider, type AttachmentAdapter } from "@assistant-ui/react";
+import { toast } from "sonner";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
@@ -37,8 +38,10 @@ import { PanelLeftIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Thread } from "./thread.tsx";
 import {
+  AnswerQuestionProvider,
   ChatHeadersProvider,
   ChatHostProvider,
+  type AnswerQuestion,
   SelectConversationProvider,
   useChatHost,
 } from "./runtime-context.ts";
@@ -69,6 +72,7 @@ import {
   SESSIONS_QUERY_KEY,
   stopSession,
   respondToToolApproval,
+  answerQuestion,
   type SessionsCache,
   type SessionSummary,
 } from "./sessions.ts";
@@ -163,6 +167,11 @@ export interface ChatPageProps {
   can: ChatCan;
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+}
+
+/** One toast per waiting conversation, so it can be dismissed when the wait ends. */
+function awaitingToastId(sessionId: string): string {
+  return `chat-awaiting-${sessionId}`;
 }
 
 export function ChatPage({
@@ -267,6 +276,32 @@ export function ChatPage({
     const list = sessions.data ?? [];
     return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
   }, [sessions.data, activeId]);
+
+  // A conversation that starts waiting on the person (a tool approval or
+  // questions) while they are looking at another one gets a toast that leads
+  // there; the list badges it either way. The toast stays until the person
+  // closes it, opens that conversation, or the wait ends. Conversations
+  // already waiting when the page loads are left to the badge.
+  const awaitingSeen = useRef<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    const rows = sessions.data;
+    if (!rows) return;
+    const seen = awaitingSeen.current;
+    const awaiting = new Set(rows.filter((s) => s.awaiting_input).map((s) => s.id));
+    awaitingSeen.current = awaiting;
+    for (const id of seen ?? []) if (!awaiting.has(id)) toast.dismiss(awaitingToastId(id));
+    toast.dismiss(awaitingToastId(activeId));
+    if (!seen) return;
+    for (const s of rows) {
+      if (!s.awaiting_input || seen.has(s.id) || s.id === activeId) continue;
+      toast(t("awaiting.toast", { title: s.title ?? t("awaiting.untitled") }), {
+        id: awaitingToastId(s.id),
+        duration: Infinity,
+        closeButton: true,
+        action: { label: t("awaiting.open"), onClick: () => onConversationChange?.(s.id) },
+      });
+    }
+  }, [sessions.data, activeId, t, onConversationChange]);
 
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
@@ -721,7 +756,7 @@ function ConversationInner({
       queryClient.setQueryData<SessionsCache>(sessionsQueryKey(spaceId), (prev) => {
         const existing = prev?.pages.flatMap((p) => p.data).find((s) => s.id === id);
         const row: SessionSummary = {
-          ...(existing ?? { id, title: null, unread: false }),
+          ...(existing ?? { id, title: null, awaiting_input: false, unread: false }),
           generating: true,
           updatedAt: new Date().toISOString(),
         };
@@ -790,10 +825,17 @@ function ConversationInner({
     adapters: { attachments },
     onRespondToToolApproval,
   });
+  // Same reason: an `ask_user` call is held by the server-side turn.
+  const onAnswerQuestion = useCallback<AnswerQuestion>(
+    (toolCallId, reply) => answerQuestion(getHeaders, id, toolCallId, reply),
+    [getHeaders, id],
+  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} />
+      <AnswerQuestionProvider value={onAnswerQuestion}>
+        <Thread composerSlot={composerSlot} />
+      </AnswerQuestionProvider>
     </AssistantRuntimeProvider>
   );
 }

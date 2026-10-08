@@ -42,6 +42,8 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { MarkdownText } from "./markdown-text.tsx";
+import { AskUserPanel, AskUserToolUI } from "./ask-user-card.tsx";
+import { usePendingQuestion } from "./pending-questions.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -71,6 +73,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
+      <AskUserToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -264,6 +267,11 @@ function ComposerAttachmentError() {
 
 function Composer({ slot }: { slot?: React.ReactNode }) {
   const { can, t } = useChatHost();
+  // A question the live turn waits on takes the composer's place, the way a
+  // coding agent's question replaces its input (`ask-user-card.tsx`).
+  const pendingQuestion = usePendingQuestion();
+  if (pendingQuestion)
+    return <AskUserPanel key={pendingQuestion.toolCallId} {...pendingQuestion} />;
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (

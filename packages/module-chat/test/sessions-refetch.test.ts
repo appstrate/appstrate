@@ -8,6 +8,7 @@ const row = (id: string, generating: boolean): SessionSummary => ({
   id,
   title: null,
   generating,
+  awaiting_input: false,
   unread: false,
   updatedAt: "2026-09-02T10:00:00.000Z",
 });
