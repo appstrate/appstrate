@@ -23,6 +23,7 @@ import {
   startReportSession,
   type ReportSource,
 } from "../src/commands/run/report.ts";
+import { launchEnvelope } from "../src/commands/run/launch-warnings.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 
 const REPORT_CTX = {
@@ -212,6 +213,45 @@ describe("startReportSession — integration readiness", () => {
       SNAPSHOT,
     );
     expect(session.warnings).toEqual([WARNING]);
+  });
+
+  it("announces the run with its warnings under --json", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    const line = launchEnvelope(
+      "appstrate.report.started",
+      session.runId,
+      REPORT_CTX.instance,
+      session.warnings,
+    );
+    expect(JSON.parse(line)).toEqual({
+      type: "appstrate.report.started",
+      runId: SUCCESS_BODY.id,
+      instance: REPORT_CTX.instance,
+      warnings: [WARNING],
+    });
+  });
+
+  it("announces the run without a warnings key when there are none", async () => {
+    stub = installStubFetch(() => ok());
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    const line = launchEnvelope(
+      "appstrate.report.started",
+      session.runId,
+      REPORT_CTX.instance,
+      session.warnings,
+    );
+    expect(JSON.parse(line)).not.toHaveProperty("warnings");
   });
 
   it("summarises a 409 missing_integration_connection by item", async () => {

@@ -139,6 +139,14 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.inputSchema.required).toEqual(["kind"]);
   });
 
+  it("promises the launch warnings in its result shape", () => {
+    const { tool } = makeRunAndWait({});
+    expect(tool.descriptor.description).toContain(
+      "`{ id, packageId, status, done:true, result?, error?, warnings? }`",
+    );
+    expect(tool.descriptor.description).toContain("`integration_unbound`");
+  });
+
   it("describes inline defaults and exact manifest overrides", () => {
     const { tool } = makeRunAndWait({});
 

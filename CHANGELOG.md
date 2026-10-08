@@ -75,6 +75,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shows it on the run page; the chat renders a connect card from an
   `integration_unbound` warning, the CLI prints one `⚠` line per warning, and
   the MCP server instructions explain both.
+- **The run resource gains `integrations_unbound`** (#1830): the sorted ids of
+  the declared integrations the run started without (`[]` when none, `null`
+  when the run has no connection snapshot), which `connections_used` cannot
+  carry.
+- **`appstrate run --report --json` announces the run** with an
+  `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
+  registration reported some), as `--remote --json` does with
+  `appstrate.remote.triggered` (#1830).
 
 ### Fixed
 

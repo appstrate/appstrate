@@ -69,7 +69,7 @@ import {
   type ReportSession,
   type ReportSource,
 } from "./run/report.ts";
-import { launchItemLines } from "./run/launch-warnings.ts";
+import { launchEnvelope, launchItemLines } from "./run/launch-warnings.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -457,6 +457,15 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     for (const line of launchItemLines(reportSession?.warnings)) {
       process.stderr.write(`⚠ ${line}\n`);
     }
+  } else if (reportSession) {
+    writeStdout(
+      launchEnvelope(
+        "appstrate.report.started",
+        reportSession.runId,
+        resolverInputsInstance(resolverInputs),
+        reportSession.warnings,
+      ),
+    );
   }
 
   // Heartbeat is lifted out of the `try` so the cleanup hook can stop

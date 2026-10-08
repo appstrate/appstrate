@@ -338,18 +338,26 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * renders even after the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
-  resolved: typeof runs.$inferSelect.resolvedConnections,
+  snapshot: ResolvedConnectionMap | null,
 ): RunConnectionUsed[] | null {
-  const used = Object.entries(readResolvedConnections(resolved) ?? {}).flatMap(
-    ([integrationId, bound]) =>
-      bound.map((v) => ({
-        integration_package_id: integrationId,
-        label: v.label,
-        account_id: v.accountId,
-        source: v.source,
-      })),
+  const used = Object.entries(snapshot ?? {}).flatMap(([integrationId, bound]) =>
+    bound.map((v) => ({
+      integration_package_id: integrationId,
+      label: v.label,
+      account_id: v.accountId,
+      source: v.source,
+    })),
   );
   return used.length > 0 ? used : null;
+}
+
+/** Integrations the run started without — the snapshot's `[]` entries; null with no snapshot. */
+function projectIntegrationsUnbound(snapshot: ResolvedConnectionMap | null): string[] | null {
+  if (!snapshot) return null;
+  return Object.entries(snapshot)
+    .filter(([, bound]) => bound.length === 0)
+    .map(([integrationId]) => integrationId)
+    .sort();
 }
 
 /** `runs.resolved_connections` as read back from jsonb — parsed, never trusted as typed. */
@@ -358,6 +366,7 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
+  const snapshot = readResolvedConnections(r.run.resolvedConnections);
   return {
     ...runRowToWireDto(r.run),
     // Resolved input includes editor-imposed values. The placement's current locks
@@ -369,7 +378,8 @@ function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): Enriched
     end_user_name: r.endUserName ?? null,
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
-    connections_used: projectConnectionsUsed(r.run.resolvedConnections),
+    connections_used: projectConnectionsUsed(snapshot),
+    integrations_unbound: projectIntegrationsUnbound(snapshot),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
     // INPUT = distinct `appfile://` ids referenced in the run's persisted

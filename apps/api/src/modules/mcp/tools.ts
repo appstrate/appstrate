@@ -968,9 +968,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
-      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings? }` when the run reaches a " +
+      "terminal status; `warnings`, present only when the launch reported some, lists the " +
+      "`integration_unbound` integrations the run started without. Do NOT call `getRun` after " +
+      "this tool just to wait for completion; this tool already waits. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +

@@ -169,6 +169,11 @@ export type EnrichedRun = RunWireDto & {
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
   /**
+   * Declared integrations the run started without (bound to no connection), sorted.
+   * Null when the run has no connection snapshot.
+   */
+  integrations_unbound: string[] | null;
+  /**
    * True when the requesting recipient has an unread notification for this run
    * (issue #667). Per-recipient: derived from the `notifications` table for the
    * current actor, so a dashboard user and an end-user see independent state.

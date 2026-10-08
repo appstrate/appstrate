@@ -6581,6 +6581,8 @@ export interface components {
                  */
                 source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             }[] | null;
+            /** @description Declared integrations this run started without — bound to no connection (an explicit none, or a non-required integration nothing served). Sorted ids; empty when every one was bound; null when the run has no connection snapshot. */
+            integrations_unbound: string[] | null;
         };
         RunLog: {
             /** Format: int64 */
@@ -8368,6 +8370,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,
@@ -21813,6 +21816,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": true,
                      *       "file_counts": {
                      *         "input": 0,
@@ -22190,6 +22194,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": "Weekday morning sort",
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,
@@ -22297,6 +22302,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,

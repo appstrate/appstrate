@@ -24,10 +24,9 @@ export function groupByIntegration(
 }
 
 /**
- * The declared integrations the run bound to no connection — its snapshot's `[]` entries, which
- * `connections_used` (one entry per bound connection) cannot carry.
+ * The declared integrations the run bound to no connection, which `connections_used` (one entry
+ * per bound connection) cannot carry.
  */
 export function unboundIntegrationIds(run: EnrichedRun): string[] {
-  const ids: unknown = (run as { integrations_unbound?: unknown }).integrations_unbound;
-  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  return run.integrations_unbound ?? [];
 }

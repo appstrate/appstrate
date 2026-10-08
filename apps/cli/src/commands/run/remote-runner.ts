@@ -49,7 +49,7 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
-import { connectionRefusalSummary, launchItemLines } from "./launch-warnings.ts";
+import { connectionRefusalSummary, launchEnvelope, launchItemLines } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
@@ -286,14 +286,7 @@ export async function runRemote(
     writeStderr(`→ running ${opts.bundleLabel} (reporting to ${opts.instance} as ${runId})\n`);
     for (const line of launchItemLines(warnings)) writeStderr(`⚠ ${line}\n`);
   } else {
-    writeStdout(
-      JSON.stringify({
-        type: "appstrate.remote.triggered",
-        runId,
-        instance: opts.instance,
-        ...(warnings.length > 0 ? { warnings } : {}),
-      }) + "\n",
-    );
+    writeStdout(launchEnvelope("appstrate.remote.triggered", runId, opts.instance, warnings));
   }
 
   // ─── 1b. Set up the local console sink ─────────────────────────────

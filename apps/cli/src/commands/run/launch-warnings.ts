@@ -25,6 +25,20 @@ export function launchItemLines(items: unknown): string[] {
 }
 
 /**
+ * The `--json` line announcing a launched run (`appstrate.remote.triggered` for `--remote`,
+ * `appstrate.report.started` for `--report`); `warnings` only when the launch reported some.
+ */
+export function launchEnvelope(
+  type: "appstrate.remote.triggered" | "appstrate.report.started",
+  runId: string,
+  instance: string,
+  warnings: unknown[],
+): string {
+  const envelope = { type, runId, instance, ...(warnings.length > 0 ? { warnings } : {}) };
+  return JSON.stringify(envelope) + "\n";
+}
+
+/**
  * The items of a 409 `missing_integration_connection`, joined for an error
  * hint, or null for any other body (the caller then shows it raw).
  */

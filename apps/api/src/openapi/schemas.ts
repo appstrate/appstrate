@@ -1096,6 +1096,7 @@ export const schemas = {
       "api_key_name",
       "schedule_name",
       "connections_used",
+      "integrations_unbound",
       "package_ephemeral",
       "unread",
       "file_counts",
@@ -1376,6 +1377,12 @@ export const schemas = {
             },
           },
         },
+      },
+      integrations_unbound: {
+        type: ["array", "null"],
+        description:
+          "Declared integrations this run started without — bound to no connection (an explicit none, or a non-required integration nothing served). Sorted ids; empty when every one was bound; null when the run has no connection snapshot.",
+        items: { type: "string" },
       },
     },
   },

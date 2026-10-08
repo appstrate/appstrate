@@ -259,7 +259,7 @@ The profile/member family stays camelCase as a fixed set of names:
 
 **Opaque, producer-defined** (client- or agent-supplied, returned verbatim): `runs.input`, `runs.result`, `runs.checkpoint`, `package_schedules.input`, `runs.context_snapshot` (caller-supplied environment metadata), `end_users.metadata`, `package_persistence.content`. Manifests (`packages.draft_manifest`, `package_versions.manifest`) are AFPS, hence snake_case by Zone 1. `chat_messages.content` is an AI SDK `UIMessage` (third-party vocabulary), with Appstrate's own `metadata` under 4o.
 
-**Internal-only** (never returned verbatim — producer casing): `audit_events.before` / `after` (camelCase, 4m), `runs.model_cost` (`ModelCost`), `runs.resolved_connections` (projected per key into the snake_case `connections_used`), `runs.resolved_integration_versions`.
+**Internal-only** (never returned verbatim — producer casing): `audit_events.before` / `after` (camelCase, 4m), `runs.model_cost` (`ModelCost`), `runs.resolved_connections` (projected per key into the snake_case `connections_used` and `integrations_unbound`), `runs.resolved_integration_versions`.
 
 When adding a JSONB column, decide up front which of the three it is. If a route starts returning an internal blob verbatim, its keys become wire and must be snake_case; renaming a key of a wire-exposed column is a breaking wire change and needs a `scripts/migration/` rewrite of the stored rows.
 

@@ -67,16 +67,21 @@ describe("groupByIntegration — integrations the run started without", () => {
 });
 
 describe("unboundIntegrationIds", () => {
-  const run = (over: Record<string, unknown>) => ({ ...over }) as unknown as EnrichedRun;
+  const run = (integrations_unbound: EnrichedRun["integrations_unbound"]) =>
+    ({ integrations_unbound }) as EnrichedRun;
 
   it("reads the run's unbound integrations", () => {
-    expect(unboundIntegrationIds(run({ integrations_unbound: ["@o/slack"] }))).toEqual([
+    expect(unboundIntegrationIds(run(["@o/notion", "@o/slack"]))).toEqual([
+      "@o/notion",
       "@o/slack",
     ]);
   });
 
-  it("is empty when the run carries none", () => {
-    expect(unboundIntegrationIds(run({ integrations_unbound: null }))).toEqual([]);
-    expect(unboundIntegrationIds(run({}))).toEqual([]);
+  it("is empty when every integration was bound", () => {
+    expect(unboundIntegrationIds(run([]))).toEqual([]);
+  });
+
+  it("is empty when the run has no connection snapshot", () => {
+    expect(unboundIntegrationIds(run(null))).toEqual([]);
   });
 });
