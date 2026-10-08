@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.66] - 2026-10-08
+
 ### Operators
 
 - **The boot refuses while the database holds a ciphertext under a kid absent
@@ -253,6 +255,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   administrator enables its MCP server.
 
 ### Fixed
+
+- **The CLI no longer loses its login when two `appstrate` processes refresh
+  the token at once** (#1806). Refresh now runs under one cross-process
+  `credentials.lock` beside `credentials.json`, re-reads the token pair under
+  the lock, and login writes the pair and the profile in one hold of it; a
+  background `appstrate code sync` racing another command no longer redeems
+  the same single-use refresh token and gets the session revoked as reuse.
+- **A Claude Code session says when `appstrate code sync` failed at its
+  start** (#1805), instead of silently keeping the cached plugin.
+- **`get.appstrate.dev` no longer passes its release tag to
+  `appstrate install`** (#1788). `bootstrap.sh` read `APPSTRATE_VERSION` as a
+  tag (`v1.0.0-beta.65` or `latest`) and exported it to the installer, which
+  read it as an image tag that GHCR does not publish.
 
 - **A `400 validation_failed` response reports a missing body field with
   `errors[].code: "required"`** (#1790), as documented, instead of
