@@ -68,12 +68,20 @@ export function ShellSidebar({
 
   return (
     <Sidebar>
-      {/* Head: the brand cell alone, at the header's height and closed by the
+      {/* Head: the brand cell, at the header's height and closed by the
           header's own rule — the two lines meet across the shell instead of
-          nearly meeting. Beside the product name, the two controls that act on
-          the whole shell: search and collapse. */}
-      <SidebarHeader className="border-sidebar-border h-header justify-center border-b px-2 py-0">
-        <OrgSwitcher variant="brand" />
+          nearly meeting. Beside it, the collapse: where the header's burger
+          brings the sidebar back, so both gestures happen in one corner. It
+          shows while the pointer is anywhere on the sidebar, or on focus
+          (Notion's way; `group` is the sidebar's own root), so at rest the
+          head is the workspace's name alone. */}
+      <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
+        <div className="min-w-0 flex-1">
+          <OrgSwitcher variant="brand" />
+        </div>
+        <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
+          <PanelLeft className="size-4" />
+        </SidebarTrigger>
       </SidebarHeader>
       {/* Below the header's rule, the products. No second rule: the tabs are
           their own enclosure, and a line under them would cut the column into
@@ -144,16 +152,9 @@ export function ShellSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        {/* Who you are, and the collapse beside it — the control that changes
-            the column's width sits at the end of the column, not in the head
-            where it competed with the product name. */}
-        <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
-          <div className="min-w-0 flex-1">
-            <NavUser variant="row" />
-          </div>
-          <SidebarTrigger className="text-muted-foreground size-7 shrink-0">
-            <PanelLeft className="size-4" />
-          </SidebarTrigger>
+        {/* Who you are, and nothing else: the collapse moved to the head. */}
+        <div className="border-sidebar-border border-t p-2">
+          <NavUser variant="row" />
         </div>
       </SidebarFooter>
     </Sidebar>
@@ -162,19 +163,13 @@ export function ShellSidebar({
 
 export function ShellHeader({
   actions,
-  fullBleed = false,
 }: {
   /** Page-owned controls, left of the notification bell. */
   actions?: ReactNode;
-  /**
-   * Edge to edge instead of centred on the page width. For a surface that is
-   * itself full-bleed: a header centred on 1300px over an edge-to-edge chat
-   * would put the profile 300px short of the right edge it belongs to.
-   */
-  fullBleed?: boolean;
 }) {
   const { isMobile, openMobile, state, setPeeking } = useSidebar();
   const { data: unreadCount } = useUnreadCount();
+  const collapsed = !isMobile && state === "collapsed";
 
   return (
     <header
@@ -183,10 +178,15 @@ export function ShellHeader({
         isMobile && openMobile && "invisible",
       )}
     >
+      {/* Edge to edge, never centred on the page width: the header belongs to
+          the shell, not to the page column, so its two ends sit at the shell's
+          two edges whatever the screen's width. Collapsed, the left inset is
+          the sidebar's own (`px-2`), so the burger stands where the brand cell
+          stood and its icon over the navigation's icons. */}
       <div
         className={cn(
           "px-gutter h-header flex w-full shrink-0 items-center gap-2 border-b border-b-black/5 md:border-b-0",
-          !fullBleed && "max-w-page mx-auto",
+          collapsed && "md:pl-2",
         )}
       >
         {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
@@ -197,10 +197,10 @@ export function ShellHeader({
             way back is here. Hovering slides it over the page (as the screen's
             left edge does), a click pins it open again. It carries the unread
             dot the hidden Runs entry cannot show. */}
-        {!isMobile && state === "collapsed" && (
+        {collapsed && (
           <SidebarTrigger
             data-sidebar="peek-trigger"
-            className="relative -ml-2 hidden size-8 shrink-0 md:inline-flex"
+            className="relative hidden size-8 shrink-0 md:inline-flex"
             onPointerEnter={() => setPeeking(true)}
           >
             <Menu className="size-4" />

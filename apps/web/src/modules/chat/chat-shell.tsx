@@ -77,7 +77,7 @@ export function ChatShell({
               pinned. */}
           <SidebarInset className="bg-canvas h-svh min-h-0 overflow-hidden">
             <ChatTitleCrumb conversationId={conversationId} t={t} can={can} />
-            <ShellHeader actions={headerActions} fullBleed />
+            <ShellHeader actions={headerActions} />
             <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
           </SidebarInset>
         </SidebarProvider>

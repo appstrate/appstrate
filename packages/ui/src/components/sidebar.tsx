@@ -21,7 +21,7 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
-const PEEK_CLOSE_DELAY_MS = 300;
+const PEEK_CLOSE_DELAY_MS = 80;
 
 const SidebarProvider = React.forwardRef<
   HTMLDivElement,
@@ -157,9 +157,10 @@ const Sidebar = React.forwardRef<
     const peek = canPeek && peeking;
 
     // While peeking, the panel stays out as long as the pointer is on it, on the
-    // edge zone or the trigger that opened it, or while one of its menus is open
-    // (a menu is portalled outside the panel, and a modal menu makes the page
-    // under it inert, so the pointer is never "on" the panel then). Leaving
+    // edge zone or the trigger that opened it, or while one of its menus or
+    // popovers is open (both are portalled outside the panel, and a modal menu
+    // makes the page under it inert, so the pointer is never "on" the panel
+    // then; the context switcher is a popover, not a menu). Leaving
     // closes it after a short grace, so a diagonal slip does not snap it shut.
     React.useEffect(() => {
       if (!peek) return;
@@ -170,7 +171,9 @@ const Sidebar = React.forwardRef<
         const stays =
           panelRef.current?.contains(target) ||
           target?.closest?.("[data-sidebar=peek-zone],[data-sidebar=peek-trigger]") ||
-          document.querySelector("[data-radix-popper-content-wrapper] [role=menu]");
+          document.querySelector(
+            "[data-radix-popper-content-wrapper] :is([role=menu],[role=dialog])",
+          );
         if (!stays) timer = setTimeout(() => setPeeking(false), PEEK_CLOSE_DELAY_MS);
       };
       document.addEventListener("pointermove", onMove);
@@ -252,11 +255,14 @@ const Sidebar = React.forwardRef<
         />
         <div
           className={cn(
-            "duration-base ease-surface fixed inset-y-0 z-10 hidden w-(--sidebar-width) transition-[left,right,width,top,bottom] md:flex",
+            "duration-base ease-surface fixed inset-y-0 z-10 hidden w-(--sidebar-width) transition-[left,right,width,top,bottom,box-shadow] md:flex",
             // Collapsed off-canvas, the panel is a card below the header, so a
             // peek reads as floating over the page rather than as the page's
             // column coming back.
-            "group-data-[collapsible=offcanvas]:top-header group-data-[collapsible=offcanvas]:bottom-2 group-data-[collapsible=offcanvas]:z-40 group-data-[collapsible=offcanvas]:overflow-hidden group-data-[collapsible=offcanvas]:border-y group-data-[collapsible=offcanvas]:shadow-xl",
+            "group-data-[collapsible=offcanvas]:top-header group-data-[collapsible=offcanvas]:bottom-2 group-data-[collapsible=offcanvas]:z-40 group-data-[collapsible=offcanvas]:overflow-hidden group-data-[collapsible=offcanvas]:border-y",
+            // The shadow only while peeking: parked just off the edge, the card
+            // would still cast it onto the page.
+            peek && "shadow-xl",
             side === "left"
               ? cn(
                   "left-0 group-data-[collapsible=offcanvas]:rounded-r-xl",
