@@ -8,8 +8,7 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0033-unshare-space-access-loss.ts [--apply]
  *
- * Run FIRST in the deploy window, from the checkout of tag `v1.0.0-beta.65` — its release's code
- * (below): platform stopped, then `pg_dump`,
+ * Run FIRST in the deploy window, from the release checkout: platform stopped, then `pg_dump`,
  * then `--apply`, then `0032-connection-sets.sql` with the command `--apply` prints (its
  * `-v ran_0033=1` is what lets `0032` run), then the deploy (`0077` applies at boot), then
  * reopen. It refuses an empty `DATABASE_URL` (the client would open `./data/pglite`) and prints
@@ -17,9 +16,9 @@
  *
  * Before `0032` because its freeze turns a colleague's still-shared connection into a member pin:
  * run after it, this would unshare connections just frozen, and those members would fail on pins
- * they never set. It reads and writes `integration_connections` (`id`, `user_id`, `space_id`,
- * `shared_with_org`, `updated_at`) and `package_schedules` (below), and reads `spaces`,
- * `org_members`, `space_members` and `space_roles`.
+ * they never set. Safe on the pre-`0077` schema: it reads and writes only
+ * `integration_connections` (`id`, `user_id`, `space_id`, `shared_with_org`, `updated_at`),
+ * `spaces`, `org_members`, `space_members` and `space_roles`, none of which `0077` changes.
  *
  * The release unshares a connection the moment its owner loses access to its space; this applies
  * the same unshare to owners who lost it before the deploy — whether they left the organization
@@ -29,12 +28,7 @@
  * default naming an unshared connection is left as it is and fails its runs with
  * `pinned_connection_unavailable`, as after a live access loss, until an admin changes it.
  *
- * It imports that service, so it runs with the code of its release: a later one writes what the
- * window's schema does not have yet (`package_schedules.disabled_reason`, `0078`;
- * `connection_unshared`, `0079`). From a later checkout, on a database already migrated, the
- * service also disables, with `connection_unshared`, other actors' enabled schedules naming an
- * unshared connection, and this prints their ids. Their queue jobs are not removed here; each one's
- * next fire finds the row disabled, skips it and removes its job (`triggerScheduledRun`).
+ * Run it from the `v1.0.0-beta.65` checkout: a later service writes columns this window lacks.
  *
  * Dry run by default (rolled back); `--apply` commits. Idempotent: a second run unshares nothing.
  * Rollback: the owner re-shares, should they regain the space; the ids are printed.
@@ -67,25 +61,20 @@ export async function runUnshareSpaceAccessLoss(options: {
   );
   out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
   const unshared: string[] = [];
-  const disabled: string[] = [];
   try {
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL lock_timeout = '5s'");
       await tx.execute("SET LOCAL statement_timeout = '120s'");
       const orgs = await tx.select({ id: organizations.id }).from(organizations);
       for (const org of orgs) {
-        const { connectionIds: ids, disabledScheduleIds } =
-          await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId: org.id });
+        const { connectionIds: ids } = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+          orgId: org.id,
+        });
         if (ids.length === 0) continue;
         out(`  org ${org.id}: ${ids.length} — ${ids.join(", ")}`);
-        if (disabledScheduleIds.length > 0) {
-          out(`    schedules disabled: ${disabledScheduleIds.join(", ")}`);
-        }
         unshared.push(...ids);
-        disabled.push(...disabledScheduleIds);
       }
       out(`connections unshared: ${unshared.length}`);
-      out(`schedules disabled (connection_unshared): ${disabled.length}`);
       if (!apply) throw new DryRunRollback();
     });
     out("0033: APPLIED — committed. Next, in the same shell:");

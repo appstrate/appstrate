@@ -61,6 +61,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
+import { invalidateSchedules } from "./use-schedules";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -436,7 +437,8 @@ export function usePromoteIntegrationOAuthClient() {
 
 /** Also deletes the connections it minted — in every space for an org client. */
 export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.oauthClient.delete.success");
+  const qc = useQueryClient();
+  const clientsChanged = useClientMutationSuccess("integration.oauthClient.delete.success");
   return useMutation({
     mutationFn: async (vars: { params: ClientPath }) => {
       if (tier === "space") {
@@ -447,7 +449,11 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
         });
       }
     },
-    onSuccess,
+    onSuccess: () => {
+      clientsChanged();
+      // Deleting the connections it minted disables schedules naming them.
+      invalidateSchedules(qc);
+    },
   });
 }
 
@@ -626,10 +632,12 @@ export function useUpdateIntegrationConnection() {
       );
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       toast.success(t("integration.connection.updated"));
       // A label shows on every picker and readiness view, not just the connection list.
       void invalidateIntegrationQueries(qc);
+      // Unsharing disables other people's schedules naming the connection.
+      if (vars.body.shared_with_org === false) invalidateSchedules(qc);
     },
   });
 }

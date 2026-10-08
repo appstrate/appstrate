@@ -5,8 +5,9 @@
  * to the ones another actor armed: never refused, never shrunk to the survivors — the overrides
  * stay as written and re-enabling makes that actor choose again.
  *
- * Every writer that locks several schedules locks them in id order, in one statement: a schedule
- * one transaction holds as its own is another's foreign one.
+ * Every explicit writer that locks several schedules locks them in id order, in one statement: a
+ * schedule one transaction holds as its own is another's foreign one. A cascade delete (agent,
+ * space, end user) locks in the order it walks; a deadlock with one is detected by Postgres.
  */
 
 import { asc, inArray, or, sql, type SQL } from "drizzle-orm";

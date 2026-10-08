@@ -86,7 +86,10 @@ export function useSchedules(packageId: string | undefined) {
   });
 }
 
-/** Every cached schedule list and detail, across org/space — also used after a connection delete. */
+/**
+ * Every cached schedule list and detail, across org/space — also used after a connection delete or
+ * unshare.
+ */
 export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });

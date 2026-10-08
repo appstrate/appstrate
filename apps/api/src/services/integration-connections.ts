@@ -3177,7 +3177,7 @@ export async function planConnectionForget(
   };
 }
 
-/** Code-unit order, as `ORDER BY` compares these ASCII ids; `localeCompare` follows a locale. */
+/** Code-unit order: the same on every host, where `localeCompare` follows a locale. */
 function compareBinary(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }

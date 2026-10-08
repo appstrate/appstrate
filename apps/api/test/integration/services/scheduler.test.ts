@@ -1165,15 +1165,16 @@ describeRequiresRedis("scheduler service", () => {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [conn!.id] },
       });
-
-      await updateMemberRole(orgId, admin.id, "member", { userId, firstPartySession: true });
-
-      const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
-      expect(after).toMatchObject({ enabled: false, disabledReason: "connection_unshared" });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
       });
       try {
+        expect(await queue.getJobScheduler(schedule.id)).toBeDefined();
+
+        await updateMemberRole(orgId, admin.id, "member", { userId, firstPartySession: true });
+
+        const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+        expect(after).toMatchObject({ enabled: false, disabledReason: "connection_unshared" });
         expect(await queue.getJobScheduler(schedule.id)).toBeUndefined();
       } finally {
         await queue.close();
