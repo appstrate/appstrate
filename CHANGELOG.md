@@ -57,8 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   space), every enabled schedule of another actor whose `connection_overrides`
   name the connection gets `enabled: false` and a `disabled_reason`,
   `connection_deleted` or the new `connection_unshared`; its overrides are
-  kept, and re-enabling it requires choosing that integration's connections
-  again. Neither act is refused because of these schedules, and the owner's
+  kept, and while the connection stays unreachable, re-enabling it requires a
+  new choice. Neither act is refused because of these schedules, and the owner's
   own schedules and other members' pins behave as before. A schedule already
   broken this way before the upgrade stays as it is.
   `GET /api/me/connections/{id}/delete-impact` gains the required

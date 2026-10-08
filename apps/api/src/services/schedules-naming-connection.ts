@@ -22,6 +22,11 @@ export function scheduleOverridesName(connectionId: string): SQL {
   )`;
 }
 
+/** `connection_overrides` names one of `connectionIds`; `undefined` for none. */
+export function schedulesNamingAny(connectionIds: readonly string[]): SQL | undefined {
+  return or(...connectionIds.map((id) => scheduleOverridesName(id)));
+}
+
 /** A connection and the actor owning it. */
 interface OwnedConnection {
   id: string;
@@ -50,7 +55,10 @@ export function isForeignNaming(schedule: NamingSchedule, connection: OwnedConne
   );
 }
 
-/** The `updated_at` bump fails the compare-and-set of a PATCH read before it. */
+/**
+ * Disable `ids` for `reason`: `enabled` off, `next_run_at` cleared, `updated_at` bumped so a PATCH
+ * read before fails its compare-and-set. Their jobs are the caller's to remove after the commit.
+ */
 export async function disableSchedules(
   tx: Tx,
   ids: readonly string[],
@@ -74,7 +82,7 @@ export async function disableForeignSchedules(
   reason: ScheduleDisabledReason,
   alsoLock?: SQL,
 ): Promise<string[]> {
-  const naming = or(...connections.map((c) => scheduleOverridesName(c.id)));
+  const naming = schedulesNamingAny(connections.map((c) => c.id));
   if (!naming && !alsoLock) return [];
   const rows = await tx
     .select({

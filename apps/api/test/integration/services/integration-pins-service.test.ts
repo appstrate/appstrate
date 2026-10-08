@@ -747,6 +747,34 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(row!.enabled).toBe(false);
       });
 
+      it("an OAuth client delete disables a colleague's schedule naming two of its connections once", async () => {
+        const minted = await seedSharedConnections(2);
+        const clientId = await seedClientMinting(minted);
+        const colleague = await seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId: scope.spaceId,
+          userId: ctx.user.id,
+          nextRunAt: new Date(Date.now() + 3_600_000),
+          connectionOverrides: { [INTEGRATION]: minted },
+        });
+
+        const { disabledScheduleIds } = await deleteIntegrationOAuthClient(
+          scope,
+          INTEGRATION,
+          clientId,
+        );
+
+        expect(disabledScheduleIds).toEqual([colleague.id]);
+        const [row] = await db.select().from(schedules).where(eq(schedules.id, colleague.id));
+        expect(row).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          nextRunAt: null,
+          connectionOverrides: { [INTEGRATION]: minted },
+        });
+      });
+
       it("an OAuth client delete forgets two minted connections sharing a pin and a schedule set", async () => {
         const minted = await seedSharedConnections(2);
         const clientId = await seedClientMinting(minted);

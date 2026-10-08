@@ -473,8 +473,9 @@ export const mePaths = {
         "Another member's pins keep the id, and their next run fails " +
         "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
         "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
-        "transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept, so " +
-        "re-enabling one requires a new choice; delete-impact counts them " +
+        "transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: " +
+        "while the connection stays unreachable, re-enabling one requires a new choice. " +
+        "Delete-impact counts them " +
         "(`other_schedules_disabled_count`). " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +

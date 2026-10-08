@@ -310,12 +310,10 @@ export interface ConnectionDeleteImpact {
   other_schedules_disabled_count: number;
 }
 
-/** The impact of a delete that rewrites nothing the caller may see. */
-export const NO_CONNECTION_DELETE_IMPACT: ConnectionDeleteImpact = {
-  pins: [],
-  schedules: [],
-  other_schedules_disabled_count: 0,
-};
+/** The impact of a delete that rewrites nothing the caller may see; a fresh value each call. */
+export function noConnectionDeleteImpact(): ConnectionDeleteImpact {
+  return { pins: [], schedules: [], other_schedules_disabled_count: 0 };
+}
 
 /**
  * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
@@ -341,7 +339,7 @@ export async function getConnectionDeleteImpact(
       ),
     )
     .limit(1);
-  if (!row) return NO_CONNECTION_DELETE_IMPACT;
+  if (!row) return noConnectionDeleteImpact();
   // Member pins need no such filter: a pin write requires its connections in the pin's own space.
   const plan = await planConnectionForget(
     db,

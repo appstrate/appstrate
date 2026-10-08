@@ -112,6 +112,7 @@ import {
   isForeignNaming,
   scheduleActorIs,
   scheduleOverridesName,
+  schedulesNamingAny,
 } from "./schedules-naming-connection.ts";
 import {
   actorIdentityOf,
@@ -2047,24 +2048,33 @@ export async function deleteIntegrationOAuthClient(
               ),
             )
             .returning(deletedConnectionOwner);
-    // Each forget below locks its connection's rows; locked here first for all of them, in the
-    // plan's order, so two batches cannot each hold a row the other waits on.
+    // Each forget below locks its connection's rows: the owner's member pins naming it, then every
+    // schedule naming it. Locked here first for all of them, in the plan's order, so two batches
+    // cannot each hold a row the other waits on.
     const forgotten = deletedConns.map((c) => c.id);
-    if (forgotten.length > 0) {
+    const owners = [...new Set(deletedConns.flatMap((c) => (c.userId ? [c.userId] : [])))];
+    if (owners.length > 0) {
       await tx
         .select({ id: integrationPins.id })
         .from(integrationPins)
-        .where(arrayOverlaps(integrationPins.connectionIds, forgotten))
+        .where(
+          and(
+            inArray(integrationPins.userId, owners),
+            arrayOverlaps(integrationPins.connectionIds, forgotten),
+          ),
+        )
         .orderBy(
           asc(integrationPins.packageId),
           asc(integrationPins.integrationId),
           asc(integrationPins.id),
         )
         .for("update");
+    }
+    if (forgotten.length > 0) {
       await tx
         .select({ id: schedules.id })
         .from(schedules)
-        .where(or(...forgotten.map((id) => scheduleOverridesName(id))))
+        .where(schedulesNamingAny(forgotten))
         .orderBy(asc(schedules.id))
         .for("update");
     }
@@ -3134,9 +3144,9 @@ export async function planConnectionForget(
     .filter((row) => scheduleActorIs(row, owner))
     .sort(
       (a, b) =>
-        a.agentPackageId.localeCompare(b.agentPackageId) ||
+        compareBinary(a.agentPackageId, b.agentPackageId) ||
         a.createdAt.getTime() - b.createdAt.getTime() ||
-        a.id.localeCompare(b.id),
+        compareBinary(a.id, b.id),
     );
   return {
     pins: pinRows.map((pin) => ({
@@ -3165,6 +3175,11 @@ export async function planConnectionForget(
       .filter((row) => isForeignNaming(row, connection))
       .map((row) => row.id),
   };
+}
+
+/** Code-unit order, as `ORDER BY` compares these ASCII ids; `localeCompare` follows a locale. */
+function compareBinary(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /**

@@ -8,7 +8,8 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0033-unshare-space-access-loss.ts [--apply]
  *
- * Run FIRST in the deploy window, from the release checkout: platform stopped, then `pg_dump`,
+ * Run FIRST in the deploy window, from the checkout of tag `v1.0.0-beta.65` — its release's code
+ * (below): platform stopped, then `pg_dump`,
  * then `--apply`, then `0032-connection-sets.sql` with the command `--apply` prints (its
  * `-v ran_0033=1` is what lets `0032` run), then the deploy (`0077` applies at boot), then
  * reopen. It refuses an empty `DATABASE_URL` (the client would open `./data/pglite`) and prints
@@ -28,10 +29,12 @@
  * default naming an unshared connection is left as it is and fails its runs with
  * `pinned_connection_unavailable`, as after a live access loss, until an admin changes it.
  *
- * Since #1767 the service also disables, with `connection_unshared`, other actors' enabled schedules
- * naming an unshared connection: a run now needs migration `0079`, and prints those schedule ids.
- * Their queue jobs are not removed here; each one's next fire finds the row disabled, skips it and
- * removes its job (`triggerScheduledRun`).
+ * It imports that service, so it runs with the code of its release: a later one writes what the
+ * window's schema does not have yet (`package_schedules.disabled_reason`, `0078`;
+ * `connection_unshared`, `0079`). From a later checkout, on a database already migrated, the
+ * service also disables, with `connection_unshared`, other actors' enabled schedules naming an
+ * unshared connection, and this prints their ids. Their queue jobs are not removed here; each one's
+ * next fire finds the row disabled, skips it and removes its job (`triggerScheduledRun`).
  *
  * Dry run by default (rolled back); `--apply` commits. Idempotent: a second run unshares nothing.
  * Rollback: the owner re-shares, should they regain the space; the ids are printed.

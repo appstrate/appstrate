@@ -303,13 +303,13 @@ export async function removeSpaceMember(params: {
     const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
-    if (!existing) return removal(false, accessAfter, NOTHING_UNSHARED);
+    if (!existing) return removal(false, accessAfter, nothingUnshared());
     assertCanManageSpaceMember(params.actorPermissions, existing.ref);
     const deleted = await tx
       .delete(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    if (deleted.length === 0) return removal(false, accessAfter, NOTHING_UNSHARED);
+    if (deleted.length === 0) return removal(false, accessAfter, nothingUnshared());
     const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId,
@@ -432,16 +432,15 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 }
 
 /** What an access loss unshared, and the other actors' schedules that disabled. */
-interface ConnectionsUnshared {
+export interface ConnectionsUnshared {
   connectionIds: string[];
   disabledScheduleIds: string[];
 }
 
-/** {@link unshareConnectionsOfOwnersWithoutAccess} when nothing loses access. */
-export const NOTHING_UNSHARED: ConnectionsUnshared = {
-  connectionIds: [],
-  disabledScheduleIds: [],
-};
+/** {@link unshareConnectionsOfOwnersWithoutAccess} when nothing loses access, fresh each call. */
+export function nothingUnshared(): ConnectionsUnshared {
+  return { connectionIds: [], disabledScheduleIds: [] };
+}
 
 /**
  * The one gate of a share (`shared_with_org: true`), called in the sharing transaction before the

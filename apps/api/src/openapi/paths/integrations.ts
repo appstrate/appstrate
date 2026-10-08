@@ -1212,8 +1212,9 @@ export const integrationsPaths = {
         "that member's next run fails with `pinned_connection_unavailable` until they pick again. " +
         "Unsharing a shared connection disables, in the same transaction, every enabled schedule of " +
         "another actor than its owner whose `connection_overrides` name it " +
-        "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept, so re-enabling it " +
-        "requires a new choice; the owner's own schedules are untouched. " +
+        "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the " +
+        "connection stays unreachable, re-enabling it requires a new choice. The owner's own " +
+        "schedules are untouched. " +
         "A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
         "with 409 `connection_label_taken`.",
