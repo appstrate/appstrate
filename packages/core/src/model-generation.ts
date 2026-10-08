@@ -103,7 +103,10 @@ export const modelGenerationCapabilitiesSchema = z
         levels: z
           .partialRecord(modelReasoningLevelSchema, modelCapabilitySupportSchema)
           .default({}),
-        /** Absent when the model does not reason or does not take `off`. */
+        /**
+         * Absent when the model does not reason, does not take `off`, or when
+         * what it sends is not known.
+         */
         off: modelReasoningOffSchema.optional(),
       })
       .default({ supported: "unknown", adaptive: null, levels: {} }),

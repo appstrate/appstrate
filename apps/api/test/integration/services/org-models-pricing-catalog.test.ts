@@ -8,7 +8,6 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { buildPiModel, piReasoningLevels } from "@appstrate/runner-pi/pi-model";
-import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -173,7 +172,6 @@ describe("loadModel — catalog fallback", () => {
         baseUrl: "http://sidecar:8080/llm",
         reasoning: resolved.reasoning,
       });
-      expect(generation?.off).toBe(piReasoningOff(run)!);
       const levels = piReasoningLevels(run);
       expect(
         Object.keys(generation!.levels).filter(

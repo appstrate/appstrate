@@ -191,7 +191,9 @@ function generationOf(record: Model<Api>): ModelGenerationCapabilities {
     : !(record.reasoning && RESPONSES_APIS.has(record.api));
   const levels = new Set<string>(piReasoningLevels(record));
   const support = (on: boolean): ModelCapabilitySupport => (on ? "supported" : "unsupported");
-  const off = piReasoningOff(record);
+  // As a run sees the record: its Pi talks to the sidecar or the llm-proxy,
+  // never the upstream URL, so only the provider shapes its request.
+  const off = piReasoningOff({ ...record, baseUrl: "" });
   return {
     temperature: support(temperatureSupported),
     reasoning: {

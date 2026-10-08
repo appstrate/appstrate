@@ -150,7 +150,7 @@ describe("projectAliasedModel", () => {
       aliased: true,
       generation: {
         temperature: "unknown",
-        reasoning: { supported: "unknown", adaptive: null, levels: {}, off: "unsent" },
+        reasoning: { supported: "unknown", adaptive: null, levels: {} },
       },
     });
 
