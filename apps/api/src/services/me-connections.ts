@@ -26,7 +26,7 @@ import {
   packages,
   spaces,
 } from "@appstrate/db/schema";
-import { actorFilter, type Actor } from "../lib/actor.ts";
+import { actorFilter, actorFromIds, type Actor } from "../lib/actor.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -309,19 +309,33 @@ export interface ConnectionDeleteImpact {
 
 /**
  * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
- * and per (schedule, integration) naming `connectionId`. The delete accepts only the owner, so the
- * caller stands for the owner. A bound credential sees its org (and space) only.
+ * and per (schedule, integration) naming `connectionId`. Empty wherever that delete refuses: a
+ * connection the caller does not own, or outside a bound credential's org (and space).
  */
 export async function getConnectionDeleteImpact(
   actor: Actor,
   connectionId: string,
   authority: MeConnectionAuthority,
 ): Promise<ConnectionDeleteImpact> {
-  const plan = await planConnectionForget(
-    db,
-    { id: connectionId, owner: actor },
-    { within: authority.kind === "bound" ? authority : undefined },
-  );
+  const [row] = await db
+    .select({
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+    })
+    .from(integrationConnections)
+    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        actorFilter(actor, integrationConnections),
+        authorityFilter(authority, spaces.orgId, integrationConnections.spaceId),
+      ),
+    )
+    .limit(1);
+  if (!row) return { pins: [], schedules: [] };
+  // `integration_connections` holds exactly one owner id.
+  const owner = actorFromIds(row.userId, row.endUserId)!;
+  const plan = await planConnectionForget(db, { id: connectionId, owner });
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];
   const agents =
     agentIds.length === 0
@@ -330,8 +344,9 @@ export async function getConnectionDeleteImpact(
           .select({ id: packages.id, draftManifest: packages.draftManifest })
           .from(packages)
           .where(inArray(packages.id, agentIds));
+  // The cascading FK on `package_id` guarantees every agent's row.
   const displayNames = new Map(agents.map((pkg) => [pkg.id, getPackageDisplayName(pkg)]));
-  const displayName = (id: string) => displayNames.get(id) ?? id;
+  const displayName = (id: string) => displayNames.get(id)!;
   return {
     pins: plan.pins.map((pin) => ({
       agent_package_id: pin.agentPackageId,
@@ -350,7 +365,7 @@ export async function getConnectionDeleteImpact(
           agent_display_name: displayName(schedule.agentPackageId),
           integration_package_id: integrationId,
           connection_count: ids.length,
-          disables: schedule.disables && !schedule.nextOverrides?.[integrationId],
+          disables: schedule.enabled && !schedule.nextOverrides?.[integrationId],
         })),
     ),
   };

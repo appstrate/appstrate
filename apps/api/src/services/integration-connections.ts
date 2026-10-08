@@ -3000,12 +3000,12 @@ async function forgetDeletedConnection(
   const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
   for (const pin of plan.pins) {
     // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
-    if (pin.kept.length === 0) {
+    if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
     } else {
       await tx
         .update(integrationPins)
-        .set({ connectionIds: pin.kept, updatedAt: new Date() })
+        .set({ connectionIds: pin.nextConnectionIds, updatedAt: new Date() })
         .where(eq(integrationPins.id, pin.id));
     }
   }
@@ -3038,7 +3038,7 @@ interface PinForget {
   integrationId: string;
   connectionIds: string[];
   /** `connectionIds` without the connection; empty drops the pin. */
-  kept: string[];
+  nextConnectionIds: string[];
 }
 
 /** One of the owner's schedules whose `connection_overrides` name the connection. */
@@ -3046,6 +3046,7 @@ interface ScheduleForget {
   id: string;
   name: string | null;
   agentPackageId: string;
+  enabled: boolean;
   connectionOverrides: ConnectionOverrides;
   /** Without the connection: an emptied set drops its integration, an emptied map is `null`. */
   nextOverrides: ConnectionOverrides | null;
@@ -3060,17 +3061,16 @@ interface ConnectionForgetPlan {
 }
 
 /**
- * The rewrites forgetting connection `id` makes to `owner`'s member pins and schedule overrides;
- * other members' keep the id and fail loudly. `within` narrows the rows to an org (and space);
- * `lock` takes them `FOR UPDATE`, for a caller that applies the plan in the same transaction.
+ * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
+ * overrides; other members' keep the id and fail loudly. `lock` takes the rows `FOR UPDATE`, for a
+ * caller that applies the plan in the same transaction.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
-  options: { within?: { orgId: string; spaceId?: string }; lock?: boolean } = {},
+  { lock = false }: { lock?: boolean } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
-  const { within, lock = false } = options;
   const pinQuery = executor
     .select({
       id: integrationPins.id,
@@ -3080,17 +3080,7 @@ export async function planConnectionForget(
     })
     .from(integrationPins)
     .where(
-      and(
-        eq(integrationPins.userId, owner.id),
-        arrayContains(integrationPins.connectionIds, [id]),
-        within
-          ? inArray(
-              integrationPins.spaceId,
-              executor.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, within.orgId)),
-            )
-          : undefined,
-        within?.spaceId ? eq(integrationPins.spaceId, within.spaceId) : undefined,
-      ),
+      and(eq(integrationPins.userId, owner.id), arrayContains(integrationPins.connectionIds, [id])),
     )
     .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
   const scheduleQuery = executor
@@ -3102,21 +3092,17 @@ export async function planConnectionForget(
       connectionOverrides: schedules.connectionOverrides,
     })
     .from(schedules)
-    .where(
-      and(
-        actorFilter(owner, schedules),
-        scheduleOverridesName(id),
-        within ? eq(schedules.orgId, within.orgId) : undefined,
-        within?.spaceId ? eq(schedules.spaceId, within.spaceId) : undefined,
-      ),
-    )
+    .where(and(actorFilter(owner, schedules), scheduleOverridesName(id)))
     .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
   // Member pins are a member's own: an end user holds none.
   const pinRows = owner.type !== "user" ? [] : await (lock ? pinQuery.for("update") : pinQuery);
   const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
   return {
-    pins: pinRows.map((pin) => ({ ...pin, kept: pin.connectionIds.filter((c) => c !== id) })),
-    schedules: scheduleRows.map(({ enabled, connectionOverrides, ...schedule }) => {
+    pins: pinRows.map((pin) => ({
+      ...pin,
+      nextConnectionIds: pin.connectionIds.filter((c) => c !== id),
+    })),
+    schedules: scheduleRows.map(({ connectionOverrides, ...schedule }) => {
       const overrides = connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
         const rest = ids.filter((c) => c !== id);
@@ -3126,7 +3112,7 @@ export async function planConnectionForget(
         ...schedule,
         connectionOverrides: overrides,
         nextOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        disables: enabled && kept.length < Object.keys(overrides).length,
+        disables: schedule.enabled && kept.length < Object.keys(overrides).length,
       };
     }),
   };

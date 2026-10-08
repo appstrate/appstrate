@@ -2005,7 +2005,7 @@ export interface paths {
         };
         /**
          * The caller's pins and schedules a connection delete would rewrite
-         * @description Lists the caller's own member pins and schedules whose connection set names this connection — exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, admin pins and org defaults are not listed: the delete leaves them untouched. An id the caller references nowhere, or not a UUID, answers empty lists. A delegated or end-user credential sees its bound organization (and space) only; an end user has no pins.
+         * @description Lists the caller's own member pins and schedules whose connection set names this connection — exactly the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, admin pins and org defaults are not listed: the delete leaves them untouched. Wherever the delete refuses, the lists are empty: an id that is not a UUID, unknown, or of a connection the caller does not own, and for a delegated or end-user credential a connection outside its bound organization (and space). An end user has no pins.
          */
         get: operations["getMyConnectionDeleteImpact"];
         put?: never;
@@ -14636,7 +14636,7 @@ export interface operations {
                             integration_package_id: string;
                             /** @description Size of the schedule's override set for this integration before the delete. */
                             connection_count: number;
-                            /** @description True when the delete disables this schedule: it is enabled and this connection is the only one in its set for the integration. */
+                            /** @description True when the delete disables this schedule: it is enabled, and this set empties. */
                             disables: boolean;
                         }[];
                     };

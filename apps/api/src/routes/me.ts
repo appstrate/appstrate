@@ -210,7 +210,7 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 
 /**
  * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
- * schedules the delete would rewrite. A non-UUID id answers empty lists.
+ * schedules the delete would rewrite. Empty wherever that delete refuses, a non-UUID id included.
  */
 router.get(
   "/connections/:connectionId/delete-impact",
