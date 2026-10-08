@@ -26,6 +26,7 @@ import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/con
 import { listSpaces, createSpace, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { pinMissing, remedyLine } from "../lib/remedy.ts";
 
 interface SpaceBaseOptions {
   profile?: string;
@@ -104,13 +105,10 @@ export async function spaceCurrentCommand(
   opts: SpaceBaseOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
-  const { profile } = await resolveActiveProfile(opts.profile);
-  if (!profile) {
-    io.stderr.write("Not logged in. Run: appstrate login\n");
-    io.exit(1);
-  }
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
+  requireLoggedIn(profileName, profile, io);
   if (!profile.spaceId) {
-    io.stderr.write("No space pinned. Run: appstrate space switch\n");
+    io.stderr.write(`${remedyLine(pinMissing("space", profileName))}\n`);
     io.exit(1);
   }
   io.stdout.write(`${profile.spaceId}\n`);

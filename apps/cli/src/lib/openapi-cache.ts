@@ -34,7 +34,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { apiFetchRaw, AuthError } from "./api.ts";
+import { apiFetchRaw, sessionRevokedError } from "./api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /** Minimal OpenAPI 3.1 shape — only the fields we actually read. */
@@ -227,11 +227,7 @@ export async function fetchOpenApi(
     return cached.doc;
   }
 
-  if (res.status === 401) {
-    throw new AuthError(
-      `Unauthorized — your session may have been revoked. Run: appstrate login --profile ${profileName}`,
-    );
-  }
+  if (res.status === 401) throw await sessionRevokedError(profileName);
 
   if (!res.ok) {
     let body: string;

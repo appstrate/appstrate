@@ -16,7 +16,7 @@
  * the Bearer JWT issued by `/api/auth/cli/token`.
  */
 
-import { readConfig, resolveProfileName } from "../lib/config.ts";
+import { readConfig, requireLoggedIn, resolveProfileName } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
@@ -49,12 +49,7 @@ export async function whoamiCommand(
   const profileName = resolveProfileName(opts.profile, config);
   const profile = config.profiles[profileName];
 
-  if (!profile) {
-    io.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
-    io.exit(1);
-  }
+  requireLoggedIn(profileName, profile, io);
 
   try {
     const me = await apiFetch<ProfileResponse>(profileName, "/api/profile");

@@ -28,6 +28,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
+import { profileMissing, remedyLine } from "./remedy.ts";
 
 export interface Profile {
   instance: string;
@@ -363,9 +364,7 @@ export function requireLoggedIn(
   io: CommandIO = DEFAULT_IO,
 ): asserts profile is Profile {
   if (!profile) {
-    io.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
+    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
     io.exit(1);
   }
 }

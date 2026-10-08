@@ -19,7 +19,8 @@ export function getLockPath(): string {
  * Released in a `finally`. Throws `FileLockBusyError` past `timeoutMs`
  * (default 60 s — fits a large org's first sync, inside a marketplace
  * command's timeout) while another process holds the lock; runs `body`
- * unlocked, after a warning on stderr, where `flock(2)` does not work.
+ * unlocked, after a warning on stderr, where `flock(2)` does not work or the
+ * lock file cannot be opened.
  */
 export function withSyncLock<T>(body: () => Promise<T>, options: FileLockOptions = {}): Promise<T> {
   return withFileLock(getLockPath(), "code sync", body, options);

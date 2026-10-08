@@ -20,6 +20,9 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getDataDir, homeDir } from "../config.ts";
+import { shellQuote } from "../shell.ts";
+import type { Actionable } from "../remedy.ts";
+import { getNoticePath } from "./state.ts";
 
 export const SYNC_TARGETS = ["claude-plugin", "codex", "claude-user"] as const;
 export type SyncTarget = (typeof SYNC_TARGETS)[number];
@@ -69,6 +72,23 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 /** Re-runs the marketplace sync and reinstalls the plugin: what makes a new tree live. */
 export const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
 
+/** Every plugin's one hook: print the notice (`notice.ts`), if any; never fail. */
+function noticeHook(): string {
+  const hooks = {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: "startup",
+          hooks: [
+            { type: "command", command: `cat ${shellQuote(getNoticePath())} 2>/dev/null || true` },
+          ],
+        },
+      ],
+    },
+  };
+  return `${JSON.stringify(hooks, null, 2)}\n`;
+}
+
 /**
  * Only public connection coordinates belong in a plugin, never CLI credentials.
  * The active space travels as `X-Space-Id` independently of which spaces
@@ -82,7 +102,10 @@ export function pluginFixedFiles(connection?: {
 }): Record<string, Uint8Array> {
   const encoder = new TextEncoder();
   const files = Object.fromEntries(
-    Object.entries(PLUGIN_FILES).map(([path, text]) => [path, encoder.encode(text)]),
+    Object.entries({ ...PLUGIN_FILES, "hooks/hooks.json": noticeHook() }).map(([path, text]) => [
+      path,
+      encoder.encode(text),
+    ]),
   );
   if (connection) {
     const config = {
@@ -115,11 +138,9 @@ const SETUP_SLUG = "setup";
 /**
  * The plugin a machine gets before the CLI is connected, so the marketplace
  * install succeeds and the remedy sits where the user works: one skill that
- * says how, plus a `SessionStart` hook that says it at every session start —
- * to the user, and to the model so it can offer to run the login itself.
- * The first connected sync replaces the whole tree.
+ * says how. The first connected sync replaces the whole tree.
  */
-export function setupPluginFiles(problem: string, remedy: string): Record<string, Uint8Array> {
+export function setupPluginFiles({ problem, remedy }: Actionable): Record<string, Uint8Array> {
   const skillMd = [
     "---",
     `name: ${SETUP_SLUG}`,
@@ -133,55 +154,19 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
     `The \`${PLUGIN_NAME}\` plugin syncs your Appstrate organization's skills into Claude Code, ` +
       `but this machine is not connected yet: ${problem}.`,
     "",
-    "1. Run the login. It opens the browser on the device-flow page; the user only has to " +
-      "approve there. Ask for the Appstrate instance URL if unknown (`https://app.appstrate.com` " +
-      "for the hosted service) and pass it as `--instance`:",
+    "1. Run this command, replacing any `<placeholder>` in it by asking the user:",
     "",
     "   ```sh",
-    `   ${remedy} --instance <url>`,
+    `   ${remedy}`,
     "   ```",
-    "",
-    "   With several organizations, add `--org <slug>`.",
-    `2. Reload the plugin with \`${PLUGIN_UPDATE_COMMAND}\`, or start a new ` +
-      "Claude Code session. The organization's skills then replace this one.",
+    `2. Run \`${PLUGIN_UPDATE_COMMAND}\`, then start a new Claude Code session: ` +
+      "the organization's skills replace this one there.",
     "",
   ].join("\n");
-  const hookOutput = {
-    systemMessage:
-      `Appstrate skills: this machine is not connected (${problem}). ` +
-      `Run \`${remedy}\`, or ask Claude to run it for you.`,
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext:
-        `The ${PLUGIN_NAME} plugin is installed but not connected: ${problem}. ` +
-        `Offer to run \`${remedy} --instance <url>\` for the user (it opens the browser; ` +
-        `they only approve there), then \`${PLUGIN_UPDATE_COMMAND}\`. ` +
-        `The /${PLUGIN_NAME}:${SETUP_SLUG} skill has the details.`,
-    },
-  };
-  const hooks = {
-    hooks: {
-      SessionStart: [
-        {
-          matcher: "startup",
-          hooks: [
-            { type: "command", command: `printf '%s' ${shellQuote(JSON.stringify(hookOutput))}` },
-          ],
-        },
-      ],
-    },
-  };
-  const encoder = new TextEncoder();
   return {
     ...pluginFixedFiles(),
-    "hooks/hooks.json": encoder.encode(`${JSON.stringify(hooks, null, 2)}\n`),
-    [`skills/${SETUP_SLUG}/SKILL.md`]: encoder.encode(skillMd),
+    [`skills/${SETUP_SLUG}/SKILL.md`]: new TextEncoder().encode(skillMd),
   };
-}
-
-/** POSIX single-quote quoting: the only escape is closing, backslash-quoting, reopening. */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /** Atomic swap of the whole plugin root, same staging discipline as {@link writePluginTree}. */

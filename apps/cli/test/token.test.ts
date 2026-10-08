@@ -7,9 +7,9 @@
  *   1. No token plaintext ever reaches stdout or stderr — the whole
  *      point of the command is metadata-only disclosure.
  *   2. Expired access tokens still produce a report (status: expired)
- *      rather than surfacing a keyring scrub null. That means we must
- *      seed tokens that `loadTokens` won't auto-scrub — refresh-expiry
- *      must be in the future.
+ *      rather than a "no tokens" null. That means we must seed tokens
+ *      `loadTokens` won't read as expired — refresh-expiry must be in
+ *      the future.
  *   3. A non-JWT access token degrades gracefully: TTL lines still
  *      render, the "JWT claims" section falls back to an explanatory
  *      line rather than throwing.

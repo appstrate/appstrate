@@ -53,6 +53,7 @@ import {
   AuthError,
   ApiError,
 } from "../lib/api.ts";
+import { loginRemedy } from "../lib/remedy.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
@@ -384,7 +385,7 @@ export async function apiCommand(
       io.stderr.write(
         profileName === undefined
           ? "API key rejected — check --api-key / APPSTRATE_API_KEY (revoked, expired, or for another instance)\n"
-          : `Session may be expired — run: appstrate login --profile ${profileName}\n`,
+          : `Session may be expired — run: ${loginRemedy(profileName, auth.instance)}\n`,
       );
     }
 

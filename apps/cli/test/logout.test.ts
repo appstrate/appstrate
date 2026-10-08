@@ -22,6 +22,7 @@ import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
+import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -144,6 +145,51 @@ describe("logout (with refresh token)", () => {
   });
 });
 
+describe("logout (credentials lock)", () => {
+  it("deletes the tokens under the credentials lock, so no refresh can save them back", async () => {
+    await seedLoggedInProfile("default");
+    installFetch(async () => new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+    const heldAtDelete: boolean[] = [];
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword(value: string): void {
+        keyring.store.set(profile, value);
+      },
+      getPassword(): string | null {
+        return keyring.store.get(profile) ?? null;
+      },
+      deletePassword(): void {
+        heldAtDelete.push(credentialsLockHeld());
+        keyring.store.delete(profile);
+      },
+    }));
+
+    const { io } = createMemoryIO();
+    await logoutCommand({ profile: "default" }, io);
+
+    expect(heldAtDelete).toEqual([true]);
+    expect(await loadTokens("default")).toBeNull();
+  });
+});
+
+describe("logout (credentials lock held)", () => {
+  it("still removes the tokens and the profile when the lock stays held past its wait", async () => {
+    await seedLoggedInProfile("default");
+    installFetch(async () => new Response(JSON.stringify({ revoked: true }), { status: 200 }));
+    const release = await holdCredentialsLock();
+
+    const stopClock = jumpClock();
+    try {
+      await logoutCommand({ profile: "default" }, createMemoryIO().io);
+    } finally {
+      stopClock();
+      await release();
+    }
+
+    expect(await loadTokens("default")).toBeNull();
+    expect(await getProfile("default")).toBeNull();
+  });
+});
+
 describe("logout (idempotency)", () => {
   it("is idempotent when already logged out (no tokens, no profile)", async () => {
     installFetch(async () => new Response("", { status: 200 }));
@@ -161,7 +207,8 @@ it("removes credentials even when the synchronization lock cannot be opened", as
   await logoutCommand({}, io);
   expect(await loadTokens("default")).toBeNull();
   expect(await getProfile("default")).toBeNull();
-  expect(stderr()).toContain("could not complete skills cleanup");
+  // An unopenable lock fails open: the skills cleanup runs unlocked, and says so.
+  expect(stderr()).toContain("code sync lock unavailable");
 });
 
 /**
