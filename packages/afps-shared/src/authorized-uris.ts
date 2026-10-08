@@ -164,11 +164,11 @@ function readEntry(pattern: string): EntryReading {
   return { kind: "url", scheme: parsed.scheme, host, literal };
 }
 
-/** A host one label below `literal` must keep its registrable domain inside `literal`. */
-function boundsWildcard(literal: string): boolean {
+/** Whether `host`'s registrable domain lies inside the wildcard's literal part. */
+function domainWithin(literal: string, host: string): boolean {
   if (literal === "") return false;
-  const domain = getDomain(`${WILDCARD_PROBE}.${literal}`, PUBLIC_SUFFIX_LIST);
-  return domain !== null && domain.length <= literal.length;
+  const domain = getDomain(host, PUBLIC_SUFFIX_LIST);
+  return domain !== null && (literal === domain || literal.endsWith(`.${domain}`));
 }
 
 /**
@@ -186,7 +186,7 @@ export function isHostUnboundedUriPattern(pattern: string): boolean {
   if (entry.host.startsWith("[") || WHATWG_IPV4_NUMBER.test(labels[labels.length - 1]!)) {
     return true;
   }
-  return !boundsWildcard(entry.literal);
+  return !domainWithin(entry.literal, `${WILDCARD_PROBE}.${entry.literal}`);
 }
 
 /**
@@ -196,15 +196,11 @@ export function isHostUnboundedUriPattern(pattern: string): boolean {
  */
 export function wildcardMatchStaysWithinBound(pattern: string, targetHost: string): boolean {
   const entry = readEntry(pattern);
-  if (entry.kind === "url-form") return true;
-  if (entry.kind === "path") return !entry.pattern.includes("*");
-  if (entry.kind !== "url") return false;
-  const { literal } = entry;
-  if (literal === null) return true;
+  // Only ever asked of an entry that matched an absolute target: a path entry never does.
+  if (entry.kind !== "url") return entry.kind === "url-form";
+  if (entry.literal === null) return true;
   const target = normalisedHost(targetHost);
-  if (literal === "" || target.startsWith("[")) return false;
-  const domain = getDomain(target, PUBLIC_SUFFIX_LIST);
-  return domain !== null && (literal === domain || literal.endsWith(`.${domain}`));
+  return !target.startsWith("[") && domainWithin(entry.literal, target);
 }
 
 /**

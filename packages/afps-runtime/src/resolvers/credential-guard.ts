@@ -4,7 +4,6 @@
 /** Credential-exfiltration guard of the three `api_call` paths: docs/architecture/SIDECAR.md. */
 
 import {
-  canonicalUrl,
   isHostUnboundedUriPattern,
   matchesAuthorizedUriSpec,
   wildcardMatchStaysWithinBound,
@@ -23,17 +22,17 @@ export interface CredentialUrlPolicy {
 
 /**
  * False when every entry matching `url` reaches it only past its literal registrable domain.
- * A URL that does not parse, or that no entry matches, is `fetchApiCall`'s to refuse.
+ * A URL that does not parse, or that no entry matches, is the caller's allowlist gate's to refuse.
  */
 export function credentialStaysWithinBound(
   url: string,
   authorizedUris: readonly string[],
 ): boolean {
-  const canonical = canonicalUrl(url);
-  if (canonical === undefined) return true;
-  const host = new URL(canonical).hostname;
-  const matching = authorizedUris.filter((p) => matchesAuthorizedUriSpec(p, canonical));
-  return matching.length === 0 || matching.some((p) => wildcardMatchStaysWithinBound(p, host));
+  const matching = authorizedUris.filter((p) => matchesAuthorizedUriSpec(p, url));
+  return (
+    matching.length === 0 ||
+    matching.some((p) => wildcardMatchStaysWithinBound(p, new URL(url).hostname))
+  );
 }
 
 /** The one pre-send decision of the three `api_call` paths; `fetchApiCall` gates the targets. */

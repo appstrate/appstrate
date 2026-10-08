@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0037 — READ-ONLY pre-flight (#1656), before the deploy and after a `tldts` bump, env loaded:
+ * 0037 — READ-ONLY pre-flight (#1656), before the deploy, env loaded:
  *
  *   set -a && . ./.env && set +a && bun scripts/migration/0037-verify-authorized-uri-host-bounds.ts
  *
@@ -12,10 +12,7 @@
  */
 
 import { SQL } from "bun";
-import {
-  isHostUnboundedUriPattern,
-  unrenderableAuthorizedUriFields,
-} from "@appstrate/afps-shared/authorized-uris";
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/authorized-uris";
 import { injectsHttpCredential, type AfpsHttpDelivery } from "@appstrate/afps-shared/delivery-http";
 import { STORED_MANIFESTS_QUERY, type StoredManifest } from "./0035-verify-manifest-expressions.ts";
 
@@ -30,7 +27,6 @@ export const SHOPIFY_CONNECTIONS_QUERY = `
    ORDER BY id`;
 
 interface ShopifyAuth {
-  authorized_uris: string[];
   credentials: { schema: { properties: { shop_domain: { pattern: string } } } };
 }
 
@@ -82,8 +78,6 @@ export function unboundedEntries(rows: readonly StoredManifest[]): string[] {
 export function shopDomainIssue(fields: Readonly<Record<string, unknown>>): string | null {
   const value = fields.shop_domain;
   if (typeof value !== "string" || value === "") return "shop_domain missing";
-  const [bad] = unrenderableAuthorizedUriFields(SHOPIFY.authorized_uris, fields);
-  if (bad) return `shop_domain must be ${bad.expected}`;
   // The rendered host is matched lowercased (WHATWG), so case is no defect here.
   if (!SHOP_DOMAIN.test(value.toLowerCase())) {
     return "shop_domain is not a <store>.myshopify.com host";

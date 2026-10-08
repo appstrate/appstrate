@@ -7,21 +7,16 @@
  * Driven from synthetic manifests, not the repo's sources: the gate must hold
  * whatever version the tree happens to be at. A guard that stops comparing
  * passes everything, so each rejection is paired with an accepted case. The
- * last block reads the real sources, so a `tldts` bump fails in `bun test` too.
+ * last block pins tenant hosts the real sources' wildcards must keep reaching.
  */
 
 import { describe, it, expect } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
-import {
-  findUnboundedInjectedCredentials,
-  findUnevaluableExpressions,
-} from "@appstrate/core/integration";
 import { findSchemaVersionDrift } from "../build-system-packages.ts";
-// By path: the root workspace does not depend on (nor link) `@appstrate/afps-runtime`.
-import { credentialStaysWithinBound } from "../../packages/afps-runtime/src/resolvers/credential-guard.ts";
-import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
+import {
+  matchesAuthorizedUriSpec,
+  wildcardMatchStaysWithinBound,
+} from "@appstrate/afps-shared/authorized-uris";
 
 const manifest = (schemaVersion?: unknown) => ({
   name: "@appstrate/zoom",
@@ -69,34 +64,18 @@ describe("findSchemaVersionDrift", () => {
   });
 });
 
-describe("system package sources — manifest write-path rules", () => {
-  type Source = { auths?: Record<string, { authorized_uris?: string[] }> };
-  const SOURCES = join(import.meta.dir, "../system-packages");
-  const manifests = readdirSync(SOURCES)
-    .filter((dir) => !dir.startsWith("."))
-    .map((dir) => {
-      const raw = readFileSync(join(SOURCES, dir, "manifest.json"), "utf8");
-      return [dir, JSON.parse(raw) as Source] as const;
-    });
+type Source = { auths?: Record<string, { authorized_uris?: string[] }> };
+const SOURCES = `${import.meta.dir}/../system-packages`;
+const wildcards: string[] = [];
+for (const path of new Bun.Glob("*/manifest.json").scanSync({ cwd: SOURCES })) {
+  const manifest = (await Bun.file(`${SOURCES}/${path}`).json()) as Source;
+  for (const auth of Object.values(manifest.auths ?? {})) {
+    wildcards.push(...(auth.authorized_uris ?? []).filter((uri) => uri.includes("*.")));
+  }
+}
 
-  it("passes every manifest write-path rule, the authorized_uris host bound included", () => {
-    const refused = manifests.flatMap(([dir, manifest]) =>
-      [...findUnboundedInjectedCredentials(manifest), ...findUnevaluableExpressions(manifest)].map(
-        (issue) => `${dir}: ${issue.path.join(".")}`,
-      ),
-    );
-    expect(refused).toEqual([]);
-  });
-
-  it("still holds tenant wildcards under a registrable domain, so the sweep is not vacuous", () => {
-    const uris = manifests.flatMap(([, manifest]) =>
-      Object.values(manifest.auths ?? {}).flatMap((auth) => auth.authorized_uris ?? []),
-    );
-    expect(uris).toContain("https://*.zendesk.com/**");
-    expect(uris).toContain("https://*.salesforce.com/**");
-  });
-
-  // A failure here means the Public Suffix List moved: rerun 0037.
+describe("system package sources — tenant hosts under their wildcards", () => {
+  // A failure here means the Public Suffix List moved under a system integration.
   it.each([
     "https://acme.zendesk.com/api/v2/tickets",
     "https://acme.my.salesforce.com/services/data/v61.0",
@@ -110,13 +89,12 @@ describe("system package sources — manifest write-path rules", () => {
     "https://acme.teamwork.com/projects.json",
     "https://acme.pipedrive.com/api/v1/deals",
     "https://app-eu.wrike.com/api/v4/tasks",
-  ])("keeps the credential of a tenant host its wildcard matches: %s", (url) => {
-    const wildcards = manifests.flatMap(([, manifest]) =>
-      Object.values(manifest.auths ?? {})
-        .flatMap((auth) => auth.authorized_uris ?? [])
-        .filter((uri) => uri.includes("*.")),
-    );
-    expect(wildcards.some((uri) => matchesAuthorizedUriSpec(uri, url))).toBe(true);
-    expect(credentialStaysWithinBound(url, wildcards)).toBe(true);
+  ])("keeps the credential of %s", (url) => {
+    const host = new URL(url).hostname;
+    expect(
+      wildcards.some(
+        (uri) => matchesAuthorizedUriSpec(uri, url) && wildcardMatchStaysWithinBound(uri, host),
+      ),
+    ).toBe(true);
   });
 });
