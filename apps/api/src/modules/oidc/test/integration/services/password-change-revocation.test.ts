@@ -14,6 +14,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import {
+  CREDENTIAL_CHANGE_REVOCATION_FAILED,
+  setCredentialChangeHook,
+} from "@appstrate/db/credential-change";
 import { deviceCode, oauthAccessToken, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -35,6 +39,7 @@ import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { upsertSmtpConfig, _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
+import { revokeOidcAccessAfterCredentialChange } from "../../../services/credential-change.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -327,6 +332,42 @@ async function resetToken(email: string): Promise<string> {
   return firstLink(mail!).pathname.split("/").pop()!;
 }
 
+/** Reset `email`'s password on the hosted page of a space client with its own transport. */
+async function resetOnHostedPage(spaceId: string, email: string): Promise<Response> {
+  const client = await createClient({
+    level: "space",
+    name: "Hosted pages",
+    redirectUris: ["https://acme.example.com/oauth/callback"],
+    referencedSpaceId: spaceId,
+  });
+  await upsertSmtpConfig(spaceId, {
+    host: "__test_json__",
+    port: 587,
+    username: "u",
+    pass: "p",
+    fromAddress: `no-reply@${spaceId}.test`,
+    fromName: "Tenant",
+  });
+  const token = await resetToken(email);
+  const qs = `?client_id=${encodeURIComponent(client.clientId)}&state=s`;
+  const form = await app.request(
+    `/api/oauth/reset-password${qs}&token=${encodeURIComponent(token)}`,
+  );
+  expect(form.status).toBe(200);
+  const csrfCookie = (form.headers.get("set-cookie") ?? "").split(";")[0]!;
+  const csrfToken = (await form.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
+  return app.request(`/api/oauth/reset-password${qs}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: csrfCookie },
+    body: new URLSearchParams({
+      _csrf: csrfToken,
+      token,
+      password: NEW_PASSWORD,
+      password_confirm: NEW_PASSWORD,
+    }).toString(),
+  });
+}
+
 describe("a password change or reset revokes the account's other access", () => {
   // Reset links leave by mail; sign-in then requires a verified address.
   enableSmtpForSuite();
@@ -386,44 +427,75 @@ describe("a password change or reset revokes the account's other access", () => 
 
   it("a reset on the hosted page revokes every session and token", async () => {
     const access = await signInEverywhere();
-    // The hosted page serves a space client whose space has its own transport.
-    const client = await createClient({
-      level: "space",
-      name: "Hosted pages",
-      redirectUris: ["https://acme.example.com/oauth/callback"],
-      referencedSpaceId: access.spaceId,
-    });
-    await upsertSmtpConfig(access.spaceId, {
-      host: "__test_json__",
-      port: 587,
-      username: "u",
-      pass: "p",
-      fromAddress: `no-reply@${access.spaceId}.test`,
-      fromName: "Tenant",
-    });
-    const token = await resetToken(access.email);
-    const qs = `?client_id=${encodeURIComponent(client.clientId)}&state=s`;
-    const form = await app.request(
-      `/api/oauth/reset-password${qs}&token=${encodeURIComponent(token)}`,
-    );
-    expect(form.status).toBe(200);
-    const csrfCookie = (form.headers.get("set-cookie") ?? "").split(";")[0]!;
-    const csrfToken = (await form.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
 
-    const res = await app.request(`/api/oauth/reset-password${qs}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: csrfCookie },
-      body: new URLSearchParams({
-        _csrf: csrfToken,
-        token,
-        password: NEW_PASSWORD,
-        password_confirm: NEW_PASSWORD,
-      }).toString(),
-    });
+    const res = await resetOnHostedPage(access.spaceId, access.email);
 
     expect(res.status).toBe(200);
     expect(await profileStatus(access.sessionA)).toBe(401);
     expect(await profileStatus(access.sessionB)).toBe(401);
     await expectTokensRevoked(access);
+  });
+
+  describe("when revoking fails", () => {
+    beforeEach(() => {
+      setCredentialChangeHook(async () => {
+        throw new Error("revocation store unavailable");
+      });
+    });
+    afterEach(() => {
+      setCredentialChangeHook(revokeOidcAccessAfterCredentialChange);
+    });
+
+    async function expectRevocationFailed(res: Response): Promise<void> {
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { code?: string };
+      expect(body.code).toBe(CREDENTIAL_CHANGE_REVOCATION_FAILED);
+    }
+
+    it("a change answers 500 with its code", async () => {
+      const user = await createTestUser({ emailVerified: true, password: PASSWORD });
+
+      const res = await postAuth(
+        "/change-password",
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        user.cookie,
+      );
+
+      await expectRevocationFailed(res);
+    });
+
+    it("a change that rotates its session still hands back the new cookie", async () => {
+      const user = await createTestUser({ emailVerified: true, password: PASSWORD });
+
+      const res = await postAuth(
+        "/change-password",
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD, revokeOtherSessions: true },
+        user.cookie,
+      );
+
+      await expectRevocationFailed(res);
+      expect(await profileStatus(sessionCookie(res))).toBe(200);
+    });
+
+    it("a reset answers 500 with its code", async () => {
+      const user = await createTestUser({ emailVerified: true, password: PASSWORD });
+      const token = await resetToken(user.email);
+
+      const res = await postAuth("/reset-password", { token, newPassword: NEW_PASSWORD });
+
+      await expectRevocationFailed(res);
+    });
+
+    it("the hosted page says the password changed and offers a new link", async () => {
+      const user = await createTestUser({ emailVerified: true, password: PASSWORD });
+      const { defaultSpaceId } = await createTestOrg(user.id);
+
+      const res = await resetOnHostedPage(defaultSpaceId, user.email);
+
+      expect(res.status).toBe(500);
+      const page = await res.text();
+      expect(page).toContain("Demandez un nouveau lien de réinitialisation");
+      expect(page).toContain('href="/api/oauth/forgot-password?');
+    });
   });
 });

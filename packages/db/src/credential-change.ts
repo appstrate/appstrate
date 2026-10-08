@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { APIError } from "better-auth/api";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, or, sql } from "drizzle-orm";
 import { createLogger } from "@appstrate/core/logger";
 import { db } from "./client.ts";
 import { verification } from "./schema/index.ts";
@@ -32,8 +32,8 @@ export function setCredentialChangeHook(hook: CredentialChangeHook): void {
 
 /**
  * Ends every way into the account other than `keepSessionId` once its
- * password has been changed or reset: the other sessions, the reset links
- * still outstanding, then whatever the module hook revokes.
+ * password has been changed or reset: the other sessions, the emailed links
+ * that would sign in again, then whatever the module hook revokes.
  *
  * Sessions go first, so a session about to end can no longer authorize a new
  * token or approve a device code by the time the hook runs. What it cannot
@@ -47,9 +47,10 @@ export function setCredentialChangeHook(hook: CredentialChangeHook): void {
  */
 export async function endOtherAccessAfterCredentialChange(
   sessions: SessionStore,
-  userId: string,
+  account: { id: string; email: string },
   keepSessionId: string | null,
 ): Promise<void> {
+  const userId = account.id;
   let step = "sessions";
   try {
     // Through Better Auth rather than SQL so its session-delete hooks run
@@ -58,12 +59,22 @@ export async function endOtherAccessAfterCredentialChange(
       .filter((s) => s.id !== keepSessionId)
       .map((s) => s.token);
     if (others.length > 0) await sessions.deleteSessions(others);
-    step = "reset_links";
-    // Better Auth stores `reset-password:<token>` → user id, identifier unhashed.
+    step = "sign_in_links";
+    // The stored links that sign in: `reset-password:<token>` → user id, and
+    // `magic-link:<token>` → `{"email": …}` (as typed, hence `lower`). The
+    // emailed verification links are signed JWTs, with no row to delete.
+    const magicLinkEmail = sql`CASE WHEN pg_input_is_valid(${verification.value}, 'jsonb')
+      THEN lower(${verification.value}::jsonb ->> 'email') END`;
     await db
       .delete(verification)
       .where(
-        and(like(verification.identifier, "reset-password:%"), eq(verification.value, userId)),
+        or(
+          and(like(verification.identifier, "reset-password:%"), eq(verification.value, userId)),
+          and(
+            like(verification.identifier, "magic-link:%"),
+            eq(magicLinkEmail, account.email.toLowerCase()),
+          ),
+        ),
       );
     if (_credentialChangeHook) {
       step = "module";

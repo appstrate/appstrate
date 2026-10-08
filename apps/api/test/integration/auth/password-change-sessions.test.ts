@@ -8,7 +8,8 @@
  * `apps/api/src/modules/oidc/test/integration/services/password-change-revocation.test.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
 import { createTestUser } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -136,6 +137,40 @@ describe("password reset links (SMTP on)", () => {
     // The new password signs in; the old sessions are not coming back.
     const signedIn = await postAuth("/sign-in/email", { email, password: NEW_PASSWORD });
     expect(signedIn.status).toBe(200);
+  });
+
+  describe("magic links", () => {
+    let oidcHook: ReturnType<typeof _swapMagicLinkIssuedHookForTesting>;
+    beforeEach(() => {
+      oidcHook = _swapMagicLinkIssuedHookForTesting(null);
+    });
+    afterEach(() => {
+      _swapMagicLinkIssuedHookForTesting(oidcHook);
+    });
+
+    it("a reset spends the magic links still outstanding", async () => {
+      const { email } = await twoBrowsers();
+      const [mail] = await captureMails(async () => {
+        const res = await postAuth("/sign-in/magic-link", {
+          email,
+          callbackURL: "/",
+          errorCallbackURL: "/magic-link",
+        });
+        expect(res.status).toBe(200);
+      });
+      const magicLink = firstLink(mail!);
+
+      const reset = await postAuth("/reset-password", {
+        token: await resetToken(email),
+        newPassword: NEW_PASSWORD,
+      });
+
+      expect(reset.status).toBe(200);
+      const verify = await app.request(`/api/auth/magic-link/verify${magicLink.search}`);
+      expect(verify.status).toBe(302);
+      expect(new URL(verify.headers.get("location")!, "http://x").pathname).toBe("/magic-link");
+      expect(verify.headers.get("set-cookie") ?? "").not.toContain("session_token=");
+    });
   });
 
   it("a change spends the reset links still outstanding", async () => {

@@ -64,6 +64,7 @@
   "resetPassword.submit": "Reset password",
   "resetPassword.mismatch": "Passwords don't match",
   "resetPassword.invalidToken": "This link is invalid or has expired",
+  "resetPassword.revocationFailed": "Your password was reset, but not all of your other devices could be signed out. Request a new reset link to finish.",
   "resetPassword.requestNew": "Request a new link",
   "resetPassword.successTitle": "Password changed",
   "resetPassword.successDescription": "Your password has been reset and every device signed out. You can now sign in.",

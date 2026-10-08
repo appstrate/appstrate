@@ -111,7 +111,11 @@ import { renderMagicLinkPage } from "./pages/magic-link.ts";
 import { renderMagicLinkConfirmPage } from "./pages/magic-link-confirm.ts";
 import { renderVerifyEmailSentPage } from "./pages/verify-email-sent.ts";
 import { renderForgotPasswordPage } from "./pages/forgot-password.ts";
-import { renderResetPasswordPage, renderInvalidTokenPage } from "./pages/reset-password.ts";
+import {
+  renderResetPasswordPage,
+  renderInvalidTokenPage,
+  renderRevocationFailedPage,
+} from "./pages/reset-password.ts";
 import { renderConsentPage } from "./pages/consent.ts";
 import { renderErrorPage } from "./pages/error.ts";
 import {
@@ -2135,14 +2139,7 @@ export function createOidcRouter() {
       // The password is written and the token spent: not an invalid link.
       if (readErrorCode(bodyText) === CREDENTIAL_CHANGE_REVOCATION_FAILED) {
         return c.html(
-          renderErrorPage({
-            title: "Mot de passe modifié",
-            message:
-              "Votre mot de passe a été modifié, mais vos autres appareils n'ont pas " +
-              "tous pu être déconnectés. Connectez-vous puis modifiez-le à nouveau, " +
-              "ou contactez un administrateur.",
-            branding: ctx.branding,
-          }).value,
+          renderRevocationFailedPage({ queryString: forwardQuery, branding: ctx.branding }).value,
           500,
         );
       }

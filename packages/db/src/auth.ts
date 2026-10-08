@@ -809,9 +809,13 @@ function buildAuth(options: CreateAuthOptions) {
       // Every reset path (`/reset-password`, and the hosted OIDC page calling
       // it) lands here, after Better Auth has written the new password.
       onPasswordReset: async ({ user }): Promise<void> => {
-        await notifyPasswordChanged(user.email);
-        const { internalAdapter } = await auth.$context;
-        await endOtherAccessAfterCredentialChange(internalAdapter, user.id, null);
+        // Revoke before the mail: a slow transport must not widen the window.
+        try {
+          const { internalAdapter } = await auth.$context;
+          await endOtherAccessAfterCredentialChange(internalAdapter, user, null);
+        } finally {
+          await notifyPasswordChanged(user.email);
+        }
       },
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
@@ -906,19 +910,22 @@ function buildAuth(options: CreateAuthOptions) {
     hooks: {
       after: createAuthMiddleware(async (ctx) => {
         if (ctx.path !== "/change-password") return;
-        if (ctx.context.returned instanceof APIError) return;
+        if (isAPIError(ctx.context.returned)) return;
         // Set by the route's `sensitiveSessionMiddleware`: a change never succeeds without it.
         const caller = ctx.context.session;
         if (!caller) throw new Error("/change-password succeeded without a session in context");
         // The caller's session, or the one Better Auth swapped it for when
         // the caller passed `revokeOtherSessions`: the cookie it now holds.
         const kept = ctx.context.newSession ?? caller;
-        await notifyPasswordChanged(caller.user.email);
-        await endOtherAccessAfterCredentialChange(
-          ctx.context.internalAdapter,
-          caller.user.id,
-          kept.session.id,
-        );
+        try {
+          await endOtherAccessAfterCredentialChange(
+            ctx.context.internalAdapter,
+            caller.user,
+            kept.session.id,
+          );
+        } finally {
+          await notifyPasswordChanged(caller.user.email);
+        }
       }),
     },
 

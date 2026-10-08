@@ -18,7 +18,9 @@ describe("endOtherAccessAfterCredentialChange", () => {
       },
     };
 
-    const err = await endOtherAccessAfterCredentialChange(sessions, "user-1", "kept").then(
+    const account = { id: "user-1", email: "user-1@example.test" };
+
+    const err = await endOtherAccessAfterCredentialChange(sessions, account, "kept").then(
       () => null,
       (e: unknown) => e as { statusCode?: number; body?: { code?: string } },
     );

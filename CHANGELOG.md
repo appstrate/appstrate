@@ -28,23 +28,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Changing or resetting a password signs the account out everywhere
-  else.** A change ends every other session of the account, invalidates its
-  outstanding password-reset links and, with the OIDC module, revokes its
-  OAuth refresh and access tokens (`offline_access` ones included), its CLI
-  sessions (`revoked_reason: password_changed`) and its device codes, approved
-  or not; the session that made the change stays signed in, whichever client
-  sent it. A reset, through `/api/auth/reset-password` or the hosted
-  `/api/oauth/reset-password` page, does the same and ends every session. An
-  MCP client or the CLI signs in again afterwards. An OAuth access token
-  already issued as a JWT stays valid until it expires, at most one hour
-  (Better Auth's `accessTokenExpiresIn` default); a CLI access token stops at
-  once. With `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), another
-  browser stays signed in until its cached session expires. If revoking fails
-  once the password is written, the error is logged and the change or reset
-  answers `500 credential_change_revocation_failed`; the dashboard and the
-  hosted page then say the password was changed but not every device could be
-  signed out, instead of reporting an invalid link.
+- **Changing or resetting a password ends the account's other sessions and
+  sign-in tokens.** A change ends every other session of the account,
+  invalidates its outstanding password-reset and magic links and, with the
+  OIDC module, revokes its OAuth refresh and access tokens (`offline_access`
+  ones included), its CLI sessions (`revoked_reason: password_changed`) and
+  its device codes, approved or not; the session that made the change stays
+  signed in, whichever client sent it. A reset, through
+  `/api/auth/reset-password` or the hosted `/api/oauth/reset-password` page,
+  does the same and ends every session. The "password changed" email now
+  leaves after the revocation. An MCP client or the CLI signs in again
+  afterwards. Not ended: API keys (they act as their creator), streams already
+  open, an OAuth access token already issued as a JWT (valid until it expires,
+  at most one hour by Better Auth's `accessTokenExpiresIn` default) and, with
+  `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), another browser
+  until its cached session expires; a CLI access token stops at once. If
+  revoking fails once the password is written, the error is logged and the
+  change or reset answers `500 credential_change_revocation_failed`; the
+  dashboard and the hosted page then say the password was changed but not
+  every device could be signed out, and the reset pages offer a new reset link
+  instead of reporting an invalid one.
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

@@ -64,6 +64,7 @@
   "resetPassword.submit": "Réinitialiser",
   "resetPassword.mismatch": "Les mots de passe ne correspondent pas",
   "resetPassword.invalidToken": "Ce lien est invalide ou a expiré",
+  "resetPassword.revocationFailed": "Votre mot de passe a été réinitialisé, mais vos autres appareils n'ont pas tous pu être déconnectés. Demandez un nouveau lien de réinitialisation pour terminer.",
   "resetPassword.requestNew": "Demander un nouveau lien",
   "resetPassword.successTitle": "Mot de passe modifié",
   "resetPassword.successDescription": "Votre mot de passe a été réinitialisé et tous vos appareils ont été déconnectés. Vous pouvez maintenant vous connecter.",
