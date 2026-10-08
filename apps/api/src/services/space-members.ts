@@ -396,11 +396,13 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 }
 
 /**
- * 409 `connection_owner_without_access` when sharing a connection whose owner no longer reaches its
- * space — the share-side twin of {@link unshareConnectionsOfOwnersWithoutAccess}. Call it in the
- * sharing transaction, before the write. No-op for an end user's connection.
+ * The one gate of a share (`shared_with_org: true`), called in the sharing transaction before the
+ * write. 409 `end_user_connection_not_shareable` for an end user's connection (see the
+ * `integration_connections_end_user_not_shared` CHECK). 409 `connection_owner_without_access`
+ * when the owning member no longer reaches the space — the share-side twin of
+ * {@link unshareConnectionsOfOwnersWithoutAccess}.
  */
-export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: string): Promise<void> {
+export async function assertConnectionShareable(tx: Tx, connectionId: string): Promise<void> {
   const [conn] = await tx
     .select({
       userId: integrationConnections.userId,
@@ -411,7 +413,13 @@ export async function assertOwnerReachesSpaceForShare(tx: Tx, connectionId: stri
     .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
-  if (!conn?.userId) return;
+  if (!conn) return;
+  if (!conn.userId) {
+    throw conflict(
+      "end_user_connection_not_shareable",
+      "An end user's connection cannot be shared with the organization.",
+    );
+  }
   await lockOrgMember(tx, conn.orgId, conn.userId);
   await lockSpaceRow(tx, conn.spaceId);
   const lost = await connectionsOfOwnersWithoutAccess(

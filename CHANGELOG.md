@@ -12,6 +12,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
   (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
   secret that was active. Rotation procedure: `docs/ENV.md`.
+- **Before the deploy, run the pre-flight in the header of
+  `scripts/migration/0036-unshare-end-user-connections.sql`** (#1775). The
+  database must be at `0078` (beta.65 deployed); on an older one, deploy
+  beta.65 first. With its first three counts at 0 there is nothing to do.
+  Otherwise stop the app
+  container (`docker stop`), `pg_dump`, run
+  `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql`,
+  deploy: it removes end users' connections from admin pins and org defaults,
+  unshares them and lists them. Migration `0080` refuses the boot, naming the
+  script, while an end user's connection is shared or named by an admin pin
+  or an org default. The pre-flight also counts admin pins and org defaults
+  naming an id left dangling by earlier deletions; they are not rewritten and
+  fail with `pinned_connection_unavailable` until an admin edits them.
 
 ### Changed
 
@@ -28,6 +41,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same 409 with one `remote_binds_one_connection` item per integration
   (`field: integrations.<id>`). A client matching on the `agent_not_ready`
   code breaks; no known consumer reads it (the CLI prints the status and body).
+- **BREAKING (API): an end user's connection cannot be shared** (#1775):
+  `shared_with_org: true` on one answers
+  `409 end_user_connection_not_shareable`. Deleting an end user can no longer
+  leave an admin pin or an org default naming a deleted connection. On
+  existing data, `0036` unshares the end users' connections already shared and
+  removes them from admin pins and org defaults, which shrink or disappear; a
+  member pin, a schedule or a run override of another actor naming one fails
+  (`pinned_connection_unavailable` / `override_connection_unavailable`) until
+  a new pick.
 
 ### Fixed
 

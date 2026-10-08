@@ -1672,7 +1672,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -13099,6 +13099,7 @@ export interface operations {
                 "application/json": {
                     /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
                     label?: string;
+                    /** @description `true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`. */
                     shared_with_org?: boolean;
                 };
             };
@@ -13150,7 +13151,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), or sharing it once its owner no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`) */
+            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it once its owning member no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13298,7 +13299,7 @@ export interface operations {
             /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed. */
+            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed. */
             404: components["responses"]["NotFound"];
         };
     };
@@ -13561,7 +13562,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`. */
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it. */
                     connection_ids: string[];
                 };
             };
@@ -13581,7 +13582,7 @@ export interface operations {
             /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared, or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
+            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
             404: components["responses"]["NotFound"];
         };
     };

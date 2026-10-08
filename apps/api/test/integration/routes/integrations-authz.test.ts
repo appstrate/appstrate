@@ -12,7 +12,7 @@
  *   2. PATCH /:packageId/connections/:connectionId metadata authorization —
  *      owner edit (200), admin sharing a row they don't own (403, owner-consent
  *      rule) but unsharing it (200, 409 while pinned), unrelated member (403),
- *      foreign-space row (404).
+ *      foreign-space row (404), an end user sharing their own (409).
  *   3. `integrations:configure` is session-only — the governance mutations
  *      (settings gate, agent pins, org default) refuse every API key,
  *      whatever its creator's role.
@@ -34,7 +34,13 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedApiKey, seedSpace, seedPackageShare } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedApiKey,
+  seedEndUser,
+  seedSpace,
+  seedPackageShare,
+} from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { and, eq } from "drizzle-orm";
 import {
@@ -649,6 +655,41 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       body: JSON.stringify({ label: "x" }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("409s an end user sharing their own connection, which stays private", async () => {
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@myorg/gmail",
+        authKey: "google",
+        accountId: "acct-eu",
+        spaceId: ctx.defaultSpaceId,
+        endUserId: endUser.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+        label: "Connexion eu",
+      })
+      .returning({ id: integrationConnections.id });
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:connect"],
+    });
+
+    const res = await patchShared(row!.id, true, {
+      Authorization: `Bearer ${key.rawKey}`,
+      "X-Space-Id": ctx.defaultSpaceId,
+      "Appstrate-User": endUser.id,
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe(
+      "end_user_connection_not_shareable",
+    );
+    expect(await isShared(row!.id)).toBe(false);
   });
 });
 

@@ -167,6 +167,13 @@ export const integrationConnections = pgTable(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
     ),
+    // Only a member shares: an end user's connection serves that end user's runs, so it never
+    // enters an admin pin or an org default, and its `end_user_id` cascade strands no id in
+    // either (`assertConnectionShareable` refuses the share with 409 first).
+    check(
+      "integration_connections_end_user_not_shared",
+      sql`NOT shared_with_org OR user_id IS NOT NULL`,
+    ),
     // AFPS §7.2 (audit 03c §D-4): manifest auth keys MUST match
     // `^[a-z][a-z0-9_]*$`. The DB mirrors the manifest-side validation
     // already enforced by `@afps-spec/schema` so the wire and the row

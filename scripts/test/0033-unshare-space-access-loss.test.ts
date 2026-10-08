@@ -17,19 +17,11 @@ import {
   createTestContext,
   createTestUser,
 } from "../../apps/api/test/helpers/auth.ts";
-import {
-  seedEndUser,
-  seedPackage,
-  seedSpace,
-  seedSpaceMember,
-} from "../../apps/api/test/helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpaceMember } from "../../apps/api/test/helpers/seed.ts";
 
 const INTEGRATION = "@mig0033/svc";
 
-async function seedSharedConnection(
-  spaceId: string,
-  owner: { userId: string } | { endUserId: string },
-): Promise<string> {
+async function seedSharedConnection(spaceId: string, owner: { userId: string }): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
@@ -61,7 +53,7 @@ describe("runUnshareSpaceAccessLoss", () => {
   let lost: string;
   let departed: string;
   let otherOrgDeparted: string;
-  /** Still reached by their owner, or owned by an end-user: shared after every run. */
+  /** Still reached by their owner: shared after every run. */
   let kept: string[];
   const lines: string[] = [];
   const run = (apply: boolean) =>
@@ -81,12 +73,9 @@ describe("runUnshareSpaceAccessLoss", () => {
     const insider = await createTestUser();
     await addOrgMember(ctx.orgId, insider.id, "member");
     await seedSpaceMember({ spaceId: closed.id, userId: insider.id });
-    // An end-user's connection is not a member's: no access loss applies to it.
-    const endUser = await seedEndUser({ spaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
     kept = [
       await seedSharedConnection(ctx.defaultSpaceId, { userId: member.id }),
       await seedSharedConnection(closed.id, { userId: insider.id }),
-      await seedSharedConnection(ctx.defaultSpaceId, { endUserId: endUser.id }),
     ];
     // Shared by a user who left the organization: a `user` row, no `org_members` row.
     const leaver = await createTestUser();

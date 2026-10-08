@@ -55,7 +55,7 @@ import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integ
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
-import { assertOwnerReachesSpaceForShare } from "./space-members.ts";
+import { assertConnectionShareable } from "./space-members.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -469,10 +469,10 @@ interface UpdateConnectionMetadataInput {
  * is enforced in the route: the owner or an `integrations:configure` holder
  * may edit, but only the owner may share (sharing is consent).
  *
- * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, and a label
- * another connection of the (space, integration) holds (409
- * `connection_label_taken`, raised by the unique index). A rename takes the
- * insert's label lock, so it cannot land between an insert's pick and its write.
+ * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, sharedWithOrg=true per
+ * `assertConnectionShareable`, and a label another connection of the (space, integration)
+ * holds (409 `connection_label_taken`, raised by the unique index). A rename takes the insert's
+ * label lock, so it cannot land between an insert's pick and its write.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
@@ -503,10 +503,8 @@ export async function updateConnectionMetadata(
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
-      // The owner may have lost the space since the route checked; the unshare that loss ran
-      // could not see this share yet.
       if (input.sharedWithOrg === true) {
-        await assertOwnerReachesSpaceForShare(tx, connectionId);
+        await assertConnectionShareable(tx, connectionId);
       }
       return tx
         .update(integrationConnections)

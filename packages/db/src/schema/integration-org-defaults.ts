@@ -30,7 +30,8 @@
  * carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id
- * that no longer resolves.
+ * that no longer resolves. An end user's cascade delete removes none of them:
+ * see the `integration_connections_end_user_not_shared` CHECK.
  */
 
 import {
@@ -59,7 +60,7 @@ export const integrationOrgDefaults = pgTable(
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    /** The set every agent binds by default. Each member must be sharedWithOrg=true. */
+    /** The set every agent binds by default. Each id names a member's shared connection. */
     connectionIds: uuid("connection_ids").array().notNull(),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),
