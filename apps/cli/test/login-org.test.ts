@@ -328,7 +328,7 @@ describe("login credentials write", () => {
     }
 
     expect((await loadTokens("default"))?.refreshToken).toBe("rt-approved");
-    expect(stderr()).toContain("held the credentials lock for over 30 s; proceeding without it");
+    expect(stderr()).toContain("waited 30 s for the credentials lock; proceeding without it");
   });
 });
 

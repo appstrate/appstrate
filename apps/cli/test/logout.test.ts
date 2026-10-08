@@ -186,7 +186,7 @@ describe("logout (credentials lock)", () => {
 
     expect(await loadTokens("default")).toBeNull();
     expect(await getProfile("default")).toBeNull();
-    expect(stderr()).toContain("held the credentials lock for over 30 s; proceeding without it");
+    expect(stderr()).toContain("waited 30 s for the credentials lock; proceeding without it");
   });
 });
 

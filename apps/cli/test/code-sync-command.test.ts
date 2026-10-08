@@ -1347,6 +1347,63 @@ describe("code sync — session notice", () => {
     expect(await runHook()).toEqual(SILENT_HOOK);
   });
 
+  it("fails the run when the session is lost mid-download, and says so next session", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    const before = await snapshot(pluginRoot());
+    // The listing still answers; the new version's download is refused and
+    // the refresh that follows is too, so the session is gone.
+    createSkillServer([{ ...ONE_SKILL[0]!, version: "2.0.0" }]).install();
+    const serve = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/download")) return new Response("", { status: 401 });
+      if (path === "/api/auth/cli/token") {
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      return serve(input, init);
+    }) as unknown as typeof fetch;
+    const { io, stdout } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect((await hookOutput()).systemMessage).toContain(
+      "`appstrate login --profile default --instance https://app.example.com`",
+    );
+  });
+
+  it("fails the run when the session is lost mid-resolution, and says so next session", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    const before = await snapshot(pluginRoot());
+    // The listing still answers; the version resolution is refused and the
+    // refresh that follows is too, so the session is gone.
+    const serve = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/versions/latest")) return new Response("", { status: 401 });
+      if (path === "/api/auth/cli/token") {
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      return serve(input, init);
+    }) as unknown as typeof fetch;
+    const { io, stdout } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect((await hookOutput()).systemMessage).toContain(
+      "`appstrate login --profile default --instance https://app.example.com`",
+    );
+  });
+
   it("names the remedy when an existing plugin loses its profile", async () => {
     createSkillServer(ONE_SKILL).install();
     await syncPlugin();
@@ -1635,8 +1692,12 @@ describe("code sync — multiple spaces", () => {
       codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1"] }, io),
     ).rejects.toBeInstanceOf(ExitError);
 
-    expect(stderr()).toContain("no longer grants this profile access to them");
+    expect(stderr()).toContain(
+      "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch <org-id-or-slug> --profile default\n",
+    );
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    // The typed flag got its answer right here: no notice for a later session.
+    expect(await exists(getNoticePath())).toBe(false);
   });
 
   it("keeps every skill when the space listing fails for anything but a revocation", async () => {

@@ -449,6 +449,8 @@ async function resolveAll(
   for (const entry of resolutions) {
     const { packageId, kind } = entry.job;
     if ("error" in entry) {
+      // A lost session is the run's problem, not this package's: it fails the run.
+      if (entry.error instanceof AuthError) throw entry.error;
       // A refused draft is refused again next run: it goes, like a failed render.
       if (!isDraftRefusal(entry.error)) unresolved.set(packageId, kind);
       report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
@@ -597,6 +599,8 @@ async function fetchTrees(
   const decoder = new TextDecoder();
   for (const result of results) {
     if ("error" in result) {
+      // A lost session is the run's problem, not this skill's: it fails the run.
+      if (result.error instanceof AuthError) throw result.error;
       report.skill(`Failed ${result.entry.packageId}: ${formatError(result.error)}`);
       continue;
     }
@@ -805,7 +809,13 @@ async function selectSources(
     // the same rule `selectedSpaces` applies to an unusable space.
     if (explicit)
       throw new Error(
-        "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch",
+        remedyLine(
+          switchFix(
+            "Cannot select spaces: this organization no longer grants this profile access to them",
+            "org",
+            profileName,
+          ),
+        ),
       );
     // Otherwise the revocation stands on its own: no space supplies skills any
     // more, so the ordinary removal plan takes every one of them off the disk.

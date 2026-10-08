@@ -112,7 +112,7 @@ export async function withCredentialsLockForUser<T>(
   } catch (err) {
     if (!(err instanceof FileLockBusyError)) throw err;
     io.stderr.write(
-      `warning: another appstrate process has held the credentials lock for over ${CREDENTIALS_LOCK_TIMEOUT_MS / 1000} s; proceeding without it.\n`,
+      `warning: waited ${CREDENTIALS_LOCK_TIMEOUT_MS / 1000} s for the credentials lock; proceeding without it.\n`,
     );
     return body();
   }
