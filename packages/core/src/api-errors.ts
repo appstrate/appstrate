@@ -520,8 +520,7 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * pointer.
  *
  * The `required` code needs issues parsed with `reportInput: true` (as
- * `parseBody` does); otherwise a missing field keeps its Zod-derived code
- * (`invalid_type`, `invalid_value`, `invalid_union`).
+ * `parseBody` does); otherwise a missing field keeps its Zod-derived code.
  *
  * `unrecognized_keys` is the one issue that does NOT name its field through
  * `path`: Zod reports the container's path (EMPTY for a top-level body) and

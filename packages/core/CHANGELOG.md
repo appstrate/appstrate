@@ -28,16 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **`parseBody` (`./api-errors`) reports a missing body field as
-  `errors[].code: "required"` when its schema rejects `undefined`**, as the
-  `FieldErrorCode` union and the docs always promised. Since Zod 4 it
-  reported `invalid_type`, `invalid_value` (enum, literal) or `invalid_union`.
-  Three cases keep their code: a missing discriminator (`invalid_union`), an
-  object-level `.refine(…, { path })` (`invalid_value`) and a missing
-  `z.coerce.number()` field (`invalid_type`, coerced to `NaN`). A caller of
-  `zodIssuesToFieldErrors` that parses itself gets `required` only with
-  `safeParse(…, { reportInput: true })`, otherwise it keeps the previous
-  codes. A client that read those codes as "missing" should branch on
-  `required`; a present wrong value is unchanged. (#1790)
+  `errors[].code: "required"` when its schema rejects `undefined`**; since
+  Zod 4 it reported `invalid_type`, `invalid_value` or `invalid_union`. A
+  missing discriminator, an object-level `.refine(…, { path })` and
+  `z.coerce.number()` keep their code. `zodIssuesToFieldErrors` callers that
+  parse themselves need `reportInput: true`. Clients should branch on
+  `required`. (#1790)
 
 ## [14.0.0] — 2026-10-05
 
