@@ -116,14 +116,14 @@ function injectCache(cache: KeyValueCache): { getCache: () => Promise<KeyValueCa
 }
 
 describe("RedisCookieJarStore", () => {
-  it("writes the jar entries encrypted under the cp:cookies: namespace with TTL", async () => {
+  it("writes the jar entries encrypted under the cp:cookie-jar: namespace with TTL", async () => {
     const fake = createFakeCache();
     const jar = new RedisCookieJarStore(injectCache(fake));
     await jar.set("xyz", "conn-a", JAR, 90);
-    const stored = fake._store.get("cp:cookies:xyz:conn-a")!;
+    const stored = fake._store.get("cp:cookie-jar:xyz:conn-a")!;
     expect(stored).not.toContain("a=1");
     expect(decrypt(stored)).toBe(JSON.stringify([...JAR]));
-    expect(fake._lastTtl.get("cp:cookies:xyz:conn-a")).toBe(90);
+    expect(fake._lastTtl.get("cp:cookie-jar:xyz:conn-a")).toBe(90);
   });
 
   it("round-trips a multi-bucket jar", async () => {
@@ -160,7 +160,7 @@ describe("RedisCookieJarStore", () => {
     ["invalid JSON", encrypt("{not json")],
   ])("reads %s as an empty jar", async (_label, raw) => {
     const fake = createFakeCache();
-    fake._store.set("cp:cookies:s1:conn-a", raw);
+    fake._store.set("cp:cookie-jar:s1:conn-a", raw);
     const jar = new RedisCookieJarStore(injectCache(fake));
     expect(await jar.get("s1", "conn-a")).toEqual(new Map());
   });
