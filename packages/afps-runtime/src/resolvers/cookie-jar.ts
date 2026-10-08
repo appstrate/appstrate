@@ -22,8 +22,8 @@ export interface CookieScope {
    *  own origin. A cookie captured over https never reaches a non-https `url`. */
   header(url: string, base: string | null | undefined): string | undefined;
   /** Merge `url`'s Set-Cookie into its own bucket, storing each expiry and purging expired
-   *  entries; an already-expired cookie deletes the name. */
-  capture(url: string, setCookieHeaders: string[]): void;
+   *  entries; an already-expired cookie deletes the name. `now`: receipt time (default: now). */
+  capture(url: string, setCookieHeaders: string[], now?: number): void;
 }
 
 type Gate = "allowlist" | "open";
@@ -109,9 +109,8 @@ export function cookieScope(
       return byName.size ? [...byName.values()].join("; ") : undefined;
     },
 
-    capture(url, setCookieHeaders) {
+    capture(url, setCookieHeaders, now = Date.now()) {
       if (!setCookieHeaders.length) return;
-      const now = Date.now();
       const k = key(gate(url), originOf(url));
       const byName = new Map<string, StoredCookie>();
       for (const c of jar.get(k) ?? []) if (alive(c, now)) byName.set(c.pair.split("=")[0]!, c);

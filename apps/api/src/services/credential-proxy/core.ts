@@ -294,8 +294,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Siblings share cookies only across hosts the manifest names literally, never a rendered one.
   const literalAllowlist = policy.allowAllUris ? null : declaredUris;
   // guardedFetch composes every hop's Cookie from this snapshot and captures every hop's
-  // Set-Cookie into it; `captured` is replayed over a fresh read at the end.
-  const captured: Array<[string, string[]]> = [];
+  // Set-Cookie into it; `captured` is replayed over a fresh read at the end, at its receipt time.
+  const captured: Array<[string, string[], number]> = [];
   const scope =
     jarStore && jarSessionId
       ? cookieScope(
@@ -307,8 +307,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const cookies = scope && {
     header: (url: string, base: string | null) => scope.header(url, base),
     capture: (url: string, setCookies: string[]) => {
-      scope.capture(url, setCookies);
-      if (setCookies.length) captured.push([url, setCookies]);
+      const now = Date.now();
+      scope.capture(url, setCookies, now);
+      if (setCookies.length) captured.push([url, setCookies, now]);
     },
   };
 
@@ -352,7 +353,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     if (!jarStore || !jarSessionId || !jarTtl || jarTtl <= 0 || captured.length === 0) return;
     const latest = await jarStore.get(jarSessionId, connectionId);
     const fresh = cookieScope(latest, input.integrationId, literalAllowlist);
-    for (const [url, setCookies] of captured) fresh.capture(url, setCookies);
+    for (const [url, setCookies, now] of captured) fresh.capture(url, setCookies, now);
     await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
   };
 

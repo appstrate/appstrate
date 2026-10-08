@@ -171,6 +171,10 @@ describe("cookieScope — expiry (RFC 6265 §5.3 step 3, §5.4)", () => {
   it.each([
     ["Max-Age=60", "a=1; Max-Age=60"],
     ["an Expires 60 s ahead", "a=1; Expires=Tue, 01 Jan 2030 00:01:00 GMT"],
+    [
+      "Max-Age=60 over a far-future Expires",
+      "a=1; Expires=Fri, 01 Jan 2999 00:00:00 GMT; Max-Age=60",
+    ],
   ])("sends a cookie with %s until it expires", (_label, header) => {
     const jar: CookieJar = new Map();
     at(0);
@@ -217,13 +221,23 @@ describe("cookieScope — expiry (RFC 6265 §5.3 step 3, §5.4)", () => {
     expect(ownCookies(restored, API)).toBe("a=1");
   });
 
-  it("does not fold an expired literal sibling's cookie", () => {
+  it("drops an expired cookie from a literal sibling and from the allowlist own origin", () => {
     const scope = cookieScope(new Map(), "i", LITERAL);
     at(0);
     scope.capture(CONTENT, ["cdn=1; Max-Age=60", "keep=1"]);
-    expect(scope.header(API, null)).toBe("cdn=1; keep=1");
+    scope.capture(API, ["own=1; Max-Age=60"]);
+    expect(scope.header(API, null)).toBe("cdn=1; keep=1; own=1");
     at(61);
     expect(scope.header(API, null)).toBe("keep=1");
+  });
+
+  it("dates Max-Age from an explicit receipt time", () => {
+    const jar: CookieJar = new Map();
+    at(30);
+    cookieScope(jar, "i", null).capture(API, ["a=1; Max-Age=60"], T0);
+    expect(ownCookies(jar, API)).toBe("a=1");
+    at(61);
+    expect(ownCookies(jar, API)).toBeUndefined();
   });
 });
 

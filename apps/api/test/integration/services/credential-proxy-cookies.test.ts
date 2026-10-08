@@ -10,7 +10,7 @@
  * like the in-container sidecar, and kept per connection.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
@@ -111,6 +111,10 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "cpcookieorg" });
     jar = new LocalCookieJarStore();
+  });
+
+  afterEach(() => {
+    setSystemTime();
   });
 
   const call = (
@@ -336,6 +340,23 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       "PHPSESSID=sess-abc", // GET hop after the 302 deleted it
       "PHPSESSID=sess-abc",
     ]);
+  });
+
+  it("dates a redirect hop's Max-Age from its receipt, not from the exchange's end", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId);
+    const upstream = recordingUpstream((url, n) => {
+      if (url.endsWith("/cart/add")) return redirect("/cart", "s=short; Max-Age=2");
+      // The redirected hop answers 20 s later: `s` (2 s) is already expired when the jar persists.
+      if (n === 2) setSystemTime(new Date(Date.now() + 20_000));
+      return new Response("{}", { status: 200 });
+    });
+
+    await call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl);
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(cookiePairs(upstream.seen[1]?.cookie)).toEqual(["PHPSESSID=sess-abc", "s=short"]);
+    expect(cookiePairs(upstream.seen[2]?.cookie)).toEqual(["PHPSESSID=sess-abc"]);
   });
 
   describe("origin scoping", () => {
