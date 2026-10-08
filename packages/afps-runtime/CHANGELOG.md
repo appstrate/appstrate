@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each `UrlPolicyRefusal` to its code.
 - `classifyApiCallFailure` returns the kind's shared `code`; a transport
   error's own code (`ECONNREFUSED`, …) is renamed from `code` to `errno`.
+- **BREAKING:** `ApiCallFailureError` (`code: ApiCallFailureCode`) replaces
+  `AuthorizedUrisError`. The local resolver raises it for every outbound
+  failure and URL-policy refusal, under the code the platform proxy answers;
+  `details` holds `integration`, the target as written, the declared
+  allowlist, and for an engine failure `redirect` (a hop was refused) and a
+  transport error's `errno`. An unresolvable host is `upstream_unresolvable`,
+  no longer the SSRF code, and a timeout or transport fault is typed
+  (`upstream_timeout`, `upstream_unreachable`) instead of rethrown raw. A
+  substituted or injected header value that is no HTTP field value is
+  `credential_unusable`; `RESOLVER_HEADER_INVALID` names the agent's own
+  header only. Retired: `RESOLVER_URL_BLOCKED`, `RESOLVER_REDIRECT_BLOCKED`,
+  `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, `AUTHORIZED_URIS_MISMATCH`,
+  `AUTHORIZED_URIS_EMPTY`.
 
 ### Fixed — a sticky cookie expires (#1778)
 

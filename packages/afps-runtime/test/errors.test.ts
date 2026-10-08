@@ -9,7 +9,7 @@
  * "Removed — five unraised error classes" entry). Three of its assertions
  * covered code that did NOT go away and were lost with it:
  *
- *   - `AuthorizedUrisError`'s code, and that `details` preserves `provider`
+ *   - `ApiCallFailureError`'s code, and that `details` preserves `provider`
  *     and `target`. That object IS the allowlist-refusal audit record — the
  *     only place the refused target is written down — so a change that stopped
  *     carrying it would be a silent loss of security evidence.
@@ -18,21 +18,19 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { AuthorizedUrisError, ResolverError } from "../src/errors.ts";
+import { ApiCallFailureError, ResolverError } from "../src/errors.ts";
 
-describe("AuthorizedUrisError", () => {
+describe("ApiCallFailureError", () => {
   it("exposes the code it was constructed with", () => {
-    expect(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x").code).toBe(
-      "AUTHORIZED_URIS_EMPTY",
+    expect(new ApiCallFailureError("unauthorized_target", "x").code).toBe("unauthorized_target");
+    expect(new ApiCallFailureError("upstream_unresolvable", "x").code).toBe(
+      "upstream_unresolvable",
     );
-    expect(new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "x").code).toBe(
-      "AUTHORIZED_URIS_MISMATCH",
-    );
-    expect(new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", "x").name).toBe("AuthorizedUrisError");
+    expect(new ApiCallFailureError("blocked_target", "x").name).toBe("ApiCallFailureError");
   });
 
   it("preserves the security-relevant target + provider in details", () => {
-    const err = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "rejected", {
+    const err = new ApiCallFailureError("unauthorized_target", "rejected", {
       provider: "@appstrate/gmail",
       target: "https://evil.com/",
     });
@@ -53,7 +51,7 @@ describe("AfpsRuntimeError base, through the classes that actually reach it", ()
     });
     expect(resolver.cause).toBe(root);
 
-    const allowlist = new AuthorizedUrisError("AUTHORIZED_URIS_MISMATCH", "wrapped", undefined, {
+    const allowlist = new ApiCallFailureError("unauthorized_target", "wrapped", undefined, {
       cause: root,
     });
     expect(allowlist.cause).toBe(root);

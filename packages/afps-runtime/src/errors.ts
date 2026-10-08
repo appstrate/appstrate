@@ -10,9 +10,9 @@
  * (`@appstrate/afps-runtime/errors`).
  *
  * Two classes are raised here: {@link ResolverError} (generic resolver wiring
- * and outbound-HTTP body/path refusals) and {@link AuthorizedUrisError} (an
- * `api_call` target outside its allowlist). The platform serialises them
- * through `@appstrate/core/api-errors` plus
+ * and outbound-HTTP body/path refusals) and {@link ApiCallFailureError} (an
+ * `api_call` exchange refused or failed, under the code every path shares).
+ * The platform serialises them through `@appstrate/core/api-errors` plus
  * `run-launcher/bundle-error-mapping.ts`, which translates this taxonomy into
  * the platform's own error catalogue.
  *
@@ -33,6 +33,7 @@ import {
   BundleSignaturePolicyError,
   type SignaturePolicyReason,
 } from "./bundle/signature-policy.ts";
+import type { ApiCallFailureCode } from "./resolvers/api-call-engine.ts";
 
 /** Machine-readable codes for {@link ResolverError} — the generic resolver
  * wiring taxonomy shared by the runtime and the standalone `afps` CLI. */
@@ -44,22 +45,15 @@ export type ResolverErrorCode =
   | "RESOLVER_PATH_OUTSIDE_ALLOWED_ROOTS"
   | "RESOLVER_PATH_SYMLINK_REFUSED"
   | "RESOLVER_PATH_INVALID"
-  // The standalone CLI's `LocalIntegrationResolver` surfaces these
-  // when the shared outbound-HTTP engine refuses the initial target
-  // (SSRF blocklist) or a redirect hop (per-hop SSRF / off-allowlist).
-  | "RESOLVER_URL_BLOCKED"
-  | "RESOLVER_REDIRECT_BLOCKED"
-  // A header value (a substituted or injected credential included) is no HTTP field value.
-  | "RESOLVER_HEADER_INVALID"
-  | "RESOLVER_CREDENTIAL_EXFIL_BLOCKED";
+  // An agent-written header value is no HTTP field value.
+  | "RESOLVER_HEADER_INVALID";
 
 /** Stable, machine-readable code for every error class in this module. */
 export type AfpsErrorCode =
   | BundleErrorCode
   | SignaturePolicyReason
   | "unsigned_required"
-  | "AUTHORIZED_URIS_EMPTY"
-  | "AUTHORIZED_URIS_MISMATCH"
+  | ApiCallFailureCode
   | ResolverErrorCode;
 
 /**
@@ -85,13 +79,13 @@ export abstract class AfpsRuntimeError extends Error implements AfpsError {
   }
 }
 
-/** An integration `api_call` tool tried to call a target outside its allowlist. */
-export class AuthorizedUrisError extends AfpsRuntimeError {
-  override readonly name = "AuthorizedUrisError";
-  readonly code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH";
+/** An integration `api_call` refused or failed, under the code the platform and sidecar carry. */
+export class ApiCallFailureError extends AfpsRuntimeError {
+  override readonly name = "ApiCallFailureError";
+  readonly code: ApiCallFailureCode;
 
   constructor(
-    code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH",
+    code: ApiCallFailureCode,
     message: string,
     details?: Record<string, unknown>,
     options?: ErrorOptions,
