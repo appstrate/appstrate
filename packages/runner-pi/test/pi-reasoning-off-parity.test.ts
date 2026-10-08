@@ -3,27 +3,27 @@
 /**
  * PARITY: what the catalog says level `off` puts on the wire
  * (`piReasoningOff`, a restatement of Pi's request builders) vs what Pi really
- * builds (`observedReasoningOff`, two captured payloads). Every record Pi
- * keeps, every API shape without a record, and the cases the UI names.
+ * builds (`observedReasoningOff`, two captured payloads), over the API shapes
+ * the platform serves: every record Pi keeps, every shape and provider without
+ * a record, and the cases the UI names.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
-import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
-import type { PiModelDialect } from "@appstrate/core/sidecar-types";
+import { MODEL_API_SHAPES, type PiModelDialect } from "@appstrate/core/sidecar-types";
 import { buildPiModel, piReasoningLevels } from "../src/pi-model.ts";
 import { observedReasoningOff, recordSpec } from "../src/pi-payload.ts";
-import { piReasoningOff } from "../src/pi-reasoning-off.ts";
-import { PROVIDER_BY_API } from "../src/provider-map.ts";
+import { piReasoningOff, piTakesReasoningOff } from "../src/pi-reasoning-off.ts";
 import { nativeModel } from "./pi-payload.ts";
 
 // What `piReasoningOff` answers for: a run's Pi talks to the sidecar or the llm-proxy.
 const PROXY = "http://sidecar.test/llm";
 
-const RECORDS = getBuiltinProviders().flatMap(
-  (provider) => getBuiltinModels(provider) as Model<Api>[],
-);
+const SERVED: ReadonlySet<string> = new Set(MODEL_API_SHAPES);
+const RECORDS = getBuiltinProviders()
+  .flatMap((provider) => getBuiltinModels(provider) as Model<Api>[])
+  .filter((record) => SERVED.has(record.api));
 
 /** A registry record built the way a run builds it. */
 function platformModel(record: Model<Api>): Model<Api> {
@@ -56,9 +56,7 @@ async function mismatches(models: Array<[string, Model<Api>]>): Promise<string[]
 }
 
 describe("piReasoningOff ↔ the payload Pi builds for off", () => {
-  const offRecords = RECORDS.filter(
-    (record) => record.reasoning && piReasoningLevels(record).includes("off"),
-  );
+  const offRecords = RECORDS.filter(piTakesReasoningOff);
 
   it("agrees on every reasoning record Pi keeps that takes off", async () => {
     expect(offRecords.length).toBeGreaterThan(0);
@@ -69,26 +67,20 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
     expect(await mismatches(models)).toEqual([]);
   });
 
-  const shapes = new Set([...RECORDS.map((record) => record.api), ALIAS_CLIENT_API_SHAPE]);
   const pairs = [...new Set(RECORDS.map((record) => `${record.api} ${record.provider}`))].map(
     (pair) => pair.split(" ") as [string, string],
   );
 
-  const gatewayShapes = [...shapes].filter((shape) => shape in PROVIDER_BY_API);
   // A string `off` is what makes Pi's per-provider `reasoning_effort` detection decide.
   const DIALECTS: Array<[string, PiModelDialect | null]> = [
     ["no map", null],
     ["an off effort", { name: "my-model", thinkingLevelMap: { off: "none" } }],
   ];
 
-  it("covers every gateway API shape", () => {
-    expect(gatewayShapes.length).toBe(Object.keys(PROVIDER_BY_API).length);
-  });
-
   for (const [label, dialect] of DIALECTS) {
     it(`agrees on a model Pi keeps no record of with ${label}, per API shape and provider`, async () => {
       const models: Array<[string, Model<Api>]> = [
-        ...gatewayShapes.map((shape): [string, Model<Api>] => [
+        ...MODEL_API_SHAPES.map((shape): [string, Model<Api>] => [
           `gateway ${shape}`,
           unrecorded(shape, undefined, dialect),
         ]),

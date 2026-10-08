@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What reasoning level `off` puts on the wire, restating the `off` branch of
- * each request builder of the pinned `@earendil-works/pi-ai`: Pi's session
- * hands `off` to the request as no reasoning option at all, and each API then
- * sends an explicit disable or nothing. Kept synchronous and request-free so
- * the catalog can serve it. It answers for the model as a run builds it: runs
- * reach the provider through the sidecar or the llm-proxy, so the upstream URL
- * never matters and only the provider and `compat` decide. Only the branches
- * Pi's registry reaches are restated; anything else (an API, a chat-completions
- * thinking format, template arguments) is "not known" (`undefined`), never a
- * failed listing. Parity with the payloads Pi really builds is pinned by
- * `test/pi-reasoning-off-parity.test.ts`, which fails on a Pi bump that
- * reaches an unrestated branch.
+ * What level `off` puts on the wire, restating the `off` branches of the pinned
+ * `@earendil-works/pi-ai` for the API shapes the platform serves, so the catalog
+ * answers without building a request. A run reaches the provider through the
+ * sidecar or the llm-proxy, so only the provider and `compat` decide. A branch
+ * not restated answers `undefined` ("not known"); `test/pi-reasoning-off-parity.test.ts`
+ * pins parity with Pi's payloads and fails when a Pi bump reaches one.
  */
 
 import type { ModelReasoningOff } from "@appstrate/core/model-generation";
@@ -21,27 +15,25 @@ import type { Api, Model } from "./pi-sdk.ts";
 
 type CompletionsCompat = NonNullable<Model<"openai-completions">["compat"]>;
 
+export function piTakesReasoningOff(model: Model<Api>): boolean {
+  return model.reasoning && piReasoningLevels(model).includes("off");
+}
+
 export function piReasoningOff(model: Model<Api>): ModelReasoningOff | undefined {
-  if (!model.reasoning || !piReasoningLevels(model).includes("off")) return undefined;
+  if (!piTakesReasoningOff(model)) return undefined;
   const sends = sendsOffParameter(model);
   return sends === undefined ? undefined : sends ? "disables" : "unsent";
 }
 
-// `thinkingLevelMap.off` is never null below: Pi refuses `off` then.
 function sendsOffParameter(model: Model<Api>): boolean | undefined {
   switch (model.api) {
     case "anthropic-messages":
-    case "azure-openai-responses":
     case "openai-codex-responses":
-    case "google-generative-ai":
-    case "google-vertex":
       return true;
     case "openai-responses":
       return model.provider !== "github-copilot";
     case "mistral-conversations":
-      // `reasoning_effort` comes from the map; `prompt_mode` is only ever sent on.
       return Boolean(model.thinkingLevelMap?.off);
-    case "bedrock-converse-stream":
     case "pi-messages":
       return false;
     case "openai-completions":
@@ -62,10 +54,9 @@ function completionsSendsOff(model: Model<Api>): boolean | undefined {
     case "together":
       return true;
     case "baseten":
-      // `enable_thinking: false`: the only arguments Pi's records declare.
       return onlyThinkingEnabled(compat.chatTemplateArgs) ? true : undefined;
     case "openai":
-    case "ant-ling": // its own branch only fires on a level
+    case "ant-ling":
       return (
         (compat.supportsReasoningEffort ?? detected.supportsReasoningEffort) &&
         typeof model.thinkingLevelMap?.off === "string"
@@ -83,17 +74,13 @@ function onlyThinkingEnabled(values: Record<string, unknown> = {}): boolean {
   );
 }
 
-/**
- * Pi's `detectCompat`, reduced to the two fields that decide `off` and to its
- * provider half: behind the proxy no upstream host is ever matched.
- */
+/** Pi's `detectCompat`, provider half, reduced to the two fields that decide `off`. */
 function detectedCompletionsDialect({ provider }: Model<Api>) {
   const is = (...providers: string[]) => providers.includes(provider);
   const zai = is("zai", "zai-coding-cn");
   const noEffort =
     zai ||
-    is("together", "ant-ling", "xai", "moonshotai", "moonshotai-cn") ||
-    is("cloudflare-ai-gateway", "nvidia");
+    is("together", "ant-ling", "moonshotai", "moonshotai-cn", "cloudflare-ai-gateway", "nvidia");
   const thinkingFormat = is("deepseek")
     ? "deepseek"
     : zai

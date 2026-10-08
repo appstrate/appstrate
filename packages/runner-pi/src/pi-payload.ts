@@ -51,14 +51,9 @@ export async function capturePayload(
 }
 
 /**
- * What level `off` really puts on the wire, read off Pi itself: `unsent` when
- * its payload is the one Pi builds for the same model declared non-reasoning.
- * Pi's session hands `off` to the request as no reasoning option at all. The
- * OpenAI shapes also pick the instruction role (`developer` or `system`) off
- * `reasoning`: it is pinned on both sides so only reasoning parameters differ.
- * Limit: a builder that sends reasoning parameters whatever `model.reasoning`
- * (Anthropic's `compat.supportsMidConvoEffort`: adaptive thinking at every
- * level) reads as `unsent`; such records refuse `off` today.
+ * `unsent` when Pi's `off` payload equals the model's declared non-reasoning,
+ * instruction role pinned (it follows `reasoning` too). Limit: parameters sent
+ * whatever `reasoning` (`compat.supportsMidConvoEffort`) read as `unsent`; those refuse `off`.
  */
 export async function observedReasoningOff(model: Model<Api>): Promise<ModelReasoningOff> {
   const pinned = {

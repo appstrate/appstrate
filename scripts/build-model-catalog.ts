@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   type CatalogRecord,
   parseModelCatalog,
@@ -39,10 +40,11 @@ import {
   observedReasoningOff,
   recordSpec,
 } from "../packages/runner-pi/src/pi-payload.ts";
-import { piReasoningOff } from "../packages/runner-pi/src/pi-reasoning-off.ts";
+import { piReasoningOff, piTakesReasoningOff } from "../packages/runner-pi/src/pi-reasoning-off.ts";
 import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";
+const SERVED_SHAPES: ReadonlySet<string> = new Set(MODEL_API_SHAPES);
 
 /** A record of a Pi data file, as Pi wrote it. */
 interface SourceRecord extends Record<string, unknown> {
@@ -146,7 +148,6 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
     baseUrl: source.baseUrl,
     ...recordSpec(model),
   });
-  const takesOff = built.reasoning && piReasoningLevels(built).includes("off");
   // Unset first: what a run sends when no level is configured.
   const levels = piReasoningLevels(built).flatMap((level) => (level === "off" ? [] : [level]));
   for (const level of [undefined, ...levels]) {
@@ -157,8 +158,9 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
     }
   }
   // An instance serves the derived `off`: a record the rule does not cover or
-  // misreads is dropped rather than served with no label or a wrong one.
-  if (takesOff) {
+  // misreads is dropped rather than served with no label or a wrong one. A
+  // shape no provider offers is never served, so neither is its `off`.
+  if (SERVED_SHAPES.has(built.api) && piTakesReasoningOff(built)) {
     const derived = piReasoningOff(built);
     if (!derived) return "reasoning off: not derivable";
     const observed = await observedReasoningOff(built);
