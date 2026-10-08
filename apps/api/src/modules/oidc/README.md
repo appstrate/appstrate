@@ -177,6 +177,8 @@ The OIDC module also owns the lifecycle of CLI refresh-token families that back 
 
 The user-facing routes are **cookie-only by design** — a leaked API key (or a compromised stamping flow) must not be able to sign every device out at once. The org-scoped admin routes accept cookie or API key, gated by the `cli-sessions: read | delete` resource the module contributes via `permissionsContribution()` (granted to owner + admin by default; not API-key-grantable, not end-user-grantable).
 
+A password change or reset revokes every family of the account too (reason `password_changed`), along with its OAuth refresh and access tokens and its device codes, approved or not: `services/credential-change.ts`, installed at `init()` through `setCredentialChangeHook` and called by core's `endOtherAccessAfterCredentialChange` (`packages/db/src/credential-change.ts`) once the other Better Auth sessions have ended.
+
 ## Auth strategy contributed
 
 A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix, per Phase 0 discipline rule). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.

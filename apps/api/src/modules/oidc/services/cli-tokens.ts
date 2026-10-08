@@ -760,9 +760,10 @@ export async function revokeFamilyForUser(params: {
 
 /**
  * Revoke every active CLI session family belonging to a user. Server
- * primitive backing `appstrate logout --all` and the dashboard
- * "Revoke all sessions" button. Idempotent — already-revoked families
- * are skipped at the SQL level.
+ * primitive backing `appstrate logout --all`, the dashboard
+ * "Revoke all sessions" button (`user_revoked_all`) and a password change or
+ * reset (`password_changed`, `credential-change.ts`). Idempotent —
+ * already-revoked families are skipped at the SQL level.
  *
  * Returns the count of families newly revoked so the caller can render a
  * meaningful confirmation toast ("Signed out 3 devices.").
@@ -770,11 +771,13 @@ export async function revokeFamilyForUser(params: {
  * Implementation: a single UPDATE scoped by `user_id` + active
  * (`revoked_at IS NULL`). We don't need to enumerate families first —
  * the rotation children carry the same `revoked_at` column and the same
- * UPDATE flips both heads and children. The audit reason is
- * `user_revoked_all` so it is distinguishable from per-family revocation
- * in the security log.
+ * UPDATE flips both heads and children. The audit reason tells it apart
+ * from per-family revocation in the security log.
  */
-export async function revokeAllFamiliesForUser(userId: string): Promise<{ revokedCount: number }> {
+export async function revokeAllFamiliesForUser(
+  userId: string,
+  reason: "user_revoked_all" | "password_changed",
+): Promise<{ revokedCount: number }> {
   // Count families that will be touched BEFORE the UPDATE, so the return
   // value matches "number of devices signed out" rather than "number of
   // rows touched" (rotation rows would inflate the latter into something
@@ -792,7 +795,7 @@ export async function revokeAllFamiliesForUser(userId: string): Promise<{ revoke
   if (heads.length === 0) return { revokedCount: 0 };
   await db
     .update(cliRefreshToken)
-    .set({ revokedAt: new Date(), revokedReason: "user_revoked_all" })
+    .set({ revokedAt: new Date(), revokedReason: reason })
     .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
   // Drop device-name cache entries for the revoked families — same race
   // window as `revokeFamily` (see comment there). Bulk path bypasses the

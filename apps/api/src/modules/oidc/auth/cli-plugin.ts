@@ -465,7 +465,7 @@ export function cliTokenPlugin() {
               error_description: "Authentication required.",
             });
           }
-          const result = await revokeAllFamiliesForUser(session.user.id);
+          const result = await revokeAllFamiliesForUser(session.user.id, "user_revoked_all");
           return ctx.json(result);
         },
       ),

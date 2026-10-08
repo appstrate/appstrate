@@ -145,6 +145,8 @@ const EMITTED_OUT_OF_SIGHT = [
   // `parsePackageZip`'s companion-file refusal (`@appstrate/core/zip`).
   "missing_content",
   "invalid_content",
+  // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
+  "credential_change_revocation_failed",
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */

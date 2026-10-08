@@ -20,12 +20,9 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { session, user } from "@appstrate/db/schema";
-import { setPostBootstrapOrgHook } from "@appstrate/db/auth";
+import { setPostBootstrapOrgHook, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../helpers/app.ts";
-import {
-  restorePostBootstrapOrgHookAfterSuite,
-  restoreRealmResolverAfterSuite,
-} from "../../helpers/auth.ts";
+import { restoreAfterSuite } from "../../helpers/auth.ts";
 import { useAuthEnv } from "../../helpers/auth-env.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -67,8 +64,8 @@ async function spendBudget(headers: Record<string, string>): Promise<void> {
   }
 }
 
-restoreRealmResolverAfterSuite();
-restorePostBootstrapOrgHookAfterSuite();
+restoreAfterSuite(_authHookSlotsForTesting.realmResolver);
+restoreAfterSuite(_authHookSlotsForTesting.postBootstrapOrg);
 
 describe("Better Auth rate limiting keys on the platform-resolved client IP", () => {
   beforeEach(async () => {

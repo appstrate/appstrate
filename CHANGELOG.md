@@ -28,6 +28,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Changing or resetting a password ends the account's other sessions and
+  sign-in tokens.** A change ends the account's other sessions and invalidates
+  its stored password-reset links, magic links, in-progress social-account links
+  and unredeemed model-provider pairing tokens; with the OIDC module, also its
+  OAuth refresh and access tokens (`offline_access` included), CLI sessions
+  (`revoked_reason: password_changed`) and device codes. The session that made
+  the change stays signed in; a reset (`/api/auth/reset-password` or the hosted
+  `/api/oauth/reset-password` page) ends every session. If revoking fails once
+  the password is written, the request answers
+  `500 credential_change_revocation_failed`. What is deliberately not ended
+  (API keys, linked accounts, …) is listed in `SECURITY.md`.
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

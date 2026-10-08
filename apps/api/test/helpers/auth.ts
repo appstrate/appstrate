@@ -18,14 +18,9 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
-import {
-  getAuth,
-  _swapBeforeSignupHookForTesting,
-  _swapMagicLinkIssuedHookForTesting,
-  _swapPostBootstrapOrgHookForTesting,
-  _swapRealmResolverForTesting,
-} from "@appstrate/db/auth";
+import { getAuth, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { db } from "./db.ts";
+import { captureMails, firstLink } from "./smtp.ts";
 import { seedSpaceMember } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -335,36 +330,56 @@ export async function createTestContext(
   };
 }
 
-/** For a suite that sets the process-wide realm resolver: start from none, hand the installed one back. */
-export function restoreRealmResolverAfterSuite(): void {
-  let installed: ReturnType<typeof _swapRealmResolverForTesting>;
-  beforeAll(() => {
-    installed = _swapRealmResolverForTesting(null);
-  });
-  afterAll(() => {
-    _swapRealmResolverForTesting(installed);
-  });
+/** The `Cookie` header for the session a Better Auth response set. */
+export function sessionCookieOf(res: Response): string {
+  const token = /better-auth\.session_token=([^;]+)/.exec(res.headers.get("set-cookie") ?? "");
+  if (!token) throw new Error(`no session cookie (status ${res.status})`);
+  return `${SESSION_COOKIE_NAME}=${token[1]}`;
 }
 
-/** For a suite that sets the post-bootstrap-org hook: start from none, hand the installed one back. */
-export function restorePostBootstrapOrgHookAfterSuite(): void {
-  let installed: ReturnType<typeof _swapPostBootstrapOrgHookForTesting>;
-  beforeAll(() => {
-    installed = _swapPostBootstrapOrgHookForTesting(null);
-  });
-  afterAll(() => {
-    _swapPostBootstrapOrgHookForTesting(installed);
-  });
+/** Better Auth calls through a test app, the way a browser makes them. */
+export function authClientFor(app: {
+  request(path: string, init?: RequestInit): Response | Promise<Response>;
+}) {
+  const post = (path: string, body: unknown, cookie?: string): Promise<Response> =>
+    Promise.resolve(
+      app.request(`/api/auth${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+        body: JSON.stringify(body),
+      }),
+    );
+  return {
+    post,
+    /** A real email sign-in: the cookie of the session it opened. */
+    signIn: async (email: string, password: string): Promise<string> =>
+      sessionCookieOf(await post("/sign-in/email", { email, password })),
+    /** 200 while the session lives, 401 once it has ended. */
+    profileStatus: async (cookie: string): Promise<number> =>
+      (await app.request("/api/profile", { headers: { Cookie: cookie } })).status,
+    /** The token of a reset link mailed to `email` (SMTP on). */
+    resetToken: async (email: string): Promise<string> => {
+      const [mail] = await captureMails(async () => {
+        const res = await post("/request-password-reset", { email, redirectTo: "/reset-password" });
+        if (!res.ok) throw new Error(`request-password-reset answered ${res.status}`);
+      });
+      if (!mail) throw new Error(`no reset link mailed to ${email}`);
+      return firstLink(mail).pathname.split("/").pop()!;
+    },
+  };
 }
 
-/** For a suite that sets the before-signup hook: start from none, hand the installed one back. */
-export function restoreBeforeSignupHookAfterSuite(): void {
-  let installed: ReturnType<typeof _swapBeforeSignupHookForTesting>;
+/**
+ * For a suite that sets a process-wide slot of `_authHookSlotsForTesting`: start
+ * from none, hand the installed value back.
+ */
+export function restoreAfterSuite<T>(slot: { swapForTesting(next: T | null): T | null }): void {
+  let installed: T | null = null;
   beforeAll(() => {
-    installed = _swapBeforeSignupHookForTesting(null);
+    installed = slot.swapForTesting(null);
   });
   afterAll(() => {
-    _swapBeforeSignupHookForTesting(installed);
+    slot.swapForTesting(installed);
   });
 }
 
@@ -374,16 +389,17 @@ export function restoreBeforeSignupHookAfterSuite(): void {
  */
 export function captureIssuedMagicLinks(): { tokenFor(email: string): string } {
   const tokens = new Map<string, string>();
-  let installed: ReturnType<typeof _swapMagicLinkIssuedHookForTesting> = null;
+  const slot = _authHookSlotsForTesting.magicLinkIssued;
+  let installed: ReturnType<typeof slot.get> = null;
   beforeEach(() => {
     tokens.clear();
-    installed = _swapMagicLinkIssuedHookForTesting(async (info) => {
+    installed = slot.swapForTesting(async (info) => {
       tokens.set(info.email, info.token);
       return installed ? installed(info) : info.url;
     });
   });
   afterEach(() => {
-    _swapMagicLinkIssuedHookForTesting(installed);
+    slot.swapForTesting(installed);
   });
   return {
     tokenFor(email) {

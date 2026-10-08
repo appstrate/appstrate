@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
+import { _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { eq } from "drizzle-orm";
 import { user as userTable } from "@appstrate/db/schema";
@@ -45,12 +45,13 @@ describe("platform auth e-mails (SMTP on)", () => {
   });
 
   describe("magic link without the OIDC module", () => {
-    let oidcHook: ReturnType<typeof _swapMagicLinkIssuedHookForTesting>;
+    const magicLinkSlot = _authHookSlotsForTesting.magicLinkIssued;
+    let oidcHook: ReturnType<typeof magicLinkSlot.get>;
     beforeEach(() => {
-      oidcHook = _swapMagicLinkIssuedHookForTesting(null);
+      oidcHook = magicLinkSlot.swapForTesting(null);
     });
     afterEach(() => {
-      _swapMagicLinkIssuedHookForTesting(oidcHook);
+      magicLinkSlot.swapForTesting(oidcHook);
     });
 
     async function requestLink(email: string): Promise<URL> {
