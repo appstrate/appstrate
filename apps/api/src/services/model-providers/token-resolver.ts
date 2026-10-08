@@ -234,12 +234,9 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
     // revoked refresh token; transient failures rethrow as a generic Error.
     if (err instanceof RefreshError && err.kind === "revoked") {
       await markCredentialNeedsReconnection(state.orgId, credentialId);
-      throw gone(
-        "OAUTH_REFRESH_REVOKED",
-        `OAuth refresh revoked for ${state.config.providerId} (${credentialId}): ${
-          err.body ?? "invalid_grant"
-        }`,
-      );
+      // `err.message` carries only the classified error summary; the raw IdP
+      // body (`err.body`) may echo tokens and never goes into a message.
+      throw gone("OAUTH_REFRESH_REVOKED", `OAuth refresh revoked: ${err.message}`);
     }
     // Transient failure (network / 5xx / parse). A single transient error is
     // NOT terminal — the cached token may still be valid. But a token that is

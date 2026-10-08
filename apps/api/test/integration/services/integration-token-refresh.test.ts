@@ -3,16 +3,17 @@
 /**
  * Phase 6 — refresh-time scope-shrink awareness.
  *
- * `forceRefreshIntegrationConnection` is the inline refresh helper called
- * by the integration credentials resolver. Phase 6 added two behaviours:
+ * `forceRefreshIntegrationConnection` is the refresh helper behind
+ * `refreshConnectionCredential`. Phase 6 added two behaviours:
  *
  *   1. When the IdP echoes a `scope` field in the refresh response,
  *      `scopes_granted` on the DB row is overwritten with the new
  *      authoritative set (OAuth 2 §5.1).
  *   2. The result surfaces `shrinkDetected = true` when the new set is
- *      strictly narrower than the previously-stored one, so the resolver
- *      can cross-check against installed agents' `requiredScopes` and
- *      flip `needsReconnection` if the actor dropped below the floor.
+ *      strictly narrower than the previously-stored one, so
+ *      `refreshConnectionCredential` can cross-check against installed
+ *      agents' `requiredScopes` and flip `needsReconnection` if the actor
+ *      dropped below the floor.
  *
  * The tests below stand up a controllable Bun.serve as the upstream
  * token endpoint and walk the helper through the four cases that
@@ -24,16 +25,19 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
   RefreshError,
   decryptCredentialsToStringMap,
   encryptCredentialEnvelope,
+  encryptCredentials,
 } from "@appstrate/connect";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import {
   forceRefreshIntegrationConnection,
-  refreshAndClassify,
+  refreshConnectionCredential,
   type RefreshTarget,
 } from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
@@ -453,21 +457,46 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
   });
 
-  it("refreshAndClassify throws the 503 for a stored blob under a missing kid (not transient)", async () => {
+  it("refreshConnectionCredential throws the 503 for a stored blob under a missing kid (not transient)", async () => {
     const connId = await seedConnection(["read"]);
+    // A resolvable pinned client: the refresh context builds, and the exchange is what decrypts.
+    const [client] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: PACKAGE_ID,
+        authKey: "primary",
+        clientId: "cid",
+        clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+      })
+      .returning({ id: integrationOauthClients.id });
     await db
       .update(integrationConnections)
-      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .set({
+        credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}`,
+        clientRef: client!.id,
+      })
       .where(eq(integrationConnections.id, connId));
-    const outcome = refreshAndClassify(await readTarget(connId), PACKAGE_ID, "primary", {
-      tokenEndpoint: token.url,
-      clientId: "cid",
-      clientSecret: "csec",
+    const [pkg] = await db
+      .select({ draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(eq(packages.id, PACKAGE_ID));
+    const manifest = pkg!.draftManifest as unknown as IntegrationManifest;
+    const outcome = refreshConnectionCredential({
+      connection: { ...(await readTarget(connId)), authKey: "primary" },
+      integrationId: PACKAGE_ID,
+      manifest,
+      authDef: manifest.auths!.primary as AfpsManifestAuth,
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      actor: { type: "user", id: ctx.user.id },
+      force: true,
     });
     await expect(outcome).rejects.toMatchObject({
       status: 503,
       code: "encryption_key_unavailable",
     });
+    expect(token.requests()).toBe(0);
   });
 });
 
@@ -662,19 +691,17 @@ describe("integration refresh-failure escalation", () => {
     expect(row.needsReconnection).toBe(false);
   });
 
-  // A 2xx whose body carries no `access_token` used to be absorbed: the current
-  // access token was spliced in as a fallback, so the exchange "succeeded", the
-  // dead token was re-persisted, and `needsReconnection` / the streak were
-  // RESET. Worse, with no `expires_in` the row also lost its `expires_at`,
-  // after which neither the proactive lead window nor this escalation could
-  // ever fire again — a dead credential marked healthy, permanently.
+  // A 2xx body with no `access_token` is a failed refresh, never a success with
+  // the current token spliced in — that would re-persist the dead token, reset
+  // `needsReconnection` and the streak, and (with no `expires_in`) drop the
+  // row's `expires_at`, after which neither the lead window nor this escalation
+  // could fire again. With no `error` either, it is transient: counted.
   it("treats a 2xx without access_token as a failure and increments the counter", async () => {
     const connId = await seedConn({
       expiresAt: new Date(Date.now() - HOUR_MS),
       refreshFailureCount: 1,
     });
-    // The real shape: an IdP answering 200 with an OAuth error object.
-    token.setResponse({ error: "invalid_grant" }, 200);
+    token.setResponse({}, 200);
 
     await expect(
       forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
@@ -682,10 +709,34 @@ describe("integration refresh-failure escalation", () => {
         clientId: "cid",
         clientSecret: "csec",
       }),
-    ).rejects.toThrow(/access_token/);
+    ).rejects.toThrow(/HTTP 200 without access_token/);
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(2);
+    expect(row.needsReconnection).toBe(false);
+  });
+
+  // Some IdPs answer a failed grant with a 2xx RFC 6749 §5.2 error object: the
+  // same verdict as a 400 `invalid_grant` — revoked, flagged, not counted.
+  it("treats a 2xx `invalid_grant` error object as revoked and flags the connection", async () => {
+    const connId = await seedConn({
+      expiresAt: new Date(Date.now() - HOUR_MS),
+      refreshFailureCount: 1,
+    });
+    token.setResponse({ error: "invalid_grant" }, 200);
+
+    const refused = forceRefreshIntegrationConnection(
+      await readTarget(connId),
+      PACKAGE_ID,
+      "primary",
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+    );
+    await expect(refused).rejects.toBeInstanceOf(RefreshError);
+    await expect(refused).rejects.toMatchObject({ kind: "revoked" });
+
+    const row = await readRow(connId);
+    expect(row.needsReconnection).toBe(true);
+    expect(row.refreshFailureCount).toBe(1);
   });
 
   it("a transient upstream failure during refresh increments the counter and rethrows", async () => {

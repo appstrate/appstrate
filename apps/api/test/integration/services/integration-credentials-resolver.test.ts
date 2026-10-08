@@ -9,7 +9,7 @@
  * Refresh seam used by these tests
  * --------------------------------
  * The resolver does NOT take an injectable refresh function. It calls
- * `forceRefreshIntegrationConnection` directly, which in turn builds a
+ * `refreshConnectionCredential`, which in turn builds a
  * `RefreshContext` from the manifest's `auths.{key}.tokenUrl` + the seeded
  * per-space `integration_oauth_clients` row, then POSTs the
  * `refresh_token` to that token URL via the shared
@@ -310,6 +310,61 @@ describe("resolveLiveIntegrationCredentials", () => {
     // merely because it lacks a refresh client.
     await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {});
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("a PROACTIVE read of a credential nothing can refresh, inside the lead window, serves it uncounted", async () => {
+    async function refreshFailureCount(connId: string): Promise<number> {
+      const [row] = await db
+        .select({ count: integrationConnections.refreshFailureCount })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      return row!.count;
+    }
+    // Expiry 1 min out → inside OAUTH_REFRESH_LEAD_MS → the proactive branch runs.
+    const soon = () => new Date(Date.now() + 60_000);
+
+    // oauth2 whose minting client is gone.
+    const oauthId = await seedConnection({ userId: ctx.user.id, expiresAt: soon() });
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+    const oauth = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(oauthId),
+      {},
+    );
+    expect(oauth.auths[0]!.fields.access_token).toBe("old-access");
+    expect(await refreshFailureCount(oauthId)).toBe(0);
+    expect(await needsReconnection(oauthId)).toBe(false);
+
+    // A non-oauth2 auth.
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const apiKeyId = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "acct-api-key",
+      expiresAt: soon(),
+    });
+    await db
+      .update(integrationConnections)
+      .set({ clientRef: null })
+      .where(eq(integrationConnections.id, apiKeyId));
+    const apiKey = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(apiKeyId),
+      {},
+    );
+    expect(apiKey.auths[0]!.fields.access_token).toBe("old-access");
+    expect(await refreshFailureCount(apiKeyId)).toBe(0);
+    expect(await needsReconnection(apiKeyId)).toBe(false);
   });
 
   // ── Invariant matrix ──

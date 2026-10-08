@@ -9,9 +9,9 @@
  * building a bundle internally and routing it through the single
  * `persistCredentialBundle` writer.
  *
- * Re-acquisition is OAuth2-only and is a direct call to
- * `forceRefreshIntegrationConnection` from the live resolvers — not a strategy
- * method — because the only refreshable auth type is `oauth2`.
+ * Re-acquisition is OAuth2-only and goes through `refreshConnectionCredential`
+ * (`services/integration-token-refresh.ts`) from the live resolvers — not a
+ * strategy method — because the only refreshable auth type is `oauth2`.
  */
 
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";

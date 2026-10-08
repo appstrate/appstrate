@@ -8,10 +8,10 @@
  * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
- *   2. If the auth is OAuth2 AND (forced OR within the lead window),
- *      call {@link forceRefreshIntegrationConnection}. RefreshError
- *      with `kind="revoked"` flips needsReconnection and bubbles a
- *      structured 410; transient failures bubble a 502.
+ *   2. If forced OR within the lead window, call
+ *      {@link refreshConnectionCredential} and translate its outcome: a dead
+ *      credential (already flagged needsReconnection) bubbles a structured
+ *      410, a retryable failure a 502.
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -22,14 +22,12 @@
 import {
   resolveAfpsHttpDelivery,
   decryptCredentialsToStringMap,
-  RefreshError,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
@@ -37,19 +35,14 @@ import { logger } from "../lib/logger.ts";
 import { decryptStoredCredential } from "../lib/stored-credential.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
-import {
-  buildIntegrationOAuthRefreshContext,
-  refreshAndClassify,
-} from "./integration-token-refresh.ts";
+import { refreshConnectionCredential } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
   readCredentialRevision,
-  recordUnrefreshableRejection,
   upstreamRejectionStreak,
 } from "./integration-connections.ts";
-import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
@@ -205,7 +198,7 @@ export async function resolveLiveIntegrationCredentials(
 
   // Terminally unusable, and already flagged by whoever concluded it: surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
-  const throwTerminal = (reason: string): never => {
+  const throwTerminal = (reason: string, detail?: string): never => {
     logger.warn("Integration credential terminally unusable — flagged needsReconnection", {
       runId: context.runId,
       integrationId,
@@ -213,38 +206,13 @@ export async function resolveLiveIntegrationCredentials(
       connectionId: connection.id,
       forced: forceRefresh,
       reason,
+      detail,
     });
     throw gone(
       "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
       `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
         `the connection has been flagged as needing re-connection. Re-connect ` +
         `'${integrationId}' and relaunch the run.`,
-    );
-  };
-
-  // A forced refresh nothing can recover (no refresh client, or not oauth2).
-  // One 401 can be a transient upstream fault, or a permission error the agent
-  // provoked, so it is counted: 502 until INTEGRATION_REFRESH_MAX_FAILURES
-  // consecutive rejections (a successful call ends the streak), then terminal.
-  const rejectUnrefreshable = async (reason: string): Promise<never> => {
-    const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
-      connection.id,
-      integrationId,
-      reach,
-    );
-    if (needsReconnection) return throwTerminal(reason);
-    logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
-      runId: context.runId,
-      integrationId,
-      authKey,
-      connectionId: connection.id,
-      failures,
-      maxFailures,
-      reason,
-    });
-    throw badGateway(
-      `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} consecutive upstream rejections before it is flagged`,
     );
   };
 
@@ -262,161 +230,52 @@ export async function resolveLiveIntegrationCredentials(
     return throwTerminal("stored credentials could not be decrypted");
   }
 
-  let expiresAtEpochMs: number | null = connection.expiresAt
-    ? connection.expiresAt.getTime()
-    : null;
-
-  // Decide whether to refresh.
-  const needsRefresh =
-    authDef.type === "oauth2" && (forceRefresh || isWithinLeadWindow(connection.expiresAt));
+  let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
   let credentialRevision: string | null = connection.credentialRevision;
 
-  if (needsRefresh) {
-    let refreshContext;
-    try {
-      refreshContext = await buildIntegrationOAuthRefreshContext(
-        integrationId,
-        authKey,
-        authDef,
-        context.spaceId,
-        connection,
-      );
-    } catch (err) {
-      // Transient token-endpoint discovery failure on an issuer-only manifest —
-      // NEVER terminal (the row stays untouched; the next run re-discovers).
-      if (err instanceof RefreshError && err.kind === "transient") {
-        if (forceRefresh) {
-          // Forced = the sidecar already saw an upstream 401, so the cached
-          // token is known-bad. We can't refresh right now → 502 so the sidecar
-          // keeps the original 401 and backs off.
-          logger.warn("Integration token endpoint discovery transient failure (forced refresh)", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            error: err.message,
-          });
-          throw badGateway(
-            `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
-          );
-        }
-        // Proactive (lead-window) path: the cached token is still valid (we're
-        // merely ahead of expiry). A discovery blip must NOT fail the run —
-        // serve the cached credential unchanged and let a later real 401 drive
-        // forced re-discovery. `refreshContext` left null → refresh skipped.
-        logger.info(
-          "Integration token endpoint discovery transient failure on proactive refresh — serving cached credential",
-          { runId: context.runId, integrationId, authKey, error: err.message },
-        );
-        refreshContext = null;
-      } else {
-        throw err;
-      }
-    }
-    if (refreshContext) {
-      // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
-      // already gated type=oauth2, so this is the only refreshable auth.
-      const classified = await refreshAndClassify(
-        connection,
-        integrationId,
-        authKey,
-        refreshContext,
-        // A forced refresh follows an upstream 401: the post-lock freshness
-        // short-circuit must not answer it with the very token that 401'd.
-        // The proactive (lead-window) branch keeps the short-circuit — there
-        // the stored token is presumed good, we are merely ahead of expiry.
-        { force: forceRefresh },
-      );
-      if (classified.status === "terminal") {
-        // The connection can never be refreshed as stored (no refresh_token).
-        // Same terminal surface as every other dead credential: 410, the helper having flagged it.
-        return throwTerminal(classified.reason);
-      }
-      if (classified.status === "revoked") {
-        // 410 here propagates to the sidecar, which translates back
-        // to a 401 to the integration's MCP client. The
-        // needsReconnection flag has already been set by the helper.
-        // Matches the model-provider token endpoint's revoked semantics.
-        logger.warn("Integration token refresh revoked", {
+  // A forced refresh follows an upstream 401 on the credential this connection holds; a
+  // proactive one runs ahead of expiry, with the stored token presumed good.
+  if (forceRefresh || isWithinLeadWindow(connection.expiresAt)) {
+    const outcome = await refreshConnectionCredential({
+      connection,
+      integrationId,
+      manifest,
+      authDef,
+      scope: { orgId: context.orgId, spaceId: context.spaceId },
+      actor: context.actor,
+      force: forceRefresh,
+    });
+    switch (outcome.status) {
+      case "dead":
+        return throwTerminal(outcome.reason, outcome.detail);
+      case "retry":
+        // The cached credential may still be usable: 502 lets the sidecar's
+        // `refreshOnUnauthorized` cooldown back off without poisoning the row.
+        logger.warn("Integration credential not refreshed — retry later", {
           runId: context.runId,
           integrationId,
           authKey,
-          status: classified.error.status,
+          connectionId: connection.id,
+          reason: outcome.reason,
+          detail: outcome.detail,
         });
-        throw gone(
-          "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-          `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
-        );
-      }
-      if (classified.status === "transient") {
-        // Transient failure (network, upstream 5xx, parse error). The
-        // cached credential may still be usable; surfacing 502 lets the
-        // sidecar's `refreshOnUnauthorized` cooldown back off without
-        // poisoning the connection row.
-        const err = classified.error;
-        logger.warn("Integration token refresh transient error", {
+        throw badGateway(`Integration '${integrationId}' auth '${authKey}' ${outcome.reason}`);
+      case "kept":
+        logger.debug("Integration proactive refresh skipped — serving the stored credential", {
           runId: context.runId,
           integrationId,
           authKey,
-          error: err instanceof Error ? err.message : String(err),
+          connectionId: connection.id,
+          reason: outcome.reason,
+          detail: outcome.detail,
         });
-        throw badGateway(
-          `Integration '${integrationId}' auth '${authKey}' token refresh failed upstream (transient)`,
-        );
-      }
-
-      const refreshed = classified.result;
-      fields = refreshed.fields;
-      credentialRevision = await readCredentialRevision(connection.id);
-      expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
-
-      // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
-      // refresh response narrowed `scopesGranted` (user revoked some
-      // permissions in their account settings between issuance and
-      // refresh), cross-check against the union of `requiredScopes`
-      // across every agent in the space and flip `needsReconnection`
-      // if the actor has dropped below that floor. Fast-path: skip
-      // the agent scan unless the refresh actually shrank scopes.
-      if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
-        const granted = refreshed.scopesGranted;
-        const { required } = await computeRequiredScopes({
-          scope: { orgId: context.orgId, spaceId: context.spaceId },
-          integrationId: integrationId,
-          authKey,
-        });
-        // Diff through the manifest `implies` hierarchy: a parent grant (e.g.
-        // GitHub `repo`) covers the children it implies (`public_repo`).
-        const missing = scopesNotCovered(required, granted, manifest, authKey);
-        if (missing.length > 0) {
-          await markIntegrationConnectionNeedsReconnection(connection.id);
-          logger.warn("Integration scope shrink dropped below required floor", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            granted,
-            required,
-            missing,
-          });
-        } else {
-          logger.info("Integration scope shrink absorbed (still covers required)", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            granted,
-            required,
-          });
-        }
-      }
-    } else if (forceRefresh) {
-      // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
-      // resolvable pinned OAuth client or no token_endpoint, so the token can
-      // never be refreshed. Terminal.
-      await rejectUnrefreshable("no OAuth client or token endpoint");
+        break;
+      case "refreshed":
+        fields = outcome.fields;
+        credentialRevision = await readCredentialRevision(connection.id);
+        expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
+        break;
     }
-  } else if (forceRefresh) {
-    // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
-    // with no connect.tool re-login handler — those route to re-login in the
-    // sidecar and never reach here). There is nothing to refresh.
-    await rejectUnrefreshable(`auth type '${authDef.type}' is not refreshable`);
   }
 
   const http = authDef.delivery?.http;

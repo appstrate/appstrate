@@ -4,6 +4,8 @@ import { describe, it, expect } from "bun:test";
 import {
   parseTokenResponse,
   parseTokenErrorResponse,
+  classifyTokenErrorBody,
+  readTokenResponse,
   buildTokenHeaders,
   buildTokenBody,
 } from "../src/token-utils.ts";
@@ -44,14 +46,6 @@ describe("parseTokenResponse", () => {
   it("extracts accessToken", () => {
     const result = parseTokenResponse(baseToken);
     expect(result.accessToken).toBe("tok_123");
-  });
-
-  it("throws when access_token is missing", () => {
-    expect(() => parseTokenResponse({})).toThrow("No (string) access_token");
-  });
-
-  it("throws when access_token is a non-string", () => {
-    expect(() => parseTokenResponse({ access_token: 12345 })).toThrow("No (string) access_token");
   });
 
   it("coerces a string expires_in (Azure AD v1 / Keycloak)", () => {
@@ -174,6 +168,110 @@ describe("parseTokenErrorResponse", () => {
 
   it("classifies empty body as 'transient'", () => {
     expect(parseTokenErrorResponse(400, "").kind).toBe("transient");
+  });
+});
+
+describe("classifyTokenErrorBody", () => {
+  it("classifies invalid_grant as 'revoked'", () => {
+    expect(classifyTokenErrorBody({ error: "invalid_grant" })).toEqual({
+      kind: "revoked",
+      error: "invalid_grant",
+      errorDescription: undefined,
+    });
+  });
+
+  // No provider-specific list: only the standard code declares a credential dead.
+  it("keeps any other code 'transient' and redacts the description", () => {
+    const result = classifyTokenErrorBody({
+      error: "bad_refresh_token",
+      error_description: "token ghr_0123456789abcdefABCDEF0123456789abcd is bad",
+    });
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBe("bad_refresh_token");
+    expect(result.errorDescription).toBe("token [redacted] is bad");
+  });
+
+  it("classifies a body with no string error as 'transient' with no code", () => {
+    expect(classifyTokenErrorBody({})).toEqual({ kind: "transient" });
+    expect(classifyTokenErrorBody({ error: 42 }).error).toBeUndefined();
+    expect(classifyTokenErrorBody(null)).toEqual({ kind: "transient" });
+    expect(classifyTokenErrorBody("invalid_grant")).toEqual({ kind: "transient" });
+  });
+});
+
+describe("readTokenResponse", () => {
+  function json(body: unknown, status: number): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("returns the body of a 2xx that carries an access_token", async () => {
+    const read = await readTokenResponse(json({ access_token: "tok", scope: "a" }, 200));
+    expect(read).toEqual({ ok: true, raw: { access_token: "tok", scope: "a" } });
+  });
+
+  it("summarizes a classified non-2xx as code and description, raw text on body", async () => {
+    const text = JSON.stringify({ error: "invalid_grant", error_description: "gone" });
+    const read = await readTokenResponse(new Response(text, { status: 400 }));
+    expect(read).toEqual({
+      ok: false,
+      kind: "revoked",
+      status: 400,
+      summary: "invalid_grant — gone",
+      body: text,
+      error: "invalid_grant",
+      errorDescription: "gone",
+    });
+  });
+
+  it("uses the code alone when there is no description", async () => {
+    const read = await readTokenResponse(json({ error: "invalid_grant" }, 401));
+    expect(read.ok).toBe(false);
+    if (!read.ok) expect(read.summary).toBe("invalid_grant");
+  });
+
+  it("falls back to the status when the body named no code", async () => {
+    const read = await readTokenResponse(new Response("<html>down</html>", { status: 503 }));
+    expect(read).toMatchObject({ ok: false, kind: "transient", status: 503, summary: "HTTP 503" });
+  });
+
+  it("classifies a non-JSON 2xx as transient with the parse error as cause", async () => {
+    const read = await readTokenResponse(new Response("<html>gateway</html>", { status: 200 }));
+    expect(read).toMatchObject({ ok: false, kind: "transient", status: 200 });
+    if (!read.ok) {
+      expect(read.summary).toBe("non-JSON response");
+      expect(read.body).toBeUndefined();
+      expect(read.cause).toBeInstanceOf(SyntaxError);
+    }
+  });
+
+  it("classifies a 2xx JSON body without a (string, non-empty) access_token", async () => {
+    for (const body of [{}, { access_token: 12345 }, { access_token: "" }]) {
+      const read = await readTokenResponse(json(body, 200));
+      expect(read).toMatchObject({
+        ok: false,
+        kind: "transient",
+        summary: "HTTP 200 without access_token",
+        body: JSON.stringify(body),
+      });
+    }
+    expect(await readTokenResponse(json({ error: "invalid_grant" }, 200))).toMatchObject({
+      ok: false,
+      kind: "revoked",
+      summary: "invalid_grant",
+    });
+  });
+
+  it("never puts the raw body in the summary", async () => {
+    const MARKER = "LEAKED_CODE_abc123_should_not_appear";
+    const read = await readTokenResponse(json({ error: "invalid_grant", reflected: MARKER }, 400));
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.summary).not.toContain(MARKER);
+      expect(read.body).toContain(MARKER);
+    }
   });
 });
 

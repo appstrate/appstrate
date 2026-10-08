@@ -258,7 +258,7 @@ describe("performRefreshTokenExchange — failure classification", () => {
 
   it("attaches the parse failure as the cause of a non-JSON 2xx body", async () => {
     // Delete-to-fail: without `{ cause }` the thrown error says only
-    // "<label> returned non-JSON response". The read already consumed
+    // "<label> failed: non-JSON response". The read already consumed
     // the stream at that point, so the `body` field built for this cannot be
     // filled in and the SyntaxError is the only description of what came back.
     const err = await captureError(
@@ -271,7 +271,8 @@ describe("performRefreshTokenExchange — failure classification", () => {
       ),
     );
     expect(err).toBeInstanceOf(RefreshError);
-    expect((err as RefreshError).message).toContain("non-JSON");
+    expect((err as RefreshError).message).toBe("refresh failed: non-JSON response");
+    expect((err as RefreshError).kind).toBe("transient");
     expect((err as RefreshError).cause).toBeInstanceOf(SyntaxError);
     expect((err as RefreshError).status).toBe(200);
   });
@@ -286,10 +287,9 @@ describe("performRefreshTokenExchange — failure classification", () => {
 });
 
 // A 2xx whose body carries no `access_token` is a FAILED refresh dressed as a
-// success. It used to be absorbed: the caller's current access token was
-// spliced in as a fallback, so the exchange returned "ok" while handing back
-// the very token the refresh existed to replace — and the write-back then
-// cleared `needsReconnection` and the failure streak on a dead credential.
+// success — never "ok" with the caller's current token spliced in, which would
+// clear `needsReconnection` and the failure streak on a dead credential. A
+// 2xx RFC 6749 §5.2 error object is classified like a non-2xx one.
 describe("performRefreshTokenExchange — a 2xx without access_token is a failure", () => {
   function respondingJson(body: unknown): typeof fetch {
     return responding(
@@ -301,21 +301,46 @@ describe("performRefreshTokenExchange — a 2xx without access_token is a failur
     );
   }
 
-  it("throws on an IdP that answers 200 with an error object", async () => {
+  it("classifies 200 + invalid_grant as revoked", async () => {
     const err = await captureError(respondingJson({ error: "invalid_grant" }));
-    expect(err).toBeInstanceOf(Error);
-    expect(String(err)).toContain("access_token");
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("revoked");
+    expect((err as RefreshError).status).toBe(200);
+    expect((err as RefreshError).message).toContain("invalid_grant");
   });
 
-  it("throws on an empty 200 body rather than reusing the previous token", async () => {
+  // GitHub answers a dead refresh token with this. Only the standard
+  // `invalid_grant` declares a credential dead, so it stays transient — but
+  // the IdP's code must reach the message instead of a generic parse failure.
+  it("classifies 200 + a non-standard error code as transient, naming the code", async () => {
+    const TOKEN = "ghr_0123456789abcdefABCDEF0123456789abcd";
+    const body = {
+      error: "bad_refresh_token",
+      error_description: `The refresh token ${TOKEN} is invalid`,
+    };
+    const err = await captureError(respondingJson(body));
+    expect(err).toBeInstanceOf(RefreshError);
+    const e = err as RefreshError;
+    expect(e.kind).toBe("transient");
+    expect(e.status).toBe(200);
+    expect(e.message).toContain("bad_refresh_token");
+    expect(e.message).toContain("[redacted]");
+    expect(e.message).not.toContain(TOKEN);
+    expect(JSON.parse(e.body!)).toEqual(body);
+  });
+
+  it("classifies an empty 200 body as transient rather than reusing the previous token", async () => {
     const err = await captureError(respondingJson({}));
-    expect(err).toBeInstanceOf(Error);
-    expect(String(err)).toContain("access_token");
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
+    expect((err as RefreshError).status).toBe(200);
+    expect((err as RefreshError).message).toContain("access_token");
   });
 
   it("throws on a 200 that only rotates the refresh token", async () => {
     const err = await captureError(respondingJson({ refresh_token: "rt_new", expires_in: 3600 }));
-    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
   });
 
   // The counterpart that must KEEP working: RFC 6749 §6 lets the server omit
