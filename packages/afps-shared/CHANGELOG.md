@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-08
+
 Breaking (0.x minor): `parseUrlFormPattern` and `unrenderableAuthorizedUriFields`
 return a `root` with each field.
 

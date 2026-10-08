@@ -27,9 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Requires `@appstrate/afps-shared` `^0.11.0`** (was `^0.10.1`): the
-  `authorized_uris` rules moved to its `./authorized-uris` subpath. No core
-  export changes. (#1763)
+- **Requires `@appstrate/afps-shared` `^0.12.0`** (was `^0.10.1`): the
+  `authorized_uris` rules moved to its `./authorized-uris` subpath (0.11.0),
+  and connection variables arrived (0.12.0). No core export changes. (#1763)
 - **`findUnboundedInjectedCredentials` (`@appstrate/core/integration`)
   refuses an `authorized_uris` wildcard that is not under a literal
   registrable domain**, judged with the Public Suffix List (ICANN and private
