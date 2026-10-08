@@ -5,7 +5,7 @@
     "": {
       "name": "appstrate",
       "dependencies": {
-        "@afps-spec/schema": "^0.8.0",
+        "@afps-spec/schema": "^0.9.0",
         "@appstrate/afps-shared": "workspace:*",
         "@appstrate/connect": "workspace:*",
         "@appstrate/core": "workspace:*",
@@ -177,7 +177,7 @@
         "afps": "./bin/afps.ts",
       },
       "dependencies": {
-        "@afps-spec/schema": "^0.8.0",
+        "@afps-spec/schema": "^0.9.0",
         "@afps-spec/types": "^0.1.0",
         "@appstrate/afps-shared": "workspace:*",
         "fflate": "^0.8.3",
@@ -228,7 +228,7 @@
       "name": "@appstrate/core",
       "version": "15.0.0",
       "dependencies": {
-        "@afps-spec/schema": "^0.8.0",
+        "@afps-spec/schema": "^0.9.0",
         "@appstrate/afps-shared": "^0.12.0",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
@@ -503,7 +503,7 @@
     "zod": "4.6.5",
   },
   "packages": {
-    "@afps-spec/schema": ["@afps-spec/schema@0.8.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-YMGs8UxDzDO8dLHsjM4PYN8KO+bek+Mx1EQFcrkmNtpkHrAk36HvW0rdCEviQwvReK4njKmw/a3NEYZ5Nc5NFQ=="],
+    "@afps-spec/schema": ["@afps-spec/schema@0.9.0", "", { "dependencies": { "ajv": "^8.17.1", "semver": "^7.7.4", "zod": "^4.4.3" } }, "sha512-oUzSlo8Ll1Xdvp82EUXokgyashR537PgACggVnMbVOvaB16DLJwA0+ifvG3AFBhWUKpRhkUm6CjMS3Z24E3iMQ=="],
 
     "@afps-spec/types": ["@afps-spec/types@0.1.0", "", {}, "sha512-0fK0vqhtzr+fRPnze2HPr+Krrx8pZwiOsUDjFswwz/Mr/VfnvWN+xinwzajX17NfFwA8W5a+vY90xO7HL7M9Xg=="],
 
