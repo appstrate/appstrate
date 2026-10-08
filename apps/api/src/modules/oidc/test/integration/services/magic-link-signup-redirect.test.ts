@@ -24,7 +24,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { prefixedId } from "@appstrate/db/ids";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { _swapBeforeSignupHookForTesting } from "@appstrate/db/auth";
+import { _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { spaces, user as userTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -47,9 +47,10 @@ describe("magic-link verify — a closed-signup client and a new address", () =>
 
   // The boot installs every module's `beforeSignup` (`lib/boot.ts`); the test
   // app does not, so the suite installs the OIDC one and restores the original.
-  let installedSignupHook: ReturnType<typeof _swapBeforeSignupHookForTesting>;
+  const signupSlot = _authHookSlotsForTesting.beforeSignup;
+  let installedSignupHook: ReturnType<typeof signupSlot.get>;
   beforeAll(() => {
-    installedSignupHook = _swapBeforeSignupHookForTesting((email, ctx) =>
+    installedSignupHook = signupSlot.swapForTesting((email, ctx) =>
       oidcModule.hooks!.beforeSignup!(email, ctx),
     );
   });
@@ -66,7 +67,7 @@ describe("magic-link verify — a closed-signup client and a new address", () =>
   });
 
   afterAll(() => {
-    _swapBeforeSignupHookForTesting(installedSignupHook);
+    signupSlot.swapForTesting(installedSignupHook);
     getTestApp();
   });
 

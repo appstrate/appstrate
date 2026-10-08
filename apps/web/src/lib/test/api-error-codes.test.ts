@@ -151,6 +151,8 @@ const EMITTED_OUT_OF_SIGHT = [
   "authorization_server_mismatch",
   // An `authorized_uris` entry a credential field leaves unrenderable (`services/connect/fields-strategy.ts`).
   "unrenderable_authorized_uri",
+  // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
+  "credential_change_revocation_failed",
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */

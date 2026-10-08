@@ -94,7 +94,11 @@ import {
 } from "./services/social.ts";
 import { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getOidcAuthApi } from "./auth/api.ts";
-import { BA_MAGIC_LINK_VERIFY_PATH, withSmtpOverride } from "@appstrate/db/auth";
+import {
+  BA_MAGIC_LINK_VERIFY_PATH,
+  CREDENTIAL_CHANGE_REVOCATION_FAILED,
+  withSmtpOverride,
+} from "@appstrate/db/auth";
 import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
@@ -2131,10 +2135,14 @@ export function createOidcRouter() {
         status: resetResponse.status,
         body: bodyText.slice(0, 200),
       });
-      return c.html(
-        renderInvalidTokenPage({ queryString: forwardQuery, branding: ctx.branding }).value,
-        400,
-      );
+      // The password is written and the token spent: not an invalid link.
+      const revocationFailed = bodyText.includes(CREDENTIAL_CHANGE_REVOCATION_FAILED);
+      const page = renderInvalidTokenPage({
+        queryString: forwardQuery,
+        branding: ctx.branding,
+        revocationFailed,
+      });
+      return c.html(page.value, revocationFailed ? 500 : 400);
     }
 
     logger.info("oidc: password reset success");

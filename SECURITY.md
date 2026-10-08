@@ -404,6 +404,16 @@ app.use("*", async (c, next) => {
 
 Sessions are managed by Better Auth (email/password + optional Google social login, cookie-based sessions). Account linking uses trusted providers (Google) with verified emails to prevent pre-account takeover. Email verification is opt-in (requires SMTP configuration). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
+Changing or resetting a password ends the account's other sessions and invalidates its stored password-reset links, magic links, in-progress social-account links and unredeemed model-provider pairing tokens (`packages/db/src/credential-change.ts`); with the OIDC module, also its OAuth refresh and access tokens (`offline_access` included), CLI sessions and device codes (`apps/api/src/modules/oidc/services/credential-change.ts`). A change keeps the session that made it; a reset (`/api/auth/reset-password` or the hosted `/api/oauth/reset-password` page) ends every session. Deliberately not ended:
+
+- API keys, which act as their creator rather than as a session: review them in the settings after a reset;
+- SSE streams already open;
+- linked sign-in methods (a social account linked from another session stays linked): review them in the security settings after a reset;
+- emailed verification and change-email links, signed tokens with nothing stored. A verified account's change of address is approved from its current address first; an unverified account's link goes straight to the new address and signs in when opened, for up to one hour;
+- a first password set on a social-only account (`POST /api/profile/password`), which replaces nothing;
+- an OAuth access token already issued as a JWT, valid until it expires (one hour by default);
+- with `AUTH_SESSION_COOKIE_CACHE_SECONDS` above 0 (default 0), a revoked session whose cached copy has not expired: it passes every authentication check until then (approve a device code, create an API key, link an account).
+
 ### Organization context verification
 
 Every authenticated request must include an `X-Org-Id` header. The middleware verifies the user is a member of the specified organization via Drizzle:
