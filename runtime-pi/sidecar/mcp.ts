@@ -51,8 +51,10 @@ import {
   createMcpServer,
   ErrorCode,
   McpError,
+  API_CALL_ERROR_META_KEY,
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
+  type ApiCallErrorMeta,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
   type AppstrateToolDefinition,
@@ -1044,8 +1046,14 @@ function buildSidecarTools(options: MountMcpOptions): {
           // upstream contact, but the runtime parser requires `_meta`
           // on every CallToolResult — surface `status: 0` so the agent
           // can distinguish "no upstream contact" from "upstream
-          // returned 5xx" via the status code.
-          _meta: API_CALL_PREFLIGHT_META,
+          // returned 5xx" via the status code. A coded failure adds its
+          // code under its own key; the upstream status stays 0.
+          _meta: result.code
+            ? {
+                ...API_CALL_PREFLIGHT_META,
+                [API_CALL_ERROR_META_KEY]: { code: result.code } satisfies ApiCallErrorMeta,
+              }
+            : API_CALL_PREFLIGHT_META,
         };
       }
       return responseToToolResult(result.response, {

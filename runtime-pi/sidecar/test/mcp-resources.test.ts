@@ -449,6 +449,26 @@ describe("POST /mcp — api_call response body survives (no outputSchema / no st
     expect(result.structuredContent).toBeUndefined();
     expect(JSON.parse(result.content[0]!.text!)).toEqual({ error: "nope" });
     expect(result._meta?.["dev.appstrate/upstream"]?.status).toBe(404);
+    // An upstream answer is no proxy failure: no code.
+    expect(result._meta?.["dev.appstrate/api-call-error"]).toBeUndefined();
+  });
+
+  // The upstream status stays 0: a proxy refusal must not read as the API answering 403.
+  it("carries a refused call's code apart from an upstream status of 0", async () => {
+    const fetchFn = mock(async () => new Response("unreachable"));
+    const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });
+    const res = await rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://other.example.com/x" },
+      },
+    });
+    const result = res.json.result as { isError?: boolean; _meta?: Record<string, unknown> };
+    expect(result.isError).toBe(true);
+    expect(result._meta?.["dev.appstrate/upstream"]).toEqual({ status: 0, headers: {} });
+    expect(result._meta?.["dev.appstrate/api-call-error"]).toEqual({ code: "unauthorized_target" });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });
 

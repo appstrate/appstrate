@@ -110,3 +110,17 @@ export interface UpstreamMeta {
   /** Lowercased, allowlisted upstream response headers. */
   headers: Record<string, string>;
 }
+
+/**
+ * MCP `_meta` key under which the sidecar packages the code of an
+ * `api_call` it refused or failed itself (a refused target, an unusable
+ * credential, an upstream it could not reach, …), alongside an
+ * {@link UPSTREAM_META_KEY} status of 0. Kept apart from that status: a
+ * proxy refusal must never read as the upstream answering 403.
+ */
+export const API_CALL_ERROR_META_KEY = "dev.appstrate/api-call-error";
+
+/** Serialised proxy failure. `code` is afps-runtime's `ApiCallFailureCode`. */
+export interface ApiCallErrorMeta {
+  code: string;
+}

@@ -9,9 +9,12 @@
  *      on `_meta["dev.appstrate/upstream"]`, but `callToolResultToPi` keeps
  *      only `content` — so without this the agent never sees the status
  *      code and can't branch on 200/404/409/… Here we read it back and put
- *      it where the agent can act on it.
+ *      it where the agent can act on it. A call the sidecar refused or failed
+ *      itself (status 0) also carries its failure code on
+ *      `_meta["dev.appstrate/api-call-error"]`, rendered beside the status
+ *      (`[api_call status=0 error=blocked_target]`).
  *
- *      The status is ALL that survives. `_meta` carries allowlisted
+ *      The status (and that code) is ALL that survives. `_meta` carries allowlisted
  *      response headers too, and this shaper reads them and drops them:
  *      only the status reaches a content block, so `location`, `etag`,
  *      `retry-after` and the rest die here. That is deliberate — a raw
@@ -50,7 +53,7 @@ import { constants as fsConstants } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { spillResourcesToWorkspace, type RuntimeEventEmitter } from "@appstrate/runner-pi";
-import { readUpstreamMeta } from "./upstream-meta.ts";
+import { readApiCallErrorCode, readUpstreamMeta } from "./upstream-meta.ts";
 
 // Structural views — the sidecar's MCP `CallToolResult` carries these
 // shapes; we avoid importing the SDK type to keep the helper test-friendly.
@@ -198,6 +201,7 @@ export async function shapeApiCallResponse(
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
   const status = safeStatus(result);
+  const error = readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0]);
 
   if (opts.toFile) {
     const bytes = await extractBodyBytes(result, opts.readResource);
@@ -208,6 +212,7 @@ export async function shapeApiCallResponse(
       path: opts.toFile,
       size: bytes.byteLength,
       ...(status !== null ? { status } : {}),
+      ...(error !== null ? { error } : {}),
     };
     // Descriptor rides twice, per the MCP spec recommendation: as
     // `structuredContent` (machine-readable, matches the tool's
@@ -238,6 +243,12 @@ export async function shapeApiCallResponse(
   // text/image content to the model (see module doc).
   return {
     ...spilled,
-    content: [{ type: "text", text: `[api_call status=${status}]` }, ...spilled.content],
+    content: [
+      {
+        type: "text",
+        text: `[api_call status=${status}${error !== null ? ` error=${error}` : ""}]`,
+      },
+      ...spilled.content,
+    ],
   };
 }

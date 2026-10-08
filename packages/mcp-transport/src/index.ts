@@ -315,8 +315,10 @@ export {
 // and the runtime-pi parser. Hosted here so both sides agree without
 // duplicating constants.
 export {
+  API_CALL_ERROR_META_KEY,
   UPSTREAM_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
+  type ApiCallErrorMeta,
   type UpstreamMeta,
 } from "./upstream-meta.ts";
 

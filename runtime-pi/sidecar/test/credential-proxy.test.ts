@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { cookieScope } from "@appstrate/afps-runtime/resolvers";
+import { cookieScope, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
@@ -66,13 +66,13 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(400);
+      expect(result.code).toBeUndefined();
       expect(result.error).toMatch(/Invalid integration id/);
     }
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
-  it("returns 400 on unresolved target placeholders", async () => {
+  it("refuses unresolved target placeholders, with no shared code", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -86,7 +86,6 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
-      status: 400,
       error: "Unresolved placeholders in target: {{missing}}",
     });
   });
@@ -118,7 +117,6 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
-      status: 400,
       error: 'Unresolved placeholders in header "X-Other": {{nope}}',
     });
     expect(fetchFn).not.toHaveBeenCalled();
@@ -153,7 +151,7 @@ describe("executeApiCall — structured failures", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 403 when the URL is not in authorizedUris", async () => {
+  it("refuses a URL not in authorizedUris as unauthorized_target", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -167,7 +165,7 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/not in authorized_uris allowlist/);
     }
   });
@@ -215,7 +213,7 @@ describe("executeApiCall — connection-rendered allowlists (#1627)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toContain("does not render");
       expect(result.error).not.toContain("mysite.com");
     }
@@ -240,7 +238,7 @@ describe("executeApiCall — connection-rendered allowlists (#1627)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toContain("{$credential.webhook_url}");
       expect(result.error).not.toContain("SECRETTOKEN");
     }
@@ -886,39 +884,99 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       deps,
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(502);
+    if (!result.ok) expect(result.code).toBe("upstream_unreachable");
     expect(fetchFn).toHaveBeenCalledTimes(11);
   });
 
-  it.each([
+  // The platform proxy's codes (afps-runtime's `API_CALL_FAILURE_STATUS`), one row per engine
+  // failure kind plus a URL-policy refusal.
+  const throwing = (thrown: unknown) =>
+    mock(async () => {
+      throw thrown;
+    }) as unknown as typeof fetch;
+  const injected = (token: string, authorizedUris: string[] | null, allowAllUris = false) =>
+    mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: token },
+      authorizedUris,
+      allowAllUris,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer ",
+      credentialFieldName: "access_token",
+    }));
+  // The DNS gate runs off the test preload's trusted hosts (api.example.com is one): a host not on it.
+  const gated = (resolveHost: ApiCallDeps["resolveHost"]): Partial<ApiCallDeps> => ({
+    fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok" },
+      authorizedUris: null,
+      allowAllUris: true,
+      credentialFieldName: "access_token",
+    })),
+    declaredUris: [],
+    resolveHost,
+  });
+  it.each<[string, string, Partial<ApiCallDeps>, ApiCallFailureCode, string]>([
+    [
+      "a target off the allowlist",
+      "https://other.example.com/v1",
+      {},
+      "unauthorized_target",
+      'Integration "demo": URL not in authorized_uris allowlist',
+    ],
+    [
+      "a target resolving into a blocked range",
+      "https://rebind.example.com/v1",
+      gated(async () => ["10.0.0.5"]),
+      "blocked_target",
+      "blocked network range",
+    ],
+    [
+      "an unresolvable target",
+      "https://rebind.example.com/v1",
+      gated(async () => Promise.reject(new Error("ENOTFOUND"))),
+      "upstream_unresolvable",
+      "could not be resolved",
+    ],
+    [
+      "an unusable injected credential",
+      "https://api.example.com/v1",
+      { fetchCredentials: injected("tok\r\nX-Evil: 1", ["https://api.example.com/**"]) },
+      "credential_unusable",
+      "the connection's credential is unusable",
+    ],
     [
       "a silent upstream",
-      new DOMException("deadline exceeded", "TimeoutError"),
-      504,
+      "https://api.example.com/v1",
+      { fetchFn: throwing(new DOMException("deadline exceeded", "TimeoutError")) },
+      "upstream_timeout",
       "Upstream timeout: api.example.com did not answer in time",
     ],
     [
       "a refused connection",
-      Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }),
-      502,
+      "https://api.example.com/v1",
+      { fetchFn: throwing(Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" })) },
+      "upstream_unreachable",
       "Upstream request failed: ECONNREFUSED (api.example.com)",
     ],
-  ])("answers %s with the platform proxy's status", async (_, thrown, status, error) => {
-    const fetchFn = mock(async () => {
-      throw thrown;
-    });
+    [
+      "an injected credential with no allowlist (URL policy)",
+      "https://api.example.com/v1",
+      { fetchCredentials: injected("tok", null, true), declaredUris: [] },
+      "credential_exfiltration_refused",
+      "names its hosts",
+    ],
+  ])("codes %s as the platform proxy does", async (_, targetUrl, overrides, code, error) => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
         connectionId: "conn-1",
-        targetUrl: "https://api.example.com/v1",
+        targetUrl,
         method: "GET",
         callerHeaders: {},
         body: { kind: "none" },
       },
-      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      makeDeps(overrides),
     );
-    expect(result).toEqual({ ok: false, status, error });
+    expect(result).toEqual({ ok: false, code, error: expect.stringContaining(error) });
   });
 
   it("holds an injected credential to authorized_uris on a redirect under allow_all_uris", async () => {
@@ -1119,7 +1177,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
       expect(result.error).toContain("api.example.com");
     }
@@ -1275,7 +1333,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       );
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.status).toBe(403);
+        expect(result.code).toBe("blocked_target");
         expect(result.error).toMatch(/Redirect blocked \(ssrf\)/);
       }
       // The blocked hop was never issued — only the initial fetch.
@@ -1308,7 +1366,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
       expect(result.error).toContain("evil.attacker.com");
       // The raw URL path/query never appears (defence against capability
@@ -1339,7 +1397,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       },
       makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, fetchCredentials, declaredUris: [] }),
     );
-    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(result).toMatchObject({ ok: false, code: "credential_exfiltration_refused" });
     if (!result.ok) expect(result.error).toMatch(/names its hosts/);
     expect(fetchFn).not.toHaveBeenCalled();
   });
@@ -1369,7 +1427,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
         declaredUris: ["https://api.example.com/**", "https://**"],
       }),
     );
-    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(result).toMatchObject({ ok: false, code: "credential_exfiltration_refused" });
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
@@ -1769,7 +1827,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
       expect(result.error).toContain("evil.example.net");
     }
@@ -1798,7 +1856,7 @@ describe("executeApiCall — redirects after the credential-exfiltration downgra
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
     }
     expect(calls.map((c) => c.url)).toEqual(["https://api.example.com/start"]);
@@ -1871,10 +1929,12 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
         makeDeps({
           fetchFn,
           fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+          // An allow_all_uris integration declares none, so the exfiltration guard decides.
+          declaredUris: [],
         }),
       );
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.status).toBe(403);
+      if (!result.ok) expect(result.code).toBe("credential_exfiltration_refused");
       expect(calls).toHaveLength(0);
     },
   );
@@ -1900,7 +1960,7 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toMatch(/URL not in authorized_uris allowlist/);
       expect(result.error).not.toContain("hooks.example.com");
     }
@@ -1922,10 +1982,11 @@ describe("executeApiCall — credential exfiltration with URL-valued credential 
       makeDeps({
         fetchFn,
         fetchCredentials: fieldCreds({ authorizedUris: null, allowAllUris: true }),
+        declaredUris: [],
       }),
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(403);
+    if (!result.ok) expect(result.code).toBe("credential_exfiltration_refused");
     expect(calls).toHaveLength(0);
   });
 });
@@ -1939,17 +2000,22 @@ describe("executeApiCall — no credential in an error host", () => {
     credentialFieldName: "api_key",
   }));
 
-  it.each([
-    ["an unresolvable host", { resolveHost: async () => Promise.reject(new Error("ENOTFOUND")) }],
+  it.each<[string, ApiCallFailureCode, Partial<ApiCallDeps>]>([
+    [
+      "an unresolvable host",
+      "upstream_unresolvable",
+      { resolveHost: async () => Promise.reject(new Error("ENOTFOUND")) },
+    ],
     [
       "a transport error",
+      "upstream_unreachable",
       {
         fetchFn: mock(async () => {
           throw Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
         }) as unknown as typeof fetch,
       },
     ],
-  ])("redacts a host-templated secret from %s", async (_, overrides) => {
+  ])("redacts a host-templated secret from %s", async (_, code, overrides) => {
     const result = await executeApiCall(
       {
         integrationId: "demo",
@@ -1963,7 +2029,7 @@ describe("executeApiCall — no credential in an error host", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(502);
+      expect(result.code).toBe(code);
       expect(result.error).toContain("{{api_key}}.api-us1.com");
       expect(result.error).not.toContain(SECRET);
       expect(result.error).not.toContain(SECRET.toLowerCase());
@@ -2036,7 +2102,7 @@ describe("executeApiCall — no credential in an error host", () => {
     expect(calls).toBe(2);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("unauthorized_target");
       expect(result.error).toContain("host={{access_token}}.evil.example");
       expect(result.error.toLowerCase()).not.toContain(FRESH.toLowerCase());
     }
@@ -2083,7 +2149,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       }),
       "https://public.example.com/x",
     );
-    expect(result).toMatchObject({ ok: false, status: 403 });
+    expect(result).toMatchObject({ ok: false, code: "unauthorized_target" });
     if (!result.ok) expect(result.error).toContain("declares no authorized_uris");
     expect(resolveHost).not.toHaveBeenCalled();
     expect(fetchFn).not.toHaveBeenCalled();
@@ -2101,7 +2167,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(403);
+      expect(result.code).toBe("blocked_target");
       expect(result.error).toMatch(/blocked network range/);
     }
     // The request never went out — fail happened pre-fetch.
@@ -2122,7 +2188,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.status).toBe(502);
+      expect(result.code).toBe("upstream_unresolvable");
       expect(result.error).toMatch(/could not be resolved/);
       // Host only — never the full URL (may encode capabilities).
       expect(result.error).toContain("rebind.example.com");
@@ -2142,7 +2208,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       }),
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(403);
+    if (!result.ok) expect(result.code).toBe("blocked_target");
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
@@ -2171,7 +2237,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
         `https://${host}/api/x`,
       );
       expect(result.ok).toBe(reached);
-      if (!result.ok) expect(result.status).toBe(403);
+      if (!result.ok) expect(result.code).toBe("blocked_target");
       expect(fetchFn).toHaveBeenCalledTimes(reached ? 1 : 0);
     },
   );
@@ -2193,7 +2259,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
       "https://169.254.169.254/latest/meta-data",
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.status).toBe(403);
+    if (!result.ok) expect(result.code).toBe("blocked_target");
     expect(resolveHost).not.toHaveBeenCalled();
   });
 });
@@ -2715,12 +2781,12 @@ describe("executeApiCall — a header value that is no HTTP field value", () => 
   };
 
   for (const token of [`${SECRET}\r\nX-Evil: 1`, `${SECRET}€`]) {
-    it(`answers an unusable injected credential with a 502 naming the header only`, async () => {
+    it(`answers an unusable injected credential as credential_unusable, naming the header only`, async () => {
       const { result, fetchFn } = callWith(token);
       const out = await result;
       expect(out.ok).toBe(false);
       if (!out.ok) {
-        expect(out.status).toBe(502);
+        expect(out.code).toBe("credential_unusable");
         expect(out.error).toContain(`"Authorization"`);
         expect(out.error).not.toContain(SECRET);
       }
@@ -2728,10 +2794,11 @@ describe("executeApiCall — a header value that is no HTTP field value", () => 
     });
   }
 
-  it("answers a caller's own invalid header value with a 400", async () => {
+  it("refuses a caller's own invalid header value, with no shared code", async () => {
     const { result, fetchFn } = callWith("ok", { "X-Note": "a\nb" });
     const out = await result;
-    expect(out).toMatchObject({ ok: false, status: 400 });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.code).toBeUndefined();
     expect(fetchFn).not.toHaveBeenCalled();
   });
 

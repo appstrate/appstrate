@@ -12,7 +12,7 @@ import { describe, it, expect } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
+import { API_CALL_ERROR_META_KEY, UPSTREAM_META_KEY } from "@appstrate/mcp-transport";
 import { shapeApiCallResponse } from "../mcp/api-call-response-resolver.ts";
 
 // `realpathSync`: on macOS `tmpdir()` is `/var/folders/…`, a symlink to
@@ -35,6 +35,12 @@ type Block = { type: string; text?: string; uri?: string };
 const withStatus = (content: Block[], status: number) => ({
   content,
   _meta: { [UPSTREAM_META_KEY]: { status, headers: {} } },
+});
+/** A call the sidecar refused or failed itself: upstream status 0, its own code beside it. */
+const failed = (content: Block[], code: unknown) => ({
+  content,
+  isError: true,
+  _meta: { [UPSTREAM_META_KEY]: { status: 0, headers: {} }, [API_CALL_ERROR_META_KEY]: { code } },
 });
 
 describe("shapeApiCallResponse — responseMode.toFile", () => {
@@ -83,6 +89,16 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     const out = await shapeApiCallResponse(result, baseOpts(workspace, "e.json"));
     const descriptor = JSON.parse((out.content[0] as { text: string }).text);
     expect(descriptor.status).toBe(404);
+    expect(descriptor.error).toBeUndefined();
+    expect(out.isError).toBe(true);
+  });
+
+  it("carries a sidecar failure's code into the descriptor", async () => {
+    const workspace = ws();
+    const result = failed([{ type: "text", text: "refused" }], "unauthorized_target");
+    const out = await shapeApiCallResponse(result, baseOpts(workspace, "e.json"));
+    const descriptor = JSON.parse((out.content[0] as { text: string }).text);
+    expect(descriptor).toMatchObject({ status: 0, error: "unauthorized_target" });
     expect(out.isError).toBe(true);
   });
 });
@@ -94,6 +110,22 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     const out = await shapeApiCallResponse(result, baseOpts(workspace));
     expect((out.content[0] as { text: string }).text).toBe("[api_call status=404]");
     expect((out.content[1] as { text: string }).text).toBe("hi");
+  });
+
+  it("renders a sidecar failure's code beside status 0", async () => {
+    const workspace = ws();
+    const result = failed([{ type: "text", text: "blocked" }], "blocked_target");
+    const out = await shapeApiCallResponse(result, baseOpts(workspace));
+    expect((out.content[0] as { text: string }).text).toBe(
+      "[api_call status=0 error=blocked_target]",
+    );
+    expect((out.content[1] as { text: string }).text).toBe("blocked");
+  });
+
+  it.each([42, "x] [api_call status=200", null])("ignores a malformed code (%p)", async (code) => {
+    const workspace = ws();
+    const out = await shapeApiCallResponse(failed([], code), baseOpts(workspace));
+    expect((out.content[0] as { text: string }).text).toBe("[api_call status=0]");
   });
 
   // #876: the sidecar attaches no structuredContent on the inline path, so the
