@@ -229,6 +229,22 @@ interface ActorConnectionRow {
    */
   clientRef: string | null;
   refreshFailureCount: number;
+  /** Read in the statement that read `credentialsEncrypted`: the upstream that credential is for. */
+  variables: ConnectionVariables;
+  /** RFC 8707 `resource` the token was requested for; every refresh sends it again. */
+  oauthResource: string | null;
+}
+
+/** A connection's variables (AFPS §7.12) as the run-time renderers substitute them. */
+export type ConnectionVariables = Readonly<Record<string, string>>;
+
+/** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
+function connectionVariablesOf(value: unknown): ConnectionVariables {
+  const out: Record<string, string> = {};
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
+  }
+  return Object.freeze(out);
 }
 
 /**
@@ -312,6 +328,8 @@ export async function loadAccessibleConnectionById(
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
       refreshFailureCount: integrationConnections.refreshFailureCount,
+      variables: integrationConnections.variables,
+      oauthResource: integrationConnections.oauthResource,
     })
     .from(integrationConnections)
     .where(
@@ -336,8 +354,8 @@ export async function loadAccessibleConnectionById(
         (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
     );
   }
-  const { integrationId: _integrationId, ...resolved } = row;
-  return resolved;
+  const { integrationId: _integrationId, variables, ...resolved } = row;
+  return { ...resolved, variables: connectionVariablesOf(variables) };
 }
 
 /** The `X-Run-Id` run; `boundSet` re-checks it on every selection, the 401 refresh included. */
@@ -470,6 +488,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables,
+    oauthResource,
   } = row;
   return {
     id,
@@ -479,6 +499,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables: connectionVariablesOf(variables),
+    oauthResource,
   };
 }
 
@@ -2546,6 +2568,8 @@ interface StoreConnectionInput {
    * the integration declares none. Always written: an acquisition replaces them.
    */
   variables?: Record<string, string> | null;
+  /** RFC 8707 `resource` the oauth2 token was requested for; absent when none was sent. */
+  oauthResource?: string;
 }
 
 /**
@@ -2628,6 +2652,11 @@ interface PersistCredentialInput {
    * INSERT: absent → NULL. UPDATE: written when provided; the refresh write-back omits it.
    */
   variables?: Record<string, string> | null;
+  /**
+   * RFC 8707 `resource` the oauth2 token was requested for (AFPS §8.6). Every acquisition writes
+   * it, absent → NULL (a non-oauth2 credential has none); the refresh write-back leaves it.
+   */
+  oauthResource?: string;
 }
 
 /**
@@ -2736,6 +2765,7 @@ export async function persistCredentialBundle(
           needsReconnection: input.needsReconnection ?? false,
           clientRef: input.clientRef ?? null,
           variables: input.variables ?? null,
+          oauthResource: input.oauthResource ?? null,
           expiresAt: input.expiresAt ?? null,
           label: labelValue,
           createdAt: now,
@@ -2772,6 +2802,7 @@ export async function persistCredentialBundle(
   if (input.variables !== undefined) set.variables = input.variables;
 
   if (target.kind === "update-owned") {
+    set.oauthResource = input.oauthResource ?? null;
     await assertSpaceInScope(target.scope);
     const ownerPredicate = actorFilter(target.actor, integrationConnections);
     // Owner-scoped reconnect: id + space + actor identity, PLUS the
@@ -3024,6 +3055,7 @@ export async function saveIntegrationConnection(
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
     variables: input.variables ?? null,
+    ...(input.oauthResource !== undefined ? { oauthResource: input.oauthResource } : {}),
   };
   const summary = input.connectionId
     ? await persistCredentialBundle(

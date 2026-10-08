@@ -391,19 +391,24 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  /**
-   * The minting client pinned on the connection
-   * (`integration_connections.client_ref`): a flat client id — the env id of a
-   * system client or the `integration_oauth_clients.id` of a custom client.
-   * Resolves WHICH client's credentials refresh the tokens — the same one that
-   * minted them. `null` only for non-oauth2 connections, which never reach this
-   * function (guarded below).
-   */
-  clientRef: string | null,
+  connection: {
+    /**
+     * The minting client pinned on the connection
+     * (`integration_connections.client_ref`): a flat client id — the env id of a
+     * system client or the `integration_oauth_clients.id` of a custom client.
+     * Resolves WHICH client's credentials refresh the tokens — the same one that
+     * minted them. `null` only for non-oauth2 connections, which never reach this
+     * function (guarded below).
+     */
+    clientRef: string | null;
+    /** The RFC 8707 `resource` the token was requested for, sent again on refresh. */
+    oauthResource: string | null;
+  },
   /** Discovery seam for tests; production uses the cached RFC 8414 resolver. */
   discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
+  const { clientRef, oauthResource } = connection;
   const afpsAuth = authDef;
   const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
 
@@ -484,5 +489,9 @@ export async function buildIntegrationOAuthRefreshContext(
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
   const { issuer: _boundIssuer, ...credentials } = client;
-  return { tokenEndpoint, ...credentials };
+  return {
+    tokenEndpoint,
+    ...credentials,
+    ...(oauthResource !== null ? { resource: oauthResource } : {}),
+  };
 }

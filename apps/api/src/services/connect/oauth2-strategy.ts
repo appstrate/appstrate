@@ -415,6 +415,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
       clientRef: result.clientRef,
       variables: result.variables ?? null,
+      ...(result.resource ? { oauthResource: result.resource } : {}),
     });
   }
 }

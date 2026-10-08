@@ -94,6 +94,12 @@ export const integrationConnections = pgTable(
     // by OAuth2Strategy on every connect/reconnect). Enforced at the service
     // layer — a cross-table CHECK on the auth type is not expressible in SQL.
     clientRef: text("client_ref"),
+    /**
+     * RFC 8707 `resource` the connection's token was requested for (authorize + code exchange),
+     * sent again on every refresh (AFPS §8.6). NULL ⟺ none was sent. Written with the token at
+     * each acquisition; the refresh write-back leaves it.
+     */
+    oauthResource: text("oauth_resource"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
     // 5xx / parse — NOT `invalid_grant`, which flips `needsReconnection`

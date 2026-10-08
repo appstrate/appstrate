@@ -16,7 +16,10 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { readConnectionVariables } from "../../../src/services/connection-variables.ts";
+import {
+  loadAccessibleConnectionById,
+  persistCredentialBundle,
+} from "../../../src/services/integration-connections.ts";
 import {
   connectToolBlock,
   httpHeaderDelivery,
@@ -392,7 +395,7 @@ describe("resolveIntegrationSpawns — run-start connect.tool with connection va
   });
 });
 
-describe("readConnectionVariables", () => {
+describe("connection rows carry their variables", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -401,34 +404,63 @@ describe("readConnectionVariables", () => {
     await seedIntegration(ctx, remoteManifest());
   });
 
-  it("reads the variables stored with the credential the caller holds, and none after a rewrite", async () => {
-    const id = await seedConnection(ctx, "default", { base_url: "https://forge.example.com" });
-    const [row] = await db
-      .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, id));
-    const held = { id, credentialsEncrypted: row!.credentialsEncrypted };
-    const manifest = remoteManifest();
-
-    expect(await readConnectionVariables(manifest, held)).toEqual({
-      base_url: "https://forge.example.com",
+  const load = (id: string) =>
+    loadAccessibleConnectionById(id, INTEG, null, {
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
     });
 
-    await db
-      .update(integrationConnections)
-      .set({
-        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-456" } }),
-        variables: { base_url: "https://other.example.com" },
-      })
-      .where(eq(integrationConnections.id, id));
-    expect(await readConnectionVariables(manifest, held)).toBeNull();
+  it("reads the variables in the statement that reads the credential, own strings only", async () => {
+    const id = await seedConnection(ctx, "default", {
+      base_url: "https://mcp.example.com/forge",
+      port: 443,
+    } as unknown as Record<string, string>);
+    expect((await load(id))!.variables).toEqual({ base_url: "https://mcp.example.com/forge" });
   });
 
-  it("reads nothing for an integration that declares no variables", async () => {
-    const id = await seedConnection(ctx, "default", { base_url: "https://forge.example.com" });
-    const literal = remoteIntegrationManifest({ name: INTEG, auths: {} });
-    expect(
-      await readConnectionVariables(literal, { id, credentialsEncrypted: "not-the-ciphertext" }),
-    ).toEqual({});
+  it("a token refresh rewrites the credential and leaves the variables and the resource", async () => {
+    const id = await seedConnection(ctx, "default", { base_url: "https://mcp.example.com/forge" });
+    await db
+      .update(integrationConnections)
+      .set({ oauthResource: "https://mcp.example.com/forge/mcp" })
+      .where(eq(integrationConnections.id, id));
+    const held = (await load(id))!;
+
+    await persistCredentialBundle(
+      { kind: "update-by-id", connectionId: id },
+      { credentials: { api_key: "k-456" }, expiresAt: null, needsReconnection: false },
+    );
+
+    const after = (await load(id))!;
+    expect(after.credentialsEncrypted).not.toBe(held.credentialsEncrypted);
+    expect(after.variables).toEqual(held.variables);
+    expect(after.oauthResource).toBe("https://mcp.example.com/forge/mcp");
+    const { specs, dropped } = await resolve(ctx);
+    expect(dropped).toEqual([]);
+    expect(specs[0]!.manifest.server?.url).toBe("https://mcp.example.com/forge/mcp");
+  });
+
+  it("an acquisition without a resource clears the stored one", async () => {
+    const id = await seedConnection(ctx, "default", { base_url: "https://mcp.example.com/forge" });
+    await db
+      .update(integrationConnections)
+      .set({ oauthResource: "https://mcp.example.com/forge/mcp" })
+      .where(eq(integrationConnections.id, id));
+
+    await persistCredentialBundle(
+      {
+        kind: "update-owned",
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        connectionId: id,
+        packageId: INTEG,
+        authKey: "primary",
+      },
+      {
+        credentials: { api_key: "k-789" },
+        variables: { base_url: "https://mcp.example.com/forge" },
+      },
+    );
+    expect((await load(id))!.oauthResource).toBeNull();
   });
 });

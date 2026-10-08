@@ -174,6 +174,34 @@ describe("performRefreshTokenExchange — token_endpoint_auth_method default (R8
   });
 });
 
+describe("performRefreshTokenExchange — RFC 8707 resource (AFPS §8.6)", () => {
+  async function refreshBody(resource?: string): Promise<URLSearchParams> {
+    let body = "";
+    await withStub(
+      (async (_url, init) => {
+        body = init?.body as string;
+        return new Response(JSON.stringify({ access_token: "new", token_type: "Bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+      { ...ctx, ...(resource !== undefined ? { resource } : {}) },
+      (c) => performRefreshTokenExchange(c, "rt_abc", { label: "refresh" }),
+    );
+    return new URLSearchParams(body);
+  }
+
+  it("sends the resource the token was requested for", async () => {
+    const body = await refreshBody("https://forge.example.com/mcp");
+    expect(body.getAll("resource")).toEqual(["https://forge.example.com/mcp"]);
+    expect(body.get("grant_type")).toBe("refresh_token");
+  });
+
+  it("sends no resource when none was requested", async () => {
+    expect((await refreshBody()).has("resource")).toBe(false);
+  });
+});
+
 describe("performRefreshTokenExchange — failure classification", () => {
   it("classifies HTTP 400 invalid_grant as revoked", async () => {
     const err = await captureError(

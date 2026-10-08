@@ -24,6 +24,11 @@ export interface RefreshContext {
   /** Token endpoint client-auth method (`token_endpoint_auth_method`). */
   tokenEndpointAuthMethod?: OAuthTokenAuthMethod;
   /**
+   * RFC 8707 `resource` the token was requested for. A refresh is a token request, so it binds
+   * the new token to the same resource (AFPS §8.6, RFC 8707 §2.2).
+   */
+  resource?: string;
+  /**
    * Injectable egress fetch. Defaults to the SSRF-guarded `oauthEgressFetch`.
    * Tests inject a stub here rather than patching the global `fetch` — the
    * guarded default resolves DNS, which would (correctly) fail-close on
@@ -114,6 +119,7 @@ export async function performRefreshTokenExchange(
   const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
+    ...(ctx.resource ? { resource: ctx.resource } : {}),
   };
   if (tokenAuthMethod === "client_secret_post") {
     bodyParams.client_id = ctx.clientId;

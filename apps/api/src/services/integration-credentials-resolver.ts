@@ -31,7 +31,6 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { scopesNotCovered } from "@appstrate/core/integration";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
-import { readConnectionVariables } from "./connection-variables.ts";
 
 import { logger } from "../lib/logger.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
@@ -246,15 +245,7 @@ export async function resolveLiveIntegrationCredentials(
     );
   };
 
-  // Read with the ciphertext below: the variables name the upstream THIS credential was acquired for.
-  const variables = await readConnectionVariables(manifest, connection);
-  if (!variables) {
-    // A reconnect rewrote the row since it was loaded: retry-later, never a pairing of halves.
-    throw badGateway(
-      `Integration '${integrationId}' connection ${connection.id} changed while being read; retry`,
-    );
-  }
-
+  const { variables } = connection;
   let fields = decryptIntegrationConnectionFields(
     connection.credentialsEncrypted,
     integrationId,
@@ -291,7 +282,7 @@ export async function resolveLiveIntegrationCredentials(
         authKey,
         authDef,
         context.spaceId,
-        connection.clientRef,
+        connection,
       );
     } catch (err) {
       // Transient token-endpoint discovery failure on an issuer-only manifest —

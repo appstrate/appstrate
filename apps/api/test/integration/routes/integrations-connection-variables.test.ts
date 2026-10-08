@@ -442,6 +442,18 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(conn!.variables).toEqual({ base_url: base });
     expect(conn!.clientRef).toBe(client!.id);
     expect(forge.tokenRequests[0]!.resource).toBe(`${base}/api/v4/mcp`);
+    // AFPS §8.6: the refresh is a token request too, bound to the same resource.
+    expect(conn!.oauthResource).toBe(`${base}/api/v4/mcp`);
+    const auth = (forgeManifest("@myorg/forge").auths as Record<string, unknown>)
+      .oauth as AfpsManifestAuth;
+    const refresh = await buildIntegrationOAuthRefreshContext(
+      "@myorg/forge",
+      "oauth",
+      auth,
+      ctx.defaultSpaceId,
+      conn!,
+    );
+    expect(refresh!.resource).toBe(`${base}/api/v4/mcp`);
   });
 
   it("keys auto-provisioned clients by issuer: two servers, two clients, two redirect URIs", async () => {
@@ -545,10 +557,11 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       auth,
       ctx.defaultSpaceId,
-      client!.id,
+      { clientRef: client!.id, oauthResource: null },
     );
     expect(refresh!.tokenEndpoint).toBe(`${otherBase}/oauth/token`);
     expect(refresh!.clientId).toBe(client!.clientId);
     expect(refresh!.tokenEndpointAuthMethod).toBe("none");
+    expect(refresh).not.toHaveProperty("resource");
   });
 });

@@ -123,6 +123,7 @@ column integration_connections.identity_claims jsonb
 column integration_connections.integration_package_id text not null
 column integration_connections.label text not null
 column integration_connections.needs_reconnection boolean not null default false
+column integration_connections.oauth_resource text
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.shared_with_org boolean not null default false

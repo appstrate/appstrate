@@ -280,6 +280,8 @@ export interface IntegrationOAuthCallbackResult {
   clientRef: string;
   /** The validated issuer the request was sent to, when known (from the signed state). */
   issuer?: string;
+  /** RFC 8707 `resource` sent on the authorize and token requests; refresh sends it again. */
+  resource?: string;
   /** Connection variables carried from initiate. */
   variables?: Record<string, string>;
 }
@@ -427,6 +429,7 @@ export async function handleIntegrationOAuthCallback(
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
     clientRef: integration.clientRef,
     ...(integration.issuer ? { issuer: integration.issuer } : {}),
+    ...(integration.resource ? { resource: integration.resource } : {}),
     ...(integration.variables ? { variables: integration.variables } : {}),
   };
 }

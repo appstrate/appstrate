@@ -57,6 +57,7 @@ import {
   displayAccountId,
   isIntegrationActive,
   loadAccessibleConnectionById,
+  type ConnectionVariables,
 } from "./integration-connections.ts";
 import {
   fetchIntegrationManifest,
@@ -77,7 +78,6 @@ import {
   DEFAULT_DELIVERY_FILE_MODE,
   type AfpsManifestAuth,
 } from "./integration-manifest-helpers.ts";
-import { readConnectionVariables, type ConnectionVariables } from "./connection-variables.ts";
 
 interface ResolveIntegrationsInput {
   /**
@@ -751,14 +751,7 @@ async function resolveDeliveries(
     return null;
   }
 
-  const variables = await readConnectionVariables(manifest, row);
-  if (!variables) {
-    logger.info("bound connection was rewritten while being read; skipping delivery entries", {
-      integrationId,
-      connectionId: row.id,
-    });
-    return null;
-  }
+  const { variables } = row;
   const hasVariables = Object.keys(variables).length > 0;
 
   // ─── connect.tool + run_at:"run-start" — store-the-secret acquisition ───
