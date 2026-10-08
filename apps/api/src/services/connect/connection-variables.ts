@@ -23,7 +23,6 @@ import {
   getRemoteSource,
   getVariablesSchema,
   type AfpsManifestAuth,
-  type AfpsManifestConnect,
 } from "../integration-manifest-helpers.ts";
 
 export type ConnectionVariables = Record<string, string>;
@@ -37,19 +36,15 @@ const EXPECTED_HOST =
 
 /**
  * The URL templates choosing the upstream of a connection made with `auth`: the integration's
- * `source.remote.url`, the auth's oauth2 `issuer`, its `connect.login.request.url` — those that
- * reference a variable.
+ * `source.remote.url` and the auth's oauth2 `issuer` — those that reference a variable.
  */
 export function authUrlTemplates(
   manifest: IntegrationManifest,
-  auth: Pick<AfpsManifestAuth, "type" | "issuer" | "connect">,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
 ): string[] {
-  const loginUrl = (auth.connect as AfpsManifestConnect | undefined)?.login?.request?.url;
-  return [
-    getRemoteSource(manifest)?.url,
-    auth.type === "oauth2" ? auth.issuer : undefined,
-    loginUrl,
-  ].filter(isVariableTemplate);
+  return [getRemoteSource(manifest)?.url, auth.type === "oauth2" ? auth.issuer : undefined].filter(
+    isVariableTemplate,
+  );
 }
 
 /** Injectable for tests: the egress decision for a rendered URL (DNS-resolving by default). */

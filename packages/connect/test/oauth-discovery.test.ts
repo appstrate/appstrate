@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { resolveOAuthEndpoints, __clearOAuthDiscoveryCache } from "../src/oauth-discovery.ts";
+import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { resolveOAuthEndpoints } from "../src/oauth-discovery.ts";
 
 beforeEach(() => {
   // Reset the per-issuer discovery cache so each test sees a clean slate.
-  __clearOAuthDiscoveryCache();
+  clearAllCachesLocally();
 });
 
 // The SUT egress is SSRF-guarded (`oauthEgressFetch` does real DNS), so tests
@@ -540,29 +541,19 @@ describe("resolveOAuthEndpoints — the validated issuer and RFC 9207", () => {
   });
 });
 
-describe("resolveOAuthEndpoints — cache bound", () => {
-  it("evicts the oldest issuer once more than 500 are cached", async () => {
-    let as0Fetches = 0;
-    const fetchImpl = (async (input: string | URL | Request) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input : input.url,
-      );
-      if (url.origin === "https://as0.example.com") as0Fetches++;
-      return jsonResponse({
-        issuer: url.origin,
-        authorization_endpoint: `${url.origin}/authorize`,
-        token_endpoint: `${url.origin}/token`,
-      });
-    }) as unknown as typeof fetch;
-    const resolve = (n: number) =>
-      resolveOAuthEndpoints({ fetchImpl, issuer: `https://as${n}.example.com` });
-
-    await resolve(0);
-    const discovered = as0Fetches;
-    await resolve(0);
-    expect(as0Fetches).toBe(discovered);
-    for (let n = 1; n <= 500; n++) await resolve(n);
-    await resolve(0);
-    expect(as0Fetches).toBeGreaterThan(discovered);
+describe("resolveOAuthEndpoints — body cap", () => {
+  it("refuses a discovery document larger than 64 KiB", async () => {
+    const doc = {
+      issuer: "https://idp.example.com",
+      authorization_endpoint: "https://idp.example.com/authorize",
+      token_endpoint: "https://idp.example.com/token",
+      padding: "x".repeat(64 * 1024),
+    };
+    const result = await resolveOAuthEndpoints({
+      fetchImpl: (async () => jsonResponse(doc)) as unknown as typeof fetch,
+      issuer: "https://idp.example.com",
+    });
+    expect(result.issuer).toBeUndefined();
+    expect(result.tokenEndpoint).toBeUndefined();
   });
 });

@@ -246,6 +246,20 @@ describe("discoverProtectedResourceMetadata", () => {
     expect(md).toBeNull();
   });
 
+  it("refuses a metadata document larger than 64 KiB", async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        resource: "https://x/mcp",
+        authorization_servers: ["https://as.x"],
+        padding: "x".repeat(64 * 1024),
+      })) as unknown as typeof fetch;
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: "https://x/mcp",
+      fetchImpl,
+    });
+    expect(md).toBeNull();
+  });
+
   it("returns null when no strategy yields a document", async () => {
     const fetchImpl = (async () =>
       new Response("nope", { status: 404 })) as unknown as typeof fetch;

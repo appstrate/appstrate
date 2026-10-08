@@ -319,10 +319,9 @@ export async function resolveLiveIntegrationCredentials(
       // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
       // already gated type=oauth2, so this is the only refreshable auth.
       const classified = await refreshAndClassify(
-        connection.id,
+        connection,
         integrationId,
         authKey,
-        connection.credentialsEncrypted,
         refreshContext,
         // A forced refresh follows an upstream 401: the post-lock freshness
         // short-circuit must not answer it with the very token that 401'd.

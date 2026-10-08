@@ -49,7 +49,11 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { compileEgressPolicy, planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
+import {
+  compileEgressPolicy,
+  matchesAuthorizedUriSpec,
+  planHttpDeliveryInjection,
+} from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -464,8 +468,11 @@ export async function connectRemoteHttpIntegration(
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
   // (api_key) just return the same value forever.
-  const planInjection = (callerHeaderNames: readonly string[]) => {
-    const plan = source.snapshot().deliveryPlans[authKey];
+  const planInjection = (
+    snapshot: ReturnType<typeof source.snapshot>,
+    callerHeaderNames: readonly string[],
+  ) => {
+    const plan = snapshot.deliveryPlans[authKey];
     return plan ? planHttpDeliveryInjection(plan, callerHeaderNames) : { kind: "none" as const };
   };
 
@@ -494,10 +501,27 @@ export async function connectRemoteHttpIntegration(
         credentialAnswered: boolean;
         credentialRevision: string | undefined;
       }> => {
-        const credentialRevision = source.snapshot().credentialRevision;
+        const snapshot = source.snapshot();
+        const credentialRevision = snapshot.credentialRevision;
         const headers = new Headers(init?.headers);
-        const injection = planInjection([...headers.keys()]);
+        const injection = planInjection(snapshot, [...headers.keys()]);
+        // `guardedFetch` accepts `string | URL`; the MCP transports always
+        // call with a URL/string target (headers/body ride in `init`), so a
+        // stray `Request` is normalised to its URL for the type.
+        const target: string | URL =
+          typeof input === "string" || input instanceof URL ? input : input.url;
         if (injection.kind === "inject") {
+          // AFPS §8.6: the credential goes only to the URIs rendered for the connection it belongs
+          // to. The server URL was rendered at spawn; a reconnect to another upstream swaps in a
+          // credential (and URIs) for that one, which this server must never receive.
+          const authorizedUris =
+            snapshot.auths.find((a) => a.authKey === authKey)?.authorizedUris ?? [];
+          const url = String(target);
+          if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url))) {
+            throw new Error(
+              `integration ${spec.integrationId}: ${url} is outside the authorized URIs of its connection; the credential is not sent`,
+            );
+          }
           headers.set(injection.header.name, injection.header.value);
         }
         const sensitiveHeaderName =
@@ -506,11 +530,6 @@ export async function connectRemoteHttpIntegration(
             : injection.kind === "caller_override"
               ? injection.headerName
               : null;
-        // `guardedFetch` accepts `string | URL`; the MCP transports always
-        // call with a URL/string target (headers/body ride in `init`), so a
-        // stray `Request` is normalised to its URL for the type.
-        const target: string | URL =
-          typeof input === "string" || input instanceof URL ? input : input.url;
         // Operator-trusted internal hosts (EGRESS_ALLOW_INTERNAL_HOSTS, forwarded
         // by the platform) skip only the host blocklist — without this, a remote
         // MCP server the platform-side spawn validation just allowed (internal

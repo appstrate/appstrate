@@ -34,6 +34,7 @@
  */
 
 import { guardedFetch } from "@appstrate/core/ssrf";
+import { readJsonUnder } from "./bounded-body.ts";
 
 /** Validated subset of an RFC 9728 protected-resource metadata document. */
 export interface ProtectedResourceMetadata {
@@ -182,7 +183,7 @@ async function fetchResourceMetadata(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    const json = (await res.json()) as unknown;
+    const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
     return validateResourceMetadata(json as RawResourceMetadata);
   } catch {

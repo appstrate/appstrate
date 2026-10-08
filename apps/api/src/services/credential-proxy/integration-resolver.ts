@@ -213,10 +213,9 @@ export async function forceRefreshIntegrationProxyCredentials(
   // its default (true): this whole function IS the proxy's 401-retry hook, so
   // the stored token is known-bad and its remaining lifetime proves nothing.
   const classified = await refreshAndClassify(
-    connection.id,
+    connection,
     input.integrationId,
     connection.authKey,
-    connection.credentialsEncrypted,
     refreshContext,
   );
   if (classified.status === "terminal") {

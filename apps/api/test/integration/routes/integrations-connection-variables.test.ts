@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
@@ -575,5 +576,79 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(refresh!.clientId).toBe(client!.clientId);
     expect(refresh!.tokenEndpointAuthMethod).toBe("none");
     expect(refresh).not.toHaveProperty("resource");
+
+    // AFPS §8.7: the server's metadata may have changed since connect; its token endpoint passes
+    // the egress controls again before a refresh token is sent to it.
+    const refreshAt = (tokenEndpoint: string) =>
+      buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        { clientRef: client!.id, oauthResource: null },
+        async () => ({ tokenEndpoint }),
+      );
+    expect(await refreshAt("http://forge.example.com/oauth/token")).toBeNull();
+    expect(await refreshAt("https://169.254.169.254/oauth/token")).toBeNull();
+    await expect(refreshAt("https://forge.invalid/oauth/token")).rejects.toMatchObject({
+      name: "RefreshError",
+      kind: "transient",
+    });
+  });
+
+  it("spends the page on a started flow: its cookie is cleared, a replay of it refused", async () => {
+    const session = await openHosted(ctx, "@myorg/forge", "oauth");
+    const refused = await submitHosted(session, { variables: { base_url: `${base}/?q=1` } });
+    expect(refused.status).toBe(400);
+    expect(refused.headers.get("set-cookie")).toBeNull();
+
+    const started = await submitHosted(session, { variables: { base_url: base } });
+    expect(started.status).toBe(200);
+    expect(started.headers.get("set-cookie")).toMatch(/appstrate_connect=;.*Max-Age=0/);
+    const replayed = await submitHosted(session, { variables: { base_url: otherBase } });
+    expect(replayed.status).toBe(404);
+    expect(forge.registrations).toHaveLength(1);
+  });
+
+  it("drops the clients of servers no connection uses once no flow can still need them", async () => {
+    const complete = async (baseUrl: string) => {
+      const { res } = await beginHosted(baseUrl);
+      const { redirect_url } = (await res.json()) as { redirect_url: string };
+      const callback = await authorize(redirect_url);
+      expect((await app.request(callback.pathname + callback.search)).status).toBe(200);
+    };
+    const age = () =>
+      db
+        .update(integrationOauthClients)
+        .set({ createdAt: new Date(Date.now() - 11 * 60_000) })
+        .where(eq(integrationOauthClients.integrationId, "@myorg/forge"));
+    const issuers = async () =>
+      (await db.select().from(integrationOauthClients)).map((c) => c.issuer).sort();
+
+    expect((await beginHosted(base)).res.status).toBe(200);
+    await age();
+    expect((await beginHosted(otherBase)).res.status).toBe(200);
+    expect(await issuers()).toEqual([otherBase]);
+
+    await complete(otherBase);
+    await age();
+    expect((await beginHosted(base)).res.status).toBe(200);
+    expect(await issuers()).toEqual([base, otherBase].sort());
+  });
+
+  it("rate-limits the hosted submit per client IP", async () => {
+    await flushRedis();
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        statuses.push(
+          (await app.request("/api/integrations/connect/submit", { method: "POST" })).status,
+        );
+      }
+      expect(statuses.slice(0, 20).every((status) => status === 404)).toBe(true);
+      expect(statuses[20]).toBe(429);
+    } finally {
+      await flushRedis();
+    }
   });
 });

@@ -202,10 +202,9 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
   );
   expect(context).not.toBeNull();
   await forceRefreshIntegrationConnection(
-    connectionId,
+    { ...row, variables: {} },
     INTEGRATION,
     AUTH_KEY,
-    row.credentialsEncrypted,
     context!,
   );
 }

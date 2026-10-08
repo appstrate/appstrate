@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { createCache } from "@appstrate/core/cache";
+import { readJsonUnder } from "./bounded-body.ts";
 import { oauthEgressFetch } from "./oauth-egress.ts";
 
 /**
@@ -154,55 +156,33 @@ export function buildDiscoveryProbes(issuer: string): string[] {
 }
 
 /**
- * Per-issuer discovery result cache (AFPS §7.3 enrichment).
- *
- * Discovery documents are stable IdP configuration that rotates on the order
- * of weeks/months — we cache the projected fields per issuer URL so a connect
- * burst doesn't hammer the IdP's well-known endpoints. An entry lives an hour and
- * the cache holds at most {@link DISCOVERY_CACHE_MAX} issuers, oldest evicted
- * first: a connection's user may choose its authorization server (AFPS §7.3), so
- * the key space is theirs to grow. Only SUCCESSFUL projections are cached — a failed
- * discovery is left uncached so the next call re-discovers (a negative entry
- * would permanently disable enrichment / brick refresh on a transient blip).
- *
- * Cache is keyed by the trimmed-trailing-slash issuer string — the exact same
- * normalisation used for the §7.3 issuer-equality check below.
+ * What discovery learned about one issuer. The endpoints are applied only where the manifest leaves
+ * them undeclared.
  */
-interface CachedDiscovery {
+interface DiscoveredMetadata {
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
   codeChallengeMethodsSupported?: string[];
   userinfoEndpoint?: string;
   registrationEndpoint?: string;
   grantTypesSupported?: string[];
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
-  /** Discovered endpoints (NOT applied unless manifest leaves them undeclared). */
-  discoveredAuthorizationEndpoint?: string;
-  discoveredTokenEndpoint?: string;
-}
-const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
-const DISCOVERY_CACHE_MAX = 500;
-const discoveryCache = new Map<string, CachedDiscovery & { expiresAt: number }>();
-
-function readDiscoveryCache(issuer: string): CachedDiscovery | undefined {
-  const entry = discoveryCache.get(issuer);
-  if (entry && entry.expiresAt > Date.now()) return entry;
-  discoveryCache.delete(issuer);
-  return undefined;
 }
 
-function writeDiscoveryCache(issuer: string, entry: CachedDiscovery): void {
-  discoveryCache.delete(issuer);
-  discoveryCache.set(issuer, { ...entry, expiresAt: Date.now() + DISCOVERY_CACHE_TTL_MS });
-  // Map iteration follows insertion order: the first key is the oldest entry.
-  while (discoveryCache.size > DISCOVERY_CACHE_MAX) {
-    discoveryCache.delete(discoveryCache.keys().next().value as string);
-  }
-}
-
-/** Test-only hook so unit tests can run with a clean cache state. */
-export function __clearOAuthDiscoveryCache(): void {
-  discoveryCache.clear();
-}
+/**
+ * Per-issuer discovery results (AFPS §7.3 enrichment), keyed by the issuer without its trailing
+ * slash — the normalisation of the §7.3 equality check. Discovery documents rotate over weeks, so
+ * an hour spares a connect burst the well-known round trips; the cap bounds a key space a
+ * connection's user may grow (§7.3: the authorization server can be theirs to choose). A total
+ * failure answers `undefined` and is never stored: it is typically transient, and remembering it
+ * would disable enrichment — and brick refresh for an issuer-only provider — for the TTL.
+ */
+const discoveryCache = createCache<DiscoveredMetadata>({
+  name: "oauth-discovery",
+  ttlMs: 3_600_000,
+  max: 500,
+});
 
 /**
  * Resolve OAuth endpoints, preferring explicit values and falling back to
@@ -218,181 +198,78 @@ export function __clearOAuthDiscoveryCache(): void {
 export async function resolveOAuthEndpoints(
   input: ResolveOAuthEndpointsInput,
 ): Promise<OAuthEndpointResolution> {
-  let authorizationEndpoint = input.authorizationEndpoint;
-  let tokenEndpoint = input.tokenEndpoint;
-  let codeChallengeMethodsSupported: string[] | undefined;
-  let userinfoEndpoint: string | undefined;
-  let registrationEndpoint: string | undefined;
-  let grantTypesSupported: string[] | undefined;
-  let issuer: string | undefined;
-  let authorizationResponseIssParameterSupported: boolean | undefined;
-
-  // No issuer — nothing to discover.
-  if (!input.issuer) {
-    return { authorizationEndpoint, tokenEndpoint };
-  }
-
-  const configuredIssuer = trimTrailingSlash(input.issuer);
-
-  // Cache hit — apply enrichment without any network I/O. Only successful
-  // projections are cached (no negative entries), so a miss simply falls
-  // through to a fresh discovery below.
-  const cached = readDiscoveryCache(configuredIssuer);
-  if (cached) {
-    if (!authorizationEndpoint && cached.discoveredAuthorizationEndpoint) {
-      authorizationEndpoint = cached.discoveredAuthorizationEndpoint;
-    }
-    if (!tokenEndpoint && cached.discoveredTokenEndpoint) {
-      tokenEndpoint = cached.discoveredTokenEndpoint;
-    }
-    codeChallengeMethodsSupported = cached.codeChallengeMethodsSupported;
-    userinfoEndpoint = cached.userinfoEndpoint;
-    registrationEndpoint = cached.registrationEndpoint;
-    grantTypesSupported = cached.grantTypesSupported;
-    issuer = cached.issuer;
-    authorizationResponseIssParameterSupported = cached.authorizationResponseIssParameterSupported;
+  const { issuer } = input;
+  if (!issuer) {
     return {
-      authorizationEndpoint,
-      tokenEndpoint,
-      ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
-      ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
-      ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
-      ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
-      ...(issuer !== undefined ? { issuer } : {}),
-      ...(authorizationResponseIssParameterSupported !== undefined
-        ? { authorizationResponseIssParameterSupported }
-        : {}),
+      authorizationEndpoint: input.authorizationEndpoint,
+      tokenEndpoint: input.tokenEndpoint,
     };
   }
+  const configuredIssuer = trimTrailingSlash(issuer);
+  const discovered = await discoveryCache.get(configuredIssuer, () =>
+    discover(issuer, configuredIssuer, input.fetchImpl),
+  );
+  const { authorizationEndpoint, tokenEndpoint, ...enrichment } = discovered ?? {};
+  // Manual endpoints always win — discovery fills only the gaps.
+  return {
+    authorizationEndpoint: input.authorizationEndpoint || authorizationEndpoint,
+    tokenEndpoint: input.tokenEndpoint || tokenEndpoint,
+    ...(Object.fromEntries(
+      Object.entries(enrichment).filter(([, v]) => v !== undefined),
+    ) as typeof enrichment),
+  };
+}
 
-  const candidates = buildDiscoveryProbes(input.issuer);
-  let discoveredAuthorizationEndpoint: string | undefined;
-  let discoveredTokenEndpoint: string | undefined;
-
-  for (const url of candidates) {
-    const doc = await fetchDiscoveryDocument(url, input.fetchImpl);
+/** Probe the §7.3 locations of `issuer`; `undefined` when no document yielded anything. */
+async function discover(
+  issuer: string,
+  configuredIssuer: string,
+  fetchImpl: typeof fetch | undefined,
+): Promise<DiscoveredMetadata | undefined> {
+  const found: DiscoveredMetadata = {};
+  for (const url of buildDiscoveryProbes(issuer)) {
+    const doc = await fetchDiscoveryDocument(url, fetchImpl);
     if (!doc) continue;
-    // AFPS §7.3 line 803: validate that the document's `issuer` matches the
-    // configured issuer string. Reject + try the next probe on mismatch.
-    // This MUST happen before any field is trusted from the document.
-    if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) {
-      // Discovery is best-effort — reject + try the next probe on mismatch.
-      continue;
-    }
-    if (issuer === undefined) issuer = doc.issuer as string;
-    if (
-      authorizationResponseIssParameterSupported === undefined &&
-      typeof doc.authorization_response_iss_parameter_supported === "boolean"
-    ) {
-      authorizationResponseIssParameterSupported =
+    // AFPS §7.3: the document's `issuer` must equal the configured one before any field of it is
+    // trusted; a mismatch moves on to the next probe.
+    if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) continue;
+    found.issuer ??= doc.issuer as string;
+    if (typeof doc.authorization_response_iss_parameter_supported === "boolean") {
+      found.authorizationResponseIssParameterSupported ??=
         doc.authorization_response_iss_parameter_supported;
     }
+    if (typeof doc.authorization_endpoint === "string") {
+      found.authorizationEndpoint ??= doc.authorization_endpoint;
+    }
+    if (typeof doc.token_endpoint === "string") found.tokenEndpoint ??= doc.token_endpoint;
+    // RFC 8414 §2 — the first well-shaped array; no default synthesised when absent.
+    found.codeChallengeMethodsSupported ??= stringArray(doc.code_challenge_methods_supported);
+    // OIDC Discovery 1.0 / RFC 7591 §3 — well-formed URLs only.
+    found.userinfoEndpoint ??= urlString(doc.userinfo_endpoint);
+    found.registrationEndpoint ??= urlString(doc.registration_endpoint);
+    // RFC 8414 §2 — drives the refresh_token grant asked of auto-DCR and the connect-time
+    // refresh-token guard.
+    found.grantTypesSupported ??= stringArray(doc.grant_types_supported);
     if (
-      discoveredAuthorizationEndpoint === undefined &&
-      typeof doc.authorization_endpoint === "string"
-    ) {
-      discoveredAuthorizationEndpoint = doc.authorization_endpoint;
-    }
-    if (discoveredTokenEndpoint === undefined && typeof doc.token_endpoint === "string") {
-      discoveredTokenEndpoint = doc.token_endpoint;
-    }
-    // RFC 8414 §2 — project the first defined-and-well-shaped array we find.
-    // Don't synthesise a default when absent (caller's job).
-    if (
-      codeChallengeMethodsSupported === undefined &&
-      Array.isArray(doc.code_challenge_methods_supported) &&
-      doc.code_challenge_methods_supported.every((m): m is string => typeof m === "string")
-    ) {
-      codeChallengeMethodsSupported = doc.code_challenge_methods_supported;
-    }
-    // OIDC Discovery 1.0 — project `userinfo_endpoint` when present and
-    // well-formed (string URL). Ignore non-string / malformed values.
-    if (userinfoEndpoint === undefined && typeof doc.userinfo_endpoint === "string") {
-      try {
-        // Validate as a URL so callers get a usable string or undefined.
-        new URL(doc.userinfo_endpoint);
-        userinfoEndpoint = doc.userinfo_endpoint;
-      } catch {
-        // Malformed — ignore.
-      }
-    }
-    // RFC 7591 §3 — project `registration_endpoint` (Dynamic Client
-    // Registration) when present and well-formed. Powers MCP-spec auto-DCR.
-    if (registrationEndpoint === undefined && typeof doc.registration_endpoint === "string") {
-      try {
-        new URL(doc.registration_endpoint);
-        registrationEndpoint = doc.registration_endpoint;
-      } catch {
-        // Malformed — ignore.
-      }
-    }
-    // RFC 8414 §2 — project `grant_types_supported` (first well-shaped array).
-    // Consumed by auto-DCR (request the refresh_token grant only when listed)
-    // and the connect-time refresh-token guard. Absent ⇒ undefined.
-    if (
-      grantTypesSupported === undefined &&
-      Array.isArray(doc.grant_types_supported) &&
-      doc.grant_types_supported.every((g): g is string => typeof g === "string")
-    ) {
-      grantTypesSupported = doc.grant_types_supported;
-    }
-    if (
-      discoveredAuthorizationEndpoint &&
-      discoveredTokenEndpoint &&
-      codeChallengeMethodsSupported !== undefined &&
-      userinfoEndpoint !== undefined
+      found.authorizationEndpoint &&
+      found.tokenEndpoint &&
+      found.codeChallengeMethodsSupported !== undefined &&
+      found.userinfoEndpoint !== undefined
     ) {
       break;
     }
   }
+  return Object.values(found).some((v) => v !== undefined) ? found : undefined;
+}
 
-  // Cache ONLY a successful projection. A total failure is NOT cached: it is
-  // typically transient (IdP/network blip), and a process-lifetime negative
-  // entry would permanently disable enrichment — and, on the refresh path,
-  // permanently brick token refresh for an issuer-only provider until restart.
-  // Leaving it uncached means the next call re-discovers; the spec-mandated
-  // silent fallback to manual endpoints still holds for THIS call.
-  const anyDiscovered =
-    issuer !== undefined ||
-    discoveredAuthorizationEndpoint !== undefined ||
-    discoveredTokenEndpoint !== undefined ||
-    codeChallengeMethodsSupported !== undefined ||
-    userinfoEndpoint !== undefined ||
-    registrationEndpoint !== undefined ||
-    grantTypesSupported !== undefined;
-  if (anyDiscovered) {
-    writeDiscoveryCache(configuredIssuer, {
-      discoveredAuthorizationEndpoint,
-      discoveredTokenEndpoint,
-      codeChallengeMethodsSupported,
-      userinfoEndpoint,
-      registrationEndpoint,
-      grantTypesSupported,
-      issuer,
-      authorizationResponseIssParameterSupported,
-    });
-  }
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v): v is string => typeof v === "string")
+    ? value
+    : undefined;
+}
 
-  // Manual endpoints always win — discovery fills only the gaps.
-  if (!authorizationEndpoint && discoveredAuthorizationEndpoint) {
-    authorizationEndpoint = discoveredAuthorizationEndpoint;
-  }
-  if (!tokenEndpoint && discoveredTokenEndpoint) {
-    tokenEndpoint = discoveredTokenEndpoint;
-  }
-
-  return {
-    authorizationEndpoint,
-    tokenEndpoint,
-    ...(codeChallengeMethodsSupported !== undefined ? { codeChallengeMethodsSupported } : {}),
-    ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
-    ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
-    ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
-    ...(issuer !== undefined ? { issuer } : {}),
-    ...(authorizationResponseIssParameterSupported !== undefined
-      ? { authorizationResponseIssParameterSupported }
-      : {}),
-  };
+function urlString(value: unknown): string | undefined {
+  return typeof value === "string" && URL.canParse(value) ? value : undefined;
 }
 
 interface DiscoveryDocument {
@@ -426,7 +303,7 @@ async function fetchDiscoveryDocument(
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
-    const json = (await res.json()) as unknown;
+    const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
     return json as DiscoveryDocument;
   } catch {

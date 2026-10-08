@@ -97,7 +97,11 @@ export {
 // OAuth2 user-facing connect flow for integration auths (used by the
 // marketplace UI; parameterised by manifest endpoints + admin-registered
 // client credentials).
-export { initiateIntegrationOAuth, handleIntegrationOAuthCallback } from "./integration-oauth.ts";
+export {
+  initiateIntegrationOAuth,
+  handleIntegrationOAuthCallback,
+  OAUTH_STATE_TTL_SECONDS,
+} from "./integration-oauth.ts";
 // Only the callback-result type crosses the package boundary (apps/api's
 // integrations route + connect strategy). The initiate-side input/result
 // shapes stay internal — callers build the argument inline and read the

@@ -32,7 +32,8 @@ import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
 import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
-const OAUTH_STATE_TTL_SECONDS = 10 * 60;
+/** How long an authorization request can still complete at the callback. */
+export const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 /**
  * Subject-id sentinel embedded in the {@link OAuthStateRecord} `subjectId`

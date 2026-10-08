@@ -26,8 +26,15 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { decryptCredentialsToStringMap, encryptCredentialEnvelope } from "@appstrate/connect";
-import { forceRefreshIntegrationConnection } from "../../../src/services/integration-token-refresh.ts";
+import {
+  RefreshError,
+  decryptCredentialsToStringMap,
+  encryptCredentialEnvelope,
+} from "@appstrate/connect";
+import {
+  forceRefreshIntegrationConnection,
+  type RefreshTarget,
+} from "../../../src/services/integration-token-refresh.ts";
 import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
 
 interface TokenServer {
@@ -39,6 +46,10 @@ interface TokenServer {
   maxConcurrent: () => number;
   /** Forget that peak, so an assertion measures only what follows. */
   resetPeak: () => void;
+  /** Run before each response, while the exchange is in flight. */
+  setDuringExchange: (fn: (() => Promise<void>) | null) => void;
+  /** Exchanges served so far. */
+  requests: () => number;
   stop: () => void;
 }
 
@@ -48,6 +59,8 @@ function startTokenServer(): TokenServer {
   let delayMs = 0;
   let inFlight = 0;
   let peak = 0;
+  let served = 0;
+  let duringExchange: (() => Promise<void>) | null = null;
   const server = (
     globalThis as unknown as {
       Bun: {
@@ -65,7 +78,9 @@ function startTokenServer(): TokenServer {
       inFlight += 1;
       peak = Math.max(peak, inFlight);
       if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      if (duringExchange) await duringExchange();
       inFlight -= 1;
+      served += 1;
       return new Response(JSON.stringify(nextBody), {
         status: nextStatus,
         headers: { "Content-Type": "application/json" },
@@ -85,6 +100,10 @@ function startTokenServer(): TokenServer {
     resetPeak: () => {
       peak = 0;
     },
+    setDuringExchange: (fn) => {
+      duringExchange = fn;
+    },
+    requests: () => served,
     stop: () => server.stop(),
   };
 }
@@ -165,10 +184,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     token.setResponse({ access_token: "new-access", expires_in: 3600 });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       {
         tokenEndpoint: token.url,
         clientId: "cid",
@@ -205,13 +223,11 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .where(eq(integrationConnections.id, connId));
     const refresh = async () =>
       (
-        await forceRefreshIntegrationConnection(
-          connId,
-          PACKAGE_ID,
-          "primary",
-          (await fetchEncrypted(connId))!,
-          { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-        )
+        await forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
+          tokenEndpoint: token.url,
+          clientId: "cid",
+          clientSecret: "csec",
+        })
       ).fields;
 
     token.setResponse({ access_token: "access-2", expires_in: 3600 });
@@ -251,10 +267,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
@@ -272,10 +287,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
@@ -303,10 +317,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
@@ -322,10 +335,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
       { force: false },
     );
@@ -343,11 +355,11 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     // The assertion below must measure these two flights and nothing else.
     token.resetPeak();
 
-    const encrypted = (await fetchEncrypted(connId))!;
+    const target = await readTarget(connId);
     const refreshCtx = { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" };
     const [forced, proactive] = await Promise.all([
-      forceRefreshIntegrationConnection(connId, PACKAGE_ID, "primary", encrypted, refreshCtx),
-      forceRefreshIntegrationConnection(connId, PACKAGE_ID, "primary", encrypted, refreshCtx, {
+      forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", refreshCtx),
+      forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", refreshCtx, {
         force: false,
       }),
     ]);
@@ -365,6 +377,56 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     expect(row!.needsReconnection).toBe(false);
   });
 
+  // AFPS §7.12: a reconnect may move the connection to another upstream. A refresh decided on
+  // the row as read before must neither spend the new credential at the old server nor hand
+  // back a token for the old one.
+  it("refuses a refresh once the connection was reconnected elsewhere, without an exchange", async () => {
+    const connId = await seedConnection(["read"]);
+    const target = await readTarget(connId);
+    const reconnected = encryptCredentialEnvelope({
+      outputs: { access_token: "other-access", refresh_token: "other-rt" },
+    });
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: reconnected, variables: { base_url: "https://other.example" } })
+      .where(eq(integrationConnections.id, connId));
+    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
+
+    const refused = forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", {
+      tokenEndpoint: token.url,
+      clientId: "cid",
+      clientSecret: "csec",
+    });
+    await expect(refused).rejects.toBeInstanceOf(RefreshError);
+    await expect(refused).rejects.toMatchObject({ kind: "transient" });
+    expect(token.requests()).toBe(0);
+    expect(await fetchEncrypted(connId)).toBe(reconnected);
+  });
+
+  it("discards a token refreshed while the connection was reconnected", async () => {
+    const connId = await seedConnection(["read"]);
+    const reconnected = encryptCredentialEnvelope({
+      outputs: { access_token: "other-access", refresh_token: "other-rt" },
+    });
+    token.setResponse({ access_token: "stale-server-access", expires_in: 3600 });
+    token.setDuringExchange(async () => {
+      await db
+        .update(integrationConnections)
+        .set({ credentialsEncrypted: reconnected, clientRef: "other-client" })
+        .where(eq(integrationConnections.id, connId));
+    });
+
+    const refused = forceRefreshIntegrationConnection(
+      await readTarget(connId),
+      PACKAGE_ID,
+      "primary",
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+    );
+    await expect(refused).rejects.toMatchObject({ name: "RefreshError", kind: "transient" });
+    expect(token.requests()).toBe(1);
+    expect(await fetchEncrypted(connId)).toBe(reconnected);
+  });
+
   it("treats scope creep (response wider than stored) as non-shrink", async () => {
     const connId = await seedConnection(["read"]);
     token.setResponse({
@@ -374,10 +436,9 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     });
 
     const result = await forceRefreshIntegrationConnection(
-      connId,
+      await readTarget(connId),
       PACKAGE_ID,
       "primary",
-      (await fetchEncrypted(connId))!,
       { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
     );
 
@@ -392,6 +453,20 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
   });
 });
+
+/** The connection as a resolver reads it: what a refresh is pinned to. */
+async function readTarget(connId: string): Promise<RefreshTarget> {
+  const [row] = await db
+    .select({
+      id: integrationConnections.id,
+      credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      clientRef: integrationConnections.clientRef,
+      oauthResource: integrationConnections.oauthResource,
+    })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connId));
+  return { ...row!, variables: {} };
+}
 
 async function fetchEncrypted(connId: string): Promise<string | null> {
   const [row] = await db
@@ -559,13 +634,11 @@ describe("integration refresh-failure escalation", () => {
     // Expired → reReadFreshness does not short-circuit → doRefresh runs.
     token.setResponse({ access_token: "fresh-access", expires_in: 3600 });
 
-    await forceRefreshIntegrationConnection(
-      connId,
-      PACKAGE_ID,
-      "primary",
-      (await fetchEncrypted(connId))!,
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
+    await forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
+      tokenEndpoint: token.url,
+      clientId: "cid",
+      clientSecret: "csec",
+    });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(0);
@@ -587,13 +660,11 @@ describe("integration refresh-failure escalation", () => {
     token.setResponse({ error: "invalid_grant" }, 200);
 
     await expect(
-      forceRefreshIntegrationConnection(
-        connId,
-        PACKAGE_ID,
-        "primary",
-        (await fetchEncrypted(connId))!,
-        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-      ),
+      forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
+        tokenEndpoint: token.url,
+        clientId: "cid",
+        clientSecret: "csec",
+      }),
     ).rejects.toThrow(/access_token/);
 
     const row = await readRow(connId);
@@ -605,13 +676,11 @@ describe("integration refresh-failure escalation", () => {
     token.setResponse({ error: "temporarily_unavailable" }, 503); // 5xx → transient
 
     await expect(
-      forceRefreshIntegrationConnection(
-        connId,
-        PACKAGE_ID,
-        "primary",
-        (await fetchEncrypted(connId))!,
-        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-      ),
+      forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
+        tokenEndpoint: token.url,
+        clientId: "cid",
+        clientSecret: "csec",
+      }),
     ).rejects.toThrow();
 
     expect((await readRow(connId)).refreshFailureCount).toBe(1);

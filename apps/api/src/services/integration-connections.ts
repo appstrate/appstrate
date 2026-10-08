@@ -28,7 +28,10 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
+  lt,
+  notExists,
   or,
   sql,
   type SQL,
@@ -54,6 +57,7 @@ import {
   discoverProtectedResourceMetadata,
   registerDynamicClient,
   DynamicClientRegistrationError,
+  OAUTH_STATE_TTL_SECONDS,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import {
@@ -238,8 +242,17 @@ interface ActorConnectionRow {
 /** A connection's variables (AFPS §7.12) as the run-time renderers substitute them. */
 export type ConnectionVariables = Readonly<Record<string, string>>;
 
+/** Whether two connections name the same upstream: the same variables, the same values. */
+export function sameConnectionVariables(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  const entries = Object.entries(a);
+  return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
+}
+
 /** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-function connectionVariablesOf(value: unknown): ConnectionVariables {
+export function connectionVariablesOf(value: unknown): ConnectionVariables {
   const out: Record<string, string> = {};
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
@@ -2022,6 +2035,7 @@ async function ensurePerConnectionOAuthClient(
     redirectTag: authorizationServerTag(issuer),
   };
   if (existing) return resolved;
+  await pruneUnusedPerConnectionClients(scope, packageId, authKey);
   return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
@@ -2029,6 +2043,33 @@ async function ensurePerConnectionOAuthClient(
     issuer,
     resolved,
   });
+}
+
+/**
+ * Delete the clients of servers chosen per connection, for this (space, integration, auth), that
+ * no connection was minted by: whoever can open a connect flow chooses the server, so only the
+ * clients in use may outlive it. A client younger than an OAuth state may still be awaiting its
+ * callback and is kept.
+ */
+async function pruneUnusedPerConnectionClients(
+  scope: SpaceScope,
+  packageId: string,
+  authKey: string,
+): Promise<void> {
+  await db.delete(integrationOauthClients).where(
+    and(
+      tierAuthFilter(scope, packageId, authKey),
+      eq(integrationOauthClients.autoProvisioned, true),
+      isNotNull(integrationOauthClients.issuer),
+      lt(integrationOauthClients.createdAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
+      notExists(
+        db
+          .select({ id: integrationConnections.id })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.clientRef, sql`${integrationOauthClients.id}::text`)),
+      ),
+    ),
+  );
 }
 
 /**
@@ -2583,10 +2624,11 @@ interface StoreConnectionInput {
  *                      `notFound` when the row isn't the caller's OR belongs to
  *                      a different integration/auth (a caller-supplied id can
  *                      never overwrite an unrelated connection of theirs).
- *   - `update-by-id` — system write-back (proactive token refresh). Keyed by
- *                      id only — the id came from an already-authorized
- *                      resolution — and silently no-ops when the row is gone
- *                      (matches the pre-convergence refresh behaviour).
+ *   - `update-by-id` — system write-back (token refresh). Keyed by id — the id
+ *                      came from an already-authorized resolution — and a
+ *                      compare-and-set on `expect`, the client and ciphertext
+ *                      the refresh spent: it writes nothing when the row is
+ *                      gone or was reconnected meanwhile.
  */
 export type PersistTarget =
   | { kind: "insert"; scope: SpaceScope; actor: Actor }
@@ -2600,7 +2642,11 @@ export type PersistTarget =
       packageId: string;
       authKey: string;
     }
-  | { kind: "update-by-id"; connectionId: string };
+  | {
+      kind: "update-by-id";
+      connectionId: string;
+      expect: { clientRef: string | null; credentialsEncrypted: string };
+    };
 
 /**
  * Persist input for the credential columns.
@@ -2697,8 +2743,7 @@ async function firstFreeLabel(
  * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
  * `needs_reconnection`) on `integration_connections`. Every acquisition and
  * refresh path converges here (spec §4.1 — "1 writer"). Returns the persisted
- * summary for INSERT / `update-owned`; `null` for `update-by-id` (the refresh
- * write-back consumes its own result shape and ignores this).
+ * summary; `null` only for an `update-by-id` that wrote nothing.
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
  * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
@@ -2826,27 +2871,50 @@ export async function persistCredentialBundle(
     // data-integrity and access surprise. Only enforced between two real
     // identities; "default" (identity-less) never blocks an upgrade.
     //
+    // The variables (AFPS §7.12) name the upstream instance the account lives on, so another
+    // instance is another identity, under the same rule: enforced between two recorded values.
+    //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
     // them and slip a different-account clobber past the guard. Do both in one
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
+    const checksAccount =
+      input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
+    const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID) {
+      if (checksAccount || checksVariables) {
         const [existing] = await tx
-          .select({ accountId: integrationConnections.accountId })
+          .select({
+            accountId: integrationConnections.accountId,
+            variables: integrationConnections.variables,
+          })
           .from(integrationConnections)
           .where(ownerScope)
           .limit(1)
           .for("update");
         if (
           existing &&
+          checksAccount &&
           existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
           existing.accountId !== input.accountId
         ) {
           throw conflict(
             "identity_mismatch",
             `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+          );
+        }
+        if (
+          existing?.variables &&
+          checksVariables &&
+          !sameConnectionVariables(connectionVariablesOf(existing.variables), input.variables!)
+        ) {
+          const instance = Object.entries(existing.variables)
+            .map(([name, value]) => `${name}=${value}`)
+            .join(", ");
+          throw conflict(
+            "identity_mismatch",
+            `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
           );
         }
       }
@@ -2863,7 +2931,7 @@ export async function persistCredentialBundle(
     return serializeIntegrationConnection(row);
   }
 
-  // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
+  // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
   // Monotonic clear: the proactive refresh write-back always passes
   // `needsReconnection: false`, which would race-clobber a `true` set
   // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
@@ -2872,14 +2940,17 @@ export async function persistCredentialBundle(
   // refresh simply no-ops on that row (a flagged connection's cached credentials
   // are stale anyway, so skipping the write-back is harmless). An explicit
   // `true` write (or any non-clearing write) stays unconditional.
-  const byIdWhere = clearsReconnection
-    ? and(
-        eq(integrationConnections.id, target.connectionId),
-        eq(integrationConnections.needsReconnection, false),
-      )
-    : eq(integrationConnections.id, target.connectionId);
-  await db.update(integrationConnections).set(set).where(byIdWhere);
-  return null;
+  const { clientRef, credentialsEncrypted } = target.expect;
+  const byIdWhere = and(
+    eq(integrationConnections.id, target.connectionId),
+    clientRef === null
+      ? isNull(integrationConnections.clientRef)
+      : eq(integrationConnections.clientRef, clientRef),
+    eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
+    clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
+  );
+  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
+  return row ? serializeIntegrationConnection(row) : null;
 }
 
 /**

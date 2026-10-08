@@ -74,7 +74,7 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { rateLimitByIp } from "../middleware/rate-limit.ts";
+import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
@@ -615,8 +615,9 @@ type IntegrationManifestDef = Awaited<ReturnType<typeof readIntegrationAuth>>["m
  * Begin the OAuth flow of a hosted-connect session from `/connect/submit`, once the form has
  * collected the integration's connection variables (AFPS §7.12), and return the provider URL the
  * page navigates to. The capability token's jti was burned by `/connect/start`; the page cookie
- * now plays its part, with the same failure semantics as that route's oauth2 branch, as problem
- * JSON for the XHR:
+ * now plays its part — its own jti is spent here, so one link starts one authorization request
+ * however often its cookie is replayed — with the same failure semantics as that route's oauth2
+ * branch, as problem JSON for the XHR:
  *
  *  - a variable the user must fix (400 `validation_failed`) passes through verbatim — the form
  *    shows it beside the field — and the cookie stays;
@@ -624,6 +625,8 @@ type IntegrationManifestDef = Awaited<ReturnType<typeof readIntegrationAuth>>["m
  *    portal carries no session) and keeps the cookie only when it provably preceded any egress —
  *    an auto-provisioned client may have registered upstream already (#1344);
  *  - anything else is a 502 and clears the cookie: it may have gone half way.
+ *
+ * The jti is handed back exactly where the cookie stays; a started flow clears the cookie.
  */
 async function beginHostedOAuth(
   c: Context<AppEnv>,
@@ -647,6 +650,7 @@ async function beginHostedOAuth(
   const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
   const strategy = resolveStrategy(auth);
   if (!strategy.begin) throw internalError();
+  if (!(await consumeJti(claims.jti, claims.exp))) throw notFound("No active connect session");
   try {
     const result = await strategy.begin(
       {
@@ -659,9 +663,13 @@ async function beginHostedOAuth(
       },
       { scopes, forceAccountSelect: claims.force_account_select ?? false },
     );
+    clearConnectPageCookie(c);
     return result.redirectUrl;
   } catch (err) {
-    if (err instanceof ApiError && err.code === "validation_failed") throw err;
+    if (err instanceof ApiError && err.code === "validation_failed") {
+      await releaseJti(claims.jti);
+      throw err;
+    }
     if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
       logger.warn("Hosted connect OAuth begin refused", {
         status: err.status,
@@ -671,7 +679,8 @@ async function beginHostedOAuth(
         authKey: claims.auth_key,
       });
       const reusable = !usesAutoProvisionedClient(manifest, auth);
-      if (!reusable) clearConnectPageCookie(c);
+      if (reusable) await releaseJti(claims.jti);
+      else clearConnectPageCookie(c);
       throw new ApiError({
         status: err.status,
         code: "connection_not_ready",
@@ -994,8 +1003,11 @@ export function createIntegrationsRouter() {
     },
   );
 
+  // Rate-limited: with connection variables, each call may discover a server the caller chose and
+  // register a client with it.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/oauth2",
+    rateLimit(30),
     requirePermission("integrations", "connect"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
@@ -1307,7 +1319,9 @@ export function createIntegrationsRouter() {
 
   // POST /connect/submit — hosted-form credential submit. Context + actor come
   // from the page cookie; the request carries only the credentials + CSRF nonce.
-  router.post("/connect/submit", async (c) => {
+  // Rate-limited per IP like `/connect/start`: no session, and an oauth2 submit
+  // reaches a server the submitter chose.
+  router.post("/connect/submit", rateLimitByIp(20), async (c) => {
     const claims = readConnectPageCookie(c);
     if (!claims) throw notFound("No active connect session");
     // Double-submit CSRF: the nonce minted into the page cookie must match the
@@ -1333,7 +1347,6 @@ export function createIntegrationsRouter() {
           );
         }
         const redirectUrl = await beginHostedOAuth(c, claims, manifest, auth, body.variables);
-        // The page cookie stays: the form can be resubmitted (other variables) until it expires.
         return c.json({ ok: true, redirect_url: redirectUrl });
       }
       if (!body.credentials) {

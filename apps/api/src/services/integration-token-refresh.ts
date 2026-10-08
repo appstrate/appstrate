@@ -34,11 +34,15 @@ import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
+  connectionVariablesOf,
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
   resolveIntegrationClientById,
+  sameConnectionVariables,
+  type ConnectionVariables,
 } from "./integration-connections.ts";
+import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
 
 interface IntegrationRefreshResult {
@@ -84,6 +88,20 @@ class UnrefreshableConnectionError extends Error {
 }
 
 /**
+ * A connection as its caller read it. The refresh context was built from its upstream (`clientRef`,
+ * `oauthResource`) and the caller renders the result with its `variables`, so the refresh runs only
+ * while the row, re-read under the lock, still names that upstream — a reconnect in between fails
+ * it transient, and the caller's next read sees the new connection whole.
+ */
+export interface RefreshTarget {
+  id: string;
+  credentialsEncrypted: string;
+  clientRef: string | null;
+  oauthResource: string | null;
+  variables: ConnectionVariables;
+}
+
+/**
  * Refresh the OAuth2 access token for an integration connection.
  * No-op (returns current creds) when the manifest auth isn't OAuth2 or its
  * pinned OAuth client no longer resolves (`refreshContext` absent). When the auth
@@ -106,13 +124,13 @@ class UnrefreshableConnectionError extends Error {
  * the post-lock freshness short-circuit — see {@link dedupedRefresh}.
  */
 export async function forceRefreshIntegrationConnection(
-  connectionId: string,
+  connection: RefreshTarget,
   packageIdForLog: string,
   authKeyForLog: string,
-  credentialsEncrypted: string,
   refreshContext?: IntegrationRefreshContext,
   options: { force?: boolean } = {},
 ): Promise<IntegrationRefreshResult> {
+  const { id: connectionId, credentialsEncrypted } = connection;
   if (!refreshContext) {
     return {
       fields: decryptCredentialsToStringMap(credentialsEncrypted),
@@ -128,7 +146,13 @@ export async function forceRefreshIntegrationConnection(
   // we refresh against the freshest stored ciphertext (a peer may have rotated
   // the refresh_token even if the access token is near expiry).
   let freshCiphertext = credentialsEncrypted;
-  return dedupedRefresh<IntegrationRefreshResult>(connectionId, {
+  // Callers that read different upstreams of the row never share a flight's result.
+  const upstream = [
+    connection.clientRef,
+    connection.oauthResource,
+    Object.entries(connection.variables).sort(),
+  ];
+  return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${JSON.stringify(upstream)}`, {
     lockKey: `intg-refresh:${connectionId}`,
     lockLabel: "intg-refresh",
     force: options.force ?? true,
@@ -137,15 +161,24 @@ export async function forceRefreshIntegrationConnection(
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
           expiresAt: integrationConnections.expiresAt,
+          clientRef: integrationConnections.clientRef,
+          oauthResource: integrationConnections.oauthResource,
+          variables: integrationConnections.variables,
         })
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
+      if (!row || !sameUpstream(row, connection)) {
+        throw new RefreshError(
+          `Integration connection '${connectionId}' was reconnected or removed while its refresh waited (transient)`,
+          "transient",
+        );
+      }
       // The read happens even when forced — `doRefresh` must spend the
       // freshest stored refresh_token, not the one the caller was holding.
-      if (row?.credentialsEncrypted) freshCiphertext = row.credentialsEncrypted;
+      freshCiphertext = row.credentialsEncrypted;
       if (force) return null;
-      if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
+      if (row.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
@@ -156,12 +189,29 @@ export async function forceRefreshIntegrationConnection(
       return null;
     },
     doRefresh: () =>
-      doRefresh(connectionId, packageIdForLog, authKeyForLog, freshCiphertext, refreshContext),
+      doRefresh(
+        { connectionId, clientRef: connection.clientRef },
+        packageIdForLog,
+        authKeyForLog,
+        freshCiphertext,
+        refreshContext,
+      ),
   });
 }
 
+function sameUpstream(
+  row: { clientRef: string | null; oauthResource: string | null; variables: unknown },
+  connection: RefreshTarget,
+): boolean {
+  return (
+    row.clientRef === connection.clientRef &&
+    row.oauthResource === connection.oauthResource &&
+    sameConnectionVariables(connectionVariablesOf(row.variables), connection.variables)
+  );
+}
+
 async function doRefresh(
-  connectionId: string,
+  { connectionId, clientRef }: { connectionId: string; clientRef: string | null },
   packageId: string,
   authKey: string,
   credentialsEncrypted: string,
@@ -279,8 +329,10 @@ async function doRefresh(
   // only when the IdP authoritatively echoed a `scope` field; otherwise it is
   // omitted so persistCredentialBundle leaves the high-water-mark untouched.
   // accountId/identityClaims are likewise omitted → never clobbered by refresh.
-  await persistCredentialBundle(
-    { kind: "update-by-id", connectionId },
+  // A compare-and-set on the credential refreshed: a row reconnected (or flagged)
+  // during the exchange keeps what it holds, and this token is never handed out.
+  const written = await persistCredentialBundle(
+    { kind: "update-by-id", connectionId, expect: { clientRef, credentialsEncrypted } },
     {
       credentials: newCreds,
       expiresAt,
@@ -288,6 +340,12 @@ async function doRefresh(
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     },
   );
+  if (!written) {
+    throw new RefreshError(
+      `Integration connection '${connectionId}' changed while its token was refreshed (transient)`,
+      "transient",
+    );
+  }
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
@@ -325,19 +383,17 @@ type RefreshClassification =
  * credentials resolver and the credential-proxy resolver.
  */
 export async function refreshAndClassify(
-  connectionId: string,
+  connection: RefreshTarget,
   packageIdForLog: string,
   authKeyForLog: string,
-  credentialsEncrypted: string,
   refreshContext: IntegrationRefreshContext,
   options: { force?: boolean } = {},
 ): Promise<RefreshClassification> {
   try {
     const result = await forceRefreshIntegrationConnection(
-      connectionId,
+      connection,
       packageIdForLog,
       authKeyForLog,
-      credentialsEncrypted,
       refreshContext,
       options,
     );
@@ -464,6 +520,28 @@ export async function buildIntegrationOAuthRefreshContext(
       authKey,
     });
     return null;
+  }
+
+  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint passes the egress
+  // controls connect applied, re-checked because its metadata may have changed since. An
+  // unresolvable host is a blip; any other refusal leaves the connection unrefreshable.
+  if (boundIssuer !== undefined) {
+    const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
+    if (!egress.ok) {
+      if (egress.detail === "resolution-failed") {
+        throw new RefreshError(
+          `Integration '${packageId}' auth '${authKey}' token endpoint did not resolve (transient)`,
+          "transient",
+        );
+      }
+      logger.warn("Integration auth refresh skipped — token endpoint refused by egress controls", {
+        packageId,
+        authKey,
+        tokenEndpoint,
+        reason: egress.reason,
+      });
+      return null;
+    }
   }
 
   // INVARIANT: an oauth2 connection always pins its minting client. A null here
