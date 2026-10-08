@@ -360,10 +360,9 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
- * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. Every refusal — unknown
- * id, another space or integration, a row neither shared nor the caller's own — is the SAME 404
- * naming the first refused id, so a pin write cannot tell a colleague's private uuid from a
- * made-up one.
+ * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. Every refusal — unknown id,
+ * another space or integration, a row neither shared nor the caller's own — is the SAME 404 naming
+ * the first refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -504,8 +503,6 @@ export async function updateConnectionMetadata(
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
-      // The share's one gate (`assertConnectionShareable`): an end user's connection, and an
-      // owning member who lost the space since the route ran.
       if (input.sharedWithOrg === true) {
         await assertConnectionShareable(tx, connectionId);
       }

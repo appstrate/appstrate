@@ -13099,7 +13099,7 @@ export interface operations {
                 "application/json": {
                     /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
                     label?: string;
-                    /** @description `true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it. */
+                    /** @description `true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`. */
                     shared_with_org?: boolean;
                 };
             };

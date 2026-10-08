@@ -15,9 +15,21 @@
 --         WHERE c.id = ANY (p.connection_ids) AND c.end_user_id IS NOT NULL))     AS admin_pins,
 --     (SELECT count(*) FROM integration_org_defaults d
 --       WHERE EXISTS (SELECT 1 FROM integration_connections c
---         WHERE c.id = ANY (d.connection_ids) AND c.end_user_id IS NOT NULL))     AS org_defaults;
+--         WHERE c.id = ANY (d.connection_ids) AND c.end_user_id IS NOT NULL))     AS org_defaults,
+--     (SELECT count(*) FROM integration_pins p
+--       WHERE p.user_id IS NULL AND EXISTS (SELECT 1 FROM unnest(p.connection_ids) u(id)
+--         WHERE NOT EXISTS (SELECT 1 FROM integration_connections c WHERE c.id = u.id)))
+--                                                                               AS dangling_admin_pins,
+--     (SELECT count(*) FROM integration_org_defaults d
+--       WHERE EXISTS (SELECT 1 FROM unnest(d.connection_ids) u(id)
+--         WHERE NOT EXISTS (SELECT 1 FROM integration_connections c WHERE c.id = u.id)))
+--                                                                               AS dangling_org_defaults;
 --
--- 0 / 0 / 0: nothing to run. Otherwise, before the deploy and with the app container stopped
+-- The last two are informational: an admin pin or org default naming an id earlier deletions left
+-- dangling is not rewritten — here or anywhere — and fails its runs with
+-- `pinned_connection_unavailable` until an admin edits it.
+--
+-- First three at 0 / 0 / 0: nothing to run. Otherwise, before the deploy and with the app container stopped
 -- (`docker stop`, not a Coolify stop — that takes Postgres down and prunes the images; the running
 -- image still lets an end user share): `pg_dump`, then
 --
@@ -35,9 +47,11 @@
 --    guard would require.
 -- 3. UNSHARE — every end user's shared connection, listed (id, space, end user) so the operator
 --    can tell the integrator.
--- What an admin does by hand. Member pins and other actors' schedule overrides naming one are left
--- as that unshare leaves them — failing loudly until re-picked — and counted (`*_kept`). No audit
--- row (no script here writes one); the listing names every pin and default rewritten or deleted.
+-- Steps 1-3 do what an admin does by hand: clear the pin or default, then unshare. Member pins and
+-- other actors' schedule overrides naming one are left as that unshare leaves them — failing
+-- loudly until re-picked — and counted (`*_kept`). No audit row (no script here writes one): the
+-- listing names every pin and default rewritten or deleted, with its org — tell the admins of each
+-- org listed.
 --
 -- Idempotent: every WHERE is the condition its write removes. Rollback: restore the `pg_dump`.
 
@@ -65,6 +79,14 @@ SELECT
       WHERE u.id NOT IN (SELECT id FROM integration_connections WHERE end_user_id IS NOT NULL)))
                                                                                 AS org_defaults_emptied_before,
   (SELECT count(*) FROM integration_pins p
+    WHERE p.user_id IS NULL AND EXISTS (SELECT 1 FROM unnest(p.connection_ids) u(id)
+      WHERE NOT EXISTS (SELECT 1 FROM integration_connections c WHERE c.id = u.id)))
+                                                                                AS admin_pins_dangling_kept,
+  (SELECT count(*) FROM integration_org_defaults d
+    WHERE EXISTS (SELECT 1 FROM unnest(d.connection_ids) u(id)
+      WHERE NOT EXISTS (SELECT 1 FROM integration_connections c WHERE c.id = u.id)))
+                                                                                AS org_defaults_dangling_kept,
+  (SELECT count(*) FROM integration_pins p
     WHERE p.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM integration_connections c
       WHERE c.id = ANY (p.connection_ids) AND c.end_user_id IS NOT NULL))       AS member_pins_kept,
   (SELECT count(*) FROM package_schedules s
@@ -75,18 +97,21 @@ SELECT
       WHERE c.end_user_id IS NOT NULL
         AND c.end_user_id IS DISTINCT FROM s.end_user_id))                      AS schedules_kept;
 
--- The pins and defaults steps 1 and 2 rewrite or delete, with their set before.
-SELECT 'admin_pin' AS kind, p.space_id, p.package_id AS agent_id, p.integration_package_id,
-       p.connection_ids::text AS connection_ids_before
+-- The pins and defaults steps 1 and 2 rewrite or delete, with their org and their set before:
+-- tell the admins of each org listed.
+SELECT 'admin_pin' AS kind, s.org_id, p.space_id, p.package_id AS agent_id,
+       p.integration_package_id, p.connection_ids::text AS connection_ids_before
 FROM integration_pins p
+JOIN spaces s ON s.id = p.space_id
 WHERE p.user_id IS NULL AND EXISTS (SELECT 1 FROM integration_connections c
   WHERE c.id = ANY (p.connection_ids) AND c.end_user_id IS NOT NULL)
 UNION ALL
-SELECT 'org_default', d.space_id, NULL, d.integration_package_id, d.connection_ids::text
+SELECT 'org_default', s.org_id, d.space_id, NULL, d.integration_package_id, d.connection_ids::text
 FROM integration_org_defaults d
+JOIN spaces s ON s.id = d.space_id
 WHERE EXISTS (SELECT 1 FROM integration_connections c
   WHERE c.id = ANY (d.connection_ids) AND c.end_user_id IS NOT NULL)
-ORDER BY 1, 2, 3, 4;
+ORDER BY 1, 2, 3, 4, 5;
 
 -- ═══ 1. ADMIN PINS ═══
 

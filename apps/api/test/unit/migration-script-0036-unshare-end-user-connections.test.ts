@@ -53,15 +53,25 @@ let secondRun: ScriptOutput;
 interface ScriptOutput {
   counts: Record<string, number>;
   unshared: { unshared_connection_id: string; space_id: string; end_user_id: string }[];
+  /** The pins and defaults the script announces it rewrites or deletes. */
+  listed: {
+    kind: string;
+    org_id: string;
+    space_id: string;
+    agent_id: string | null;
+    integration_package_id: string;
+    connection_ids_before: string;
+  }[];
 }
 
-/** The one-row count lines the script prints, merged, and the connections it lists as unshared. */
+/** The one-row count lines the script prints, merged, and the rows it lists. */
 async function runScript(db: PGlite): Promise<ScriptOutput> {
   const results = await db.exec(await Bun.file(SCRIPT).text());
-  const out: ScriptOutput = { counts: {}, unshared: [] };
+  const out: ScriptOutput = { counts: {}, unshared: [], listed: [] };
   for (const { rows } of results) {
     for (const row of rows as Record<string, unknown>[]) {
       if ("unshared_connection_id" in row) out.unshared.push(row as never);
+      if ("kind" in row) out.listed.push(row as never);
     }
     if (rows.length !== 1) continue;
     for (const [key, value] of Object.entries(rows[0] as Record<string, unknown>)) {
@@ -173,12 +183,34 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
       admin_pins_emptied_before: 1,
       org_defaults_before: 2,
       org_defaults_emptied_before: 1,
+      admin_pins_dangling_kept: 1,
+      org_defaults_dangling_kept: 0,
       member_pins_kept: 1,
       schedules_kept: 1,
       end_user_shared_after: 0,
       admin_pins_after: 0,
       org_defaults_after: 0,
     });
+  });
+
+  it("lists every admin pin and org default it rewrites or deletes, with its org and set before", () => {
+    const set = (...ids: string[]) => `{${ids.join(",")}}`;
+    const row = (kind: string, agent: string | null, integ: string, before: string) => ({
+      kind,
+      org_id: ORG,
+      space_id: SPACE,
+      agent_id: agent,
+      integration_package_id: integ,
+      connection_ids_before: before,
+    });
+    expect(firstRun.listed).toEqual([
+      row("admin_pin", AGENT, GMAIL, set(ERIN_SHARED, ALICE_SHARED)),
+      row("admin_pin", AGENT_2, GMAIL, set(ERIN_PINNED_ALONE)),
+      row("admin_pin", AGENT_3, GMAIL, set(DEAD, ERIN_UNSHARED_PINNED)),
+      row("org_default", null, GMAIL, set(ALICE_SHARED_2, ERIN_SHARED, ALICE_SHARED)),
+      row("org_default", null, SLACK, set(ERIN_DEFAULT_ALONE)),
+    ]);
+    expect(secondRun.listed).toEqual([]);
   });
 
   it("removes an end user's connection, shared or not, from admin pins and org defaults, keeping the rest in order — a dangling id included — and deletes only the sets it empties", async () => {
@@ -234,6 +266,8 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
   it("changes nothing on a second run, and finds nothing to do", () => {
     expect(afterSecondRun).toBe(afterFirstRun);
     expect(secondRun.unshared).toEqual([]);
+    // Informational and untouched: the dangling id stays, so its pin is still counted.
+    expect(secondRun.counts.admin_pins_dangling_kept).toBe(1);
     expect(
       Object.entries(secondRun.counts).filter(([key, n]) => n !== 0 && !key.endsWith("_kept")),
     ).toEqual([]);

@@ -1235,7 +1235,7 @@ export const integrationsPaths = {
                 shared_with_org: {
                   type: "boolean",
                   description:
-                    "`true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it.",
+                    "`true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`.",
                 },
               },
               additionalProperties: false,
