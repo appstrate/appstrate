@@ -391,7 +391,7 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
       .select()
       .from(runLogs)
       .where(and(eq(runLogs.runId, runId), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
-    expect(row!.level).toBe("warn");
+    expect(row!.level).toBe("info");
     expect(row!.data!.reason).toBe("unbound");
     expect(row!.message).toBe(
       `integration '${INTEG}' has no connection bound to this run — its tools are unavailable to this run`,

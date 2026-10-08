@@ -309,8 +309,14 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
       expect(res.status).toBe(201);
       const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
-      // A deliberate choice is not a warning.
-      expect(created.warnings).toEqual([]);
+      // Still reported so the launcher sees it, with no connect target: the absence was chosen.
+      expect(created.warnings).toHaveLength(1);
+      expect(created.warnings[0]).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+      });
+      expect(created.warnings[0]!.auth_key).toBeUndefined();
+      expect(created.warnings[0]!.required_scopes).toBeUndefined();
       const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
       expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });

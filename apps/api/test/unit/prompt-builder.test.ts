@@ -422,14 +422,20 @@ describe("buildEnrichedPrompt — unavailable integrations", () => {
         droppedIntegrations: [
           { integrationId: "@org/gmail", reason: "unbound" },
           { integrationId: "@org/ssh", reason: "no_delivery", connectionLabel: "db" },
+          { integrationId: "@org/ssh", reason: "bound_set_incomplete", connectionLabel: "prod" },
           { integrationId: "@org/drive", reason: "not_active" },
         ],
       }),
     );
     expect(prompt).toContain("## Unavailable Integrations");
     expect(prompt).toContain("- **@org/gmail**: no connection is bound to this run");
-    expect(prompt).toContain("- **@org/ssh** (connection 'db'): failed to start (no_delivery)");
-    expect(prompt).toContain("- **@org/drive**: failed to start (not_active)");
+    // One line per integration, however many of its connections dropped.
+    expect(prompt).toContain(
+      "- **@org/ssh**: connection 'db': the connection's credentials cannot be delivered; " +
+        "connection 'prod': another connection bound with it failed to start",
+    );
+    expect(prompt).toContain("- **@org/drive**: it is switched off in this space");
+    expect(prompt).not.toMatch(/no_delivery|not_active|bound_set_incomplete/);
     expect(prompt).toContain("report them as unavailable in this run");
   });
 

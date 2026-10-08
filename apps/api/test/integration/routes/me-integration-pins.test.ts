@@ -253,7 +253,7 @@ describe("/api/me/integration-pins", () => {
       expect(cleared!.after).toEqual({ connectionIds: [] });
     });
 
-    it("DENY: 400 invalid_request on an empty set for an integration the agent requires", async () => {
+    it("ALLOW: an empty set on a required integration — the run it governs is refused", async () => {
       const REQUIRED_AGENT = "@pinorg/agent-required";
       const manifest = buildAgentManifest();
       await seedPackage({
@@ -270,12 +270,22 @@ describe("/api/me/integration-pins", () => {
       });
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, REQUIRED_AGENT);
 
-      const res = await putPin([], authHeaders(ctx), REQUIRED_AGENT);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; param?: string };
-      expect(body.code).toBe("invalid_request");
-      expect(body.param).toBe("connection_ids");
-      expect(await db.select().from(integrationPins)).toEqual([]);
+      expect((await putPin([], authHeaders(ctx), REQUIRED_AGENT)).status).toBe(200);
+      const readiness = await app.request(`/api/agents/${REQUIRED_AGENT}/connection-readiness`, {
+        headers: authHeaders(ctx),
+      });
+      expect(((await readiness.json()) as { blocks_run: boolean }).blocks_run).toBe(true);
+
+      const run = await app.request(`/api/agents/${REQUIRED_AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(run.status).toBe(409);
+      const body = (await run.json()) as { errors: { field: string; code: string }[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
     });
 
     it("DENY: 400 when the body still names the ids the path now carries", async () => {

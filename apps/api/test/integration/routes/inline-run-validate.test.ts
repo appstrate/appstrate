@@ -17,7 +17,7 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import {
   apiIntegrationManifest,
   localIntegrationManifest,
@@ -459,6 +459,31 @@ describe("POST /api/runs/inline/validate", () => {
       expect(body.valid).toBe(true);
       expect(body.warnings.map((e) => e.code)).toEqual(["integration_unbound"]);
       expect(body.warnings[0]?.required_scopes).toEqual(["search.read"]);
+    });
+
+    it("warns of an integration switched off in the space, or refuses it when required", async () => {
+      await seedIntegration();
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+
+      const optional = await validate(manifestSelecting({ tools: ["search"] }));
+      expect(optional.status).toBe(200);
+      const body = (await optional.json()) as { warnings: Record<string, unknown>[] };
+      expect(body.warnings).toEqual([
+        {
+          field: `integrations.${INTEGRATION}`,
+          code: "integration_not_active",
+          title: "Integration Not Active",
+          message: `Integration '${INTEGRATION}' is not active in this space; the run proceeds without it.`,
+        },
+      ]);
+
+      const required = await validate(manifestSelecting({ tools: ["search"], required: true }));
+      // Accumulate mode: the readiness refusal rides the 400 envelope.
+      expect(required.status).toBe(400);
+      const refused = (await required.json()) as { errors: { field: string; code: string }[] };
+      expect(refused.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
     });
 
     it("does NOT insert a shadow row when the selection is refused", async () => {

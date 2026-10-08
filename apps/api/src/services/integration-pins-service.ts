@@ -44,7 +44,7 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { notFound, conflict, invalidRequest } from "../lib/errors.ts";
+import { notFound, conflict } from "../lib/errors.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { actorFromIds, actorOrSharedFilter, type Actor } from "../lib/actor.ts";
@@ -64,7 +64,10 @@ import {
   requirementOf,
   servingCandidates,
 } from "./integration-connection-resolver.ts";
-import type { ConnectionResolutionResult } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionResult,
+  ConnectionResolutionWarning,
+} from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
@@ -230,7 +233,7 @@ interface SetPinInput {
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
- * An empty set pins the agent to no connection, unless the agent requires the integration.
+ * An empty set pins to none; the resolver refuses it where the running version requires the integration.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -284,7 +287,6 @@ async function upsertPin(args: {
 }): Promise<PinWrite> {
   const { scope, agentPackageId, integrationId, connectionIds, userIdValue, createdBy } = args;
   await assertAgentActiveHere(scope, agentPackageId);
-  if (connectionIds.length === 0) await assertNotRequired(scope, agentPackageId, integrationId);
 
   const ids = sql`ARRAY[${sql.join(
     connectionIds.map((id) => sql`${id}`),
@@ -358,26 +360,6 @@ export async function deletePin(
 async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string): Promise<void> {
   if (!(await isPackageActiveHere(scope, agentPackageId))) {
     throw notFound(`Agent '${agentPackageId}' is not active in this space`);
-  }
-}
-
-/** Judged on the agent's draft; the resolver still refuses a pin to none the agent later requires. */
-async function assertNotRequired(
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationId: string,
-): Promise<void> {
-  const agent = await getPackage(agentPackageId, scope.orgId);
-  const entry = agent
-    ? parseManifestIntegrations(agent.manifest as unknown as Record<string, unknown>).find(
-        (e) => e.id === integrationId,
-      )
-    : undefined;
-  if (entry?.required === true) {
-    throw invalidRequest(
-      `Agent '${agentPackageId}' requires '${integrationId}': it cannot be pinned to no connection`,
-      "connection_ids",
-    );
   }
 }
 
@@ -672,6 +654,8 @@ async function resolveAgentIntegrationPick(args: {
   agentManifest: Record<string, unknown>;
   /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
   resolution: ConnectionResolutionResult;
+  /** The run cascade's warnings: why a run would start without an integration. */
+  runWarnings: ConnectionResolutionWarning[];
   /** Agent-level member pins, fetched once. */
   memberPins: MemberPinSummary[];
   /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
@@ -743,10 +727,12 @@ async function resolveAgentIntegrationPick(args: {
   // (buildRequirement returned null, `includeInert` notwithstanding), so there
   // is no verdict to report — both fields stay null rather than guessed.
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
+  const warning = args.runWarnings.find((w) => w.integrationId === integrationId) ?? null;
 
   return {
     source: resolved?.[0]?.source ?? err?.source ?? null,
     error_code: err?.code ?? null,
+    warning_code: warning?.code ?? null,
     // A set that failed its health check is still the set the layer binds.
     resolved_connection_ids: resolved
       ? resolved.map((r) => r.connectionId)
@@ -773,10 +759,7 @@ interface AgentConnectionReadiness {
    * tell anyone what to fix.
    */
   errors: ValidationFieldError[];
-  /**
-   * Every declared integration with its management verdict (includeInert) + run-blocking flag.
-   * Unbound: `!run_blocking`, no `error_code`, empty `resolved_connection_ids`.
-   */
+  /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
     integration_package_id: string;
     /** The agent's `integrations_configuration.<id>.required`. */
@@ -903,6 +886,7 @@ export async function resolveAgentConnectionReadiness(args: {
         canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,
+        runWarnings: runResolution.warnings,
         memberPins,
         manifestCache,
       }),

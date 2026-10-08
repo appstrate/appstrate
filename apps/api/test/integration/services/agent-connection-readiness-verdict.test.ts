@@ -15,7 +15,7 @@ import {
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { resolveAgentConnectionReadiness } from "../../../src/services/integration-pins-service.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
@@ -146,6 +146,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(await verdictOf()).toMatchObject({
         source: "fallback_auto",
         error_code: null,
+        warning_code: null,
         resolved_connection_ids: [id],
       });
     });
@@ -263,7 +264,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
   });
 
   // Absence degrades: no `error_code`, no layer, no set — and the run is not blocked.
-  describe("unbound — optional, `error_code` null, `resolved_connection_ids` empty", () => {
+  describe("unbound — optional, `error_code` null, `warning_code` the reason", () => {
     it("nothing connected", async () => {
       await seedAgentDeclaring(TOOLS);
       const entry = await entryOf();
@@ -272,6 +273,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(entry.resolution).toMatchObject({
         source: null,
         error_code: null,
+        warning_code: "integration_unbound",
         resolved_connection_ids: [],
         admin_pinned_connection_ids: null,
         member_pinned_connection_ids: null,
@@ -283,7 +285,11 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       await seedConnection({ authKey: "primary" });
       const entry = await entryOf();
       expect(entry.run_blocking).toBe(false);
-      expect(entry.resolution).toMatchObject({ error_code: null, resolved_connection_ids: [] });
+      expect(entry.resolution).toMatchObject({
+        error_code: null,
+        warning_code: "integration_unbound",
+        resolved_connection_ids: [],
+      });
     });
 
     it("an admin pin to none wins over a connection the fallback would bind", async () => {
@@ -295,6 +301,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(entry.resolution).toMatchObject({
         source: null,
         error_code: null,
+        warning_code: "integration_unbound",
         resolved_connection_ids: [],
         admin_pinned_connection_ids: [],
         member_pinned_connection_ids: null,
@@ -307,9 +314,23 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       await pin([], ctx.user.id);
       expect(await verdictOf()).toMatchObject({
         error_code: null,
+        warning_code: "integration_unbound",
         resolved_connection_ids: [],
         admin_pinned_connection_ids: null,
         member_pinned_connection_ids: [],
+      });
+    });
+
+    it("switched off in the space → integration_not_active, though a connection would bind", async () => {
+      await seedAgentDeclaring(TOOLS);
+      await seedConnection();
+      await deactivatePackage(scope, INTEG);
+      const entry = await entryOf();
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({
+        error_code: null,
+        warning_code: "integration_not_active",
+        resolved_connection_ids: [],
       });
     });
   });

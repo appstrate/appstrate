@@ -111,10 +111,8 @@ export function assertDependencyOverrideKeysDeclared(
 
 /**
  * The same refusal for a `connection_overrides` KEY the EFFECTIVE manifest does not
- * declare: the resolver would drop it and bind a lower cascade layer instead. An
- * explicit `[]` (bind none) on an integration the manifest marks `required` is
- * refused here too, rather than answering every launch with
- * `required_integration_unbound`.
+ * declare: the resolver would drop it and bind a lower cascade layer instead. Also `[]`
+ * on an integration the manifest marks `required`, which no launch could ever satisfy.
  */
 export function assertConnectionOverridesAllowed(
   manifest: Record<string, unknown>,

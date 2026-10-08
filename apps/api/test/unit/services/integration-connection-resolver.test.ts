@@ -19,12 +19,12 @@
  *        not_connected / must_choose when `required`, else bound to none + warning
  *
  * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
+ * An integration switched off in the space is not resolved (a warning, or an error when `required`).
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   resolveConnections as resolveConnectionsPure,
-  runConnectionsOutcome,
   servingCandidates,
   translateResolutionError,
   type IntegrationRequirement,
@@ -822,23 +822,48 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     expect(result.errors).toEqual([]);
   });
 
+  const inertReq = (required: boolean): IntegrationRequirement => ({
+    integrationId: INTEG,
+    manifest: oauth2Manifest(),
+    hasSelectedTools: false,
+    agentTools: [],
+    agentScopes: [],
+    required,
+  });
+
   it("skips integrations with no selected tools (declared-but-inert)", () => {
     const result = resolveConnections({
-      requirements: [
-        {
-          integrationId: INTEG,
-          manifest: oauth2Manifest(),
-          hasSelectedTools: false,
-          agentTools: [],
-          agentScopes: [],
-          required: true,
-        },
-      ],
+      requirements: [inertReq(false)],
       accessibleConnections: [],
       pins: [],
     });
-    expect(result.resolved).toEqual({});
-    expect(result.errors).toEqual([]);
+    expect(result).toEqual({ resolved: {}, errors: [], warnings: [] });
+  });
+
+  it("does not skip a REQUIRED inert integration: it must still bind a connection", () => {
+    const none = resolveConnections({
+      requirements: [inertReq(true)],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(none.resolved).toEqual({});
+    expect(none.errors.map((e) => e.code)).toEqual(["not_connected"]);
+
+    const c = conn({});
+    const bound = resolveConnections({
+      requirements: [inertReq(true)],
+      accessibleConnections: [c],
+      pins: [],
+    });
+    expect(bound.errors).toEqual([]);
+    expect(bound.resolved[INTEG]).toMatchObject([{ connectionId: c.id, source: "fallback_auto" }]);
+
+    const pinnedNone = resolveConnections({
+      requirements: [inertReq(true)],
+      accessibleConnections: [c],
+      pins: [pin([])],
+    });
+    expect(pinnedNone.errors.map((e) => e.code)).toEqual(["required_integration_unbound"]);
   });
 
   function requiredAuthReq(required: boolean): IntegrationRequirement {
@@ -2083,11 +2108,19 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
       }
     });
 
-    it(`${layer.name} \`[]\`, non-required → binds none, no error, no warning`, () => {
+    it(`${layer.name} \`[]\`, non-required → binds none, warned without a connect target`, () => {
       const { result } = resolveWith(layer.input([]), false);
       expect(result.errors).toEqual([]);
-      expect(result.warnings).toEqual([]);
       expect(result.resolved).toEqual({ [INTEG]: [] });
+      expect(result.warnings).toHaveLength(1);
+      const [warning] = result.warnings;
+      // A chosen absence: nothing to connect, so no link is minted for it.
+      expect(warning).toEqual({
+        integrationId: INTEG,
+        code: "integration_unbound",
+        message: expect.stringContaining("is bound to no connection by"),
+      });
+      expect(connectOfferTarget(translateResolutionError(warning!))).toBeNull();
     });
 
     it(`${layer.name} \`[]\`, required → required_integration_unbound naming the layer`, () => {
@@ -2194,40 +2227,63 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
   });
 });
 
-describe("runConnectionsOutcome", () => {
-  it("keeps an all-none snapshot — `[]` is not an empty map — with its wire warnings", () => {
-    const outcome = runConnectionsOutcome(
-      resolveConnections({
+describe("resolveConnections — integration switched off in the space", () => {
+  const inactive = { inactiveIntegrationIds: new Set([INTEG]) };
+
+  it("non-required: not resolved, warned `integration_not_active`, whatever would bind", () => {
+    const c = conn({});
+    for (const pins of [[], [pin(c.id)], [pin([])]]) {
+      const result = resolveConnections({
         requirements: [req(oauth2Manifest())],
-        accessibleConnections: [],
-        pins: [],
-      }),
-    );
-    expect(outcome).toMatchObject({ ok: true, resolved: { [INTEG]: [] } });
-    if (!outcome.ok) throw new Error("expected ok");
-    expect(outcome.warnings).toMatchObject([
-      { field: `integrations.${INTEG}`, code: "integration_unbound" },
-    ]);
+        accessibleConnections: [c],
+        pins,
+        ...inactive,
+      });
+      expect(result.errors).toEqual([]);
+      // No key: the spawn drops it as `not_active` before reading the snapshot.
+      expect(result.resolved).toEqual({});
+      expect(result.warnings).toEqual([
+        {
+          integrationId: INTEG,
+          code: "integration_not_active",
+          message: `Integration '${INTEG}' is not active in this space; the run proceeds without it.`,
+        },
+      ]);
+    }
   });
 
-  it("is null only when no integration needs a connection", () => {
-    expect(runConnectionsOutcome({ resolved: {}, errors: [], warnings: [] })).toEqual({
-      ok: true,
-      resolved: null,
-      warnings: [],
+  it("required: `integration_not_active` error, with no connect target on the wire", () => {
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest())],
+      accessibleConnections: [],
+      pins: [],
+      ...inactive,
     });
+    expect(result.warnings).toEqual([]);
+    expect(result.errors).toEqual([
+      {
+        integrationId: INTEG,
+        code: "integration_not_active",
+        message: `Integration '${INTEG}' is not active in this space.`,
+      },
+    ]);
+    const wire = translateResolutionError(result.errors[0]!);
+    expect(wire).toEqual({
+      field: `integrations.${INTEG}`,
+      code: "integration_not_active",
+      title: "Integration Not Active",
+      message: `Integration '${INTEG}' is not active in this space.`,
+    });
+    expect(connectOfferTarget(wire)).toBeNull();
   });
 
-  it("answers the 409 on any error, warnings or not", () => {
-    const outcome = runConnectionsOutcome(
-      resolveConnections({
-        requirements: [requiredReq(oauth2Manifest())],
-        accessibleConnections: [],
-        pins: [],
-      }),
-    );
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) throw new Error("expected 409");
-    expect(outcome.error.status).toBe(409);
+  it("warns for an inert non-required integration too: the spawn drops it all the same", () => {
+    const result = resolveConnections({
+      requirements: [{ ...req(oauth2Manifest()), hasSelectedTools: false }],
+      accessibleConnections: [],
+      pins: [],
+      ...inactive,
+    });
+    expect(result.warnings.map((w) => w.code)).toEqual(["integration_not_active"]);
   });
 });

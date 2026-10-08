@@ -8,7 +8,7 @@
  * run's connections panel trust. An override naming what governance outranks or
  * the caller cannot reach is refused before any run row exists. An override
  * naming no connection (`[]`) binds none, and a non-required integration
- * nobody connected starts the run with a warning.
+ * nobody connected, or switched off in the space, starts the run with a warning.
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -23,7 +23,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import {
@@ -57,6 +58,9 @@ function agentManifest(name: string, integration: string, required = false) {
 interface LaunchWarning {
   field: string;
   code: string;
+  auth_key?: string;
+  required_scopes?: string[];
+  connect_url?: string;
 }
 
 describe("launch override — the bound set names the launch it came from", () => {
@@ -92,10 +96,10 @@ describe("launch override — the bound set names the launch it came from", () =
     other = await seedIntegrationConnection(ctx, INTEGRATION);
   });
 
-  function launch(ids: string[]) {
+  function launch(ids: string[], headers: Record<string, string> = {}) {
     return app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
       body: JSON.stringify({ connection_overrides: { [INTEGRATION]: ids } }),
     });
   }
@@ -246,11 +250,21 @@ describe("launch override — the bound set names the launch it came from", () =
   });
 
   describe("explicit none", () => {
-    it("an empty override binds no connection, without a warning", async () => {
-      const res = await launch([]);
+    it("an empty override binds no connection, warned without a connect link", async () => {
+      const res = await launch([], { [RUN_CONNECT_OFFERS_HEADER]: "1" });
       expect(res.status).toBe(201);
       const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
-      expect(body.warnings).toEqual([]);
+      expect(body.warnings).toHaveLength(1);
+      const [warning] = body.warnings;
+      expect(warning).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+        message: expect.stringContaining("this run's connection_overrides"),
+      });
+      // The absence was chosen: nothing to connect.
+      expect(warning!.auth_key).toBeUndefined();
+      expect(warning!.required_scopes).toBeUndefined();
+      expect(warning!.connect_url).toBeUndefined();
 
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
@@ -383,6 +397,54 @@ describe("launch override — the bound set names the launch it came from", () =
       const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });
       await waitForRunPipelineSettled();
+    });
+  });
+  describe("an integration switched off in the space", () => {
+    beforeEach(async () => {
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    });
+
+    it("non-required: starts the run without it, warning integration_not_active", async () => {
+      // Two own connections would be `must_choose_connection` were it active: the snapshot
+      // pass must not judge an integration the run will not start.
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
+      expect(row!.resolvedConnections).toBeNull();
+      await waitForRunPipelineSettled();
+    });
+
+    it("required: refuses the launch (409 integration_not_active) and creates no run", async () => {
+      const required = "@launchorg/required-agent";
+      await seedAgent({
+        id: required,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest(required, INTEGRATION, true),
+        draftContent: "Search for something.",
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, required);
+
+      const res = await app.request(`/api/agents/${required}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [picked] } }),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { errors: LaunchWarning[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
     });
   });
 });

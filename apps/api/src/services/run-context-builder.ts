@@ -386,7 +386,7 @@ export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 
 /**
  * Persist the degradation marker for each integration the run starts
- * without: one `warn` `run_logs` row per drop, on the same
+ * without: one `run_logs` row per drop (`warn`, `info` for an unbound one), on the same
  * pg_notify → SSE path the container's own breadcrumbs use, so the gap is
  * visible on the run page instead of living only in server-side logs.
  *
@@ -406,12 +406,12 @@ export async function recordDroppedIntegrations(
   dropped: readonly DroppedIntegration[],
 ): Promise<void> {
   for (const entry of dropped) {
-    // `unbound` is a chosen absence, not a failure to start.
-    const cause =
-      entry.reason === "unbound"
-        ? "has no connection bound to this run"
-        : `is declared by this agent but was not started (${entry.reason})` +
-          (entry.detail ? `: ${entry.detail}` : "");
+    // `unbound` is a chosen absence, not a failure to start: info, not warn.
+    const unbound = entry.reason === "unbound";
+    const cause = unbound
+      ? "has no connection bound to this run"
+      : `is declared by this agent but was not started (${entry.reason})` +
+        (entry.detail ? `: ${entry.detail}` : "");
     await appendDropMarker(
       scope,
       runId,
@@ -425,6 +425,7 @@ export async function recordDroppedIntegrations(
         ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
         ...(entry.connectionLabel !== undefined ? { connectionLabel: entry.connectionLabel } : {}),
       },
+      unbound ? "info" : "warn",
     );
   }
 }
@@ -493,9 +494,10 @@ async function appendDropMarker(
   event: string,
   message: string,
   data: Record<string, unknown>,
+  level: "info" | "warn" = "warn",
 ): Promise<void> {
   try {
-    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, "warn");
+    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, level);
   } catch (err) {
     logger.warn("failed to append drop marker run log", {
       runId,

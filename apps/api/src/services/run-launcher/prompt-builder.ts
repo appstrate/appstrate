@@ -36,6 +36,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
+import type { DroppedIntegration, IntegrationDropReason } from "../integration-spawn-resolver.ts";
 import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
 /**
@@ -95,15 +96,7 @@ export async function buildPlatformSystemPrompt(
       };
     });
   }
-  // Absence (`unbound`) and breakage (every other reason) read differently to the agent.
-  const unavailableIntegrations = plan.droppedIntegrations?.map((entry) => ({
-    id: entry.integrationId,
-    ...(entry.connectionLabel ? { connection: entry.connectionLabel } : {}),
-    reason:
-      entry.reason === "unbound"
-        ? "no connection is bound to this run"
-        : `failed to start (${entry.reason})`,
-  }));
+  const unavailableIntegrations = unavailableIntegrationsOf(plan.droppedIntegrations ?? []);
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
@@ -127,7 +120,7 @@ export async function buildPlatformSystemPrompt(
     deliverables: true,
     ...(uploads ? { uploads } : {}),
     ...(integrations ? { integrations } : {}),
-    ...(unavailableIntegrations?.length ? { unavailableIntegrations } : {}),
+    ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
@@ -140,4 +133,35 @@ export async function buildPlatformSystemPrompt(
   // signature and avoids a stale/partial in-prompt list that would
   // contradict the live tool set.
   return renderPlatformPrompt(inputs);
+}
+
+/** A drop as the agent reads it; the raw reason stays in the run log. */
+const DROP_REASON_TEXT: Record<IntegrationDropReason, string> = {
+  unbound: "no connection is bound to this run",
+  not_active: "it is switched off in this space",
+  not_found: "its package does not exist",
+  not_integration: "the declared package is not an integration",
+  invalid_manifest: "its manifest is invalid",
+  remote_source_invalid: "its server address is invalid",
+  remote_url_unrenderable: "its server address cannot be built from the connection",
+  remote_url_blocked: "its server address is blocked",
+  local_server_ref_missing: "its server package is missing",
+  mcp_server_unresolved: "its server package cannot be found",
+  mcp_server_not_runnable: "its server package cannot run",
+  no_delivery: "the connection's credentials cannot be delivered",
+  bound_set_incomplete: "another connection bound with it failed to start",
+  resolve_error: "it failed to start",
+};
+
+/** One entry per integration id, its causes joined (a set drops one entry per connection). */
+function unavailableIntegrationsOf(
+  dropped: readonly DroppedIntegration[],
+): Array<{ id: string; reason: string }> {
+  const reasons = new Map<string, Set<string>>();
+  for (const entry of dropped) {
+    const text = DROP_REASON_TEXT[entry.reason];
+    const reason = entry.connectionLabel ? `connection '${entry.connectionLabel}': ${text}` : text;
+    reasons.set(entry.integrationId, (reasons.get(entry.integrationId) ?? new Set()).add(reason));
+  }
+  return [...reasons].map(([id, set]) => ({ id, reason: [...set].join("; ") }));
 }

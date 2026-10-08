@@ -40,7 +40,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { asc, eq } from "drizzle-orm";
 import { auditEvents, integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -183,6 +183,7 @@ describe("/api/integrations/:packageId admin surface", () => {
   interface AgentResolutionDTO {
     source: string | null;
     error_code: string | null;
+    warning_code: string | null;
     resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
     admin_pinned_connection_ids: string[] | null;
@@ -234,6 +235,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // Wire-shape contract — all fields present, snake_case.
       expect(body).toHaveProperty("source");
       expect(body).toHaveProperty("error_code");
+      expect(body).toHaveProperty("warning_code");
       expect(body).toHaveProperty("resolved_connection_ids");
       expect(body).toHaveProperty("resolved_missing_scopes");
       expect(body).toHaveProperty("admin_pinned_connection_ids");
@@ -247,6 +249,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // the fallback binds it, and no error stands in the way.
       expect(body.source).toBe("fallback_auto");
       expect(body.error_code).toBeNull();
+      expect(body.warning_code).toBeNull();
       expect(body.resolved_connection_ids).toEqual([connId]);
     });
 
@@ -266,7 +269,23 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution.source).toBeNull();
       expect(entry.resolution.error_code).toBeNull();
+      expect(entry.resolution.warning_code).toBe("integration_unbound");
       expect(entry.resolution.resolved_connection_ids).toEqual([]);
+    });
+
+    it("reports an integration switched off in the space as blocking only where it is required", async () => {
+      await seedPrivateConnectionFor(ctx.user.id);
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+
+      const optional = await getEntry(AGENT, INTEGRATION);
+      expect(optional.run_blocking).toBe(false);
+      expect(optional.resolution.error_code).toBeNull();
+      expect(optional.resolution.warning_code).toBe("integration_not_active");
+
+      const required = await getEntry(REQUIRED_AGENT, INTEGRATION);
+      expect(required.run_blocking).toBe(true);
+      expect(required.resolution.error_code).toBe("integration_not_active");
+      expect(required.resolution.warning_code).toBeNull();
     });
 
     it("tells no pin (null) from a pin to none ([])", async () => {
@@ -292,6 +311,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // The admin pin wins and binds nothing, though a shared connection would serve.
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution.error_code).toBeNull();
+      expect(entry.resolution.warning_code).toBe("integration_unbound");
       expect(entry.resolution.resolved_connection_ids).toEqual([]);
       expect(entry.resolution.candidates.map((c) => c.id)).toEqual([shared]);
     });
@@ -500,18 +520,30 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect((await getResolution(AGENT, INTEGRATION)).admin_pinned_connection_ids).toEqual([]);
     });
 
-    it("DENY: 400 invalid_request on an empty set for an integration the agent requires", async () => {
+    // The pin is judged by the version that runs, not at write time.
+    it("an empty set on a required integration is stored, and the run it governs is refused", async () => {
       const connId = await seedSharedConnection();
       expect((await putPin([connId], REQUIRED_AGENT)).status).toBe(200);
 
-      const res = await putPin([], REQUIRED_AGENT);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; param?: string };
-      expect(body.code).toBe("invalid_request");
-      expect(body.param).toBe("connection_ids");
-      // The stored pin is untouched.
-      const resolution = await getResolution(REQUIRED_AGENT, INTEGRATION);
-      expect(resolution.admin_pinned_connection_ids).toEqual([connId]);
+      expect((await putPin([], REQUIRED_AGENT)).status).toBe(200);
+      const entry = await getEntry(REQUIRED_AGENT, INTEGRATION);
+      expect(entry.run_blocking).toBe(true);
+      expect(entry.resolution).toMatchObject({
+        admin_pinned_connection_ids: [],
+        error_code: "required_integration_unbound",
+        source: "admin_pin",
+      });
+
+      const run = await app.request(`/api/agents/${REQUIRED_AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(run.status).toBe(409);
+      const body = (await run.json()) as { errors: { field: string; code: string }[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
     });
 
     it("the body's ids are lowercased, and a repeat that differs only in case is refused", async () => {

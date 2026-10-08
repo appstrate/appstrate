@@ -42,8 +42,7 @@ export interface ValidationFieldError {
 /**
  * A `ValidationFieldError` carrying the connection-resolution "smuggle" fields
  * surfaced by the integration connection resolver
- * (`translateResolutionError`, for the 409 items and a launch response's
- * `warnings` alike). These snake_case extras let the dashboard's
+ * (`translateResolutionError`, 409 items and launch `warnings` alike). These snake_case extras let the dashboard's
  * MissingConnections UI act on a 409 / readiness error without parsing the
  * `detail` string. Each field is populated only for the matching resolution
  * `code`; all are optional.
@@ -58,8 +57,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * round-trip through the connection list before the caller could choose.
    * On the credential proxy the candidates are the `X-Run-Id` run's bound set
    * (else every own and shared connection), and the retry names one in
-   * `X-Connection-Id`. Also on an `integration_unbound` warning when only
-   * connections other members share serve: the run started without them.
+   * `X-Connection-Id`. Also on an `integration_unbound` warning (shared-only reach).
    */
   candidate_connections?: {
     id: string;
@@ -73,17 +71,12 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
   /**
-   * `insufficient_scopes` / `not_connected` / `needs_reconnection` /
-   * `integration_unbound` — OAuth scopes the run's selected tools require on
-   * `auth_key`. Forward as `scopes` when starting the connect flow so the
-   * consent covers them.
+   * The connect-flow codes (`insufficient_scopes`, `not_connected`, `needs_reconnection`,
+   * `integration_unbound`) — OAuth scopes the run's selected tools require on
+   * `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.
    */
   required_scopes?: string[];
-  /**
-   * `insufficient_scopes` / `not_connected` / `needs_reconnection` /
-   * `integration_unbound` — auth key of the integration manifest the connect
-   * flow must target (`/auths/{authKey}/connect/...`).
-   */
+  /** The connect-flow codes — the auth the connect flow must target (`/auths/{authKey}/connect/...`). */
   auth_key?: string;
   /**
    * `insufficient_scopes` / `needs_reconnection` — true when the connection to
@@ -91,23 +84,17 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /**
-   * `auth_key_mismatch` (and its `integration_unbound` counterpart) /
-   * `auth_key_serves_no_selected_tool` — the agent dep's `auth_key` (AFPS §4.1).
-   */
+  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` / `integration_unbound` — the dep's `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
-  /**
-   * `auth_key_mismatch` (and its `integration_unbound` counterpart) — auth keys
-   * the actor's existing connections use.
-   */
+  /** `auth_key_mismatch` / `integration_unbound` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a
-   * run-kickoff 409 or launch `warnings` whose caller opted in
-   * (`RUN_CONNECT_OFFERS_HEADER`, whose docblock states who may), and only on
-   * the items an oauth2 connect flow can clear for the calling actor.
-   * Single-use and short-lived (`expiresAt`): open it — never store it, and
-   * never call the connect kickoff as well, which would mint a second link.
+   * run-kickoff 409 (or launch `warnings`) whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * docblock states who may), and only on the items an oauth2 connect flow can
+   * clear for the calling actor. Single-use and short-lived (`expiresAt`):
+   * open it — never store it, and never call the connect kickoff as well,
+   * which would mint a second link.
    */
   connect_url?: string;
   /** Absolute expiry (RFC 3339) of `connect_url`. */

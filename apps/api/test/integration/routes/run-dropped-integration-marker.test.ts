@@ -110,6 +110,8 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.data?.reason).toBe("unbound");
     expect(rows[0]!.message).toContain("has no connection bound to this run");
+    // A chosen absence, not a failure to start.
+    expect(rows[0]!.level).toBe("info");
   });
 
   it("writes no marker when every declared integration spawns", async () => {

@@ -8,11 +8,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
-import type {
-  ConnectionOverrides,
-  ConnectionResolutionError,
-  ConnectionResolutionWarning,
-} from "@appstrate/core/integration";
+import type { ConnectionOverrides, ConnectionResolutionError } from "@appstrate/core/integration";
 import { collectAgentReadiness } from "./agent-readiness.ts";
 import {
   launchOverrideLayer,
@@ -119,8 +115,8 @@ function sameSet(a: readonly string[], b: readonly string[] | undefined): boolea
  * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
  * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
  * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
- * ({@link scheduleWriteFor}). Returns the fire's warnings — the integrations it would start
- * without — for the write's response.
+ * ({@link scheduleWriteFor}). Returns the fire's warnings — none to a caller writing for another
+ * member, who must not learn how many connections the actor holds.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -136,7 +132,7 @@ export async function assertScheduleConnectionsChosen(params: {
   dependencyOverrides: Record<string, string> | null;
 }): Promise<ResolutionFieldError[]> {
   const manifestCache = await seedPinnedIntegrationManifests(params);
-  const { resolutionErrors, warnings, resolutionWarnings } = await collectAgentReadiness({
+  const { resolutionErrors, warnings } = await collectAgentReadiness({
     agent: params.agent,
     orgId: params.orgId,
     spaceId: params.spaceId,
@@ -146,11 +142,7 @@ export async function assertScheduleConnectionsChosen(params: {
   });
   const writeFor = scheduleWriteFor(params.caller, params.actor);
   const unchosen = resolutionErrors.filter(isScheduleOwned);
-  if (unchosen.length === 0) {
-    return writeFor === "member"
-      ? withSharedCandidatesOnly(resolutionWarnings, params.spaceId)
-      : warnings;
-  }
+  if (unchosen.length === 0) return writeFor === "member" ? [] : warnings;
   switch (writeFor) {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
@@ -173,36 +165,22 @@ export async function assertScheduleConnectionsChosen(params: {
 }
 
 /**
- * The refusal or warnings as a caller acting for another member may read them: a choice lists
- * only shared candidates, an item about an unshared connection names no label or account — only
- * its id, which the schedule's own set already holds — and no item names the auths the actor's
- * own connections use.
+ * The refusal as a caller acting for another member may read it: a choice lists only shared
+ * candidates, and an item about an unshared connection names no label or account — only its id,
+ * which the schedule's own set already holds.
  */
 async function withSharedCandidatesOnly(
-  items: (ConnectionResolutionError | ConnectionResolutionWarning)[],
+  errors: ConnectionResolutionError[],
   spaceId: string,
 ): Promise<ResolutionFieldError[]> {
   const shared = await sharedConnections(
     spaceId,
-    items.flatMap((e) => [
+    errors.flatMap((e) => [
       ...(e.candidateConnections ?? []).map((c) => c.id),
-      ...("connectionId" in e && e.connectionId ? [e.connectionId] : []),
+      ...(e.connectionId ? [e.connectionId] : []),
     ]),
   );
-  return items.map((e) => {
-    if (e.code === "integration_unbound") {
-      // Which auths the actor's own rows use is theirs to know: the mismatch detail goes too.
-      const { availableAuthKeys: _auths, requiredAuthKey: _mismatch, ...rest } = e;
-      const candidates = (e.candidateConnections ?? []).filter((c) => shared.has(c.id));
-      return translateResolutionError({
-        ...rest,
-        ...(candidates.length > 0 ? { candidateConnections: candidates } : {}),
-        message:
-          candidates.length > 0
-            ? `Integration '${e.integrationId}' has only shared connections, never bound implicitly — name one in connection_overrides, or the schedule's runs proceed without it.`
-            : `Integration '${e.integrationId}' has no connection the schedule's actor would run with; its runs proceed without it.`,
-      });
-    }
+  return errors.map((e) => {
     if (e.code !== "must_choose_connection") {
       if (!e.connectionId || shared.has(e.connectionId)) return translateResolutionError(e);
       return translateResolutionError({

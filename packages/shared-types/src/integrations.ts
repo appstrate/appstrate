@@ -10,6 +10,7 @@
 import type {
   ConnectionResolutionErrorCode,
   ConnectionResolutionSource,
+  ConnectionResolutionWarningCode,
   IntegrationManifest,
   IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
@@ -246,7 +247,7 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * agent-page dropdown never re-implements (and never drifts from) the
  * "which connection does this run use?" logic.
  *
- * The verdict is the resolver's own vocabulary, two fields:
+ * The verdict is the resolver's own vocabulary, three fields:
  *  - `source`     — the layer that bound the set, or the layer whose set failed
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
@@ -255,12 +256,16 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   there is no verdict.
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).
+ *  - `warning_code` — why the run would start without this integration
+ *                   (`integration_unbound`, `integration_not_active`); `null`
+ *                   when the resolver emitted no warning for it.
  * Both `null`: the integration manifest could not be loaded, so nothing was
  * resolved.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
   error_code: ConnectionResolutionErrorCode | null;
+  warning_code: ConnectionResolutionWarningCode | null;
   /** The set the next run binds (the whole failing set when a member fails its health check). */
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */

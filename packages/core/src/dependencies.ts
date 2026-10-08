@@ -144,11 +144,7 @@ export interface IntegrationConfiguration {
   tools?: string[] | ToolsWildcard;
   scopes?: string[];
   auth_key?: string;
-  /**
-   * AFPS §4.4 — the agent needs ≥1 bound connection for this integration;
-   * absent/false = the run may start without it. Unrelated to the
-   * integration manifest's auth-level `_meta["dev.appstrate/auth"].required`.
-   */
+  /** AFPS §4.4 — no run starts without a connection. Not the auth-level `_meta` `required`. */
   required?: boolean;
 }
 
@@ -351,13 +347,8 @@ export function collectOverridableDependencyIds(manifest: Record<string, unknown
  * Write integration entries back to a manifest in the AFPS split form:
  * the semver range goes to `dependencies.integrations.<id>` (a bare string,
  * §4.1) and the per-integration configuration goes to
- * `integrations_configuration.<id>` (§4.4).
- *
- * Each configuration is merged onto the one already in `manifest`: the keys
- * this module models (`tools`, `scopes`, `auth_key`, `required`) are set from
- * the entry or removed when the entry leaves them unset, and every other key
- * (`_meta`, extensions) is kept verbatim. A configuration left empty, or one
- * for an integration no longer declared, is dropped.
+ * `integrations_configuration.<id>` (§4.4), merged onto the stored one: modelled keys are set or
+ * removed, any other key (`_meta`, extensions) kept; an empty or undeclared configuration is dropped.
  */
 export function writeManifestIntegrations(
   manifest: Record<string, unknown>,

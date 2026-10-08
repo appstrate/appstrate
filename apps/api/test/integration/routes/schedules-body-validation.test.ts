@@ -157,8 +157,15 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     });
     expect(res.status, await res.clone().text()).toBe(201);
     const created = (await res.json()) as { id: string; warnings: unknown[] };
-    // A deliberate none is not something the fire would miss.
-    expect(created.warnings).toEqual([]);
+    // Reported so the writer sees it, with no connect target: the absence was chosen.
+    expect(created.warnings).toEqual([
+      expect.objectContaining({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+        message: expect.stringContaining("the schedule's connection_overrides"),
+      }),
+    ]);
+    expect(created.warnings[0]).not.toHaveProperty("auth_key");
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
     expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
   });

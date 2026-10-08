@@ -10,17 +10,17 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      none → `not_connected`, anything else → `must_choose_connection`
+ *      several → `must_choose_connection`; none → `not_connected` for a `required`
+ *      integration, else bound to none with an `integration_unbound` warning
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
  * naming anything outside it is `override_outranked`. A shared connection is never bound
- * implicitly. A layer with no row or key is absent and the next one decides; a layer set
- * to `[]` is "none" and wins. A non-required integration then binds `[]`, and so does its
- * fallback when nothing usable is reachable (a warning, not an error); a `required` one
- * fails instead (`required_integration_unbound`, `not_connected`, `auth_key_mismatch`).
- * Ambiguity and breakage fail either way. `resolveConnections()` is pure;
- * `resolveConnectionsForRun()` loads its inputs.
+ * implicitly. A layer with no row or key is absent; one set to `[]` wins and binds none —
+ * `required_integration_unbound` when required. An integration off in the space is not
+ * resolved (`integration_not_active`). A non-required integration started without gets a
+ * warning instead of an error. `resolveConnections()` is pure; `resolveConnectionsForRun()`
+ * loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -71,6 +71,7 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { listActiveIntegrationIds } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -98,10 +99,7 @@ export interface IntegrationRequirement {
   agentScopes: readonly string[];
   /** An auth is marked `_meta["dev.appstrate/auth"].required`: active even with no selection. */
   hasRequiredAuth?: boolean;
-  /**
-   * The agent's `integrations_configuration[id].required`: no run starts with this integration
-   * unbound. Not {@link hasRequiredAuth}, the integration manifest's own flag.
-   */
+  /** The agent's `integrations_configuration[id].required` — not {@link hasRequiredAuth}. */
   required: boolean;
   /** AFPS §4.1 `auth_key`: only rows on that auth are candidates, at every layer. */
   requiredAuthKey?: string;
@@ -121,6 +119,8 @@ interface ResolveConnectionsInput {
   actorEndUserId?: string | null;
   /** Also resolve INERT integrations (never spawned): the agent-page picker still manages them. */
   includeInert?: boolean;
+  /** Declared integrations switched off in the space: never resolved, the run starts without them. */
+  inactiveIntegrationIds?: ReadonlySet<string>;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
@@ -138,8 +138,16 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       ?.connectionIds ?? null;
 
   for (const req of input.requirements) {
-    // Inert: nothing the spawn resolver would start, so no verdict is needed.
+    if (input.inactiveIntegrationIds?.has(req.integrationId)) {
+      const item = { integrationId: req.integrationId, code: "integration_not_active" as const };
+      const notActive = `Integration '${req.integrationId}' is not active in this space`;
+      if (req.required) errors.push({ ...item, message: `${notActive}.` });
+      else warnings.push({ ...item, message: `${notActive}; the run proceeds without it.` });
+      continue;
+    }
+    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
     if (
+      !req.required &&
       !req.hasSelectedTools &&
       req.agentScopes.length === 0 &&
       !req.hasRequiredAuth &&
@@ -307,8 +315,10 @@ function bindSet(
   return { kind: "resolved", value };
 }
 
+type ExplicitSource = Exclude<ConnectionResolutionSource, "fallback_auto">;
+
 interface ExplicitLayerRef {
-  source: ResolvedConnection["source"];
+  source: ExplicitSource;
   code: "pinned_connection_unavailable" | "override_connection_unavailable";
   noun: string;
 }
@@ -387,7 +397,17 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   for (const layer of explicit) {
     if (layer.ids === null) continue;
     if (layer.ids.length === 0) {
-      if (!args.required) return { kind: "resolved", value: [] };
+      if (!args.required) {
+        return {
+          kind: "unbound",
+          value: [],
+          warning: {
+            integrationId: args.integrationId,
+            code: "integration_unbound",
+            message: `Integration '${args.integrationId}' is bound to no connection by ${LAYER_PHRASE[layer.source]}; the run proceeds without it.`,
+          },
+        };
+      }
       return errorOf(args, {
         code: "required_integration_unbound",
         source: layer.source,
@@ -437,6 +457,16 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     candidateConnections: serving.map((c) => candidateOf(args, c)),
   });
 }
+
+/** Who set an explicit-none layer, for the warning; no connect target: the absence is chosen. */
+const LAYER_PHRASE: Record<ExplicitSource, string> = {
+  admin_pin: "an admin pin",
+  org_default_enforced: "an enforced org default",
+  run_override: "this run's connection_overrides",
+  schedule_override: "the schedule's connection_overrides",
+  member_pin: "your pin",
+  org_default: "an org default",
+};
 
 /** A non-required integration nothing usable serves: the run starts without it, saying why. */
 function unboundOf(args: ResolveOneArgs, serving: ConnectionRow[]): ResolveOneResult {
@@ -670,21 +700,13 @@ interface ResolveConnectionsForRunInput {
   scope: SpaceScope;
   launchOverrides?: LaunchOverrides | null;
   includeInert?: boolean;
-  /**
-   * Integrations the caller already refused for a more precise reason (readiness:
-   * `integration_not_active`), so they do not also report a misleading `not_connected`.
-   */
-  skipIntegrationIds?: ReadonlySet<string>;
   manifestCache?: IntegrationManifestCache;
 }
 
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const declared = parseManifestIntegrations(input.agentManifest);
-  const entries = input.skipIntegrationIds
-    ? declared.filter((entry) => !input.skipIntegrationIds!.has(entry.id))
-    : declared;
+  const entries = parseManifestIntegrations(input.agentManifest);
   if (entries.length === 0) return { resolved: {}, errors: [], warnings: [] };
 
   const requirements = await Promise.all(
@@ -695,10 +717,11 @@ export async function resolveConnectionsForRun(
   const { actorUserId, actorEndUserId } = actorIdentityOf(input.actor);
 
   const integrationIds = validReqs.map((r) => r.integrationId);
-  const [accessibleConnections, pins, orgDefaults] = await Promise.all([
+  const [accessibleConnections, pins, orgDefaults, activeIds] = await Promise.all([
     loadAccessibleConnections(input.actor, input.scope.spaceId, integrationIds),
     loadPins(input.scope.spaceId, input.packageId, integrationIds, actorUserId),
     listOrgDefaultsForResolver(input.scope.spaceId),
+    listActiveIntegrationIds(integrationIds, input.scope.spaceId),
   ]);
 
   return resolveConnections({
@@ -710,6 +733,7 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
     includeInert: input.includeInert ?? false,
+    inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
   });
 }
 
@@ -724,20 +748,16 @@ export function missingIntegrationConnection(errors: ValidationFieldError[]): Ap
 }
 
 type ResolveRunConnectionsOutcome =
-  | { ok: true; resolved: ResolvedConnectionMap | null; warnings: ResolutionFieldError[] }
-  | { ok: false; error: ApiError };
+  { ok: true; resolved: ResolvedConnectionMap | null } | { ok: false; error: ApiError };
 
-/** The run's connection snapshot and wire warnings, else the 409 both kickoff paths relay. */
+/**
+ * The run's connection snapshot, else the 409 both kickoff paths relay. `null` only when no
+ * integration needs one: an all-`[]` map is kept.
+ */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
 ): Promise<ResolveRunConnectionsOutcome> {
-  return runConnectionsOutcome(await resolveConnectionsForRun(input));
-}
-
-/** The snapshot is `null` only when no integration needs one: an all-`[]` map is kept. */
-export function runConnectionsOutcome(
-  resolution: ConnectionResolutionResult,
-): ResolveRunConnectionsOutcome {
+  const resolution = await resolveConnectionsForRun(input);
   if (resolution.errors.length > 0) {
     return {
       ok: false,
@@ -745,16 +765,15 @@ export function runConnectionsOutcome(
     };
   }
   const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
-  return { ok: true, resolved, warnings: resolution.warnings.map(translateResolutionError) };
+  return { ok: true, resolved };
 }
 
 type ResolutionItem = ConnectionResolutionError | ConnectionResolutionWarning;
 
 /**
  * The resolution codes a connect flow can clear, and so the ones that carry
- * the `auth_key` + `required_scopes` relay: a first connect (also what binds
- * an unbound integration), a reconnect in place, and a scope upgrade all end at
- * the same consent screen.
+ * the `auth_key` + `required_scopes` relay: a first connect, a reconnect in
+ * place, and a scope upgrade all end at the same consent screen.
  */
 const CONNECT_FLOW_CODES: ReadonlySet<ResolutionItem["code"]> = new Set([
   "not_connected",
@@ -764,9 +783,8 @@ const CONNECT_FLOW_CODES: ReadonlySet<ResolutionItem["code"]> = new Set([
 ]);
 
 /**
- * Map a resolution error (the 409 envelope's items) or warning (a launch response's `warnings`)
- * to the wire-format `ResolutionFieldError` (a `ValidationFieldError` plus the resolution
- * smuggle fields).
+ * Map a resolution error (a 409 item) or warning (a launch `warnings` item) to the wire-format
+ * `ResolutionFieldError` (a `ValidationFieldError` plus the resolution smuggle fields).
  *
  * Field path: `integrations.{packageId}` — one error per integration in
  * the flat model. The dashboard's MissingConnectionsModal parses on the
@@ -846,6 +864,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
   auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
   required_integration_unbound: "Required Integration Bound To No Connection",
+  integration_not_active: "Integration Not Active",
   integration_unbound: "Integration Not Connected — Run Proceeds Without It",
 };
 

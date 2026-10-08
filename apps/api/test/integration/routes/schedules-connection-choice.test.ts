@@ -7,7 +7,8 @@
  * that an admin pin or enforced org default outranks (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
  * other connection verdict is accepted — it is repaired without editing the
  * schedule — and a non-required integration a fire would start without is
- * named in the write's `warnings`.
+ * named in the write's `warnings`, to a caller writing for itself: one writing
+ * for another member gets none, the actor's connections being theirs to manage.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -438,19 +439,24 @@ describe("schedule writes for another actor — only what both reach", () => {
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
-  it("warns, without binding it, when the actor's only reach is a connection someone shared", async () => {
+  it("accepts, warning of nothing, when the actor's only reach is a connection someone shared", async () => {
     const shared = await seedIntegrationConnection(ctx, INTEGRATION);
     await share(shared);
 
     const res = await createForMember();
     expect(res.status).toBe(201);
-    const body = (await res.json()) as WriteBody;
-    expect(body.warnings).toHaveLength(1);
-    expect(body.warnings[0]).toMatchObject({
-      field: `integrations.${INTEGRATION}`,
-      code: "integration_unbound",
-    });
-    expect(body.warnings[0]!.candidate_connections!.map((c) => c.id)).toEqual([shared]);
+    expect(((await res.json()) as WriteBody).warnings).toEqual([]);
+  });
+
+  it("warns of nothing whether the actor holds no connection or one", async () => {
+    const none = await createForMember();
+    expect(none.status).toBe(201);
+    expect(((await none.json()) as WriteBody).warnings).toEqual([]);
+
+    await seedIntegrationConnection(member, INTEGRATION);
+    const one = await createForMember();
+    expect(one.status).toBe(201);
+    expect(((await one.json()) as WriteBody).warnings).toEqual([]);
   });
 
   it("offers a shared candidate, and binding it is accepted", async () => {
@@ -692,7 +698,7 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
     ]);
   });
 
-  it("names the auths the actor's rows use in a warning to the actor only", async () => {
+  it("names the auths the actor's rows use in a warning to the actor, and warns no one else", async () => {
     const KEYED = "@schedchoice/keyed-agent";
     await seedSchedulableAgent({
       id: KEYED,
@@ -742,11 +748,7 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
 
     const forMember = await createAs(member.user.id);
     expect(forMember.status).toBe(201);
-    const [warning] = ((await forMember.json()) as WriteBody).warnings as Record<string, unknown>[];
-    expect(warning).toMatchObject({ field: `integrations.${API}`, code: "integration_unbound" });
-    expect(warning!.available_auth_keys).toBeUndefined();
-    expect(warning!.required_auth_key).toBeUndefined();
-    expect(warning!.message).not.toContain("backup");
+    expect(((await forMember.json()) as WriteBody).warnings).toEqual([]);
   });
 
   it("accepts it when an admin pin binds it — the pin, not the schedule, is what to fix", async () => {

@@ -109,22 +109,19 @@ export const connectionIdSetJsonSchema = {
   minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
   description:
-    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. `[]` is refused (400) for an integration the agent marks `required`.",
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is refused (400) and a `[]` pin is stored but refuses the runs it governs (409 `required_integration_unbound`).",
 } as const;
 
-/** The org default's set: never empty — switching the integration off in the space is how to forbid it. */
+/** The org default's set: never empty — none for every agent of the space is deactivation. */
 const orgDefaultConnectionIdSetJsonSchema = {
   ...connectionIdSetJsonSchema,
   minItems: 1,
   description:
-    "A connection set of 1 or more ids. An org default cannot bind none: deactivate the integration in the space instead.",
+    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that — agents that do not require it then start without it (a launch warning), agents that require it are refused (409 `integration_not_active`).",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
-const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
-
-/** {@link connectionSetRefusals} on a pin write, which knows the agent. */
-export const pinSetRefusals = `${connectionSetRefusals}, or \`[]\` for an integration the agent marks \`required\` (\`invalid_request\`, \`param: connection_ids\`)`;
+export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
 
 /** {@link connectionSetRefusals} on an org-default write. */
 const orgDefaultSetRefusals = `an empty set, ${connectionSetRefusals}`;
@@ -1573,7 +1570,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${pinSetRefusals}.`,
+          description: `Refused: ${connectionSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {

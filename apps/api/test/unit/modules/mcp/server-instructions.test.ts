@@ -104,7 +104,12 @@ describe("MCP server instructions — connect bullet", () => {
     for (const bullet of [chat, external]) {
       expect(bullet).toMatch(/marks it `required`/);
       expect(bullet).toContain("`integration_unbound`");
+      // An explicit `[]` and an inactive integration warn too, without a connect target.
+      expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
+      expect(bullet).toContain("`integration_not_active`");
       expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
+      // Another member's schedule: the caller must not learn what their connections lack.
+      expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);
     }
     expect(chat).toMatch(/connect button from the warning's `connect_url`; do NOT paste/);
     expect(external).toMatch(/giving the caller the warning's `connect_url`/);

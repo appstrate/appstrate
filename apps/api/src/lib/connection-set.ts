@@ -26,5 +26,5 @@ function connectionIdSet(min: number) {
 /** Pins and launch overrides. `[]` is "explicitly none": the layer wins and binds no connection. */
 export const connectionIdSetSchema = connectionIdSet(0);
 
-/** Org defaults: a default naming no connection would be a second spelling of "no default". */
+/** Org defaults: never `[]` — "none for every agent of the space" is deactivating the integration. */
 export const nonEmptyConnectionIdSetSchema = connectionIdSet(1);

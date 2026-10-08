@@ -275,12 +275,14 @@ describe("renderPlatformPrompt", () => {
       context: ctx(),
       unavailableIntegrations: [
         { id: "@org/gmail", reason: "no connection is bound to this run" },
-        { id: "@org/drive", connection: "work", reason: "failed to start (no_delivery)" },
+        { id: "@org/drive", reason: "connection 'work': its credentials cannot be delivered" },
       ],
     });
     expect(out).toContain("## Unavailable Integrations");
     expect(out).toContain("- **@org/gmail**: no connection is bound to this run");
-    expect(out).toContain("- **@org/drive** (connection 'work'): failed to start (no_delivery)");
+    expect(out).toContain(
+      "- **@org/drive**: connection 'work': its credentials cannot be delivered",
+    );
     expect(out).toContain("Never present data or results as coming from these integrations.");
     expect(out).not.toContain("## Integration: @org/gmail");
   });

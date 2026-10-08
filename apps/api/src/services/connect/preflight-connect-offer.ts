@@ -24,8 +24,8 @@
  * the same scope-catalog check the route applies to `body.scopes`, and the
  * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
  * reaching this function are the ones readiness just resolved for this org and
- * space (the agent declared them and `listActiveIntegrationIds` confirmed each
- * is ACTIVE HERE).
+ * space (the agent declared them, and the resolver emits a connect-flow item only
+ * for one ACTIVE HERE).
  */
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
