@@ -146,6 +146,7 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
     baseUrl: source.baseUrl,
     ...recordSpec(model),
   });
+  const takesOff = built.reasoning && piReasoningLevels(built).includes("off");
   // Unset first: what a run sends when no level is configured.
   const levels = piReasoningLevels(built).flatMap((level) => (level === "off" ? [] : [level]));
   for (const level of [undefined, ...levels]) {
@@ -155,10 +156,11 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
       return `request not built at level ${level ?? "unset"}: ${getErrorMessage(err)}`;
     }
   }
-  // An instance serves the derived `off`: a record the rule misreads is
-  // dropped rather than mislabelled.
-  const derived = piReasoningOff(built);
-  if (derived) {
+  // An instance serves the derived `off`: a record the rule does not cover or
+  // misreads is dropped rather than served with no label or a wrong one.
+  if (takesOff) {
+    const derived = piReasoningOff(built);
+    if (!derived) return "reasoning off: not derivable";
     const observed = await observedReasoningOff(built);
     if (observed !== derived) return `reasoning off: derived "${derived}", observed "${observed}"`;
   }

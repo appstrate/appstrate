@@ -132,9 +132,6 @@ function projectAliasedGenerationCapabilities(
   ) as ModelGenerationCapabilities["reasoning"]["levels"];
   const temperatureSupported = capabilities?.temperature === "supported";
   const reasoningSupported = capabilities?.reasoning.supported === "supported";
-  // A run on the alias re-originates on the backing, so `off` does what it
-  // does there.
-  const off = reasoningSupported ? capabilities?.reasoning.off : undefined;
 
   // Alias callers cannot inspect the backing model to compensate for an
   // unknown capability: expose only catalog-confirmed support, fail closed on
@@ -152,8 +149,8 @@ function projectAliasedGenerationCapabilities(
           }
         : {}),
       adaptive: null,
+      // No `off`: what it sends would identify the backing, as its levels would.
       levels: reasoningSupported ? { ...levels } : {},
-      ...(off ? { off } : {}),
     },
   };
 }
@@ -902,8 +899,9 @@ function unrecordedGeneration({
     dialect: null,
     apiShape,
     piProvider: resolvePiProvider(providerId),
-    // Pi talks to the sidecar or the llm-proxy, never the upstream URL: only the
-    // provider shapes the request, so no endpoint is passed.
+    // A non-aliased model's Pi talks to the sidecar or the llm-proxy, never the
+    // upstream URL, so only the provider shapes its request. An alias's
+    // capabilities are projected anyway.
     baseUrl: "",
     reasoning,
   });

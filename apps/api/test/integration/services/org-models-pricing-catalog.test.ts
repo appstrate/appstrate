@@ -163,7 +163,7 @@ describe("loadModel — catalog fallback", () => {
       const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
         ?.reasoning;
       expect(listed).toEqual(generation!);
-      // The model the runner builds from the resolved binding (`runtime-pi/env.ts`):
+      // The model the runner builds from a non-aliased binding (`runtime-pi/env.ts`):
       // its `MODEL_BASE_URL` is the sidecar's LLM proxy, never the upstream.
       const run = buildPiModel({
         id: resolved.modelId,
@@ -187,8 +187,8 @@ describe("loadModel — catalog fallback", () => {
     expect((await offOf("openai-compatible", "my-model", true))?.off).toBe("unsent");
     expect((await offOf("anthropic-compatible", "my-model", true))?.off).toBe("disables");
     expect(await offOf("openai-compatible", "my-model", false)).not.toHaveProperty("off");
-    // Pi never sees the gateway's upstream host, so OpenRouter's endpoint alone
-    // does not switch it to OpenRouter's dialect.
+    // A non-aliased model's Pi never sees the gateway's upstream host, so
+    // OpenRouter's endpoint alone does not switch it to OpenRouter's dialect.
     const viaOpenRouter = await offOf("openai-compatible", "my-model", true, OPENROUTER_URL);
     expect(viaOpenRouter?.off).toBe("unsent");
     // OpenRouter is searched live, so it serves ids its registry lacks: Pi still

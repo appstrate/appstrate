@@ -135,6 +135,30 @@ describe("build-model-catalog", () => {
     ]);
   });
 
+  // A record that takes `off` on a branch the rule does not restate would be
+  // served with no `off` at all: Baseten's thinking format without its
+  // chat-template arguments, each a word bundled records already speak.
+  it("drops a record that takes `off` when what it sends cannot be derived", async () => {
+    const kimi = getPiModel("baseten", "moonshotai/Kimi-K2.5", "openai-completions")!;
+    const { chatTemplateArgs: _args, ...compat } = kimi.compat as Record<string, unknown>;
+    expect(kimi.thinkingLevelMap?.off).toBe("off");
+    const source = (id: string, over: Record<string, unknown> = {}) =>
+      ({ ...kimi, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
+    const { records, dropped } = await selectCatalogRecords([
+      source("moonshotai/Kimi-Next"),
+      source("moonshotai/Kimi-No-Args", { compat }),
+    ]);
+
+    expect(records.map((r) => r.id)).toEqual(["moonshotai/Kimi-Next"]);
+    expect(dropped).toEqual([
+      {
+        provider: "baseten",
+        id: "moonshotai/Kimi-No-Args",
+        reason: "reasoning off: not derivable",
+      },
+    ]);
+  });
+
   it("signs a file an instance accepts whole", async () => {
     withRecords([{ id: "claude-next" }]);
     const built = await build({ now: () => 1_800_000_000_000 });

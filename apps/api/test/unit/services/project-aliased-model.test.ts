@@ -88,21 +88,16 @@ describe("projectAliasedModel", () => {
     expect(opus?.reasoning.levels).toEqual(ALIAS_LEVELS);
   });
 
-  // A run on the alias re-originates on the backing, so `off` does what it does there.
-  it("reports the backing's `off`, and none when the backing has none", () => {
-    const unsent = projectAliasedModel(
-      backedBy("opencode-go", "openai-completions", "kimi-k2.7-code"),
-    ).generation;
-    const disables = projectAliasedModel(
-      backedBy("anthropic", "anthropic-messages", "claude-sonnet-4-5"),
-    ).generation;
-    // Adaptive thinking takes no `off`.
-    const adaptive = projectAliasedModel(
-      backedBy("anthropic", "anthropic-messages", "claude-opus-5"),
-    ).generation;
-    expect(unsent?.reasoning.off).toBe("unsent");
-    expect(disables?.reasoning.off).toBe("disables");
-    expect(adaptive?.reasoning).not.toHaveProperty("off");
+  // What `off` sends fingerprints the backing just as its level set would.
+  it("never reports what `off` sends, whatever the backing", () => {
+    for (const [providerId, apiShape, modelId, off] of [
+      ["opencode-go", "openai-completions", "kimi-k2.7-code", "unsent"],
+      ["anthropic", "anthropic-messages", "claude-sonnet-4-5", "disables"],
+    ] as const) {
+      const backing = backedBy(providerId, apiShape, modelId);
+      expect(backing.generation?.reasoning.off).toBe(off);
+      expect(projectAliasedModel(backing).generation?.reasoning).not.toHaveProperty("off");
+    }
   });
 
   it("passes a non-aliased model through unchanged", () => {

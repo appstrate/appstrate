@@ -32,9 +32,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
   parameter, `unsent` when it sends none and the server keeps its own default
   (some models still reason). The server derives it from the model a run
-  builds; it is absent when the model does not reason or does not take `off`,
-  and an alias reports its backing model's. The live model catalog drops a
-  record whose derived `off` differs from the payload Pi builds.
+  builds; it is absent when the model does not reason or does not take `off`.
+  An alias never reports it: it would identify the backing model. The live
+  model catalog drops a record whose `off` cannot be derived or differs from
+  the payload Pi builds.
 
 ### Fixed
 

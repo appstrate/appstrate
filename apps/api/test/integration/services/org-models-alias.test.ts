@@ -110,11 +110,10 @@ describe("org-models — aliased flag (DB path)", () => {
     const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
     expect(listed!.generation?.reasoning.levels).toEqual(levels);
     expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.levels).toEqual(levels);
-    // `off` is the backing's: a run on the alias re-originates there.
-    const backingOff = lookupCatalogModel(getModelProvider("deepseek")!, "deepseek-flash")!
-      .generation?.reasoning.off;
-    expect(backingOff).toBeDefined();
-    expect(listed!.generation?.reasoning.off).toBe(backingOff!);
-    expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.off).toBe(backingOff!);
+    // Nor what `off` sends, which the backing reports: it would identify it.
+    const backing = lookupCatalogModel(getModelProvider("deepseek")!, "deepseek-flash")!;
+    expect(backing.generation?.reasoning.off).toBeDefined();
+    expect(listed!.generation?.reasoning).not.toHaveProperty("off");
+    expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning).not.toHaveProperty("off");
   });
 });
