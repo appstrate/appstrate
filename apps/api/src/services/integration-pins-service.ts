@@ -47,7 +47,7 @@ import {
 import { notFound, conflict } from "../lib/errors.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
+import { actorFromIds, actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -56,6 +56,7 @@ import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
 import { assertConnectionShareable } from "./space-members.ts";
+import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -473,11 +474,14 @@ interface UpdateConnectionMetadataInput {
  * `assertConnectionShareable`, and a label another connection of the (space, integration)
  * holds (409 `connection_label_taken`, raised by the unique index). A rename takes the insert's
  * label lock, so it cannot land between an insert's pick and its write.
+ *
+ * Unsharing disables other actors' schedules naming the connection (`connection_unshared`);
+ * returns their ids, whose jobs the caller removes once committed.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
   input: UpdateConnectionMetadataInput,
-): Promise<ConnectionRow> {
+): Promise<{ connection: ConnectionRow; disabledScheduleIds: string[] }> {
   const updates: { label?: string; sharedWithOrg?: boolean; updatedAt: Date } = {
     updatedAt: new Date(),
   };
@@ -487,7 +491,7 @@ export async function updateConnectionMetadata(
   const result = await db
     .transaction(async (tx) => {
       // Lock order: the label advisory lock, then (a share) the owner's membership and the space
-      // row (`lockSpaceRow`, space-members.ts).
+      // row (`lockSpaceRow`, space-members.ts), or (an unshare) the connection row, then schedules.
       if (input.label !== undefined) {
         const [conn] = await tx
           .select({
@@ -497,20 +501,37 @@ export async function updateConnectionMetadata(
           .from(integrationConnections)
           .where(eq(integrationConnections.id, connectionId))
           .limit(1);
-        if (!conn) return [];
+        if (!conn) return null;
         await lockConnectionLabels(tx, conn.spaceId, conn.integrationId);
       }
+      let unshares = false;
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
+        // Under the row lock: of two concurrent unshares, only the first sees the share.
+        const [row] = await tx
+          .select({ shared: integrationConnections.sharedWithOrg })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, connectionId))
+          .for("update");
+        unshares = row?.shared ?? false;
       }
       if (input.sharedWithOrg === true) {
         await assertConnectionShareable(tx, connectionId);
       }
-      return tx
+      const [connection] = await tx
         .update(integrationConnections)
         .set(updates)
         .where(eq(integrationConnections.id, connectionId))
         .returning();
+      if (!connection) return null;
+      const disabledScheduleIds = unshares
+        ? await disableForeignSchedules(
+            tx,
+            [{ id: connection.id, owner: actorFromIds(connection.userId, connection.endUserId)! }],
+            "connection_unshared",
+          )
+        : [];
+      return { connection, disabledScheduleIds };
     })
     .catch((err: unknown) => {
       if (input.label === undefined || !isUniqueViolation(err)) throw err;
@@ -519,8 +540,8 @@ export async function updateConnectionMetadata(
         `Another connection of this integration is already named '${input.label}'`,
       );
     });
-  if (result.length === 0) throw notFound(`Connection '${connectionId}' not found`);
-  return result[0]!;
+  if (!result) throw notFound(`Connection '${connectionId}' not found`);
+  return result;
 }
 
 /** Used by route handlers to enforce ownership before metadata edits. */

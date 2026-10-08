@@ -664,7 +664,7 @@ describe("/api/me/integration-pins", () => {
       });
       const colleague = await createTestUser();
       await addOrgMember(ctx.orgId, colleague.id);
-      await scheduleFor([gone!], { userId: colleague.id }, "colleague");
+      const colleagues = await scheduleFor([gone!], { userId: colleague.id }, "colleague");
 
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
       const announced = await impactOf(gone!);
@@ -688,9 +688,10 @@ describe("/api/me/integration-pins", () => {
           integration_package_id: before.integration,
           connection_count: before.connectionIds.length,
         }));
+      // The preview lists the owner's schedules; the colleague's is checked below.
       const rewrittenSchedules = schedulesBefore.flatMap((before) => {
         const after = schedulesAfter.get(before.id)!;
-        if (Bun.deepEquals(after, before)) return [];
+        if (before.id === colleagues.id || Bun.deepEquals(after, before)) return [];
         return Object.entries(before.connectionOverrides ?? {})
           .filter(([, ids]) => ids.includes(gone!))
           .map(([id, ids]) => ({
@@ -723,7 +724,8 @@ describe("/api/me/integration-pins", () => {
         ),
       ).toEqual(sortedBy(rewrittenSchedules, (s) => s.scheduleId + s.integration_package_id));
 
-      // The ids the delete reports disabled are the ones the preview said it would.
+      // The ids the delete reports disabled are the ones the preview said it would, and the
+      // colleague's schedule, disabled with its overrides kept.
       const [audit] = await db
         .select({ after: auditEvents.after })
         .from(auditEvents)
@@ -731,8 +733,12 @@ describe("/api/me/integration-pins", () => {
       const { disabledScheduleIds } = audit!.after as { disabledScheduleIds: string[] };
       const disabling = announced.schedules.filter((s) => s.disables);
       expect([...disabledScheduleIds].sort()).toEqual(
-        [...new Set(disabling.map((s) => s.scheduleId))].sort(),
+        [...new Set([...disabling.map((s) => s.scheduleId), colleagues.id])].sort(),
       );
+      expect(schedulesAfter.get(colleagues.id)).toMatchObject({
+        connectionOverrides: { [INTEGRATION]: [gone!] },
+        enabled: false,
+      });
 
       // A set that only shrinks stays armed; an emptied one disables its schedule instead of
       // letting it fall back to another account unattended.

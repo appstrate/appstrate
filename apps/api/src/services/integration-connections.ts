@@ -108,6 +108,11 @@ import {
 import { fetchMcpServerManifest } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
+  disableSchedules,
+  foreignSchedulesNaming,
+  scheduleOverridesName,
+} from "./schedules-naming-connection.ts";
+import {
   actorIdentityOf,
   candidateOf,
   resolveConnections,
@@ -2987,9 +2992,9 @@ const deletedConnectionOwner = {
 };
 
 /**
- * Drop a deleted connection from its OWNER's member pins and schedule overrides
- * ({@link planConnectionForget}). Returns the schedules it disabled, whose jobs the caller removes
- * once committed (importing the scheduler here would close a cycle).
+ * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
+ * actors' schedules naming it ({@link planConnectionForget}). Returns the schedules it disabled,
+ * whose jobs the caller removes once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
@@ -3021,14 +3026,8 @@ async function forgetDeletedConnection(
       })
       .where(eq(schedules.id, schedule.id));
   }
-  return plan.schedules.flatMap((s) => (s.disables ? [s.id] : []));
-}
-
-/** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
-function scheduleOverridesName(connectionId: string): SQL {
-  return sql`jsonb_path_exists(
-    ${schedules.connectionOverrides}, '$.*[*] ? (@ == $id)', jsonb_build_object('id', ${connectionId}::text)
-  )`;
+  await disableSchedules(tx, plan.foreignScheduleIds, "connection_deleted");
+  return [...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])), ...plan.foreignScheduleIds];
 }
 
 /** One of the owner's member pins naming the connection. */
@@ -3058,13 +3057,16 @@ interface ScheduleForget {
 interface ConnectionForgetPlan {
   pins: PinForget[];
   schedules: ScheduleForget[];
+  /** Other actors' enabled schedules naming the connection: disabled, their overrides kept. */
+  foreignScheduleIds: string[];
 }
 
 /**
  * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
- * overrides; other members' keep the id and fail loudly. `lock` takes the rows `FOR UPDATE`, for a
- * caller that applies the plan in the same transaction. `scheduleFilter` narrows the schedules: a
- * disabled one may name a connection of another space.
+ * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
+ * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules, for a caller that applies the
+ * plan in the same transaction. `scheduleFilter` narrows both schedule lists: a schedule may name a
+ * connection of another space.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
@@ -3101,6 +3103,8 @@ export async function planConnectionForget(
     .orderBy(asc(schedules.packageId), asc(schedules.createdAt), asc(schedules.id));
   const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
   const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const foreignQuery = foreignSchedulesNaming(executor, [connection], scheduleFilter);
+  const foreignRows = await (lock ? foreignQuery.for("update") : foreignQuery);
   return {
     pins: pinRows.map((pin) => ({
       ...pin,
@@ -3122,6 +3126,7 @@ export async function planConnectionForget(
         disables: enabled && kept.length < Object.keys(overrides).length,
       };
     }),
+    foreignScheduleIds: foreignRows.map((row) => row.id),
   };
 }
 

@@ -147,6 +147,7 @@ describeRequiresPostgres("the removal's grant bound is judged under the lock", (
       removed: true,
       accessAfter: { kind: "preset", preset: "operator" },
       unsharedConnectionIds: [],
+      disabledScheduleIds: [],
     });
   });
 

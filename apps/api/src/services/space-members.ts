@@ -35,6 +35,8 @@ import {
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
+import { actorFromIds } from "../lib/actor.ts";
+import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
@@ -249,6 +251,8 @@ export interface SpaceMemberRemoval {
   accessAfter: SpaceRoleRef | null;
   /** The connections the removal unshared, for the caller's audit. */
   unsharedConnectionIds: string[];
+  /** Other actors' schedules the unshare disabled, whose jobs the caller removes. */
+  disabledScheduleIds: string[];
 }
 
 /**
@@ -298,20 +302,26 @@ export async function removeSpaceMember(params: {
     // member row: the removal is about to delete the only one there could be.
     const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
+    const nothingUnshared = { unsharedConnectionIds: [], disabledScheduleIds: [] };
     const existing = await loadSpaceMember(space.id, userId, tx);
-    if (!existing) return { removed: false, accessAfter, unsharedConnectionIds: [] };
+    if (!existing) return { removed: false, accessAfter, ...nothingUnshared };
     assertCanManageSpaceMember(params.actorPermissions, existing.ref);
     const deleted = await tx
       .delete(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, userId)))
       .returning({ userId: spaceMembers.userId });
-    if (deleted.length === 0) return { removed: false, accessAfter, unsharedConnectionIds: [] };
-    const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+    if (deleted.length === 0) return { removed: false, accessAfter, ...nothingUnshared };
+    const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId,
       spaceId: space.id,
     });
-    return { removed: true, accessAfter, unsharedConnectionIds };
+    return {
+      removed: true,
+      accessAfter,
+      unsharedConnectionIds: unshared.connectionIds,
+      disabledScheduleIds: unshared.disabledScheduleIds,
+    };
   });
 }
 
@@ -358,16 +368,18 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * Unshare, and return, every user-owned shared connection in `scope` whose owner no longer
- * reaches its space — in the SAME transaction as the access loss. No `assertConnectionsUnpinned`:
- * a pin or default naming one fails loudly at resolution (`pinned_connection_unavailable`).
- * Every access-loss path unshares here, locking the rows in id order, so two of them sharing
- * rows (an org exit and a space close) wait on each other instead of deadlocking.
+ * Unshare every user-owned shared connection in `scope` whose owner no longer reaches its space —
+ * in the SAME transaction as the access loss — and disable other actors' schedules naming one
+ * (`connection_unshared`). No `assertConnectionsUnpinned`: a pin or default naming one fails loudly
+ * at resolution (`pinned_connection_unavailable`). Every access-loss path unshares here, locking
+ * the rows in id order, so two of them sharing rows (an org exit and a space close) wait on each
+ * other instead of deadlocking. The caller removes the disabled schedules' jobs once committed.
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
   scope: { orgId: string; userId?: string; spaceId?: string },
-): Promise<string[]> {
+): Promise<{ connectionIds: string[]; disabledScheduleIds: string[] }> {
+  const none = { connectionIds: [], disabledScheduleIds: [] };
   const lost = await connectionsOfOwnersWithoutAccess(
     tx,
     and(
@@ -377,9 +389,13 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
     ),
   );
-  if (lost.length === 0) return [];
+  if (lost.length === 0) return none;
   const locked = await tx
-    .select({ id: integrationConnections.id })
+    .select({
+      id: integrationConnections.id,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
+    })
     .from(integrationConnections)
     .where(
       and(inArray(integrationConnections.id, lost), eq(integrationConnections.sharedWithOrg, true)),
@@ -387,12 +403,17 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     .orderBy(asc(integrationConnections.id))
     .for("update");
   const ids = locked.map((row) => row.id);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return none;
   await tx
     .update(integrationConnections)
     .set({ sharedWithOrg: false, updatedAt: new Date() })
     .where(inArray(integrationConnections.id, ids));
-  return ids;
+  const disabledScheduleIds = await disableForeignSchedules(
+    tx,
+    locked.map((row) => ({ id: row.id, owner: actorFromIds(row.userId, row.endUserId)! })),
+    "connection_unshared",
+  );
+  return { connectionIds: ids, disabledScheduleIds };
 }
 
 /**

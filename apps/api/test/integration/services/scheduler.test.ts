@@ -41,6 +41,7 @@ import {
   removeScheduleJobs,
 } from "../../../src/services/scheduler.ts";
 import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
+import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
 import { leaveOrganization } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
@@ -1246,6 +1247,41 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     await expect(
       updateSchedule(scope, created, { name: "renamed" }, null, undefined),
     ).rejects.toMatchObject(refusedAsStale);
+  });
+
+  it("a colleague deleting or unsharing a connection the schedule names makes the read stale", async () => {
+    const member = await memberContext(ctx, "member");
+    const integrationId = "@casorg/svc";
+    await seedPackage({ orgId: ctx.orgId, id: integrationId, type: "integration" });
+    const [deleted, unshared] = await db
+      .insert(integrationConnections)
+      .values(
+        ["deleted", "unshared"].map((label) => ({
+          integrationId,
+          authKey: "primary",
+          accountId: label,
+          spaceId: ctx.defaultSpaceId,
+          userId: member.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          sharedWithOrg: true,
+          label,
+        })),
+      )
+      .returning({ id: integrationConnections.id });
+    const reads = [
+      await read(actor, { [integrationId]: [deleted!.id] }),
+      await read(actor, { [integrationId]: [unshared!.id] }),
+    ];
+
+    await deleteIntegrationConnection(scope, deleted!.id, { type: "user", id: member.user.id });
+    await updateConnectionMetadata(unshared!.id, { sharedWithOrg: false });
+
+    for (const created of reads) {
+      await expect(
+        updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+      ).rejects.toMatchObject(refusedAsStale);
+    }
   });
 
   it("the actor leaving the organization, which disables the schedule, makes the read stale", async () => {

@@ -1469,10 +1469,14 @@ export function createIntegrationsRouter() {
           detail: "Only the connection owner can share it (shared_with_org: true)",
         });
       }
-      const updated = await updateConnectionMetadata(connectionId, {
-        ...(body.label !== undefined ? { label: body.label } : {}),
-        ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-      });
+      const { connection: updated, disabledScheduleIds } = await updateConnectionMetadata(
+        connectionId,
+        {
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
+        },
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       await recordAuditFromContext(c, {
         action: "integration.connection.metadata.updated",
         resourceType: "integration_connection",
@@ -1480,6 +1484,7 @@ export function createIntegrationsRouter() {
         after: {
           ...(body.label !== undefined ? { label: body.label } : {}),
           ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
         },
       });
       // 200 + the bare connection resource — same serializer as the
