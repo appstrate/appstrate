@@ -35,7 +35,12 @@ import {
 import { seedPackage, seedEndUser, seedApiKey, seedSchedule } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
-import { auditEvents, integrationConnections, schedules } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationPins,
+  schedules,
+} from "@appstrate/db/schema";
 import { asc, eq, inArray } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -637,6 +642,119 @@ describe("/api/me/integration-pins", () => {
         nextRunAt: null,
       });
       expect(await impactOf(gone!)).toEqual({ pins: [], schedules: [] });
+    });
+
+    it("announces exactly the rewrites the delete then makes, read back from the rows", async () => {
+      const [web, gone] = [
+        await seedConnectionFor(ctx.user.id),
+        await seedConnectionFor(ctx.user.id),
+      ];
+      const owner = { userId: ctx.user.id };
+      await pinSet([gone!]);
+      await pinSet([web!, gone!], OTHER_AGENT);
+      await scheduleFor([gone!], owner, "alone");
+      await scheduleFor([web!, gone!], owner, "several");
+      await scheduleFor([gone!], owner, "off", false);
+      await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        name: "two integrations",
+        enabled: true,
+        ...owner,
+        connectionOverrides: {
+          [INTEGRATION]: [gone!],
+          "@pinorg/other-svc": [crypto.randomUUID()],
+        },
+      });
+      const colleague = await createTestUser();
+      await addOrgMember(ctx.orgId, colleague.id);
+      await scheduleFor([gone!], { userId: colleague.id }, "colleague");
+
+      const readPins = () =>
+        db
+          .select({
+            id: integrationPins.id,
+            agent: integrationPins.packageId,
+            integration: integrationPins.integrationId,
+            connectionIds: integrationPins.connectionIds,
+            updatedAt: integrationPins.updatedAt,
+          })
+          .from(integrationPins);
+      const readSchedules = () =>
+        db
+          .select({
+            id: schedules.id,
+            enabled: schedules.enabled,
+            connectionOverrides: schedules.connectionOverrides,
+            updatedAt: schedules.updatedAt,
+          })
+          .from(schedules);
+      const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
+      const announced = await impactOf(gone!);
+
+      const del = await app.request(`/api/me/connections/${gone}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+      const pinsAfter = new Map((await readPins()).map((p) => [p.id, p]));
+      const schedulesAfter = new Map((await readSchedules()).map((s) => [s.id, s]));
+
+      const sortedBy = <T>(rows: T[], key: (row: T) => string) =>
+        [...rows].sort((a, b) => key(a).localeCompare(key(b)));
+      const rewrittenPins = pinsBefore
+        .filter((before) => !Bun.deepEquals(pinsAfter.get(before.id), before))
+        .map((before) => ({
+          agent_package_id: before.agent,
+          integration_package_id: before.integration,
+          connection_count: before.connectionIds.length,
+        }));
+      const rewrittenSchedules = schedulesBefore.flatMap((before) => {
+        const after = schedulesAfter.get(before.id)!;
+        if (Bun.deepEquals(after, before)) return [];
+        return Object.entries(before.connectionOverrides ?? {})
+          .filter(([id, ids]) => !Bun.deepEquals(after.connectionOverrides?.[id], ids))
+          .map(([id, ids]) => ({
+            scheduleId: before.id,
+            integration_package_id: id,
+            connection_count: ids.length,
+            disables: before.enabled && !after.enabled && !after.connectionOverrides?.[id],
+          }));
+      });
+      // Not vacuous: both pins, and one entry per schedule of the owner's naming the connection.
+      expect(announced.pins).toHaveLength(2);
+      expect(announced.schedules).toHaveLength(4);
+      expect(
+        sortedBy(
+          announced.pins.map(({ agent_display_name: _name, ...pin }) => pin),
+          (p) => p.agent_package_id,
+        ),
+      ).toEqual(sortedBy(rewrittenPins, (p) => p.agent_package_id));
+      expect(
+        sortedBy(
+          announced.schedules.map(
+            ({ scheduleId, integration_package_id, connection_count, disables }) => ({
+              scheduleId,
+              integration_package_id,
+              connection_count,
+              disables,
+            }),
+          ),
+          (s) => s.scheduleId + s.integration_package_id,
+        ),
+      ).toEqual(sortedBy(rewrittenSchedules, (s) => s.scheduleId + s.integration_package_id));
+
+      // The ids the delete reports disabled are the ones the preview said it would.
+      const [audit] = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.connection.deleted"));
+      const { disabledScheduleIds } = audit!.after as { disabledScheduleIds: string[] };
+      const disabling = announced.schedules.filter((s) => s.disables);
+      expect([...disabledScheduleIds].sort()).toEqual(
+        [...new Set(disabling.map((s) => s.scheduleId))].sort(),
+      );
     });
 
     it("does not announce a disable for a schedule that is already off", async () => {

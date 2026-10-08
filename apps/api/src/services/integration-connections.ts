@@ -95,6 +95,7 @@ import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
   type ConnectionCandidate,
+  type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -2986,82 +2987,149 @@ const deletedConnectionOwner = {
 };
 
 /**
- * Drop a deleted connection from its OWNER's member pins and schedule overrides; other members'
- * keep the id and fail loudly. Returns the schedules it disabled, whose jobs the caller removes
+ * Drop a deleted connection from its OWNER's member pins and schedule overrides
+ * ({@link planConnectionForget}). Returns the schedules it disabled, whose jobs the caller removes
  * once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
   row: { id: string; userId: string | null; endUserId: string | null },
 ): Promise<string[]> {
-  if (row.userId) await dropFromOwnMemberPins(tx, row.id, row.userId);
   // `integration_connections` holds exactly one owner id.
-  return dropConnectionFromOwnSchedules(tx, row.id, actorFromIds(row.userId, row.endUserId)!);
-}
-
-async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: string): Promise<void> {
-  const holding = and(
-    eq(integrationPins.userId, userId),
-    arrayContains(integrationPins.connectionIds, [connectionId]),
-  );
-  // Delete before update: `cardinality BETWEEN 1 AND 20` refuses an emptied set.
-  await tx
-    .delete(integrationPins)
-    .where(and(holding, sql`cardinality(${integrationPins.connectionIds}) = 1`));
-  await tx
-    .update(integrationPins)
-    .set({
-      connectionIds: sql`array_remove(${integrationPins.connectionIds}, ${connectionId}::uuid)`,
-      updatedAt: new Date(),
-    })
-    .where(holding);
+  const owner = actorFromIds(row.userId, row.endUserId)!;
+  const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
+  for (const pin of plan.pins) {
+    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    if (pin.kept.length === 0) {
+      await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
+    } else {
+      await tx
+        .update(integrationPins)
+        .set({ connectionIds: pin.kept, updatedAt: new Date() })
+        .where(eq(integrationPins.id, pin.id));
+    }
+  }
+  for (const schedule of plan.schedules) {
+    await tx
+      .update(schedules)
+      .set({
+        connectionOverrides: schedule.nextOverrides,
+        ...(schedule.disables
+          ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(schedules.id, schedule.id));
+  }
+  return plan.schedules.flatMap((s) => (s.disables ? [s.id] : []));
 }
 
 /** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
-export function scheduleOverridesName(connectionId: string): SQL {
+function scheduleOverridesName(connectionId: string): SQL {
   return sql`jsonb_path_exists(
     ${schedules.connectionOverrides}, '$.*[*] ? (@ == $id)', jsonb_build_object('id', ${connectionId}::text)
   )`;
 }
 
+/** One of the owner's member pins naming the connection. */
+interface PinForget {
+  id: string;
+  agentPackageId: string;
+  integrationId: string;
+  connectionIds: string[];
+  /** `connectionIds` without the connection; empty drops the pin. */
+  kept: string[];
+}
+
+/** One of the owner's schedules whose `connection_overrides` name the connection. */
+interface ScheduleForget {
+  id: string;
+  name: string | null;
+  agentPackageId: string;
+  connectionOverrides: ConnectionOverrides;
+  /** Without the connection: an emptied set drops its integration, an emptied map is `null`. */
+  nextOverrides: ConnectionOverrides | null;
+  /** Enabled and a set empties: an unattended run must never fall back to another account. */
+  disables: boolean;
+}
+
+/** What forgetting a connection rewrites: the delete applies it, the delete-impact preview shows it. */
+interface ConnectionForgetPlan {
+  pins: PinForget[];
+  schedules: ScheduleForget[];
+}
+
 /**
- * Remove `connectionId` from `actor`'s OWN schedule overrides; emptying a set disables an enabled
- * schedule (a fallback would silently change its account). Returns the ids it disabled.
+ * The rewrites forgetting connection `id` makes to `owner`'s member pins and schedule overrides;
+ * other members' keep the id and fail loudly. `within` narrows the rows to an org (and space);
+ * `lock` takes them `FOR UPDATE`, for a caller that applies the plan in the same transaction.
  */
-async function dropConnectionFromOwnSchedules(
-  tx: Tx,
-  connectionId: string,
-  actor: Actor,
-): Promise<string[]> {
-  const held = await tx
+export async function planConnectionForget(
+  executor: DbOrTx,
+  connection: { id: string; owner: Actor },
+  options: { within?: { orgId: string; spaceId?: string }; lock?: boolean } = {},
+): Promise<ConnectionForgetPlan> {
+  const { id, owner } = connection;
+  const { within, lock = false } = options;
+  const pinQuery = executor
+    .select({
+      id: integrationPins.id,
+      agentPackageId: integrationPins.packageId,
+      integrationId: integrationPins.integrationId,
+      connectionIds: integrationPins.connectionIds,
+    })
+    .from(integrationPins)
+    .where(
+      and(
+        eq(integrationPins.userId, owner.id),
+        arrayContains(integrationPins.connectionIds, [id]),
+        within
+          ? inArray(
+              integrationPins.spaceId,
+              executor.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, within.orgId)),
+            )
+          : undefined,
+        within?.spaceId ? eq(integrationPins.spaceId, within.spaceId) : undefined,
+      ),
+    )
+    .orderBy(asc(integrationPins.packageId), asc(integrationPins.integrationId));
+  const scheduleQuery = executor
     .select({
       id: schedules.id,
+      name: schedules.name,
+      agentPackageId: schedules.packageId,
       enabled: schedules.enabled,
       connectionOverrides: schedules.connectionOverrides,
     })
     .from(schedules)
-    .where(and(actorFilter(actor, schedules), scheduleOverridesName(connectionId)))
-    .for("update");
-  const disabled: string[] = [];
-  for (const { id, enabled, connectionOverrides } of held) {
-    const kept = Object.entries(connectionOverrides ?? {}).flatMap(([integrationId, ids]) => {
-      const rest = ids.filter((c) => c !== connectionId);
-      return rest.length > 0 ? [[integrationId, rest] as const] : [];
-    });
-    const disables = enabled && kept.length < Object.keys(connectionOverrides ?? {}).length;
-    await tx
-      .update(schedules)
-      .set({
-        connectionOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
-        ...(disables
-          ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
-          : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(schedules.id, id));
-    if (disables) disabled.push(id);
-  }
-  return disabled;
+    .where(
+      and(
+        actorFilter(owner, schedules),
+        scheduleOverridesName(id),
+        within ? eq(schedules.orgId, within.orgId) : undefined,
+        within?.spaceId ? eq(schedules.spaceId, within.spaceId) : undefined,
+      ),
+    )
+    .orderBy(asc(schedules.packageId), asc(schedules.createdAt));
+  // Member pins are a member's own: an end user holds none.
+  const pinRows = owner.type !== "user" ? [] : await (lock ? pinQuery.for("update") : pinQuery);
+  const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  return {
+    pins: pinRows.map((pin) => ({ ...pin, kept: pin.connectionIds.filter((c) => c !== id) })),
+    schedules: scheduleRows.map(({ enabled, connectionOverrides, ...schedule }) => {
+      const overrides = connectionOverrides ?? {};
+      const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        const rest = ids.filter((c) => c !== id);
+        return rest.length > 0 ? [[integrationId, rest] as const] : [];
+      });
+      return {
+        ...schedule,
+        connectionOverrides: overrides,
+        nextOverrides: kept.length > 0 ? Object.fromEntries(kept) : null,
+        disables: enabled && kept.length < Object.keys(overrides).length,
+      };
+    }),
+  };
 }
 
 /**
