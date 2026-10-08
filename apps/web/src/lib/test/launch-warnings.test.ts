@@ -37,7 +37,6 @@ describe("launchWarningsToast", () => {
   it("says nothing when the launch reports nothing", async () => {
     await i18n.changeLanguage("fr");
     expect(launchWarningsToast({ kind: "run", warnings: [], nameOf })).toBeNull();
-    expect(launchWarningsToast({ kind: "run", warnings: undefined, nameOf })).toBeNull();
   });
 
   it("names one integration, by display name, in one toast", async () => {
@@ -63,7 +62,7 @@ describe("launchWarningsToast", () => {
         warning("@acme/slack", { auth_key: "oauth" }),
         warning("@acme/gmail", { auth_key: "oauth" }),
         warning("@acme/slack", { candidate_connections: [] }),
-        warning("@acme/notion", { required_auth_key: "api_key", available_auth_keys: ["oauth"] }),
+        warning("@acme/notion", { auth_key: "api_key" }),
       ],
       nameOf,
     });
@@ -102,6 +101,23 @@ describe("launchWarningsToast — why", () => {
     const toast = describeOf([warning("@acme/gmail", { candidate_connections: [SHARED] })]);
     expect(toast?.description).toBe(i18n.t("agents:launchWarnings.cause.sharedOnly", { count: 1 }));
     expect(toast?.connectable).toBe(true);
+  });
+
+  it("says a connection on another auth method is no 'not connected', and offers to connect", async () => {
+    await i18n.changeLanguage("fr");
+    const toast = describeOf([
+      warning("@acme/gmail", { required_auth_key: "api_key", available_auth_keys: ["oauth"] }),
+    ]);
+    expect(toast?.description).toBe(
+      "Elle est connectée avec une autre méthode d'authentification que celle attendue ; l'agent en est informé.",
+    );
+    expect(toast?.connectable).toBe(true);
+    await i18n.changeLanguage("en");
+    expect(
+      describeOf([warning("@acme/gmail", { required_auth_key: "api_key" })])?.description,
+    ).toBe(
+      "It is connected with a different authentication method than the agent expects; the agent is told it is unavailable.",
+    );
   });
 
   it("says an integration switched off in the space is disabled, with nothing to connect", async () => {

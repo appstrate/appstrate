@@ -74,6 +74,18 @@ describe("PinManagementSection — 'Aucune connexion'", () => {
     expect(html).toContain("pin-add-connection-");
   });
 
+  it("says both outcomes, since the agent may require the integration", async () => {
+    const html = renderSection({ connections: [SHARED] });
+    expect(html).toContain(
+      "Aucune connexion — l'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige",
+    );
+    await i18n.changeLanguage("en");
+    expect(renderSection({ connections: [SHARED] })).toContain(
+      "No connection — the agent runs without this integration, or does not start if it requires it",
+    );
+    await i18n.changeLanguage("fr");
+  });
+
   it("is offered even when no connection is shared, which only stops pinning one", () => {
     const html = renderSection({ connections: [] });
     expect(html).toContain('data-testid="pin-add-none"');

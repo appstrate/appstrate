@@ -22,7 +22,7 @@ interface ResolutionView {
   emptyPickerPrompt: EmptyPickerPrompt;
 }
 
-/** The one reading of a server verdict shared by the picker, the 409 modal and the agent block. */
+/** The one reading of a server verdict shared by the picker and the agent block. */
 export function describeResolution(resolution: IntegrationAgentResolution): ResolutionView {
   const { source, error_code: code, admin_pinned_connection_ids: adminPin } = resolution;
   const lock =
@@ -48,7 +48,10 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
 
 type UnboundReason = "inactive" | "admin_none" | "member_none" | "shared_only" | "not_connected";
 
-/** Why the run starts without this integration (nothing binds, nothing refuses), else `null`. */
+/**
+ * Why the run starts without this integration, else `null`. Every such start carries a
+ * `warning_code`; without one, an empty set is an inert integration the run never needed.
+ */
 export function unboundReason(entry: {
   run_blocking: boolean;
   resolution: Pick<
@@ -62,7 +65,12 @@ export function unboundReason(entry: {
   >;
 }): UnboundReason | null {
   const r = entry.resolution;
-  if (entry.run_blocking || r.error_code !== null || r.resolved_connection_ids.length > 0) {
+  if (
+    entry.run_blocking ||
+    r.error_code !== null ||
+    r.warning_code === null ||
+    r.resolved_connection_ids.length > 0
+  ) {
     return null;
   }
   if (r.warning_code === "integration_not_active") return "inactive";

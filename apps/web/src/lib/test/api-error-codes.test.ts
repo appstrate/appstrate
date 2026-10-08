@@ -198,6 +198,8 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
+  // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
+  "integration_unbound",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",

@@ -15,6 +15,7 @@ import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
+import { scheduleUpdateMayChangeFires } from "../lib/schedule-payload";
 
 type LaunchWarnings = components["schemas"]["LaunchWarnings"];
 
@@ -134,27 +135,35 @@ export function useCreateSchedule(packageId: string) {
   });
 }
 
+interface UpdateScheduleVariables {
+  id: string;
+  name?: string;
+  cron_expression?: string;
+  timezone?: string;
+  input?: Record<string, unknown>;
+  enabled?: boolean;
+  model_id_override?: string | null;
+  generation_config_override?: ModelGenerationSettings | null;
+  proxy_id_override?: string | null;
+  version_override?: string | null;
+  connection_overrides?: Record<string, string[]> | null;
+  actor?: { userId?: string; endUserId?: string };
+}
+
 export function useUpdateSchedule() {
   const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
+    // The schedule as it stood, read before the write invalidates it.
+    onMutate: ({ id }: UpdateScheduleVariables) => ({
+      previous: qc.getQueryData<EnrichedSchedule>(scheduleKeys.detail(orgId, spaceId, id)),
+    }),
     mutationFn: async ({
       id,
       ...data
-    }: {
-      id: string;
-      name?: string;
-      cron_expression?: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-      enabled?: boolean;
-      model_id_override?: string | null;
-      generation_config_override?: ModelGenerationSettings | null;
-      proxy_id_override?: string | null;
-      version_override?: string | null;
-      connection_overrides?: Record<string, string[]> | null;
-      actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto & LaunchWarnings> => {
+    }: UpdateScheduleVariables): Promise<ScheduleWireDto & LaunchWarnings> => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         // Spec body types `input` as a bare object.
@@ -162,8 +171,9 @@ export function useUpdateSchedule() {
       });
       return updated!;
     },
-    onSuccess: (updated) => {
+    onSuccess: (updated, body, context) => {
       invalidateSchedules(qc);
+      if (!scheduleUpdateMayChangeFires(body, context?.previous)) return;
       toastWarnings(
         { kind: "schedule", userId: updated.userId },
         updated.packageId,

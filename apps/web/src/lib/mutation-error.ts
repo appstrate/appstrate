@@ -38,7 +38,6 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
   required_integration_unbound: "error.requiredIntegrationUnbound",
-  integration_unbound: "error.integrationUnbound",
   ...PACKAGE_PATH_ERROR_KEYS,
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 };

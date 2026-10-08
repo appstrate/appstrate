@@ -2,8 +2,8 @@
 
 /**
  * Unit tests for `describeResolution` — the one reading of the server verdict
- * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
- * recovery modal and the agent's integrations block share. This is where the
+ * (`source` + `error_code`, the resolver's vocabulary) the picker and the
+ * agent's integrations block share. This is where the
  * mapping from the resolver's codes to what the UI shows is pinned — and
  * `unboundReason`, why a run starts without a declared integration.
  */
@@ -126,7 +126,7 @@ describe("describeResolution — resolved", () => {
 
   it("does not hold when there is no verdict at all (no manifest loaded)", () => {
     // `source` and `error_code` both null: nothing bound, nothing refused —
-    // the recovery modal and the reuse hint must not read that as "ready".
+    // the agent block's reuse hint must not read that as "ready".
     expect(
       describeResolution(
         resolution({ source: null, error_code: null, resolved_connection_ids: [] }),
@@ -247,6 +247,19 @@ describe("unboundReason", () => {
       unboundReason(entry(true, { ...empty, error_code: "required_integration_unbound" })),
     ).toBeNull();
     expect(unboundReason(entry(true, empty))).toBeNull();
+  });
+
+  it("is null for an empty set carrying no warning: an inert integration the run never needed", () => {
+    expect(unboundReason(entry(false, { ...empty, warning_code: null }))).toBeNull();
+    expect(
+      unboundReason(
+        entry(false, { ...empty, warning_code: null, member_pinned_connection_ids: [] }),
+      ),
+    ).toBeNull();
+    // Control: the same state with the warning reads unbound.
+    expect(unboundReason(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
   });
 
   it("is null for a non-blocking error: an inert integration's verdict is no unbound state", () => {

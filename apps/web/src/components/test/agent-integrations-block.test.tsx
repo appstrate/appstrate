@@ -4,7 +4,8 @@
  * An agent's integration card against its readiness entry: a "Requise" badge
  * for an integration the agent requires, and — for one the run starts without —
  * why: switched off in the space, a pin to none (whose), only other members'
- * shared connections, or nothing usable.
+ * shared connections, or nothing usable. Switched off reads as blocking only
+ * for a required integration.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -67,12 +68,12 @@ function unbound(over: Partial<Resolution> = {}): Resolution {
 
 function renderCard(
   resolution: Resolution,
-  entry: { required?: boolean; blocking?: boolean } = {},
+  entry: { required?: boolean; blocking?: boolean; active?: boolean } = {},
 ): string {
   const qc = new QueryClient();
   qc.setQueryData($api.queryOptions("get", "/api/integrations", { params: { header } }).queryKey, {
     object: "list",
-    data: [{ id: GMAIL, active: true, manifest: { display_name: "Gmail" } }],
+    data: [{ id: GMAIL, active: entry.active ?? true, manifest: { display_name: "Gmail" } }],
     hasMore: false,
   });
   qc.setQueryData(
@@ -100,7 +101,15 @@ function renderCard(
   );
   return render(
     <AgentIntegrationsBlock
-      entries={[{ id: GMAIL, version: "1.0.0", tools: undefined, scopes: undefined }]}
+      entries={[
+        {
+          id: GMAIL,
+          version: "1.0.0",
+          tools: undefined,
+          scopes: undefined,
+          required: entry.required ?? false,
+        },
+      ]}
       agentPackageId={AGENT}
     />,
     { queryClient: qc },
@@ -136,6 +145,21 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     expect(html).toContain(`integration-activate-${GMAIL}`);
     expect(html).not.toContain(`member-picker-${GMAIL}`);
     expect(html).not.toContain(label("integrationUnbound"));
+  });
+
+  it("off in the space per the list: blocking only when the agent requires it", () => {
+    const optional = renderCard(unbound({ warning_code: "integration_not_active" }), {
+      active: false,
+    });
+    expect(optional).toContain(label("integrationUnboundInactive"));
+    expect(optional).not.toContain(label("integrationInactive"));
+    expect(optional).not.toContain("text-destructive");
+    expect(optional).toContain(`integration-activate-${GMAIL}`);
+
+    const required = renderCard(unbound(), { active: false, required: true, blocking: true });
+    expect(required).toContain(label("integrationInactive"));
+    expect(required).toContain("text-destructive");
+    expect(required).toContain(`integration-activate-${GMAIL}`);
   });
 
   it("an admin's pin to none, over a member's", () => {

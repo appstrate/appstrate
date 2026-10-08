@@ -71,6 +71,7 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           packageId={entry.id}
           agentTools={entry.tools}
           agentScopes={entry.scopes}
+          required={entry.required === true}
           // Optimistic while the list loads (null) so the card doesn't flash
           // a "not active" state; once loaded, gate strictly on membership.
           appActive={activeIds ? activeIds.has(entry.id) : true}
@@ -85,6 +86,8 @@ interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
+  /** The agent's `required` flag: an inactive required integration refuses the run. */
+  required: boolean;
   /** Whether the integration is active — placed in this space and switched on. */
   appActive: boolean;
   agentPackageId?: string;
@@ -94,6 +97,7 @@ function IntegrationConnectionCard({
   packageId,
   agentTools,
   agentScopes,
+  required,
   appActive,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
@@ -114,7 +118,13 @@ function IntegrationConnectionCard({
   // disabled, explanatory control rather than a picker the run-time gate would
   // reject with `integration_not_active`.
   if (!appActive) {
-    return <InactiveIntegrationCard packageId={packageId} displayName={displayName} />;
+    return (
+      <InactiveIntegrationCard
+        packageId={packageId}
+        displayName={displayName}
+        required={required}
+      />
+    );
   }
 
   // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
@@ -178,14 +188,11 @@ function ManagedIntegrationCard({
       : null;
   const unbound = entry ? unboundReason(entry) : null;
 
-  // The verdict can know it is off when the list did not.
+  // The verdict can know it is off when the list did not; an `inactive` verdict is a warning,
+  // so the run starts without it.
   if (unbound === "inactive") {
     return (
-      <InactiveIntegrationCard
-        packageId={packageId}
-        displayName={displayName}
-        extraSubtitle={t(UNBOUND_LABEL_KEYS.inactive)}
-      />
+      <InactiveIntegrationCard packageId={packageId} displayName={displayName} required={false} />
     );
   }
 
@@ -218,15 +225,18 @@ function ManagedIntegrationCard({
   );
 }
 
-/** An integration switched off in this space: the reason and the activation button, no picker. */
+/**
+ * An integration switched off in this space: the reason and the activation button, no picker.
+ * Only a required one blocks the run; a non-required one is merely left out of it.
+ */
 function InactiveIntegrationCard({
   packageId,
   displayName,
-  extraSubtitle,
+  required,
 }: {
   packageId: string;
   displayName: string;
-  extraSubtitle?: string;
+  required: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const setActive = useSetPackageActive();
@@ -237,13 +247,13 @@ function InactiveIntegrationCard({
   const canActivate = maySetPackageActive(spaceGrant, "integration", true);
 
   return (
-    <CardShell title={displayName} subtitle={packageId} extraSubtitle={extraSubtitle ?? null}>
+    <CardShell title={displayName} subtitle={packageId}>
       <span className="flex items-center gap-3">
         <span
-          className="text-destructive max-w-[18rem] text-right text-xs"
+          className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-right text-xs`}
           data-testid={`integration-inactive-${packageId}`}
         >
-          {t("detail.integrationInactive")}
+          {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.inactive)}
         </span>
         {/* The sentence asks for an activation; without this the reader had to
             go find the integration page to perform it. Somebody the route

@@ -77,3 +77,50 @@ export function scheduleOverridePayload(args: {
     ...(actor ? { actor } : {}),
   };
 }
+
+/** The stored fields of a schedule that decide which connections its fires bind. */
+interface ScheduleFireState {
+  enabled: boolean;
+  userId: string | null;
+  endUserId: string | null;
+  version_override: string | null;
+  connection_overrides: Record<string, string[]> | null;
+}
+
+/** Order-insensitive identity of a connection-overrides map; `null` and `{}` are the same. */
+function overridesKey(overrides: Record<string, string[]> | null | undefined): string {
+  return JSON.stringify(
+    Object.entries(overrides ?? {})
+      .map(([id, set]) => [id, [...set].sort()] as const)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+/**
+ * Whether a schedule update can change what its fires start without, so its `warnings` are news:
+ * the connection picks, the actor or the frozen version moved, or the schedule was switched on.
+ * A rename or a pause repeats what the last write already said. An unknown prior state counts.
+ */
+export function scheduleUpdateMayChangeFires(
+  body: {
+    enabled?: boolean;
+    version_override?: string | null;
+    connection_overrides?: Record<string, string[]> | null;
+    actor?: ActorValue;
+  },
+  previous: ScheduleFireState | undefined,
+): boolean {
+  if (!previous) return true;
+  return (
+    (body.connection_overrides !== undefined &&
+      overridesKey(body.connection_overrides) !== overridesKey(previous.connection_overrides)) ||
+    (body.enabled === true && !previous.enabled) ||
+    (body.actor !== undefined &&
+      !sameActor(body.actor, {
+        ...(previous.userId ? { userId: previous.userId } : {}),
+        ...(previous.endUserId ? { endUserId: previous.endUserId } : {}),
+      })) ||
+    (body.version_override !== undefined &&
+      (body.version_override ?? null) !== (previous.version_override ?? null))
+  );
+}

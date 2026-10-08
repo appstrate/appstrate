@@ -22,6 +22,7 @@ export function isViewersLaunch(target: LaunchTarget, viewerId: string | undefin
 const MESSAGE_KEYS = { run: "launchWarnings.run", schedule: "launchWarnings.schedule" } as const;
 const CAUSE_KEYS = {
   notConnected: "launchWarnings.cause.notConnected",
+  otherAuthMethod: "launchWarnings.cause.otherAuthMethod",
   sharedOnly: "launchWarnings.cause.sharedOnly",
   inactive: "launchWarnings.cause.inactive",
   other: "launchWarnings.cause.other",
@@ -31,19 +32,20 @@ type WarningCause = keyof typeof CAUSE_KEYS;
 function causeOf(w: LaunchWarning): WarningCause {
   if (w.code === "integration_not_active") return "inactive";
   if ((w.candidate_connections?.length ?? 0) > 0) return "sharedOnly";
-  // Without a connect target or an auth mismatch, it may be a deliberate "no connection".
-  if (w.auth_key !== undefined || w.required_auth_key !== undefined) return "notConnected";
+  if (w.required_auth_key !== undefined) return "otherAuthMethod";
+  // Without a connect target, it may be a deliberate "no connection".
+  if (w.auth_key !== undefined) return "notConnected";
   return "other";
 }
 
 /** The one toast a launch's warnings make, or `null` when there is nothing to say. */
 export function launchWarningsToast(input: {
   kind: LaunchTarget["kind"];
-  warnings: readonly LaunchWarning[] | undefined;
+  warnings: readonly LaunchWarning[];
   nameOf: (integrationId: string) => string;
 }): { message: string; description: string; connectable: boolean } | null {
   const causes = new Map<string, WarningCause>();
-  for (const w of input.warnings ?? []) {
+  for (const w of input.warnings) {
     if (!w.field.startsWith("integrations.")) continue;
     const id = integrationIdOfField(w.field);
     if (!causes.has(id)) causes.set(id, causeOf(w));
@@ -59,6 +61,7 @@ export function launchWarningsToast(input: {
       names: [...causes.keys()].map(input.nameOf).join(", "),
     }),
     description: i18n.t(CAUSE_KEYS[cause], { ns: "agents", count }),
-    connectable: distinct.has("notConnected") || distinct.has("sharedOnly"),
+    connectable:
+      distinct.has("notConnected") || distinct.has("otherAuthMethod") || distinct.has("sharedOnly"),
   };
 }
