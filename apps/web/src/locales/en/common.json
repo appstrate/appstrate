@@ -261,6 +261,7 @@
   "apiError.connection_not_in_org_default": "This connection is not among those the organization enforces: {{message}}",
   "apiError.identity_mismatch": "This connection is linked to another account, reconnect with the same account or create a new connection: {{message}}",
   "apiError.connect_unavailable": "This connection method is not available on this instance. Contact your administrator.",
+  "apiError.encryption_key_unavailable": "A stored credential is encrypted with a key this instance does not have. Contact your administrator.",
   "apiError.no_billing_account": "No billing account for this organization.",
   "apiError.no_active_subscription": "The organization has no active subscription to change.",
   "apiError.subscription_exists": "The organization already has an active subscription.",

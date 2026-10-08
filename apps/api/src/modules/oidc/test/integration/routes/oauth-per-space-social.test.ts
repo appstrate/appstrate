@@ -21,11 +21,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { prefixedId } from "@appstrate/db/ids";
 import { db } from "@appstrate/db/client";
+import { eq } from "drizzle-orm";
 import {
   user as userTable,
   organizations,
   organizationMembers,
   spaces,
+  spaceSocialProviders,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -192,6 +194,33 @@ describe("OIDC per-space social auth — E2E (space-level clients)", () => {
     if (redirectUrl) {
       expect(redirectUrl).toContain(encodeURIComponent(TENANT_GOOGLE_CLIENT_ID));
     }
+  });
+
+  it("answers 503 — never the instance creds — when the tenant secret is under a missing kid", async () => {
+    const { spaceId, clientId } = await setupSpaceClient({ google: true });
+    const loginRes = await app.request(
+      `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=s`,
+    );
+    const cookie = loginRes.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("oidc_pending_client="))!
+      .split(";")[0]!;
+    await db
+      .update(spaceSocialProviders)
+      .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(spaceSocialProviders.spaceId, spaceId));
+    _clearSocialCacheForTesting();
+
+    const res = await app.request(`/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        provider: "google",
+        callbackURL: "https://acme.example.com/oauth/callback",
+      }),
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code?: string }).code).toBe("encryption_key_unavailable");
   });
 
   it("without a pending-client cookie, the resolver is NOT consulted", async () => {

@@ -151,7 +151,18 @@ retired key stays in `CONNECTION_ENCRYPTION_KEYS` until something re-encrypts wh
    re-encrypts, under the active kid, every ciphertext the retired kids wrote.
 4. Run it again without `--apply`: its per-kid inventory must show nothing under the old kid, and it
    exits 0.
-5. Remove the old kid from `CONNECTION_ENCRYPTION_KEYS` and deploy.
+5. Remove the old kid from `CONNECTION_ENCRYPTION_KEYS` and deploy. Too early, the boot refuses:
+   it names each kid still in the database that the keyring lacks.
+
+The dry run also says, per kid, whether a sample opens with the configured key:
+`SAMPLE DOES NOT OPEN` means a key replaced under an unchanged id (restore the original one) or a
+group whose sampled rows are corrupted. A rollback to the env from before step 2 refuses the boot
+once rows exist under the new kid, by design. A key that is truly lost cannot be restored: the rows under its kid are unreadable for
+good. Delete them — the connection, OAuth client, model credential, proxy or SMTP/social config is
+then reconnected or re-entered; a run's sink secret stops counting once the sink is closed or
+expired — until the dry run of step 4 shows no `UNKNOWN` line. A model credential is referenced by
+`org_models.credential_id` with `ON DELETE RESTRICT`: delete or repoint those `org_models` rows
+first, in the same SQL session.
 
 The credential-proxy cookie jars in Redis are not rewritten: they expire with their session, and one
 still under a dropped kid reads as an empty jar.

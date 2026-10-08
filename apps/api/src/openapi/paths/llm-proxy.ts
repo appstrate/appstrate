@@ -150,6 +150,14 @@ const baseResponses = {
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },
+  "503": {
+    description:
+      "`encryption_key_unavailable` — the model's stored credential is encrypted under a key " +
+      "id missing from the platform's keyring. Operator configuration; nothing is sent " +
+      "upstream and no usage is recorded (`Proxy-Status` error `proxy_configuration_error`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
   "504": {
     description:
       "`upstream_timeout` — the upstream sent no response headers in time: " +

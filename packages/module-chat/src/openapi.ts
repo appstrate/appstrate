@@ -457,9 +457,11 @@ export const chatPaths = {
           description:
             "Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`.",
         },
-        "503": enforcedSkillsUnavailableResponse(
-          "the skills the space enforces could not be loaded, so the turn is refused before anything is persisted.",
-        ),
+        "503": {
+          description:
+            "`enforced_skills_unavailable` — the skills the space enforces could not be loaded, so the turn is refused before anything is persisted. Or `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json.",
+          content: problem,
+        },
       },
     },
   },

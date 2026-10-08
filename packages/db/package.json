@@ -18,7 +18,8 @@
     "./storage": "./src/storage.ts",
     "./notify": "./src/notify.ts",
     "./pg-safe": "./src/pg-safe.ts",
-    "./logger": "./src/logger.ts"
+    "./logger": "./src/logger.ts",
+    "./encrypted-columns": "./src/encrypted-columns.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

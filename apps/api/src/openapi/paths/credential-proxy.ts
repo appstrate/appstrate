@@ -294,6 +294,15 @@ const proxyResponses = {
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },
+  "503": {
+    description:
+      "`encryption_key_unavailable` — the connection's stored credential is encrypted under a " +
+      "key id missing from the platform's keyring. Operator configuration: nothing was sent, " +
+      "the connection is not flagged, and the call succeeds once the key is restored " +
+      "(`Proxy-Status` error `proxy_configuration_error`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
   "504": {
     description:
       "`upstream_timeout` — the upstream did not answer, or did not finish a buffered body, " +

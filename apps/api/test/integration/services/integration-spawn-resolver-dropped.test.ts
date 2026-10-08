@@ -267,6 +267,20 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     expect(dropped[0]!.detail).toContain("snapshot");
   });
 
+  it("fails the kickoff with a 503 — not a drop — when the credentials are under a missing kid", async () => {
+    await seedIntegration();
+    await seedConnection();
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationConnections.integrationId, INTEG));
+
+    await expect(resolve()).rejects.toMatchObject({
+      status: 503,
+      code: "encryption_key_unavailable",
+    });
+  });
+
   it("leaves `dropped` empty on the happy path", async () => {
     await seedServer();
     await seedPackage({

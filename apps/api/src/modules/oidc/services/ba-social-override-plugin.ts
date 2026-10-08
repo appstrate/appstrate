@@ -38,9 +38,10 @@
  * button from being rendered in the first place.
  */
 
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { enterSocialOverride, type SocialOverride } from "@appstrate/db/auth";
 import { logger } from "../../../lib/logger.ts";
+import { EncryptionKeyUnavailableError } from "../../../lib/stored-credential.ts";
 import { getClientCached } from "./oauth-admin.ts";
 import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
 import { resolveSocialProviderForClient } from "./social.ts";
@@ -69,10 +70,11 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
       enterSocialOverride(override);
     }
   } catch (err) {
-    // Fail closed: a resolver failure (DB blip, decryption error, stale key
-    // rotation, …) must not leak the platform's env creds to a tenant's flow.
-    // Downstream BA surfaces `CLIENT_ID_AND_SECRET_REQUIRED` if this was not
-    // a transient blip.
+    // A missing key must not fall back to the instance's GOOGLE_*/GITHUB_* creds below.
+    if (err instanceof EncryptionKeyUnavailableError) {
+      throw new APIError("SERVICE_UNAVAILABLE", { code: err.code, message: err.message });
+    }
+    // Any other failure sets no override, so the getters fall back to the instance env creds.
     logger.warn("oidc: failed to resolve per-space social credentials", {
       module: "oidc",
       clientId: pendingClientId,

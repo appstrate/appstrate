@@ -29,7 +29,8 @@ import { checkEgressUrl, egressGuardedFetch } from "../lib/egress-host-guard.ts"
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-types";
-import { loadInferenceCredentials, loadCredentialRow } from "./model-providers/credentials.ts";
+import { loadInferenceCredentials, loadCredentialMetadata } from "./model-providers/credentials.ts";
+import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import { invalidateResolvedModel, resolveModelCached } from "./resolved-model-cache.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -259,7 +260,15 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
   >();
   await Promise.all(
     rows.map(async (r) => {
-      const live = await loadInferenceCredentials(orgId, r.credentialId);
+      // A key missing from the keyring (logged) leaves the row shown as it is, not the list a 503.
+      let live: Awaited<ReturnType<typeof loadInferenceCredentials>> = null;
+      let keyUnavailable = false;
+      try {
+        live = await loadInferenceCredentials(orgId, r.credentialId);
+      } catch (err) {
+        if (!(err instanceof EncryptionKeyUnavailableError)) throw err;
+        keyUnavailable = true;
+      }
       if (live) {
         credByRow.set(r.id, {
           providerId: live.providerId,
@@ -269,13 +278,13 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         });
         return;
       }
-      const raw = await loadCredentialRow(r.credentialId, orgId);
+      const raw = await loadCredentialMetadata(r.credentialId, orgId);
       if (!raw) return;
       credByRow.set(r.id, {
         providerId: raw.providerId,
         apiShape: raw.apiShape,
         baseUrl: raw.baseUrl,
-        needsReconnection: true,
+        needsReconnection: !keyUnavailable,
       });
     }),
   );
@@ -1103,7 +1112,7 @@ async function loadModelFromDb(orgId: string, modelDbId: string): Promise<Resolv
  * Scope, precisely — `true` requires ALL of: an existing DB row (system models
  * and non-UUID ids answer `false`), that is `enabled`, whose credential fails
  * {@link loadInferenceCredentials} AND still resolves through
- * {@link loadCredentialRow}. That last conjunct is what keeps this aligned
+ * {@link loadCredentialMetadata}. That last conjunct is what keeps this aligned
  * with what {@link listOrgModels} actually RENDERS as dead: a row whose
  * credential row is gone, or whose `providerId` has no registry entry (its
  * provider module was dropped from `MODULES`), is not listed at all — and its
@@ -1146,7 +1155,7 @@ async function loadModelBinding(
 async function credentialIsDeadButListed(orgId: string, credentialId: string): Promise<boolean> {
   if (!credentialId) return false;
   if ((await loadInferenceCredentials(orgId, credentialId)) !== null) return false;
-  return (await loadCredentialRow(credentialId, orgId)) !== null;
+  return (await loadCredentialMetadata(credentialId, orgId)) !== null;
 }
 
 /**

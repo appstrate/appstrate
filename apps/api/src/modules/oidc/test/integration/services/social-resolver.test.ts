@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { encryptCredentials } from "@appstrate/connect";
 import { prefixedId } from "@appstrate/db/ids";
 import { db } from "@appstrate/db/client";
 import {
@@ -128,21 +130,36 @@ describe("resolveSocialProviderForClient", () => {
     expect(afterDelete).toBeNull();
   });
 
-  it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
+  it("treats an unreadable ciphertext as unconfigured, a missing key as a 503", async () => {
     const spaceId = await seedOrgWithSpace();
-    // Envelope with a kid absent from the keyring — decryption must fail and
-    // the resolver must surface "not configured" instead of throwing.
     await db.insert(spaceSocialProviders).values({
       spaceId,
       provider: "google",
       clientId: "tenant-google-client",
-      clientSecretEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
+      clientSecretEncrypted: "v1:not-a-real-envelope",
     });
-    const resolved = await resolveSocialProviderForClient(
-      { level: "space", referencedSpaceId: spaceId },
-      "google",
-    );
-    expect(resolved).toBeNull();
+    const client = { level: "space" as const, referencedSpaceId: spaceId };
+    expect(await resolveSocialProviderForClient(client, "google")).toBeNull();
+
+    // A missing key must not fall back to the instance credentials, nor be cached as absent.
+    await db
+      .update(spaceSocialProviders)
+      .set({
+        clientSecretEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
+      })
+      .where(eq(spaceSocialProviders.spaceId, spaceId));
+    await invalidateSocialCache(spaceId, "google");
+    await expect(resolveSocialProviderForClient(client, "google")).rejects.toMatchObject({
+      status: 503,
+      code: "encryption_key_unavailable",
+    });
+
+    // The 503 was not cached: once the row reads again, the very next call serves it.
+    await db
+      .update(spaceSocialProviders)
+      .set({ clientSecretEncrypted: encryptCredentials({ clientSecret: "restored" }) })
+      .where(eq(spaceSocialProviders.spaceId, spaceId));
+    expect((await resolveSocialProviderForClient(client, "google"))?.clientSecret).toBe("restored");
   });
 
   it("returns null for non-space clients (no env fallback here)", async () => {

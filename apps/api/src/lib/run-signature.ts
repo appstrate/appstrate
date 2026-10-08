@@ -19,6 +19,7 @@ import { verify } from "@appstrate/afps-runtime/events";
 import { getEnv } from "@appstrate/env";
 import { ApiError, gone } from "@appstrate/core/api-errors";
 import type { RunSinkContext } from "../types/run-sink.ts";
+import { decryptStoredCredential } from "./stored-credential.ts";
 
 /**
  * 410 with a specific `code` when the sink is not in a state to accept events.
@@ -78,7 +79,10 @@ export function verifyRunSignatureHeaders(input: {
     });
   }
 
-  const secret = decrypt(input.run.sinkSecretEncrypted);
+  const secret = decryptStoredCredential(() => decrypt(input.run.sinkSecretEncrypted), {
+    runId: input.run.id,
+  });
+  if (secret === null) throw new Error(`run ${input.run.id}: sink secret is unreadable`);
 
   const result = verify({
     signatureHeader: input.signatureHeader,

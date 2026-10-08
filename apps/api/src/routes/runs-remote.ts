@@ -485,13 +485,13 @@ export function createRunsRemoteRouter() {
             eq(runs.spaceId, c.get("spaceId")),
             runVisibilityFilter(c),
             sql`sink_closed_at IS NULL`,
-            sql`sink_expires_at IS NOT NULL`,
+            sql`sink_expires_at >= now()`,
           ),
         )
         .returning({ id: runs.id });
 
       if (updated.length === 0) {
-        throw notFound(`run ${runId} not found or sink already closed`);
+        throw notFound(`run ${runId} not found, or its sink is closed or expired`);
       }
 
       // Operation result, not a resource: `sink_expires_at` is internal

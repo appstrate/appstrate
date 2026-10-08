@@ -33,6 +33,7 @@ import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-ro
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
+import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { appendSetCookies, getSessionForwardingCookies } from "../../lib/auth-cookies.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
@@ -331,28 +332,38 @@ async function loadPageContext(
   // `level=instance` read the instance config from env. Null → email features
   // disabled for this flow; a space-level client does NOT fall through to the
   // instance transport.
-  const smtp = await resolveSmtpForClient(record);
-  if (opts.requireSmtp && !smtp) {
-    return c.html(renderErrorPage(opts.requireSmtp).value, 404);
-  }
-  // Per-client social provider availability, split by client level.
-  // Space-level clients read from `space_social_providers` (tenant-owned OAuth
-  // App). Org and instance clients read env presence — the platform's shared
-  // Google/GitHub OAuth App is the appropriate identity issuer for dashboard /
-  // satellite flows.
+  let smtp: Awaited<ReturnType<typeof resolveSmtpForClient>>;
   let socialGoogle: boolean;
   let socialGithub: boolean;
-  if (record.level === "space") {
-    const [g, gh] = await Promise.all([
-      resolveSocialProviderForClient(record, "google"),
-      resolveSocialProviderForClient(record, "github"),
-    ]);
-    socialGoogle = !!g;
-    socialGithub = !!gh;
-  } else {
-    const env = getEnv();
-    socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-    socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  try {
+    smtp = await resolveSmtpForClient(record);
+    // Space clients read their own provider rows; org/instance ones the platform's env pair.
+    if (record.level === "space") {
+      const [g, gh] = await Promise.all([
+        resolveSocialProviderForClient(record, "google"),
+        resolveSocialProviderForClient(record, "github"),
+      ]);
+      socialGoogle = !!g;
+      socialGithub = !!gh;
+    } else {
+      const env = getEnv();
+      socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+      socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+    }
+  } catch (err) {
+    // A browser page, not a JSON client: the 503 of a key missing from the keyring as a page.
+    if (!(err instanceof EncryptionKeyUnavailableError)) throw err;
+    return c.html(
+      renderErrorPage({
+        title: "Service indisponible",
+        message:
+          "Un identifiant de cette application est chiffré avec une clé que ce serveur ne possède pas. Contactez l'administrateur.",
+      }).value,
+      503,
+    );
+  }
+  if (opts.requireSmtp && !smtp) {
+    return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
   return {
     url,
@@ -816,6 +827,7 @@ export function createOidcRouter() {
         const result = await sendTestEmail(spaceId, data.to);
         return c.json({ ok: true, message_id: result.messageId });
       } catch (err) {
+        if (err instanceof EncryptionKeyUnavailableError) throw err;
         const message = getErrorMessage(err);
         // Surface the SMTP server's response verbatim — DKIM/SPF/auth
         // misconfigurations are the admin's to fix, so we must not swallow

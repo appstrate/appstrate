@@ -305,6 +305,16 @@ export const responses = {
       },
     },
   },
+  /** A stored credential the operation needs is under a key id the keyring lacks (#1768). */
+  EncryptionKeyUnavailable: {
+    description:
+      "`encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored.",
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   InternalServerError: {
     description: "Unexpected server error",
     content: {

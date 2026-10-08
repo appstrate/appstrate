@@ -39,7 +39,7 @@ import { spaceSmtpConfigs } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { decryptStoredCredential } from "../../../lib/stored-credential.ts";
 
 interface SmtpSender {
   transport: Transporter;
@@ -123,16 +123,13 @@ async function buildTransport(row: SmtpRow): Promise<Transporter | null> {
   if (row.host === "__test_json__") {
     return createTransport({ jsonTransport: true });
   }
-  let pass: string;
-  try {
-    pass = decryptCredentials<{ pass: string }>(row.passEncrypted).pass;
-  } catch (err) {
-    logger.error("oidc smtp: decryption failed for per-space config, treating as unconfigured", {
-      spaceId: row.spaceId,
-      error: getErrorMessage(err),
-    });
-    return null;
-  }
+  // An unreadable blob reads as unconfigured; a missing key throws the 503 (never cached).
+  const stored = decryptStoredCredential(
+    () => decryptCredentials<{ pass: string }>(row.passEncrypted),
+    { spaceId: row.spaceId, config: "smtp" },
+  );
+  if (!stored) return null;
+  const pass = stored.pass;
   // SSRF hardening (connect-time, fail-closed). `isBlockedHost` at config-write
   // time is a LITERAL check only — a public DNS name whose A/AAAA record points
   // at loopback / a metadata IP / an internal range sails through it, and

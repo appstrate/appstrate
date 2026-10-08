@@ -237,6 +237,7 @@ export const internalPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -276,6 +277,7 @@ export const internalPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -308,7 +310,7 @@ export const internalPaths = {
         "409": integrationCredentialsConflict409,
         "410": {
           description:
-            "The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials could not be decrypted at all (rotated `CONNECTION_ENCRYPTION_KEY`, corrupted blob) — which is terminal on the plain read too, not only on a forced refresh. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics.",
+            "The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials are unreadable (corrupted blob, failed integrity check, malformed envelope) — which is terminal on the plain read too, not only on a forced refresh. A key id missing from the keyring is NOT one of them: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -324,6 +326,7 @@ export const internalPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
@@ -385,6 +388,7 @@ export const internalPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

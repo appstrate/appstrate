@@ -141,6 +141,22 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(await loadModel(ctx.orgId, model.id)).toBeNull();
   });
 
+  it("lists a model whose credential is under a missing kid as it is, and 503s its use", async () => {
+    const { cred, model } = await seedApiKeyModel();
+    await db
+      .update(modelProviderCredentials)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(modelProviderCredentials.id, cred.id));
+
+    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    expect(listed!.needs_reconnection).toBe(false);
+    expect(listed!.providerId).toBe("openai");
+    await expect(loadModel(ctx.orgId, model.id)).rejects.toMatchObject({
+      status: 503,
+      code: "encryption_key_unavailable",
+    });
+  });
+
   it("still drops a model whose credential has an unregistered providerId", async () => {
     const { cred, model } = await seedApiKeyModel();
     // The credential ROW cannot be deleted while the model references it

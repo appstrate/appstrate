@@ -52,6 +52,10 @@ import { BundleError } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
+import {
+  decryptStoredCredential,
+  EncryptionKeyUnavailableError,
+} from "../lib/stored-credential.ts";
 import type { Actor } from "../lib/actor.ts";
 import {
   displayAccountId,
@@ -268,6 +272,8 @@ export async function resolveIntegrationSpawns(
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
+        // A key missing from the keyring fails the run (503) rather than dropping the integration.
+        if (err instanceof EncryptionKeyUnavailableError) throw err;
         // The server-side log stays: it carries `spaceId`, which the
         // run-visible marker does not, and it fires even for a caller that
         // ignores `dropped` — today only tests, `run-context-builder.ts` being
@@ -778,17 +784,11 @@ async function resolveDeliveries(
       });
       return null;
     }
-    let inputs: Record<string, string>;
-    try {
-      inputs = decryptCredentialInputsToStringMap(row.credentialsEncrypted);
-    } catch (err) {
-      logger.warn("decrypt failed for run-start login secret", {
-        integrationId,
-        authKey: row.authKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+    const inputs = decryptStoredCredential(
+      () => decryptCredentialInputsToStringMap(row.credentialsEncrypted),
+      { integrationId, authKey: row.authKey, connectionId: row.id },
+    );
+    if (!inputs) return null;
     if (Object.keys(inputs).length === 0) {
       // No persisted login secret → treat as not-connected for this run.
       // Do NOT spawn a half-broken session.
@@ -847,17 +847,11 @@ async function resolveDeliveries(
     };
   }
 
-  let fields: Record<string, string>;
-  try {
-    fields = decryptCredentialsToStringMap(row.credentialsEncrypted);
-  } catch (err) {
-    logger.warn("decrypt failed for integration connection", {
-      integrationId,
-      authKey: row.authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  const fields = decryptStoredCredential(
+    () => decryptCredentialsToStringMap(row.credentialsEncrypted),
+    { integrationId, authKey: row.authKey, connectionId: row.id },
+  );
+  if (!fields) return null;
 
   const renderedUris = renderAuthAuthorizedUris(auth, fields, variables);
   const spawnEnv: Record<string, string> = {};

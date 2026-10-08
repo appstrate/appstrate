@@ -14,76 +14,17 @@
 
 import { parseArgs } from "node:util";
 import { SQL } from "bun";
-import { decrypt, encrypt } from "@appstrate/connect";
+import { decrypt, encrypt, opensWithKeyring } from "@appstrate/connect";
 import { getEnv } from "../packages/env/src/index.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-interface EncryptedColumn {
-  table: string;
-  column: string;
-  /** Primary key columns, in keyset order. */
-  key: readonly string[];
-  /** Rows whose ciphertext is still read; the others are dead data. */
-  live?: string;
-}
-
-/** Every column holding a `v1:<kid>:` ciphertext of `@appstrate/connect`'s keyring. */
-export const ENCRYPTED_COLUMNS: readonly EncryptedColumn[] = [
-  { table: "integration_connections", column: "credentials_encrypted", key: ["id"] },
-  { table: "integration_oauth_clients", column: "client_secret_encrypted", key: ["id"] },
-  { table: "model_provider_credentials", column: "credentials_encrypted", key: ["id"] },
-  { table: "org_proxies", column: "url_encrypted", key: ["id"] },
-  {
-    table: "runs",
-    column: "sink_secret_encrypted",
-    key: ["id"],
-    // `assertSinkOpen` refuses a closed or expired sink before its secret is decrypted.
-    live: "sink_closed_at IS NULL AND (sink_expires_at IS NULL OR sink_expires_at >= now())",
-  },
-  { table: "space_smtp_configs", column: "pass_encrypted", key: ["space_id"] },
-  {
-    table: "space_social_providers",
-    column: "client_secret_encrypted",
-    key: ["space_id", "provider"],
-  },
-];
+import {
+  ENCRYPTED_COLUMNS,
+  countByKid,
+  liveCiphertextWhere,
+  type KidCount,
+} from "@appstrate/db/encrypted-columns";
 
 export type Query = (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
-
-interface KidCount {
-  table: string;
-  column: string;
-  /** `null`: not a `v1:<kid>:` envelope. */
-  kid: string | null;
-  count: number;
-}
-
-/** `''` is a public OAuth client's "no secret", not a ciphertext. */
-function scope({ column, live }: EncryptedColumn): string {
-  return `"${column}" <> ''${live ? ` AND ${live}` : ""}`;
-}
-
-export async function countByKid(query: Query): Promise<KidCount[]> {
-  const counts: KidCount[] = [];
-  for (const spec of ENCRYPTED_COLUMNS) {
-    const rows = await query(
-      `SELECT CASE WHEN "${spec.column}" ~ '^v1:[A-Za-z0-9_-]{1,32}:'
-                   THEN split_part("${spec.column}", ':', 2) END AS kid,
-              count(*)::int AS count
-         FROM "${spec.table}" WHERE ${scope(spec)}
-        GROUP BY 1 ORDER BY 1`,
-    );
-    for (const row of rows) {
-      counts.push({
-        table: spec.table,
-        column: spec.column,
-        kid: row.kid as string | null,
-        count: Number(row.count),
-      });
-    }
-  }
-  return counts;
-}
 
 interface RekeyResult {
   rekeyed: number;
@@ -112,7 +53,7 @@ export async function rekeyRetiredKids(
       const rows = await query(
         `SELECT ${spec.key.map((k) => `"${k}"::text AS "${k}"`).join(", ")}, "${spec.column}" AS blob
            FROM "${spec.table}"
-          WHERE ${scope(spec)} AND "${spec.column}" LIKE 'v1:%'
+          WHERE ${liveCiphertextWhere(spec)} AND "${spec.column}" LIKE 'v1:%'
             AND split_part("${spec.column}", ':', 2) IN (${kidParams}) ${bound}
           ORDER BY ${keys} LIMIT ${options.batchSize}`,
         [...kids, ...(after ?? [])],
@@ -144,15 +85,19 @@ export async function rekeyRetiredKids(
   return result;
 }
 
-/** Prints the inventory; true when every ciphertext is under the active kid. */
+/**
+ * Prints the inventory, and for each configured kid whether its key opens a sample of the
+ * column (`SAMPLE DOES NOT OPEN`: a key replaced under the same id, or only corrupted rows).
+ * True when every ciphertext is under the active kid and every sample opens.
+ */
 export function reportCounts(
   counts: readonly KidCount[],
   keyring: { activeKid: string; retiredKids: readonly string[] },
   out: (line: string) => void,
 ): boolean {
   let clean = true;
-  for (const { table, column, kid, count } of counts) {
-    const label =
+  for (const { table, column, kid, count, samples } of counts) {
+    let label =
       kid === null
         ? "NOT AN ENVELOPE"
         : kid === keyring.activeKid
@@ -161,6 +106,11 @@ export function reportCounts(
             ? "retired"
             : "UNKNOWN";
     if (label !== "active") clean = false;
+    if (label === "active" || label === "retired") {
+      const opens = samples.some(opensWithKeyring);
+      if (!opens) clean = false;
+      label += opens ? ", sample opens" : ", SAMPLE DOES NOT OPEN";
+    }
     out(`  ${table}.${column}  ${kid ?? "-"} (${label}): ${count}`);
   }
   return clean;
@@ -203,9 +153,9 @@ if (import.meta.main) {
     const clean = reportCounts(await countByKid(query), keyring, out);
     out(
       clean
-        ? "rekey: every ciphertext is under the active kid — the retired keys can be dropped."
+        ? "rekey: every ciphertext is under the active kid and opens — the retired keys can be dropped."
         : values.apply
-          ? "rekey: ciphertexts remain outside the active kid — see the lines above."
+          ? "rekey: ciphertexts remain outside the active kid, or do not open — see the lines above."
           : "rekey: DRY RUN — nothing written. Re-run with --apply to re-encrypt the retired kids.",
     );
     code = clean ? 0 : 1;

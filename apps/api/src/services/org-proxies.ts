@@ -7,6 +7,7 @@ import { encrypt, decrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getSystemProxies, isSystemProxy } from "./proxy-registry.ts";
 import { logger } from "../lib/logger.ts";
+import { decryptForDisplay, decryptStoredCredential } from "../lib/stored-credential.ts";
 import { checkEgressUrl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import type { OrgProxyInfo, TestResult } from "@appstrate/shared-types";
 import {
@@ -82,7 +83,7 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
     mapRow: (row) => ({
       id: row.id,
       label: row.label,
-      urlPrefix: maskProxyUrl(decrypt(row.urlEncrypted)),
+      urlPrefix: storedUrlPrefix(row.id, row.urlEncrypted),
       enabled: row.enabled,
       is_default: pointer !== null && row.id === pointer,
       source: row.source as "custom" | "built-in",
@@ -91,6 +92,12 @@ export async function listOrgProxies(orgId: string): Promise<OrgProxyInfo[]> {
       updatedAt: toISORequired(row.updatedAt),
     }),
   });
+}
+
+/** The masked URL, or `""` when it cannot be read: one such row never fails the list. */
+function storedUrlPrefix(proxyId: string, urlEncrypted: string): string {
+  const url = decryptForDisplay(() => decrypt(urlEncrypted), { proxyId });
+  return typeof url === "string" ? maskProxyUrl(url) : "";
 }
 
 // --- Single-item read (system + DB) ---
@@ -253,12 +260,9 @@ async function loadProxy(
 
   if (!row || !row.enabled) return null;
 
-  try {
-    return { url: decrypt(row.urlEncrypted), label: row.label };
-  } catch {
-    logger.warn("Failed to decrypt proxy URL", { proxyId });
-    return null;
-  }
+  // A missing key is the 503: falling through to the next proxy would let a run leave unproxied.
+  const url = decryptStoredCredential(() => decrypt(row.urlEncrypted), { proxyId });
+  return url === null ? null : { url, label: row.label };
 }
 
 // --- Connection test ---

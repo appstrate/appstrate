@@ -27,6 +27,7 @@ import {
   upstreamFailureDetail,
   type UpstreamFailureCode,
 } from "../../lib/proxy-status.ts";
+import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
 import {
@@ -411,6 +412,9 @@ async function resolvePresetForOrg(
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
     // and keeps its status; anything else reads as "not enabled", cause kept.
+    if (err instanceof EncryptionKeyUnavailableError) {
+      throw proxyProblem("encryption_key_unavailable", err.message);
+    }
     if (err instanceof ApiError) throw err;
     throw new LlmProxyUnsupportedModelError(presetId, { cause: err });
   }

@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **The boot refuses while the database holds a ciphertext under a kid absent
+  from `CONNECTION_ENCRYPTION_KEY_ID` / `CONNECTION_ENCRYPTION_KEYS`** (#1768),
+  naming each kid and column; a configured kid none of whose sampled
+  ciphertexts opens is only logged as a warning. Before the deploy, with the
+  production env loaded:
+  1. run `bun scripts/rekey-encrypted-columns.ts` (without `--apply`; it writes
+     nothing): no line may read `UNKNOWN`, and every configured kid's line must
+     read `sample opens`. `SAMPLE DOES NOT OPEN` means a key replaced under the
+     same id, or a group whose sampled rows are corrupted. Fix
+     `CONNECTION_ENCRYPTION_KEYS` (or the rows) first;
+  2. this query must return 0 — the inventory counts only open sinks with an
+     expiry:
+     `SELECT count(*) FROM runs WHERE sink_secret_encrypted IS NOT NULL AND sink_expires_at IS NULL AND sink_closed_at IS NULL`.
 - **`BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>[,…]` format;
   a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
   (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
@@ -54,6 +67,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A credential encrypted under a key id missing from the keyring answers
+  `503 encryption_key_unavailable`, logging the missing kid, and is no longer
+  treated as dead or absent** (#1768, #1814). Before: a `410` and a permanent
+  reconnect prompt on the sidecar path, `404 credential_not_found` on the
+  credential proxy, an integration dropped or a proxy skipped at run start, a
+  `403` asking to re-register an OAuth client, and "not configured" for OIDC
+  per-space SMTP and social sign-ins (social falling back to the instance
+  credentials). Listings show such a row as it is. Only an unreadable blob
+  (corrupted, failed integrity check) stays terminal.
 - **Changing or resetting a password ends the account's other sessions and
   sign-in tokens.** A change ends the account's other sessions and invalidates
   its stored password-reset links, magic links, in-progress social-account links

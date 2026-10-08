@@ -23,6 +23,7 @@ import {
   performRefreshTokenExchange,
   decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
+  UnknownKeyIdError,
 } from "@appstrate/connect";
 import type {
   RefreshContext as IntegrationRefreshContext,
@@ -32,6 +33,7 @@ import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
+import { encryptionKeyUnavailable } from "../lib/stored-credential.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
@@ -360,8 +362,9 @@ type RefreshClassification =
 
 /**
  * Run {@link forceRefreshIntegrationConnection} and classify the outcome into
- * the {@link RefreshClassification} discriminated union. Never throws — the
- * caller maps each branch to its own transport error. Shared by the MITM
+ * the {@link RefreshClassification} discriminated union. Throws only the 503
+ * of a key id missing from the keyring — never a verdict on the connection;
+ * the caller maps each branch to its own transport error. Shared by the MITM
  * credentials resolver and the credential-proxy resolver.
  */
 export async function refreshAndClassify(
@@ -387,29 +390,14 @@ export async function refreshAndClassify(
     if (err instanceof UnrefreshableConnectionError) {
       return { status: "terminal", reason: err.reason };
     }
+    if (err instanceof UnknownKeyIdError) {
+      throw encryptionKeyUnavailable(err, {
+        connectionId: connection.id,
+        packageId: packageIdForLog,
+        authKey: authKeyForLog,
+      });
+    }
     return { status: "transient", error: err };
-  }
-}
-
-/**
- * Decrypt an integration connection's credential blob into a flat string
- * map, returning `null` (with a warning) on failure rather than throwing.
- * Shared by the MITM credentials resolver and the credential-proxy resolver.
- */
-export function decryptIntegrationConnectionFields(
-  ciphertext: string,
-  packageIdForLog: string,
-  authKeyForLog: string,
-): Record<string, string> | null {
-  try {
-    return decryptCredentialsToStringMap(ciphertext);
-  } catch (err) {
-    logger.warn("integration credential decrypt failed", {
-      packageId: packageIdForLog,
-      authKey: authKeyForLog,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
   }
 }
 
@@ -417,7 +405,8 @@ export function decryptIntegrationConnectionFields(
  * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
  * auth from the connection's pinned client (system, org or space). Returns
  * `null` (the auth is not refreshable) for: non-oauth2 auths, auths without a
- * `tokenUrl`, a pinned client that no longer resolves, and undecryptable client secret.
+ * `tokenUrl`, a pinned client that no longer resolves, and an unreadable client secret
+ * (a missing key throws the 503).
  *
  * Public clients (`token_endpoint_auth_method: "none"`, RFC 7591 §2) ARE
  * supported — the refresh helper sends `client_id` in the body with no

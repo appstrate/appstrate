@@ -62,6 +62,8 @@ import { logInfraMode } from "../infra/index.ts";
 import { initBundleSignaturePolicy } from "../services/run-launcher/bundle-signature-policy.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
+import { keyringKids, opensWithKeyring } from "@appstrate/connect";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -114,6 +116,8 @@ export async function bootCritical(): Promise<void> {
   // reading as operator-provisioned is a security control that is OFF.
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertSelfServiceFoldApplied();
+
+  await assertKeyringCoversCiphertexts();
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -633,6 +637,51 @@ async function unfoldedSelfServiceClientCount(): Promise<number> {
     `),
   );
   return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while the database holds a ciphertext under a key id absent from the keyring
+ * (a retired key dropped before `scripts/rekey-encrypted-columns.ts` re-encrypted its rows, a
+ * misspelt kid): every read of those rows would fail. The inventory is the rekey script's.
+ * A configured kid none of whose samples opens is only warned about: dead rows written by an
+ * older key under the same id would make a refusal crash-loop on a correct key.
+ */
+export async function assertKeyringCoversCiphertexts(
+  inventory: () => Promise<readonly KidCount[]> = storedCiphertextKids,
+  knownKids: ReadonlySet<string> = keyringKids(),
+): Promise<void> {
+  const missing = new Map<string, string[]>();
+  const opens = new Map<string, boolean>();
+  for (const { table, column, kid, count, samples } of await inventory()) {
+    if (kid === null) continue;
+    if (knownKids.has(kid)) {
+      opens.set(kid, opens.get(kid) || samples.some(opensWithKeyring));
+      continue;
+    }
+    missing.set(kid, [...(missing.get(kid) ?? []), `${table}.${column} (${count})`]);
+  }
+  for (const [kid, opened] of opens) {
+    if (opened) continue;
+    logger.warn("Encryption key opens none of its kid's sampled ciphertexts", {
+      kid,
+      remedy:
+        "a key replaced under the same id? `bun scripts/rekey-encrypted-columns.ts` names the column",
+    });
+  }
+  if (missing.size === 0) return;
+
+  const detail = [...missing].map(([kid, where]) => `'${kid}' in ${where.join(", ")}`);
+  throw new Error(
+    `Missing encryption key(s): the database holds ciphertexts under ${detail.join("; ")}, ` +
+      "and no key with that id is configured. Refusing to boot: every read of those rows " +
+      "would fail. Add each missing key to CONNECTION_ENCRYPTION_KEYS (kid → base64 key), " +
+      "then restart.",
+  );
+}
+
+async function storedCiphertextKids(): Promise<KidCount[]> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  return countByKid(async (text) => toRows(await db.execute(rawSql.raw(text))));
 }
 
 /**
