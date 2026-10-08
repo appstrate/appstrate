@@ -59,9 +59,9 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     const unrenderable = unrenderableAuthorizedUriFields(auth.authorized_uris ?? [], credentials);
     if (unrenderable.length > 0) {
       throw validationFailed(
-        unrenderable.map(({ field, expected }) => ({
-          field: `credentials.${field}`,
-          code: "unrenderable_authorized_uri",
+        unrenderable.map(({ root, field, expected }) => ({
+          field: root === "variable" ? `variables.${field}` : `credentials.${field}`,
+          code: root === "variable" ? "unrenderable_variable" : "unrenderable_authorized_uri",
           title: "Invalid Connection Field",
           message: `must be ${expected}`,
         })),

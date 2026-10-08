@@ -28,7 +28,9 @@ import {
 } from "@appstrate/core/integration";
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core/sidecar-types";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
+import { isVariableTemplate, renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import {
   renderAuthorizedUris,
   renderCredentialTemplate as renderCredentialTemplateCore,
@@ -409,6 +411,44 @@ export function getRemoteSource(
   if (typeof url !== "string") return null;
   if (transport !== "streamable-http" && transport !== "sse") return null;
   return { url, transport };
+}
+
+/**
+ * `source.remote` rendered for one connection (AFPS §7.12): a URL template from the connection's
+ * variables, a literal URL as it is. `null` when the source is not remote or the URL does not
+ * render (no variables, or a value its form refuses).
+ */
+export function renderRemoteSource(
+  manifest: IntegrationManifest,
+  variables: Readonly<Record<string, string>> | null,
+): { url: string; transport: "streamable-http" | "sse" } | null {
+  const remote = getRemoteSource(manifest);
+  if (!remote) return null;
+  const url = renderUrlTemplate(remote.url, variables ?? {});
+  return url === null ? null : { url, transport: remote.transport };
+}
+
+/** The integration's connection-variable schema (AFPS §7.12); `null` when it declares none. */
+export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObject | null {
+  const schema = (manifest as { variables?: { schema?: unknown } }).variables?.schema;
+  return typeof schema === "object" && schema !== null && !Array.isArray(schema)
+    ? (schema as JSONSchemaObject)
+    : null;
+}
+
+/**
+ * Whether `auth`'s authorization server is chosen per connection (AFPS §7.3): an oauth2 auth
+ * whose `issuer` is a URL template, or any oauth2 auth of an integration whose
+ * `source.remote.url` is one.
+ */
+export function hasPerConnectionAuthServer(
+  manifest: IntegrationManifest,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
+): boolean {
+  if (auth.type !== "oauth2") return false;
+  if (isVariableTemplate(auth.issuer)) return true;
+  const source = (manifest as { source?: { kind?: string; remote?: { url?: unknown } } }).source;
+  return source?.kind === "remote" && isVariableTemplate(source.remote?.url);
 }
 
 /** Read the Appstrate orchestrated-tool extension off a connect block. */

@@ -39,6 +39,7 @@
     "./semver-resolve": "./src/semver-resolve.ts",
     "./integrity": "./src/integrity.ts",
     "./credential-template": "./src/credential-template.ts",
+    "./connection-variables": "./src/connection-variables.ts",
     "./delivery-http": "./src/delivery-http.ts",
     "./api-tool-naming": "./src/api-tool-naming.ts",
     "./mcp-naming": "./src/mcp-naming.ts",

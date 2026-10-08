@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
@@ -16,6 +17,9 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
+  renderRemoteSource,
+  getVariablesSchema,
+  hasPerConnectionAuthServer,
   getAppstrateConnectMeta,
   authKeysServingSelection,
   type AfpsManifestConnect,
@@ -253,5 +257,56 @@ describe("runnerEgressFor", () => {
       authorizedUris: [],
       allowAllUris: true,
     });
+  });
+});
+
+describe("connection variables (AFPS §7.12)", () => {
+  const templated = manifest({
+    kind: "remote",
+    remote: { url: "{$variable.base_url}/api/v4/mcp", transport: "streamable-http" },
+  });
+
+  it("renderRemoteSource renders a template per connection, a literal as it is", () => {
+    expect(renderRemoteSource(templated, { base_url: "https://gitlab.example.com/" })).toEqual({
+      url: "https://gitlab.example.com/api/v4/mcp",
+      transport: "streamable-http",
+    });
+    expect(renderRemoteSource(templated, null)).toBeNull();
+    expect(renderRemoteSource(templated, { base_url: "https://u@gitlab.example.com" })).toBeNull();
+    const literal = manifest({
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/v1", transport: "sse" },
+    });
+    expect(renderRemoteSource(literal, null)).toEqual({
+      url: "https://mcp.example.com/v1",
+      transport: "sse",
+    });
+    expect(renderRemoteSource(manifest({ kind: "none" }), null)).toBeNull();
+  });
+
+  it("getVariablesSchema reads variables.schema, null when undeclared", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { base_url: { type: "string" } },
+    };
+    expect(
+      getVariablesSchema({ ...templated, variables: { schema } } as unknown as IntegrationManifest),
+    ).toBe(schema);
+    expect(getVariablesSchema(templated)).toBeNull();
+  });
+
+  it("hasPerConnectionAuthServer: oauth2 under a templated issuer or remote url", () => {
+    const literal = manifest({ kind: "remote", remote: { url: "https://x.example.com/mcp" } });
+    expect(hasPerConnectionAuthServer(templated, { type: "oauth2" })).toBe(true);
+    expect(hasPerConnectionAuthServer(templated, { type: "api_key" })).toBe(false);
+    expect(
+      hasPerConnectionAuthServer(literal, {
+        type: "oauth2",
+        issuer: "https://{$variable.tenant}.idp.example.com",
+      }),
+    ).toBe(true);
+    expect(
+      hasPerConnectionAuthServer(literal, { type: "oauth2", issuer: "https://idp.example.com" }),
+    ).toBe(false);
   });
 });

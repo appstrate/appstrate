@@ -70,6 +70,12 @@ export const integrationConnections = pgTable(
     credentialsEncrypted: text("credentials_encrypted").notNull(),
     /** Identity claims extracted via the AFPS `auths.{key}.identity_claims` map (§7.4) — `sub`, `email`, … */
     identityClaims: jsonb("identity_claims"),
+    /**
+     * Connection variables (AFPS §7.12) the user submitted, plaintext: non-secret values that
+     * choose the upstream (`{$variable.<name>}`). NULL ⟺ the integration declares no variables.
+     * Written in the same statement as the credential acquired for them.
+     */
+    variables: jsonb("variables").$type<Record<string, string>>(),
     /** Granted OAuth scopes — surfaced in the UI for re-consent prompts. */
     scopesGranted: text("scopes_granted")
       .array()
@@ -248,6 +254,11 @@ export const integrationOauthClients = pgTable(
     // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
     // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
+    // The authorization server an auto-provisioned client was registered with, when the auth's
+    // server is chosen per connection (AFPS §7.3: a templated `issuer` or `source.remote.url`).
+    // NULL means the manifest's fixed authorization server. A client is never presented to
+    // another issuer.
+    issuer: text("issuer"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -260,10 +271,13 @@ export const integrationOauthClients = pgTable(
       .on(table.orgId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
     // At most one auto-provisioned (DCR/CIMD) client per (space, integration,
-    // auth) — replaces the old global UNIQUE for the find-or-create path while
-    // leaving classic custom clients free to be N.
+    // auth, issuer) — replaces the old global UNIQUE for the find-or-create path
+    // while leaving classic custom clients free to be N. `coalesce` makes a NULL
+    // issuer (the manifest's fixed server) one key, as NULLS NOT DISTINCT would,
+    // which drizzle's index builder cannot express; `ioc_issuer_is_auto` keeps
+    // `''` out so the two never collide.
     uniqueIndex("idx_ioc_one_auto")
-      .on(table.spaceId, table.integrationId, table.authKey)
+      .on(table.spaceId, table.integrationId, table.authKey, sql`coalesce(${table.issuer}, '')`)
       .where(sql`${table.autoProvisioned}`),
     // Values are the three methods `@appstrate/connect` implements.
     check(
@@ -287,6 +301,10 @@ export const integrationOauthClients = pgTable(
     check(
       "ioc_auto_provisioned_is_space",
       sql`NOT ${table.autoProvisioned} OR ${table.spaceId} IS NOT NULL`,
+    ),
+    check(
+      "ioc_issuer_is_auto",
+      sql`${table.issuer} IS NULL OR (${table.autoProvisioned} AND ${table.issuer} <> '')`,
     ),
     index("idx_integration_oauth_clients_package").on(table.integrationId),
     // Hot path: the connect resolver + clients list enumerate every custom

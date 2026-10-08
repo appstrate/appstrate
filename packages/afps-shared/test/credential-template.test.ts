@@ -137,10 +137,12 @@ describe("renderAuthorizedUris", () => {
 describe("parseUrlFormPattern", () => {
   it("splits a leading placeholder from its / suffix", () => {
     expect(parseUrlFormPattern("{$credential.site_url}/api/3/**")).toEqual({
+      root: "credential",
       field: "site_url",
       suffix: "/api/3/**",
     });
     expect(parseUrlFormPattern("{$credential.webhook_url}")).toEqual({
+      root: "credential",
       field: "webhook_url",
       suffix: "",
     });
@@ -275,7 +277,11 @@ describe("unrenderableAuthorizedUriFields", () => {
   it("names a bare entry whose value ends in an empty '?' or '#'", () => {
     for (const hook of ["https://h.example.com/hook?", "https://h.example.com/hook#"]) {
       const [entry] = unrenderableAuthorizedUriFields(["{$credential.hook}"], { hook });
-      expect(entry).toEqual({ field: "hook", expected: expect.stringContaining("empty '?'") });
+      expect(entry).toEqual({
+        root: "credential",
+        field: "hook",
+        expected: expect.stringContaining("empty '?'"),
+      });
     }
   });
 
@@ -403,5 +409,168 @@ describe("parseAuthorizedUriPattern", () => {
     ]) {
       expect([pattern, parseAuthorizedUriPattern(pattern).kind]).toEqual([pattern, "malformed"]);
     }
+  });
+});
+
+describe("connection variables (§7.12) in value templates", () => {
+  it("accepts {$variable.<name>} in the grammar, not a malformed name", () => {
+    const t = "{$variable.base_url}{$variable.Base}{$variables.x}{$credential.a}";
+    expect(unsupportedTemplateExpressions(t)).toEqual(["{$variable.Base}", "{$variables.x}"]);
+  });
+
+  it("substitutes the raw value, in one pass, a missing one empty", () => {
+    expect(
+      renderCredentialTemplate(
+        "{$variable.base_url}/{$credential.token}/{$variable.missing}",
+        { token: "{$variable.base_url}" },
+        { variables: { base_url: "https://A.example.com/" } },
+      ),
+    ).toBe("https://A.example.com//{$variable.base_url}/");
+    expect(renderCredentialTemplate("[{$variable.constructor}]", {})).toBe("[]");
+    expect(renderCredentialTemplate("{$variable.x}", {}, { emptyAs: "null" })).toBeNull();
+  });
+});
+
+describe("connection variables (§7.9) in authorized_uris", () => {
+  it("parseUrlFormPattern reads a leading variable", () => {
+    expect(parseUrlFormPattern("{$variable.base_url}/api/v4/**")).toEqual({
+      root: "variable",
+      field: "base_url",
+      suffix: "/api/v4/**",
+    });
+    expect(parseUrlFormPattern("{$variable.base_url}")).toEqual({
+      root: "variable",
+      field: "base_url",
+      suffix: "",
+    });
+    expect(parseUrlFormPattern("{$variable.base_url}/{$credential.p}")).toBeNull();
+    expect(parseUrlFormPattern("{$credential.site}/{$variable.p}")).toBeNull();
+    expect(parseUrlFormPattern("{$variable.base_url}.example.com/**")).toBeNull();
+  });
+
+  describe("URL form", () => {
+    const api = "{$variable.base_url}/api/v4/**";
+
+    for (const [value, expected] of [
+      ["https://gitlab.example.com", "https://gitlab.example.com/api/v4/**"],
+      ["https://example.com/gitlab//", "https://example.com/gitlab/api/v4/**"],
+      ["http://GitLab.example.com:8080", "http://gitlab.example.com:8080/api/v4/**"],
+    ] as const) {
+      it(`renders ${JSON.stringify(value)}`, () => {
+        expect(renderAuthorizedUris([api], {}, { base_url: value })).toEqual([expected]);
+      });
+    }
+
+    it("renders a bare entry as the value URL itself", () => {
+      expect(
+        renderAuthorizedUris(["{$variable.base_url}"], {}, { base_url: "https://a.example.com" }),
+      ).toEqual(["https://a.example.com/"]);
+    });
+
+    for (const bad of [
+      "gitlab.example.com",
+      "ftp://gitlab.example.com",
+      "https://u@gitlab.example.com",
+      "https://@gitlab.example.com",
+      "https://gitlab.example.com/?a=1",
+      "https://gitlab.example.com/?",
+      "https://gitlab.example.com/#x",
+      "https://*.example.com",
+      "https://gitlab.example.com/*",
+    ]) {
+      it(`drops the entry, bare or not, when the value is ${JSON.stringify(bad)}`, () => {
+        expect(renderAuthorizedUris([api, "{$variable.base_url}"], {}, { base_url: bad })).toEqual(
+          [],
+        );
+      });
+    }
+
+    it("drops the entry when the variable is missing, whatever the credential holds", () => {
+      expect(renderAuthorizedUris([api], { base_url: "https://a.example.com" })).toEqual([]);
+    });
+  });
+
+  describe("authority form", () => {
+    const tenant = "https://{$variable.tenant}.forge.example.com/**";
+
+    it("fills the host alone or ahead of literal labels, before a literal port", () => {
+      expect(
+        renderAuthorizedUris(
+          ["https://{$variable.tenant}/**", "https://{$variable.tenant}.example.com:8443/v1/**"],
+          {},
+          { tenant: "Acme" },
+        ),
+      ).toEqual(["https://acme/**", "https://acme.example.com:8443/v1/**"]);
+    });
+
+    it("fills the host with lowercased labels", () => {
+      expect(renderAuthorizedUris([tenant], {}, { tenant: "Acme.EU" })).toEqual([
+        "https://acme.eu.forge.example.com/**",
+      ]);
+      expect(
+        renderAuthorizedUris(["https://{$variable.host}/**"], {}, { host: "Box.Example.com" }),
+      ).toEqual(["https://box.example.com/**"]);
+    });
+
+    for (const bad of ["-acme", "acme-", "a..b", "a_b", "a/b", "a:1", "*", "a".repeat(64), ""]) {
+      it(`drops the entry when the value is ${JSON.stringify(bad)}`, () => {
+        expect(renderAuthorizedUris([tenant], {}, { tenant: bad })).toEqual([]);
+      });
+    }
+
+    it("drops the entry when the rendered host exceeds 253 characters", () => {
+      const label = "a".repeat(63);
+      const value = [label, label, label, "a".repeat(44)].join(".");
+      expect(value.length + ".forge.example.com".length).toBe(254);
+      expect(renderAuthorizedUris([tenant], {}, { tenant: value })).toEqual([]);
+      expect(renderAuthorizedUris([tenant], {}, { tenant: value.slice(1) })).toHaveLength(1);
+    });
+
+    it("never fills a port, a path, or an entry without a scheme", () => {
+      for (const pattern of [
+        "https://h.example.com:{$variable.port}/**",
+        "https://h.example.com/{$variable.tenant}/**",
+        "{$variable.tenant}.example.com/**",
+        "https://api.{$variable.tenant}.example.com/**",
+        "https://u@{$variable.tenant}.example.com/**",
+        "https://{$variable.tenant}.example.com/{$credential.p}/**",
+      ]) {
+        expect([
+          pattern,
+          renderAuthorizedUris([pattern], {}, { port: "443", tenant: "a" }),
+        ]).toEqual([pattern, []]);
+      }
+    });
+  });
+
+  it("names the offending variables apart from same-named credential fields", () => {
+    const patterns = [
+      "{$variable.base_url}/**",
+      "{$credential.base_url}/**",
+      "https://{$variable.tenant}.example.com/**",
+    ];
+    expect(
+      unrenderableAuthorizedUriFields(
+        patterns,
+        { base_url: "nope" },
+        { base_url: "nope", tenant: "-x" },
+      ),
+    ).toEqual([
+      { root: "variable", field: "base_url", expected: expect.stringContaining("query string") },
+      { root: "credential", field: "base_url", expected: expect.stringContaining("query string") },
+      { root: "variable", field: "tenant", expected: expect.stringContaining("labels") },
+    ]);
+  });
+
+  it("isHostUnboundedUriPattern bounds a variable placeholder like a credential one", () => {
+    for (const pattern of [
+      "{$variable.base_url}/**",
+      "{$variable.base_url}",
+      "https://{$variable.tenant}.example.com/**",
+      "https://{$variable.host}/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+    expect(isHostUnboundedUriPattern("https://{$variable.tenant}.*/**")).toBe(true);
   });
 });

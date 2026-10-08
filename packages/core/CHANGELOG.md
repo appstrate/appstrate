@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Connection variables (AFPS §7.12)** in `findUnevaluableExpressions`
+  (`@appstrate/core/integration`): a `{$variable.<name>}` naming a declared
+  variable is evaluable in a delivery template and in `authorized_uris`, and a
+  `connect.login.request.url` may be a URL template; an undeclared variable is
+  reported, in those places and in the login url. The credential rules of
+  `integrationManifestSchema` (declared, required, refused on oauth2 and
+  `connect`) stay on `{$credential.<field>}` references.
+
 - **`PiModelDialect`** and **`isPiModelDialect`**
   (`@appstrate/core/sidecar-types`): what of a Pi registry record shapes a
   request beyond the resolved values, as the platform hands it to a model

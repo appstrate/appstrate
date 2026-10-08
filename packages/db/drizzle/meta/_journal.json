@@ -575,6 +575,13 @@
       "when": 1791500060000,
       "tag": "0081_schedule_disabled_reason_connection_unshared",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1791500120000,
+      "tag": "0082_connection_variables",
+      "breakpoints": true
     }
   ]
 }

@@ -108,3 +108,28 @@ describe("loginBlockIssues", () => {
     ]);
   });
 });
+
+describe("loginBlockIssues — connection variables (§7.7, §7.12)", () => {
+  const paths = (url: string, extra: { body?: string; headers?: Record<string, string> } = {}) =>
+    loginBlockIssues({ request: { url, ...extra } }).map((i) => i.path.join("."));
+
+  it("accepts a URL-template url", () => {
+    expect(paths("{$variable.base_url}/api/login")).toEqual([]);
+    expect(paths("https://{$variable.tenant}.example.com/login")).toEqual([]);
+  });
+
+  it("refuses a variable url that is not a URL template, or carries {{name}}", () => {
+    expect(paths("{$variable.base_url}/login?u={{user}}")).toEqual(["request.url"]);
+    expect(paths("https://example.com/{$variable.tenant}/login")).toEqual(["request.url"]);
+    expect(paths("{$variable.base_url}/{$credential.path}")).toEqual(["request.url"]);
+  });
+
+  it("still refuses {$…} in the body and headers", () => {
+    expect(
+      paths("{$variable.base_url}/login", {
+        body: "{$variable.base_url}",
+        headers: { Host: "{$variable.tenant}" },
+      }),
+    ).toEqual(["request.body", "request.headers.Host"]);
+  });
+});

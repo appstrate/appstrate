@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Canonical `{$credential.<field>}` value-template renderer — the SINGLE
- * source of truth. Consumers import this module directly; core no longer
- * publishes a `./credential-template` subpath (removed in core 6.0.0).
+ * Canonical value-template renderer — the SINGLE source of truth. Consumers import this module
+ * directly; core no longer publishes a `./credential-template` subpath (removed in core 6.0.0).
  *
  * AFPS `delivery.http` / `delivery.env` / `delivery.files` value templates
  * reference an auth's decrypted credential bag via the `{$credential.<field>}`
- * syntax. This is a DISTINCT syntax from the `{{var}}` substitution handled by
+ * syntax and the connection's variables (§7.12) via `{$variable.<name>}`. This
+ * is a DISTINCT syntax from the `{{var}}` substitution handled by
  * `@appstrate/afps-runtime`'s `substituteVars` — there is exactly ONE
- * implementation per syntax, and this module owns `{$credential.<field>}`.
+ * implementation per syntax, and this module owns `{$credential.<field>}` and
+ * `{$variable.<name>}`.
  *
- * A missing field renders empty (a missing credential field means "no value to
+ * A missing field or variable renders empty (a missing credential field means "no value to
  * inject"). The empty-value behaviour is parametrised:
  *   - `emptyAs: "string"` (default) → returns `""` for an all-empty render
  *     (the `delivery.http` value-render policy: the caller decides whether to
@@ -22,9 +23,22 @@
  *     (the `delivery.env` / `delivery.files` "field missing → skip" policy).
  */
 
+import {
+  hostVariableValue,
+  MAX_HOST_LENGTH,
+  parseUrlVariableValue,
+  VARIABLE_REF,
+  variableRefs,
+} from "./connection-variables.ts";
+
 export const CREDENTIAL_REF = /\{\$credential\.([A-Za-z0-9_]+)\}/g;
 
 const SINGLE_CREDENTIAL_REF = new RegExp(`^${CREDENTIAL_REF.source}$`);
+const SINGLE_VARIABLE_REF = new RegExp(`^${VARIABLE_REF.source}$`);
+
+/** Either reference: group 1 is a credential field, group 2 a variable name. */
+const TEMPLATE_REF = new RegExp(`${CREDENTIAL_REF.source}|${VARIABLE_REF.source}`, "g");
+const HAS_TEMPLATE_REF = new RegExp(TEMPLATE_REF.source);
 
 /** Any `{$…}` runtime expression embedded in a template (AFPS §7.7). */
 const EMBEDDED_EXPRESSION = /\{\$[^{}]*\}/g;
@@ -39,9 +53,14 @@ export function templateExpressions(template: string): string[] {
   return [...new Set(template.match(EMBEDDED_EXPRESSION) ?? [])];
 }
 
-/** The embedded `{$…}` expressions of `template` that are not `{$credential.<field>}` references. */
+/**
+ * The embedded `{$…}` expressions of `template` that are neither `{$credential.<field>}` nor
+ * `{$variable.<name>}` references.
+ */
 export function unsupportedTemplateExpressions(template: string): string[] {
-  return templateExpressions(template).filter((e) => parseCredentialRef(e) === null);
+  return templateExpressions(template).filter(
+    (e) => parseCredentialRef(e) === null && !SINGLE_VARIABLE_REF.test(e),
+  );
 }
 
 export interface RenderCredentialTemplateOptions {
@@ -50,6 +69,8 @@ export interface RenderCredentialTemplateOptions {
    * returns `null`. Defaults to `"string"`.
    */
   emptyAs?: "string" | "null";
+  /** The connection's variables, rendered for `{$variable.<name>}`. Defaults to none. */
+  variables?: Readonly<Record<string, string>>;
 }
 
 export function renderCredentialTemplate(
@@ -70,22 +91,27 @@ export function renderCredentialTemplate(
   const [unsupported] = unsupportedTemplateExpressions(template);
   if (unsupported !== undefined) {
     throw new Error(
-      `unsupported template expression '${unsupported}' — only {$credential.<field>} renders`,
+      `unsupported template expression '${unsupported}' — only {$credential.<field>} and {$variable.<name>} render`,
     );
   }
-  const rendered = substituteCredentialRefs(template, credential);
+  const rendered = substituteRefs(template, credential, opts.variables ?? {});
   if (opts.emptyAs === "null") return rendered.length === 0 ? null : rendered;
   return rendered;
 }
 
-/** Each `{$credential.<field>}` → its value; a missing or inherited field renders empty. */
-function substituteCredentialRefs(
+const own = (bag: Readonly<Record<string, unknown>>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(bag, key);
+
+/** Each reference → its value, in one pass; a missing or inherited one renders empty. */
+function substituteRefs(
   template: string,
   credential: Readonly<Record<string, unknown>>,
+  variables: Readonly<Record<string, unknown>>,
 ): string {
-  return template.replace(CREDENTIAL_REF, (_m, field: string) =>
-    Object.prototype.hasOwnProperty.call(credential, field) ? String(credential[field]) : "",
-  );
+  return template.replace(TEMPLATE_REF, (_m, field: string | undefined, name: string) => {
+    if (field !== undefined) return own(credential, field) ? String(credential[field]) : "";
+    return own(variables, name) ? String(variables[name]) : "";
+  });
 }
 
 /** Field names referenced by `{$credential.<name>}` placeholders, in order, deduplicated. */
@@ -96,20 +122,25 @@ export function credentialTemplateRefs(template: string): string[] {
 /** A rendered value may only be a literal host label run or port digits, never dots alone. */
 const AUTHORITY_VALUE = /^(?!\.+$)[A-Za-z0-9.-]+$/;
 
-const URL_FORM_HEAD = new RegExp(`^${CREDENTIAL_REF.source}`);
+const URL_FORM_HEAD = new RegExp(`^(?:${TEMPLATE_REF.source})`);
+
+/** Which bag a template placeholder reads: the credential, or the connection's variables. */
+export type TemplateRoot = "credential" | "variable";
 
 /**
- * Split a URL-form pattern (#1627): exactly one placeholder at index 0, followed by nothing or
- * a `/` suffix without placeholders. `null` for any other pattern.
+ * Split a URL-form pattern (#1627, §7.9): exactly one placeholder at index 0, followed by nothing
+ * or a `/` suffix without placeholders. `null` for any other pattern.
  */
-export function parseUrlFormPattern(pattern: string): { field: string; suffix: string } | null {
+export function parseUrlFormPattern(
+  pattern: string,
+): { root: TemplateRoot; field: string; suffix: string } | null {
   const head = URL_FORM_HEAD.exec(pattern);
   if (!head) return null;
   const suffix = pattern.slice(head[0].length);
-  if (suffix !== "" && (!suffix.startsWith("/") || credentialTemplateRefs(suffix).length > 0)) {
-    return null;
-  }
-  return { field: head[1]!, suffix };
+  if (suffix !== "" && (!suffix.startsWith("/") || HAS_TEMPLATE_REF.test(suffix))) return null;
+  return head[1] !== undefined
+    ? { root: "credential", field: head[1], suffix }
+    : { root: "variable", field: head[2]!, suffix };
 }
 
 /** `scheme://`, the scheme possibly globbed (`**://`). */
@@ -218,7 +249,7 @@ const WHATWG_IPV4_NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
  */
 export function isHostUnboundedUriPattern(pattern: string): boolean {
   if (parseUrlFormPattern(pattern)) return false;
-  const parsed = parseAuthorizedUriPattern(pattern.replace(CREDENTIAL_REF, "x"));
+  const parsed = parseAuthorizedUriPattern(pattern.replace(TEMPLATE_REF, "x"));
   if (parsed.kind === "path") return parsed.pattern.includes("*");
   if (parsed.kind !== "url" || parsed.scheme.includes("*")) return true;
   const host = parsed.host.replace(/\.+$/, "");
@@ -258,23 +289,75 @@ const EXPECTED_URL =
   "an absolute http:// or https:// URL without userinfo, fragment ('#'), empty '?' or '*'";
 const EXPECTED_URL_NO_QUERY =
   "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
+const EXPECTED_HOST_LABELS =
+  "a host name: '.'-separated labels of 1 to 63 letters, digits and '-', none starting or ending with '-'";
 
-/** A field that keeps its `authorized_uris` entry from rendering, and the form it must take. */
+/** A field or variable that keeps its `authorized_uris` entry from rendering, and the form it must take. */
 export interface UnrenderableUriField {
+  root: TemplateRoot;
   field: string;
   expected: string;
+}
+
+const HOST_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
+/**
+ * §7.9 authority form carrying a variable: `scheme://`, the variable filling the host alone or
+ * ahead of literal labels, an optional literal port, then a path without placeholders.
+ */
+const VARIABLE_AUTHORITY_ENTRY = new RegExp(
+  `^([A-Za-z][A-Za-z0-9+.-]*:\\/\\/)${VARIABLE_REF.source}((?:\\.${HOST_LABEL})*)((?::[0-9]+)?(?:\\/[^{}]*)?)$`,
+);
+
+function renderVariableEntry(
+  pattern: string,
+  variables: Readonly<Record<string, unknown>>,
+  urlForm: { field: string; suffix: string } | null,
+): { uri: string } | UnrenderableUriField {
+  if (urlForm) {
+    const url = parseUrlVariableValue(
+      own(variables, urlForm.field) ? variables[urlForm.field] : undefined,
+    );
+    if (url === null) {
+      return { root: "variable", field: urlForm.field, expected: EXPECTED_URL_NO_QUERY };
+    }
+    if (urlForm.suffix === "") return { uri: url.href };
+    return { uri: url.origin + url.pathname.replace(/\/+$/, "") + urlForm.suffix };
+  }
+  const entry = VARIABLE_AUTHORITY_ENTRY.exec(pattern);
+  if (!entry)
+    return { root: "variable", field: variableRefs(pattern)[0]!, expected: EXPECTED_HOST_LABELS };
+  const [, scheme, name, domain, rest] = entry as unknown as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const label = own(variables, name) ? hostVariableValue(variables[name]) : null;
+  if (label === null || label.length + domain.length > MAX_HOST_LENGTH) {
+    return { root: "variable", field: name, expected: EXPECTED_HOST_LABELS };
+  }
+  return { uri: scheme + label + domain + rest };
 }
 
 function renderPattern(
   pattern: string,
   fields: Readonly<Record<string, unknown>>,
+  variables: Readonly<Record<string, unknown>>,
 ): { uri: string } | UnrenderableUriField {
   const urlForm = parseUrlFormPattern(pattern);
+  if (urlForm?.root === "variable" || (!urlForm && variableRefs(pattern).length > 0)) {
+    return renderVariableEntry(pattern, variables, urlForm);
+  }
   if (urlForm) {
     const bare = urlForm.suffix === "";
     const base = renderUrlValue(fields[urlForm.field], bare);
     if (base === null) {
-      return { field: urlForm.field, expected: bare ? EXPECTED_URL : EXPECTED_URL_NO_QUERY };
+      return {
+        root: "credential",
+        field: urlForm.field,
+        expected: bare ? EXPECTED_URL : EXPECTED_URL_NO_QUERY,
+      };
     }
     // A suffix brings its own `/`; a bare entry keeps the value's exact path (`…/hook/`).
     return { uri: bare ? base : base.replace(/\/$/, "") + urlForm.suffix };
@@ -283,39 +366,45 @@ function renderPattern(
     const value = fields[ref];
     return typeof value !== "string" || !AUTHORITY_VALUE.test(value);
   });
-  if (bad !== undefined) return { field: bad, expected: EXPECTED_AUTHORITY };
+  if (bad !== undefined) return { root: "credential", field: bad, expected: EXPECTED_AUTHORITY };
   // A pattern is not a delivery template: anything but a checked field stays literal, narrowing it.
-  return { uri: substituteCredentialRefs(pattern, fields) };
+  return { uri: substituteRefs(pattern, fields, {}) };
 }
 
 /**
- * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
- * referenced field fails {@link AUTHORITY_VALUE} (or, for the URL form, {@link renderUrlValue}),
- * so a value cannot add a wildcard, a separator or another host. Import validation confines
- * placeholders to the host and port, or to the head of a URL-form pattern.
+ * Render `authorized_uris` for one connection (#1458, §7.9). A templated pattern is DROPPED when
+ * a referenced field fails {@link AUTHORITY_VALUE} (or, for the URL form, {@link renderUrlValue}),
+ * or a referenced variable fails the §7.12 rule of its form, so a value cannot add a wildcard, a
+ * separator or another host. Import validation confines placeholders to the host and port, or to
+ * the head of a URL-form pattern.
  */
 export function renderAuthorizedUris(
   patterns: readonly string[],
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>> = {},
 ): string[] {
   return patterns.flatMap((pattern) => {
-    const rendered = renderPattern(pattern, fields);
+    const rendered = renderPattern(pattern, fields, variables);
     return "uri" in rendered ? [rendered.uri] : [];
   });
 }
 
 /**
- * The fields whose value would make {@link renderAuthorizedUris} drop an entry, once per field,
- * so a connection can be refused when it is written rather than on every later call (#1627).
+ * The fields and variables whose value would make {@link renderAuthorizedUris} drop an entry,
+ * once each, so a connection can be refused when it is written rather than on every later call
+ * (#1627).
  */
 export function unrenderableAuthorizedUriFields(
   patterns: readonly string[],
   fields: Readonly<Record<string, unknown>>,
+  variables: Readonly<Record<string, unknown>> = {},
 ): UnrenderableUriField[] {
-  const byField = new Map<string, UnrenderableUriField>();
+  const byRef = new Map<string, UnrenderableUriField>();
   for (const pattern of patterns) {
-    const rendered = renderPattern(pattern, fields);
-    if (!("uri" in rendered) && !byField.has(rendered.field)) byField.set(rendered.field, rendered);
+    const rendered = renderPattern(pattern, fields, variables);
+    if ("uri" in rendered) continue;
+    const key = `${rendered.root}.${rendered.field}`;
+    if (!byRef.has(key)) byRef.set(key, rendered);
   }
-  return [...byField.values()];
+  return [...byRef.values()];
 }
