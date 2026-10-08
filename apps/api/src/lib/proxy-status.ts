@@ -7,6 +7,7 @@
  */
 
 import type { MiddlewareHandler } from "hono";
+import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError } from "./errors.ts";
 
@@ -30,6 +31,13 @@ export function relayedProxyStatus(receivedStatus: number): string {
 
 function proxyErrorStatus(type: ProxyErrorType): string {
   return `${PROXY_NAME}; error=${type}`;
+}
+
+interface ProxyProblem {
+  status: number;
+  title: string;
+  proxyError?: ProxyErrorType;
+  failure?: string;
 }
 
 /**
@@ -75,10 +83,7 @@ const PROXY_PROBLEMS = {
     proxyError: "http_response_timeout",
     failure: "did not answer in time",
   },
-} as const satisfies Record<
-  string,
-  { status: number; title: string; proxyError?: ProxyErrorType; failure?: string }
->;
+} as const satisfies Record<string, ProxyProblem> & Record<ApiCallFailureCode, ProxyProblem>;
 
 export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
 
@@ -92,8 +97,7 @@ export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode
 
 /** The problem a proxy answers for `code`; `detail` never names a secret. */
 export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {
-  const problem: { status: number; title: string; proxyError?: ProxyErrorType } =
-    PROXY_PROBLEMS[code];
+  const problem: ProxyProblem = PROXY_PROBLEMS[code];
   return new ApiError({
     status: problem.status,
     code,

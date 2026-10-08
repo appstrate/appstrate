@@ -51,8 +51,10 @@ import {
   createMcpServer,
   ErrorCode,
   McpError,
+  API_CALL_ERROR_META_KEY,
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
+  type ApiCallErrorMeta,
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
   type AppstrateToolDefinition,
@@ -128,17 +130,14 @@ import {
   type ApiCallDeps,
   type ApiCallRequestBody,
 } from "./credential-proxy.ts";
-import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
+import { buildSidecarAnswerUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
- * `_meta` payload attached to every `api_call` pre-flight error
- * (no upstream contact). Surfacing `status: 0` lets the runtime
- * distinguish "no upstream contact" from "upstream returned 5xx" via
- * the status code rather than the absence of `_meta` — the runtime
- * parser now requires `_meta` on every CallToolResult.
+ * `_meta` of an `api_call` the sidecar answered itself: `status: 0` tells the runtime no
+ * upstream response reached it, as opposed to "upstream returned 5xx".
  */
-const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
-  [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
+const SIDECAR_ANSWER_META: Record<string, unknown> = {
+  [UPSTREAM_META_KEY]: buildSidecarAnswerUpstreamMeta(),
 };
 
 /**
@@ -264,7 +263,7 @@ function multipartError(
       content: [{ type: "text", text }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -290,7 +289,7 @@ function bodyPreflightError(
       content: [{ type: "text", text: `${label}: ${text}` }],
       ...(structuredContent ? { structuredContent } : {}),
       isError: true,
-      _meta: API_CALL_PREFLIGHT_META,
+      _meta: SIDECAR_ANSWER_META,
     },
   };
 }
@@ -999,7 +998,7 @@ function buildSidecarTools(options: MountMcpOptions): {
             },
           ],
           isError: true,
-          _meta: API_CALL_PREFLIGHT_META,
+          _meta: SIDECAR_ANSWER_META,
         };
       }
 
@@ -1040,12 +1039,14 @@ function buildSidecarTools(options: MountMcpOptions): {
         return {
           content: [{ type: "text", text: `${ctx.label}: ${result.error}` }],
           isError: true,
-          // Pre-flight failure (cred fetch, URL allowlist, etc): no
-          // upstream contact, but the runtime parser requires `_meta`
-          // on every CallToolResult — surface `status: 0` so the agent
-          // can distinguish "no upstream contact" from "upstream
-          // returned 5xx" via the status code.
-          _meta: API_CALL_PREFLIGHT_META,
+          // The sidecar answered (refusal, or timeout / unreachable / refused hop after sending):
+          // the parser requires `_meta` on every result — `status: 0`, plus any shared code.
+          _meta: result.code
+            ? {
+                ...SIDECAR_ANSWER_META,
+                [API_CALL_ERROR_META_KEY]: { code: result.code } satisfies ApiCallErrorMeta,
+              }
+            : SIDECAR_ANSWER_META,
         };
       }
       return responseToToolResult(result.response, {

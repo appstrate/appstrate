@@ -24,6 +24,7 @@ import {
   matchesAuthorizedUriSpec,
 } from "@appstrate/afps-shared/authorized-uris";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
+import { ENGINE_FAILURE_CODE } from "./api-call-failure-codes.ts";
 
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
@@ -92,32 +93,30 @@ export class ApiCallRefusedError extends Error {
 
 /** Why an `api_call` exchange failed, on every path (platform proxy, sidecar, CLI). */
 export interface ApiCallFailureClass {
-  /** `invalid_header`: a header value is no HTTP field value; nothing was sent. */
-  kind: "not_authorized" | "ssrf" | "unresolvable" | "invalid_header" | "timeout" | "transport";
+  code: (typeof ENGINE_FAILURE_CODE)[keyof typeof ENGINE_FAILURE_CODE];
   /** A redirect hop was refused, not the initial target. */
   redirect: boolean;
   /** The refusal's message (hosts redacted); a transport error's own message. */
   message: string;
-  code?: string;
+  /** A transport error's system code: Bun's `ConnectionRefused`, Node's `ECONNREFUSED`. */
+  systemCode?: string;
 }
 
 /** Classify what {@link fetchApiCall} threw; each path maps the class to its own output. */
 export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
-  if (err instanceof ApiCallRefusedError) {
-    return { kind: err.kind, redirect: err.redirect, message: err.message };
-  }
-  if (err instanceof InvalidHeaderValueError) {
-    return { kind: "invalid_header", redirect: false, message: err.message };
-  }
+  const failure = (kind: keyof typeof ENGINE_FAILURE_CODE, message: string, redirect = false) => ({
+    code: ENGINE_FAILURE_CODE[kind],
+    redirect,
+    message,
+  });
+  if (err instanceof ApiCallRefusedError) return failure(err.kind, err.message, err.redirect);
+  if (err instanceof InvalidHeaderValueError) return failure("invalid_header", err.message);
   const error = err instanceof Error ? err : new Error(String(err));
-  if (error.name === "TimeoutError")
-    return { kind: "timeout", redirect: false, message: error.message };
-  const code = (error as { code?: unknown }).code;
+  if (error.name === "TimeoutError") return failure("timeout", error.message);
+  const systemCode = (error as { code?: unknown }).code;
   return {
-    kind: "transport",
-    redirect: false,
-    message: error.message,
-    ...(typeof code === "string" ? { code } : {}),
+    ...failure("transport", error.message),
+    ...(typeof systemCode === "string" ? { systemCode } : {}),
   };
 }
 
@@ -169,12 +168,21 @@ function redactCredentialMessage(
 
 /**
  * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
- * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
+ * message scrubbed and a system `code` kept, nothing else — Bun keeps the full URL on `.path` even
+ * when the message has none.
  */
 function scrubTransportError(err: unknown, fields: Readonly<Record<string, string>>): unknown {
   if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
+  const code = (err as { code?: unknown }).code;
+  // A credential can be shaped like a system code (`sk_live_abc`): drop any code that holds one.
+  if (
+    typeof code === "string" &&
+    /^[A-Za-z][A-Za-z0-9_]*$/.test(code) &&
+    !Object.values(fields).some((value) => value.length > 0 && code.includes(value))
+  )
+    Object.assign(clean, { code });
   return clean;
 }
 

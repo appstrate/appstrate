@@ -11,8 +11,8 @@
  *
  * - Every `api_call` `CallToolResult` MUST carry `_meta` under
  *   {@link UPSTREAM_META_KEY}. The sidecar attaches it on every return
- *   path — including pre-flight failures (credential fetch, URL
- *   allowlist, body too large) which surface as `status: 0`,
+ *   path — including the ones it answered itself (pre-flight refusals,
+ *   timeouts, unreachable upstreams) which surface as `status: 0`,
  *   `headers: {}`. The runtime no longer accepts a missing `_meta` —
  *   that pre-`_meta` shape was a backwards-compat shim for sidecars
  *   older than the runtime in the same release; sidecar and runtime
@@ -25,6 +25,7 @@
  */
 
 import {
+  API_CALL_ERROR_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
   UPSTREAM_META_KEY,
   type UpstreamMeta,
@@ -66,4 +67,11 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
     }
   }
   return { status: obj.status, headers };
+}
+
+/** The code under {@link API_CALL_ERROR_META_KEY}; `null` if absent or malformed. */
+export function readApiCallErrorCode(result: CallToolResult): string | null {
+  const raw = (result._meta as Record<string, unknown> | undefined)?.[API_CALL_ERROR_META_KEY];
+  const code = (raw as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" && /^[a-z_]+$/.test(code) ? code : null;
 }

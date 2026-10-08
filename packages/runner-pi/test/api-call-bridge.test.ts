@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import type { Tool as AfpsTool, ToolResult } from "@appstrate/afps-runtime/resolvers";
 import { buildApiCallExtensionFactory } from "../src/api-call-bridge.ts";
 import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
@@ -134,6 +135,25 @@ describe("buildApiCallExtensionFactory", () => {
       "socket closed",
     );
     expect(events.map((e) => e.type)).toEqual(["api_call.called", "api_call.failed"]);
+    expect(events[1]!.code).toBeUndefined();
+  });
+
+  it("leads a coded failure with the sidecar's status line and reports its code", async () => {
+    const { execute, events } = await registerApiCall(async () => {
+      throw new ApiCallFailureError("blocked_target", "blocked network range");
+    });
+
+    const thrown = await execute("call-1", { target: "https://api.acme.com/x" }).catch(
+      (e: unknown) => e,
+    );
+    expect((thrown as Error).message).toBe(
+      "[api_call status=0 code=blocked_target]\nblocked network range",
+    );
+    expect(events[1]).toMatchObject({
+      type: "api_call.failed",
+      code: "blocked_target",
+      error: "blocked network range",
+    });
   });
 
   // Pi validates arguments against `parameters` before `execute` ever runs.

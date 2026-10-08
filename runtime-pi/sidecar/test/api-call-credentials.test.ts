@@ -401,7 +401,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
     expect((await call("{{site_url}}/wp-json/x")).ok).toBe(true);
     expect(hits).toEqual(["https://wp.example.com/wp-json/x"]);
     const other = await call("https://other.example.com/wp-json/x");
-    expect(other).toMatchObject({ ok: false, status: 403 });
+    expect(other).toMatchObject({ ok: false, code: "unauthorized_target" });
     expect(hits).toHaveLength(1);
   });
 
@@ -410,7 +410,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
     [["https://{$credential.host}/**"], { host: "127.0.0.1" }, "https://{{host}}/admin"],
   ])("never pins a connection-supplied internal host (%j)", async (uris, fields, target) => {
     const { call, hits } = run(uris, fields);
-    expect(await call(target)).toMatchObject({ ok: false, status: 403 });
+    expect(await call(target)).toMatchObject({ ok: false, code: "blocked_target" });
     expect(hits).toEqual([]);
   });
 
