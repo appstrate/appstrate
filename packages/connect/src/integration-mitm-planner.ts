@@ -53,7 +53,7 @@ import {
   planHttpDeliveryInjection,
   type HttpDeliveryInjectionDecision,
 } from "@appstrate/afps-runtime/resolvers";
-import { matchesAuthorizedUriSpec } from "./proxy-primitives.ts";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 
 // ─────────────────────────────────────────────
 // Public types

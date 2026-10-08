@@ -48,7 +48,8 @@
  * Pure: no DB / Redis / sidecar. `fetchImpl` + `now` are injectable for tests.
  */
 
-import { substituteVars, matchesAuthorizedUriSpec } from "../proxy-primitives.ts";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
+import { substituteVars } from "../proxy-primitives.ts";
 import { unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import {

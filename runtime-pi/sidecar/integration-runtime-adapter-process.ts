@@ -32,7 +32,7 @@ import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
 import type { Endpoint, Peer } from "./helpers.ts";
 import { logger } from "./logger.ts";

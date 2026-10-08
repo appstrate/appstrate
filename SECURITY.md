@@ -296,7 +296,7 @@ Every `api_call` path (the sidecar, the platform credential proxy, `appstrate ru
 const inAllowlist = (url: URL) => authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
 ```
 
-`matchesAuthorizedUriSpec` (`packages/afps-runtime/src/resolvers/http-call-core.ts`) compares the target with its userinfo and fragment stripped and fails closed on a target that does not parse. In a pattern, `*` matches within one path segment and `**` any substring, except in the host, where no wildcard crosses the `/` that ends it; a scheme glob matches scheme characters only. A redirect to an origin the allowlist does not name loses the credential, and an https→http hop always does.
+`matchesAuthorizedUriSpec` (`packages/afps-shared/src/authorized-uris.ts`) compares the target with its userinfo and fragment stripped and fails closed on a target that does not parse. In a pattern, `*` matches within one path segment and `**` any substring, except in the host, where no wildcard crosses the `/` that ends it; a scheme glob matches scheme characters only. A redirect to an origin the allowlist does not name loses the credential, and an https→http hop always does.
 
 **Unauthorized requests are refused with a 403-class error that names the declared entries** (never a rendered one, which may be a secret). The platform proxy answers `403 unauthorized_target`; the sidecar's `api_call` tool error carries:
 

@@ -43,11 +43,7 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
 // consumer actually imports is re-exported here; `applyInjectedCredentialHeader`
 // and `buildInjectedCredentialHeader` are reached through the subpath.
-export {
-  substituteVars,
-  matchesAuthorizedUriSpec,
-  applyInjectedCredentialHeaderToHeaders,
-} from "./proxy-primitives.ts";
+export { substituteVars, applyInjectedCredentialHeaderToHeaders } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // ─── AFPS integration manifest ─────────────────────────────────────────

@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { createApiCallCredentialAdapter } from "../api-call-credentials.ts";
 import { executeApiCall } from "../credential-proxy.ts";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import {
   createIntegrationCredentialsSource,

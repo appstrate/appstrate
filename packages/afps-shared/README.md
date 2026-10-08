@@ -29,6 +29,7 @@ import each module by subpath.
 | `./integrity`                        | Package integrity digests.                                                                                                                                  |
 | `./companion-files`                  | Companion-file enforcement, shared between the platform ZIP-import path and the runtime bundle loader.                                                      |
 | `./credential-template`              | `{$credential.<field>}` template rendering; any other `{$…}` expression throws.                                                                             |
+| `./authorized-uris`                  | The `authorized_uris` URL-pattern rules: parse, render per connection, match a URL, compile the egress policy.                                              |
 | `./delivery-http`                    | Shared HTTP delivery contract.                                                                                                                              |
 | `./semver-resolve`                   | Version-range resolution against a published version list.                                                                                                  |
 | `./api-tool-naming` · `./mcp-naming` | Deterministic tool and MCP-server naming.                                                                                                                   |

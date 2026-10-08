@@ -19,7 +19,10 @@ import {
   assertHttpFieldValue,
   InvalidHeaderValueError,
 } from "@appstrate/afps-shared/delivery-http";
-import { hostLiterallyAllowlisted, matchesAuthorizedUriSpec } from "./http-call-core.ts";
+import {
+  hostLiterallyAllowlisted,
+  matchesAuthorizedUriSpec,
+} from "@appstrate/afps-shared/authorized-uris";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */

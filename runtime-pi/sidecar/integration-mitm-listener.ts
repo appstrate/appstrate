@@ -87,13 +87,13 @@ import {
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { substituteVars, matchesAuthorizedUriSpec } from "@appstrate/connect/proxy-primitives";
+import { substituteVars } from "@appstrate/connect/proxy-primitives";
+import { HOP_BY_HOP_HEADERS, unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import {
-  HOP_BY_HOP_HEADERS,
-  unresolvedPlaceholders,
+  isHostUnboundedUriPattern,
+  matchesAuthorizedUriSpec,
   type EgressPolicy,
-} from "@appstrate/afps-runtime/resolvers";
-import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
+} from "@appstrate/afps-shared/authorized-uris";
 import { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import type { CertMinter } from "./integration-cert-minter.ts";

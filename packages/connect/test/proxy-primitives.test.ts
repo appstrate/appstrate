@@ -10,7 +10,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   substituteVars,
-  matchesAuthorizedUriSpec,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
@@ -51,63 +50,6 @@ describe("substituteVars", () => {
 
   it("permits empty-string credential values", () => {
     expect(substituteVars("X={{empty}}", { empty: "" })).toBe("X=");
-  });
-});
-
-describe("matchesAuthorizedUriSpec (AFPS semantics)", () => {
-  it("matches an exact URL", () => {
-    expect(
-      matchesAuthorizedUriSpec(
-        "https://api.example.com/v1/messages",
-        "https://api.example.com/v1/messages",
-      ),
-    ).toBe(true);
-  });
-
-  it("rejects a URL that doesn't match the pattern", () => {
-    expect(
-      matchesAuthorizedUriSpec(
-        "https://api.example.com/v1/messages",
-        "https://api.example.com/v2/messages",
-      ),
-    ).toBe(false);
-  });
-
-  it("`*` matches a single path segment only", () => {
-    expect(
-      matchesAuthorizedUriSpec(
-        "https://api.example.com/v1/*/messages",
-        "https://api.example.com/v1/abc/messages",
-      ),
-    ).toBe(true);
-    expect(
-      matchesAuthorizedUriSpec(
-        "https://api.example.com/v1/*/messages",
-        "https://api.example.com/v1/a/b/messages",
-      ),
-    ).toBe(false);
-  });
-
-  it("`**` matches any substring including slashes", () => {
-    expect(
-      matchesAuthorizedUriSpec(
-        "https://api.example.com/v1/**/messages",
-        "https://api.example.com/v1/a/b/c/messages",
-      ),
-    ).toBe(true);
-  });
-
-  it("escapes regex metacharacters in the pattern", () => {
-    // Dots must be literal, not wildcards.
-    expect(
-      matchesAuthorizedUriSpec("https://api.example.com/v1", "https://apiXexample.com/v1"),
-    ).toBe(false);
-  });
-
-  it("does not allow partial match without wildcard", () => {
-    expect(
-      matchesAuthorizedUriSpec("https://api.example.com/v1", "https://api.example.com/v1/foo"),
-    ).toBe(false);
   });
 });
 
