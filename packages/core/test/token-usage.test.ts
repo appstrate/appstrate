@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { totalTokens, accumulateTokenUsage } from "../src/token-usage.ts";
+import { totalTokens, accumulateTokenUsage, tokenUsageSchema } from "../src/token-usage.ts";
 
 describe("totalTokens", () => {
   it("sums all four buckets", () => {
@@ -52,5 +52,28 @@ describe("totalTokens", () => {
     accumulateTokenUsage(total, { input_tokens: 1, cache_read_input_tokens: 2 });
     accumulateTokenUsage(total, { output_tokens: 4, cache_creation_input_tokens: 8 });
     expect(totalTokens(total)).toBe(15);
+  });
+});
+
+describe("tokenUsageSchema tiers", () => {
+  const usage = { input_tokens: 300_000, output_tokens: 1_000 };
+
+  it("accepts one band per threshold", () => {
+    const tiers = [
+      { input_tokens_above: 200_000, input_tokens: 250_000, output_tokens: 500 },
+      { input_tokens_above: 272_000 },
+    ];
+    expect(tokenUsageSchema.parse({ ...usage, tiers })).toEqual({ ...usage, tiers });
+  });
+
+  it("rejects a repeated threshold, a non-positive threshold and a negative count", () => {
+    const band = { input_tokens_above: 200_000, input_tokens: 1 };
+    for (const tiers of [
+      [band, band],
+      [{ input_tokens_above: 0 }],
+      [{ input_tokens_above: 200_000, output_tokens: -1 }],
+    ]) {
+      expect(tokenUsageSchema.safeParse({ ...usage, tiers }).success).toBe(false);
+    }
   });
 });

@@ -2,6 +2,7 @@
 
 import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { PricingStatus } from "./pricing-status.ts";
 
 /**
@@ -36,12 +37,7 @@ export interface RunMetricNotifyPayload {
   /** Agent id, used by the per-agent runs SSE stream filter. */
   package_id: string;
   /** Cumulative token usage as last reported by the runner. */
-  token_usage: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  } | null;
+  token_usage: TokenUsage | null;
   /** Running aggregate of `llm_usage.cost_usd` for this run, in USD. */
   cost_so_far: number;
   /**
@@ -63,7 +59,8 @@ export interface RunMetricNotifyPayload {
  *
  * The payload is JSON-encoded inline; postgres truncates NOTIFY
  * payloads at 8 KB but ours is bounded by the four `token_usage`
- * integers, a float and a one-word status, well under that ceiling.
+ * integers (plus one band per price tier of the model, a handful at most),
+ * a float and a one-word status, well under that ceiling.
  */
 export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): Promise<void> {
   await db.execute(drizzleSql`SELECT pg_notify('run_metric', ${JSON.stringify(payload)})`);

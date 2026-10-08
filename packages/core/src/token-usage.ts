@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import {
+  isTokenUsageTiers,
+  type TokenUsage,
+  type TokenUsageTier,
+} from "@appstrate/afps-shared/token-usage";
 
 /**
  * Canonical token-usage shape — the definition now lives in the zero-internal-dependency leaf
@@ -21,6 +25,8 @@ export const tokenUsageSchema = z.object({
   output_tokens: z.number().nonnegative().optional(),
   cache_creation_input_tokens: z.number().nonnegative().optional(),
   cache_read_input_tokens: z.number().nonnegative().optional(),
+  // One rule, shared with the AFPS event guard (`isCanonicalRunEvent`).
+  tiers: z.custom<TokenUsageTier[]>(isTokenUsageTiers, "invalid token usage tiers").optional(),
 });
 
 /**

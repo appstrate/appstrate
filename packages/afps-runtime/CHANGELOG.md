@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `appstrate.metric` usage carries price-tier bands (#1552)
+
+- `isCanonicalRunEvent` accepts an optional `usage.tiers` (`TokenUsage.tiers`),
+  validated by `isTokenUsageTiers` from `@appstrate/afps-shared/token-usage`,
+  the rule `tokenUsageSchema` in core also applies. A malformed band rejects
+  the event like any other `usage` constraint.
+- `TOKEN_USAGE_COUNTERS` moved to `@appstrate/afps-shared/token-usage`, where
+  `TokenUsage`'s counters are typed from it; no longer exported here.
+
 ### Added — one vocabulary of api_call failure codes (#1761)
 
 - `ApiCallFailureCode` (`./resolvers`): the snake_case codes every `api_call`

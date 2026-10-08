@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  addRequestUsage,
   buildPiModel,
   clampPiReasoningLevel,
   DEFAULT_CONTEXT_WINDOW,
@@ -14,12 +15,16 @@ import {
   piReasoningLevels,
   piTokenCostUsd,
   usableRecordMaxTokens,
+  usageCostUsd,
+  type PiTokenCounts,
 } from "../src/pi-model.ts";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
 import { capturePayload } from "../src/pi-payload.ts";
 import { nativeModel } from "./pi-payload.ts";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
+import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import { reasoningOffSendsNothing } from "../../ui/src/components/reasoning-off.ts";
 
 const PROXY = "https://appstrate.test/api/llm-proxy/openai-responses/v1";
@@ -304,4 +309,119 @@ describe("piTokenCostUsd", () => {
     const million = { input: 1_000_000, output: 0, cacheRead: 1_000_000, cacheWrite: 1_000_000 };
     expect(piTokenCostUsd(flat, million)).toBeCloseTo(1, 10);
   });
+});
+
+describe("addRequestUsage + usageCostUsd", () => {
+  /** One tier at 100k, every rate distinct (a Haiku-shaped card). */
+  const ONE_TIER = {
+    input: 1,
+    output: 5,
+    cacheRead: 0.1,
+    cacheWrite: 1.25,
+    tiers: [{ inputTokensAbove: 100_000, input: 2, output: 7.5, cacheRead: 0.2, cacheWrite: 2.5 }],
+  };
+  /** Two tiers, listed out of order: the highest threshold crossed wins. */
+  const TWO_TIERS = {
+    input: 5,
+    output: 30,
+    cacheRead: 0.5,
+    cacheWrite: 6.25,
+    tiers: [
+      { inputTokensAbove: 272_000, input: 10, output: 45, cacheRead: 1, cacheWrite: 12.5 },
+      { inputTokensAbove: 100_000, input: 7, output: 35, cacheRead: 0.7, cacheWrite: 8 },
+    ],
+  };
+  const REQUESTS: PiTokenCounts[] = [
+    { input: 1_000, output: 2_000, cacheRead: 10_000, cacheWrite: 100 },
+    { input: 50_000, output: 1_000, cacheRead: 50_000, cacheWrite: 0 }, // exactly 100k: base
+    { input: 60_000, output: 3_000, cacheRead: 40_000, cacheWrite: 1 }, // 100 001
+    { input: 200_000, output: 10_000, cacheRead: 70_000, cacheWrite: 4_000 }, // 274k
+    { input: 5_000, output: 500, cacheRead: 150_000, cacheWrite: 2_000 },
+    { input: 300_000, output: 8_000, cacheRead: 0, cacheWrite: 0 },
+  ];
+  const sum = (usage: typeof REQUESTS) =>
+    usage.reduce((total, request) => ({
+      input: total.input + request.input,
+      output: total.output + request.output,
+      cacheRead: total.cacheRead + request.cacheRead,
+      cacheWrite: total.cacheWrite + request.cacheWrite,
+    }));
+
+  for (const [name, cost] of [
+    ["one tier", ONE_TIER],
+    ["two tiers", TWO_TIERS],
+  ] as const) {
+    it(`prices summed usage as the sum of its requests (${name})`, () => {
+      // Every ordering of a rotating window, so band order never matters.
+      for (let shift = 0; shift < REQUESTS.length; shift++) {
+        const requests = [...REQUESTS.slice(shift), ...REQUESTS.slice(0, shift)];
+        const usage = accumulate(requests, cost);
+        const expected = requests.reduce((total, r) => total + piTokenCostUsd(cost, r), 0);
+        expect(usageCostUsd(usage, cost)).toBeCloseTo(expected, 10);
+        const totals = sum(requests);
+        expect(usage).toMatchObject({
+          input_tokens: totals.input,
+          output_tokens: totals.output,
+          cache_read_input_tokens: totals.cacheRead,
+          cache_creation_input_tokens: totals.cacheWrite,
+        });
+      }
+    });
+  }
+
+  it("keeps one band per tier, holding only the requests priced at it", () => {
+    const usage = accumulate(REQUESTS, TWO_TIERS);
+    const bands = Object.fromEntries(usage.tiers!.map((b) => [b.input_tokens_above, b]));
+    expect(Object.keys(bands).sort()).toEqual(["100000", "272000"]);
+    expect(bands[272_000]!.input_tokens).toBe(500_000);
+    expect(bands[100_000]!.input_tokens).toBe(65_000);
+  });
+
+  it("does not mutate its inputs", () => {
+    const first = addRequestUsage({}, REQUESTS[3]!, ONE_TIER);
+    const snapshot = structuredClone(first);
+    addRequestUsage(first, REQUESTS[3]!, ONE_TIER);
+    expect(first).toEqual(snapshot);
+  });
+
+  it("never emits tiers for a card without any, or without a card", () => {
+    const flat = { input: 1, output: 5 };
+    for (const cost of [flat, null, undefined]) {
+      const usage = accumulate(REQUESTS, cost);
+      expect(usage).not.toHaveProperty("tiers");
+    }
+    const usage = accumulate(REQUESTS, flat);
+    expect(usageCostUsd(usage, flat)).toBeCloseTo(piTokenCostUsd(flat, sum(REQUESTS)), 10);
+  });
+
+  it("prices a band whose threshold names no tier at the base rate", () => {
+    const usage = {
+      input_tokens: 300_000,
+      output_tokens: 1_000,
+      tiers: [{ input_tokens_above: 123_456, input_tokens: 300_000, output_tokens: 1_000 }],
+    };
+    const base = piTokenCostUsd({ ...ONE_TIER, tiers: [] }, piCounts(300_000, 1_000));
+    expect(usageCostUsd(usage, ONE_TIER)).toBeCloseTo(base, 10);
+  });
+
+  it("clamps a band larger than the totals to them", () => {
+    const usage = {
+      input_tokens: 200_000,
+      output_tokens: 1_000,
+      tiers: [{ input_tokens_above: 100_000, input_tokens: 900_000, output_tokens: 9_000 }],
+    };
+    const tier = { ...ONE_TIER.tiers[0]!, tiers: [] };
+    expect(usageCostUsd(usage, ONE_TIER)).toBeCloseTo(
+      piTokenCostUsd(tier, piCounts(200_000, 1_000)),
+      10,
+    );
+  });
+
+  function accumulate(requests: PiTokenCounts[], cost: ModelCost | null | undefined): TokenUsage {
+    return requests.reduce<TokenUsage>((total, r) => addRequestUsage(total, r, cost), {});
+  }
+
+  function piCounts(input: number, output: number): PiTokenCounts {
+    return { input, output, cacheRead: 0, cacheWrite: 0 };
+  }
 });

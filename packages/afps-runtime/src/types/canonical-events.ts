@@ -25,6 +25,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import { isTokenUsageTiers, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import type { TokenUsage } from "./run-result.ts";
 
 interface BaseEnvelope {
@@ -177,19 +178,6 @@ function isWireNumber(value: unknown): value is number {
 }
 
 /**
- * Counters {@link isCanonicalRunEvent} checks inside `appstrate.metric`'s
- * `usage` object. Asserted at compile time below to be exactly
- * `keyof TokenUsage`, so a counter added to (or removed from) the interface
- * cannot escape this check.
- */
-export const TOKEN_USAGE_COUNTERS = [
-  "input_tokens",
-  "output_tokens",
-  "cache_creation_input_tokens",
-  "cache_read_input_tokens",
-] as const;
-
-/**
  * One structural constraint: the dotted path it reads, and the predicate the
  * value at that path must satisfy.
  *
@@ -268,13 +256,14 @@ export const CANONICAL_CONSTRAINTS = {
   ],
   "appstrate.metric": [
     { path: "usage", holds: optional(isJsonObject) },
-    // Derived from TOKEN_USAGE_COUNTERS, which is pinned to `keyof TokenUsage`
-    // at compile time below: a counter added to the interface grows this table
-    // on its own, and the coverage guard then demands a fixture for it.
+    // Derived from TOKEN_USAGE_COUNTERS, which `TokenUsage`'s counters are
+    // typed from (`keyof TokenUsage` is pinned below): a counter added grows
+    // this table on its own, and the coverage guard then demands a fixture.
     ...TOKEN_USAGE_COUNTERS.map((counter) => ({
       path: `usage.${counter}`,
       holds: optional(isWireNumber),
     })),
+    { path: "usage.tiers", holds: optional(isTokenUsageTiers) },
     { path: "cost", holds: optional((v) => isWireNumber(v) && v >= 0) },
     { path: "durationMs", holds: optional(isWireNumber) },
   ],
@@ -359,16 +348,10 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
 type Assert<T extends true> = T;
 
 /**
- * {@link TOKEN_USAGE_COUNTERS} — the runtime list {@link isCanonicalRunEvent}
- * iterates — pinned to exactly `keyof TokenUsage`, in both directions. A
- * counter added to the interface without an entry here would be accepted
- * unchecked; one removed from the interface would leave a dead entry.
- *
- * These two assertions used to live beside the Zod payload table in
- * `../events/canonical-event-schemas.ts`; they moved here when that module was
- * removed, because they were never about the published schemas — they guard
- * {@link CANONICAL_CONSTRAINTS}, which is now the sole definition of the
- * payload shape, and which derives its `usage.*` entries from this list.
+ * The keys of `TokenUsage` are exactly the `usage.*` entries of
+ * {@link CANONICAL_CONSTRAINTS}, in both directions: the counters through
+ * `TOKEN_USAGE_COUNTERS` (which they are typed from), plus `tiers`. A field
+ * added to the interface without a constraint would be accepted unchecked.
  *
  * A module-private annotation rather than an exported type alias: tsc checks
  * `Assert<>` constraints identically either way, but a *type alias* nothing
@@ -377,8 +360,9 @@ type Assert<T extends true> = T;
  * and voiding it keeps the checks running with no public surface; the value is
  * an empty array, only its type is load-bearing.
  */
-const _tokenUsageCounterParity: [
-  Assert<(typeof TOKEN_USAGE_COUNTERS)[number] extends keyof TokenUsage ? true : false>,
-  Assert<keyof TokenUsage extends (typeof TOKEN_USAGE_COUNTERS)[number] ? true : false>,
+type ConstrainedUsageKey = (typeof TOKEN_USAGE_COUNTERS)[number] | "tiers";
+const _tokenUsageKeyParity: [
+  Assert<keyof TokenUsage extends ConstrainedUsageKey ? true : false>,
+  Assert<ConstrainedUsageKey extends keyof TokenUsage ? true : false>,
 ] = [] as never;
-void _tokenUsageCounterParity;
+void _tokenUsageKeyParity;

@@ -10,7 +10,7 @@ import { describe, it, expect } from "bun:test";
 import { modelCostSchema } from "@appstrate/core/module";
 import { piTokenCostUsd } from "@appstrate/runner-pi/pi-model";
 import { computeCostUsd } from "../../src/services/llm-proxy/metering.ts";
-import { aggregatedCostUsd } from "../../src/services/token-cost.ts";
+import { cumulativeCostUsd } from "../../src/services/token-cost.ts";
 import { parseRuntimeEnv, buildPiModelFromEnv } from "../../../../runtime-pi/env.ts";
 // The real projection `installSessionBridge` applies to Pi's counters.
 import { toReportedUsage } from "../../../../packages/runner-pi/src/pi-runner.ts";
@@ -72,14 +72,14 @@ describe("ledger prices", () => {
   });
 
   it("runner row: summed usage at the base rate", () => {
-    expect(aggregatedCostUsd(toReportedUsage(LARGE), COST)).toBeCloseTo(1.36, 10);
+    expect(cumulativeCostUsd(toReportedUsage(LARGE), COST)).toBeCloseTo(1.36, 10);
     const run = {
       input: SMALL.input + LARGE.input,
       output: SMALL.output + LARGE.output,
       cacheRead: SMALL.cacheRead + LARGE.cacheRead,
       cacheWrite: SMALL.cacheWrite + LARGE.cacheWrite,
     };
-    expect(aggregatedCostUsd(toReportedUsage(run), COST)).toBeCloseTo(RUN_BASE_USD, 10);
+    expect(cumulativeCostUsd(toReportedUsage(run), COST)).toBeCloseTo(RUN_BASE_USD, 10);
   });
 
   it("container: its per-request figures sum to the runner row, even past a tier", () => {

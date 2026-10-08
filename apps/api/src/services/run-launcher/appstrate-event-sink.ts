@@ -22,7 +22,7 @@ import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import type { CredentialSource } from "@appstrate/db/schema";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
-import { aggregatedCostUsd } from "../token-cost.ts";
+import { cumulativeCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, isServedByLlmProxy, updateRun } from "../state/runs.ts";
 import type { InferenceRoute } from "@appstrate/db/schema";
@@ -311,7 +311,7 @@ function resolveRunnerCost(
   const rates = parsedCost.success ? parsedCost.data : null;
   const usage = row.usage ?? {};
   return {
-    costUsd: aggregatedCostUsd(usage, rates),
+    costUsd: cumulativeCostUsd(usage, rates),
     pricingStatus: resolvePricingStatus({
       orgId,
       // The run's model label is not in the sink context, so the warn line is

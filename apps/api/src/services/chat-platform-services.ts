@@ -25,7 +25,7 @@ import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
-import { aggregatedCostUsd } from "./token-cost.ts";
+import { cumulativeCostUsd } from "./token-cost.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -192,7 +192,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         outputTokens,
         cacheReadTokens,
         cacheWriteTokens,
-        costUsd: aggregatedCostUsd(usage, record.cost),
+        costUsd: cumulativeCostUsd(usage, record.cost),
         pricingStatus,
         durationMs: record.durationMs,
         // Stable across durable retries; the partial unique index makes an
