@@ -1,0 +1,77 @@
+{
+  "name": "@appstrate/expo-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Expo",
+  "icon": "simple-icons:expo",
+  "description": "Expo integration backed by Expo's hosted remote MCP server (mcp.expo.dev/mcp): EAS builds and submissions, EAS Workflows, TestFlight crashes and feedback, Play Console crashes, App Store and Play Store reviews and replies, and the Expo documentation. The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …`. Authorization is fully standards-based, so no OAuth app is registered by hand: RFC 9728 protected-resource discovery on /mcp, RFC 8414 authorization-server metadata on the mcp.expo.dev issuer, RFC 7591 Dynamic Client Registration as a public client (`token_endpoint_auth_method: none`) and RFC 7636 PKCE (S256); the operator installs the connector and each member clicks Connect. The single `mcp:access` scope covers every tool, the Expo account's own permissions bound what each one can reach, and the authorization server offers no offline scope or authorize parameter to ask for a refresh token (`refresh_token_issuance: \"default\"`). There is no userinfo endpoint, so connections are told apart by the issuer alone. Phase 4 (per-tool URL envelope) is N/A — every tool transits the same /mcp endpoint. `search_documentation` needs a paid EAS plan upstream. Expo's local capabilities (simulator automation, app logs, devtools, router sitemap) need the `expo-mcp` dev dependency and a local dev server, so they are out of reach of a sandboxed run and not declared here.",
+  "keywords": ["developer-tools", "mobile", "ci", "expo", "eas", "react-native"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://mcp.expo.dev/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "issuer": "https://mcp.expo.dev",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["mcp:access"],
+      "authorized_uris": ["https://mcp.expo.dev/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "refresh_token_issuance": "default"
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "add_library": {},
+    "appstore_delete_review_response": {},
+    "appstore_reply_review": {},
+    "appstore_reviews": {},
+    "build_cancel": {},
+    "build_info": {},
+    "build_list": {},
+    "build_logs": {},
+    "build_run": {},
+    "build_submit": {},
+    "learn": {},
+    "playstore_crashes": {},
+    "playstore_reply_review": {},
+    "playstore_reviews": {},
+    "read_documentation": {},
+    "search_documentation": {},
+    "testflight_crashes": {},
+    "testflight_feedback": {},
+    "workflow_cancel": {},
+    "workflow_create": {},
+    "workflow_info": {},
+    "workflow_list": {},
+    "workflow_logs": {},
+    "workflow_run": {},
+    "workflow_validate": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
