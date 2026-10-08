@@ -8,7 +8,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { _capResponseBodyForTesting as capResponseBody } from "../../src/services/credential-proxy/core.ts";
+import { fetchApiCall } from "@appstrate/afps-runtime/resolvers";
+import {
+  _capResponseBodyForTesting as capResponseBody,
+  _toProxyCallErrorForTesting as toProxyCallError,
+} from "../../src/services/credential-proxy/core.ts";
 
 function streamFromChunks(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
   let i = 0;
@@ -114,5 +118,76 @@ describe("capResponseBody", () => {
     const bytes = await drain(result.body);
     expect(bytes).toEqual(new Uint8Array([1, 2]));
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe("the proxy's api_call failure codes (#1761)", () => {
+  /** What `fetchApiCall` rejects with, for `https://api.acme.com/**` and a public DNS answer. */
+  const engineFailure = (
+    url: string,
+    opts: Partial<Parameters<typeof fetchApiCall>[0]> = {},
+  ): Promise<unknown> =>
+    fetchApiCall({
+      url,
+      init: { method: "GET" },
+      authorizedUris: ["https://api.acme.com/**"],
+      declaredUris: ["https://api.acme.com/**"],
+      allowAllUris: false,
+      credentialHeaders: [],
+      internalHost: () => false,
+      integrationId: "@acme/api",
+      fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+      resolveHost: async () => ["203.0.113.7"],
+      targetHost: new URL(url).hostname,
+      credentialFields: {},
+      ...opts,
+    }).then(
+      () => {
+        throw new Error("expected a failure");
+      },
+      (e: unknown) => e,
+    );
+  const rejecting = (err: Error) =>
+    (async () => {
+      throw err;
+    }) as unknown as typeof fetch;
+
+  // The codes the sidecar and the CLI resolver report for the same engine kinds.
+  it.each([
+    ["not_authorized", "unauthorized_target", () => engineFailure("https://evil.example.com/x")],
+    [
+      "ssrf",
+      "blocked_target",
+      () => engineFailure("https://api.acme.com/x", { resolveHost: async () => ["10.0.0.5"] }),
+    ],
+    [
+      "unresolvable",
+      "upstream_unresolvable",
+      () => engineFailure("https://api.acme.com/x", { resolveHost: async () => [] }),
+    ],
+    [
+      "invalid_header",
+      "credential_unusable",
+      () =>
+        engineFailure("https://api.acme.com/x", {
+          init: { method: "GET", headers: { "X-Tok": "a\nb" } },
+        }),
+    ],
+    [
+      "timeout",
+      "upstream_timeout",
+      () =>
+        engineFailure("https://api.acme.com/x", {
+          fetchFn: rejecting(new DOMException("late", "TimeoutError")),
+        }),
+    ],
+    [
+      "transport",
+      "upstream_unreachable",
+      () => engineFailure("https://api.acme.com/x", { fetchFn: rejecting(new Error("reset")) }),
+    ],
+  ] as const)("%s → %s", async (_kind, code, run) => {
+    const err = toProxyCallError(await run(), "@acme/api", "api.acme.com", "c1");
+    expect(err).toMatchObject({ name: "ProxyCallError", code });
   });
 });

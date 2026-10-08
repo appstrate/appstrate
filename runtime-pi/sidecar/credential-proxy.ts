@@ -46,7 +46,9 @@ import {
   redactionFields,
   redactCredentialHost,
   templateHost,
+  URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
+  type ApiCallFailureCode,
   type CookieJar,
   type PreparedApiCallRequest,
 } from "@appstrate/afps-runtime/resolvers";
@@ -119,7 +121,11 @@ interface ApiCallSuccess {
 
 interface ApiCallFailure {
   ok: false;
-  status: number;
+  /**
+   * Absent on a failure before the call is judged (bad integration id, credential fetch,
+   * request preparation).
+   */
+  code?: ApiCallFailureCode;
   error: string;
 }
 
@@ -239,8 +245,7 @@ function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
  * the URL, substitute placeholders, inject the credential header
  * server-side, send the request, retry once on 401, capture cookies,
  * log persistent auth failures. Returns the raw upstream `Response`
- * (body unread) on success, or a structured `{status, error}` failure
- * before any outbound bytes were sent.
+ * (body unread) on success, or a structured `{code?, error}` failure.
  */
 export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Promise<ApiCallResult> {
   const { config, cookieJar, fetchFn, fetchCredentials, refreshCredentials, reportedAuthFailures } =
@@ -251,7 +256,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 1. Validate integrationId format (defence in depth — callers should
   //    have already done this, but cheap to repeat).
   if (!INTEGRATION_ID_RE.test(integrationId)) {
-    return { ok: false, status: 400, error: "Invalid integration id" };
+    return { ok: false, error: "Invalid integration id" };
   }
 
   // 2. Fetch credentials.
@@ -259,11 +264,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   try {
     creds = await fetchCredentials(integrationId);
   } catch (err) {
-    return {
-      ok: false,
-      status: 502,
-      error: `Credential fetch failed: ${getErrorMessage(err)}`,
-    };
+    return { ok: false, error: `Credential fetch failed: ${getErrorMessage(err)}` };
   }
 
   // 3. Substitute {{vars}} in the target and the caller's headers; refuse an unresolved one, there
@@ -276,7 +277,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) return { ok: false, status: 400, error: prepared.refusal.message };
+  if (!prepared.ok) return { ok: false, error: prepared.refusal.message };
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
@@ -290,7 +291,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     injectsCredential: buildInjectedCredentialHeader(creds) !== undefined,
   });
   if (policy.refuse) {
-    return { ok: false, status: 403, error: urlPolicyRefusalMessage(policy.refuse, integrationId) };
+    return {
+      ok: false,
+      code: URL_POLICY_REFUSAL_CODE[policy.refuse],
+      error: urlPolicyRefusalMessage(policy.refuse, integrationId),
+    };
   }
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
@@ -516,42 +521,31 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 }
 
 /**
- * Outbound refusals and faults as structured failures: a refused target or hop is a policy
- * 403, an unresolvable target, an unusable credential or a network fault a 502, a silent
- * upstream a 504 — the platform proxy's statuses. Hosts only, as the target template names them:
- * a redirect target may encode capabilities.
+ * Outbound refusals and faults as structured failures, under the engine's shared code. Hosts
+ * only, as the target template names them: a redirect target may encode capabilities.
  */
 function wrapRequestError(err: unknown, integrationId: string, host: string): ApiCallFailure {
   const failure = classifyApiCallFailure(err);
-  switch (failure.kind) {
-    case "not_authorized":
-    case "ssrf":
-      return {
-        ok: false,
-        status: 403,
-        error: failure.redirect
-          ? failure.message
-          : `Integration "${integrationId}": ${failure.message}`,
-      };
-    case "unresolvable":
-      return {
-        ok: false,
-        status: 502,
-        error: `Integration "${integrationId}": ${failure.message}`,
-      };
-    case "invalid_header":
-      return {
-        ok: false,
-        status: 502,
-        error: `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`,
-      };
-    case "timeout":
-      return { ok: false, status: 504, error: `Upstream timeout: ${host} did not answer in time` };
-    case "transport":
-      return {
-        ok: false,
-        status: 502,
-        error: `Upstream request failed${failure.code ? `: ${failure.code}` : ""} (${host})`,
-      };
+  let error: string;
+  switch (failure.code) {
+    case "unauthorized_target":
+    case "blocked_target":
+      error = failure.redirect
+        ? failure.message
+        : `Integration "${integrationId}": ${failure.message}`;
+      break;
+    case "upstream_unresolvable":
+      error = `Integration "${integrationId}": ${failure.message}`;
+      break;
+    case "credential_unusable":
+      error = `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`;
+      break;
+    case "upstream_timeout":
+      error = `Upstream timeout: ${host} did not answer in time`;
+      break;
+    case "upstream_unreachable":
+      error = `Upstream request failed${failure.systemCode ? `: ${failure.systemCode}` : ""} (${host})`;
+      break;
   }
+  return { ok: false, code: failure.code, error };
 }

@@ -27,8 +27,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { loadTokens } from "../src/lib/keyring.ts";
-import { readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { loadTokens, saveTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
+import { getConfigDir, readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
 import type { Space } from "../src/lib/spaces.ts";
@@ -48,6 +50,7 @@ let fetchCalls: FetchCall[];
 
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
+import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 
 /**
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
@@ -184,6 +187,160 @@ async function readPinnedSpaceId(profile = "default"): Promise<string | undefine
   const cfg = await readConfig();
   return cfg.profiles[profile]?.spaceId;
 }
+
+describe("login credentials write", () => {
+  it("saves the new pair under the credentials lock, so no refresh in flight can write over it", async () => {
+    installDefaultResponders();
+    const heldAtSave: boolean[] = [];
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword(value: string): void {
+        heldAtSave.push(credentialsLockHeld());
+        keyring.store.set(profile, value);
+      },
+      getPassword(): string | null {
+        return keyring.store.get(profile) ?? null;
+      },
+      deletePassword(): void {
+        keyring.store.delete(profile);
+      },
+    }));
+
+    const { io } = createMemoryIO();
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com", noOrg: true },
+      io,
+    );
+
+    expect(heldAtSave).toEqual([true]);
+    expect((await loadTokens("default"))?.refreshToken).toBe("rt-xyz");
+  });
+
+  describe("when a write fails", () => {
+    // Opted into plaintext, a refused keyring save would land in the file.
+    let optIn: string | undefined;
+    beforeEach(() => {
+      optIn = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+      delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    });
+    afterEach(() => {
+      if (optIn === undefined) delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+      else process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = optIn;
+    });
+
+    const oldPair = {
+      accessToken: "old-access",
+      expiresAt: Date.now() + 15 * 60 * 1000,
+      refreshToken: "old-refresh",
+      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    };
+
+    /** A stored session on `instance`, then a keyring running `onSave` on each save. */
+    async function seedSession(instance: string, onSave: (value: string) => void): Promise<void> {
+      await setProfile("default", { instance, userId: "u_old", email: "old@example.com" });
+      await saveTokens("default", oldPair);
+      _setKeyringFactoryForTesting((profile) => ({
+        setPassword(value: string): void {
+          onSave(value);
+          keyring.store.set(profile, value);
+        },
+        getPassword(): string | null {
+          return keyring.store.get(profile) ?? null;
+        },
+        deletePassword(): void {
+          keyring.store.delete(profile);
+        },
+      }));
+    }
+
+    async function loginFails(): Promise<void> {
+      installDefaultResponders();
+      const outcome = await loginCommand(
+        { profile: "default", instance: "https://app.example.com", noOrg: true },
+        createMemoryIO().io,
+      ).then(
+        () => "logged in",
+        () => "failed",
+      );
+      expect(outcome).toBe("failed");
+    }
+
+    for (const instance of ["https://previous.example.com", "https://app.example.com"]) {
+      it(`a refused save leaves the previous profile and pair untouched (${instance})`, async () => {
+        let attempts = 0;
+        await seedSession(instance, () => {
+          attempts += 1;
+          throw new Error("User canceled the operation.");
+        });
+
+        await loginFails();
+
+        expect(attempts).toBe(1);
+        expect((await loadTokens("default"))?.refreshToken).toBe("old-refresh");
+        const profile = (await readConfig()).profiles.default;
+        expect(profile?.instance).toBe(instance);
+        expect(profile?.userId).toBe("u_old");
+      });
+    }
+
+    it("a failed profile write takes the new pair back out", async () => {
+      // The save lands, then the config file becomes unreadable: the profile
+      // write that follows fails, and must not leave the new pair behind.
+      const configPath = join(getConfigDir(), "config.toml");
+      await seedSession("https://previous.example.com", () => {
+        rmSync(configPath);
+        mkdirSync(configPath);
+      });
+
+      await loginFails();
+
+      expect(await loadTokens("default")).toBeNull();
+    });
+  });
+});
+
+describe("login under a held credentials lock", () => {
+  it("fails with the busy lock and saves nothing", async () => {
+    // The clock jumps only once the device code is redeemed: started earlier,
+    // it would expire the device code before the poll.
+    const clock: { stop?: () => void } = {};
+    installDefaultResponders({
+      cliToken: () => {
+        clock.stop ??= jumpClock();
+        return Response.json({
+          access_token: makeJwt(),
+          refresh_token: "rt-approved",
+          token_type: "Bearer",
+          expires_in: 900,
+          refresh_expires_in: 30 * 24 * 60 * 60,
+          scope: "cli",
+        });
+      },
+    });
+    const release = await holdCredentialsLock();
+
+    const { io, stdout } = createMemoryIO();
+    let error: unknown;
+    try {
+      error = await loginCommand(
+        { profile: "default", instance: "https://app.example.com", noOrg: true },
+        io,
+      ).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    } finally {
+      clock.stop?.();
+      await release();
+    }
+
+    expect(error).toBeInstanceOf(ExitError);
+    expect((error as ExitError).code).toBe(1);
+    // `exitWithError` renders through `io.cancel`, which the sink records with stdout.
+    expect(stdout()).toContain("Another appstrate credential update is running");
+    expect(await loadTokens("default")).toBeNull();
+    expect((await readConfig()).profiles.default).toBeUndefined();
+  });
+});
 
 describe("login org-pin branch", () => {
   it("auto-pins the single org when the user belongs to exactly one", async () => {

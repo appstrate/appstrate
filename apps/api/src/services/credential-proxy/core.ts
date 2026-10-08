@@ -36,9 +36,9 @@ import {
   prepareApiCallRequest,
   redactionFields,
   templateHost,
+  URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
   type CookieJar,
-  type UrlPolicyRefusal,
 } from "@appstrate/afps-runtime/resolvers";
 import {
   assertHttpFieldValue,
@@ -180,12 +180,6 @@ export class ProxyCallError extends Error {
   }
 }
 
-const REFUSAL_CODE: Record<UrlPolicyRefusal, ProxyProblemCode> = {
-  unrendered: "unauthorized_target",
-  unauthorized: "unauthorized_target",
-  exfiltration: "credential_exfiltration_refused",
-};
-
 /**
  * Execute one authenticated proxy call. Credentials never leak into the
  * caller's response — the only thing that crosses the boundary is the
@@ -245,7 +239,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   });
   if (policy.refuse) {
     throw new ProxyCallError(
-      REFUSAL_CODE[policy.refuse],
+      URL_POLICY_REFUSAL_CODE[policy.refuse],
       urlPolicyRefusalMessage(policy.refuse, input.integrationId),
     );
   }
@@ -487,9 +481,9 @@ function unusableCredential(
 
 /** A relayed body whose read failed after its headers arrived, as the proxy's typed error. */
 export function bodyReadError(err: unknown, redactedHost: string): ProxyCallError {
-  const code =
-    classifyApiCallFailure(err).kind === "timeout" ? "upstream_timeout" : "upstream_unreachable";
-  return new ProxyCallError(code, upstreamFailureDetail(redactedHost, code));
+  const { code } = classifyApiCallFailure(err);
+  const upstream = code === "upstream_timeout" ? code : "upstream_unreachable";
+  return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream));
 }
 
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */
@@ -502,32 +496,29 @@ function toProxyCallError(
   const failure = classifyApiCallFailure(err);
   // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
   const sent =
-    failure.redirect || failure.kind === "timeout" || failure.kind === "transport"
+    failure.redirect ||
+    failure.code === "upstream_timeout" ||
+    failure.code === "upstream_unreachable"
       ? connectionId
       : undefined;
-  switch (failure.kind) {
-    case "not_authorized":
-    case "ssrf":
+  switch (failure.code) {
+    case "unauthorized_target":
+    case "blocked_target":
       return new ProxyCallError(
-        failure.kind === "ssrf" ? "blocked_target" : "unauthorized_target",
+        failure.code,
         `Integration ${integrationId}: ${failure.message}` +
           (failure.redirect ? "" : ` (host ${redactedHost})`),
         sent,
       );
-    case "unresolvable":
-      return new ProxyCallError("upstream_unresolvable", failure.message, sent);
-    case "invalid_header":
+    case "upstream_unresolvable":
+      return new ProxyCallError(failure.code, failure.message, sent);
+    case "credential_unusable":
       return unusableCredential(failure.message, integrationId);
-    case "timeout":
+    case "upstream_timeout":
+    case "upstream_unreachable":
       return new ProxyCallError(
-        "upstream_timeout",
-        upstreamFailureDetail(redactedHost, "upstream_timeout"),
-        sent,
-      );
-    case "transport":
-      return new ProxyCallError(
-        "upstream_unreachable",
-        upstreamFailureDetail(redactedHost, "upstream_unreachable"),
+        failure.code,
+        upstreamFailureDetail(redactedHost, failure.code),
         sent,
       );
   }
@@ -589,3 +580,6 @@ function capResponseBody(
 
 /** @internal Exported for unit testing */
 export const _capResponseBodyForTesting = capResponseBody;
+
+/** @internal Exported for unit testing */
+export const _toProxyCallErrorForTesting = toProxyCallError;

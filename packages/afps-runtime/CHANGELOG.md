@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one vocabulary of api_call failure codes (#1761)
+
+- `ApiCallFailureCode` (`./resolvers`): the snake_case codes every `api_call`
+  path reports (`unauthorized_target`, `blocked_target`,
+  `credential_exfiltration_refused`, `upstream_unresolvable`,
+  `credential_unusable`, `upstream_unreachable`, `upstream_timeout`), in a
+  leaf module with `URL_POLICY_REFUSAL_CODE` (each `UrlPolicyRefusal` to its
+  code).
+- `classifyApiCallFailure` returns the kind's shared `code`; a transport
+  error's own code moves from `code` to `systemCode` (Bun's
+  `ConnectionRefused`, Node's `ECONNREFUSED`), and a templated call keeps it.
+- **BREAKING:** `ApiCallFailureError` (`code: ApiCallFailureCode`) replaces
+  `AuthorizedUrisError`. The local resolver raises it for every outbound
+  failure and URL-policy refusal, under the code the platform proxy answers;
+  `details` holds `integration`, the target as written, the declared
+  allowlist, and for an engine failure `redirect` and `systemCode`. An
+  unresolvable host is `upstream_unresolvable`, a timeout or transport fault
+  is typed instead of rethrown raw, and a substituted or injected header
+  value that is no HTTP field value is `credential_unusable`;
+  `RESOLVER_HEADER_INVALID` names the agent's own header only. Retired:
+  `RESOLVER_URL_BLOCKED`, `RESOLVER_REDIRECT_BLOCKED`,
+  `RESOLVER_CREDENTIAL_EXFIL_BLOCKED`, `AUTHORIZED_URIS_MISMATCH`,
+  `AUTHORIZED_URIS_EMPTY`.
+
+### Removed — `authorized_uris` rules moved to afps-shared (#1763, BREAKING)
+
+- `matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`, `compileEgressPolicy`
+  and the type `EgressPolicy` are no longer exported from `./resolvers`:
+  import them from `@appstrate/afps-shared/authorized-uris`.
+
 ### Fixed — a sticky cookie expires (#1778)
 
 - `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at

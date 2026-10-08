@@ -30,6 +30,7 @@ import each module by subpath.
 | `./companion-files`                  | Companion-file enforcement, shared between the platform ZIP-import path and the runtime bundle loader.                                                      |
 | `./credential-template`              | `{$credential.<field>}` and `{$variable.<name>}` template rendering; any other `{$…}` expression throws.                                                    |
 | `./connection-variables`             | Connection variables (`{$variable.<name>}`): references and the per-connection rendering of URL templates (`source.remote.url`, `issuer`, login `url`).     |
+| `./authorized-uris`                  | The `authorized_uris` URL-pattern rules: parse, render per connection, match a URL, compile the egress policy.                                              |
 | `./delivery-http`                    | Shared HTTP delivery contract.                                                                                                                              |
 | `./semver-resolve`                   | Version-range resolution against a published version list.                                                                                                  |
 | `./api-tool-naming` · `./mcp-naming` | Deterministic tool and MCP-server naming.                                                                                                                   |

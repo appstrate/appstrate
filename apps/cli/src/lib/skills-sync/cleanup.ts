@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { readSyncState, writeSyncState } from "./state.ts";
+import { loginFix, logoutRetry } from "../remedy.ts";
+import { renderNotice } from "./notice.ts";
+import { getNoticePath, readSyncState, writeNotice, writeSyncState } from "./state.ts";
 import {
   SYNC_TARGETS,
   removeManagedDir,
@@ -23,6 +25,7 @@ export async function cleanupProfileSkills(
       ],
     };
   const failures: string[] = [];
+  const retry = logoutRetry(profileName);
   let pluginReset = false;
   for (const target of SYNC_TARGETS) {
     const ledger = state.targets[target];
@@ -31,15 +34,20 @@ export async function cleanupProfileSkills(
     // every directory under it — there is nothing to decide per entry.
     if (ledger.context.profileName !== profileName) continue;
     if (target === "claude-plugin") {
+      const fix = loginFix("Signed out", profileName, ledger.context.instance);
       try {
-        await writeSetupPlugin(
-          ledger.root,
-          setupPluginFiles("Signed out", `appstrate login --profile ${profileName}`),
-        );
-        delete state.targets[target];
-        pluginReset = true;
+        await writeSetupPlugin(ledger.root, setupPluginFiles(fix));
       } catch (error) {
-        failures.push(`Could not reset ${target}: ${String(error)}`);
+        failures.push(`Could not reset ${target}: ${String(error)}. ${retry}`);
+        continue;
+      }
+      delete state.targets[target];
+      pluginReset = true;
+      // Best effort: the setup skill carries the same remedy.
+      try {
+        await writeNotice(renderNotice(fix, "setup"));
+      } catch (error) {
+        failures.push(`Could not update ${getNoticePath()}: ${String(error)}`);
       }
       continue;
     }
@@ -50,7 +58,7 @@ export async function cleanupProfileSkills(
         await removeManagedDir(skillDir(target, slug));
         delete ledger.managed[slug];
       } catch (error) {
-        failures.push(`Could not remove ${target}/${slug}: ${String(error)}`);
+        failures.push(`Could not remove ${target}/${slug}: ${String(error)}. ${retry}`);
       }
     }
     // A target whose removals all failed keeps its entries, so it keeps its

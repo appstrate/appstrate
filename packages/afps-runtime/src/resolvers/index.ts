@@ -74,15 +74,11 @@ export {
   MAX_STREAMED_BODY_SIZE,
   STREAMING_THRESHOLD,
   makeApiCallTool,
-  matchesAuthorizedUriSpec,
-  hostLiterallyAllowlisted,
-  compileEgressPolicy,
   apiCallRequestJsonSchema,
   apiCallTargetJsonSchema,
   resolveSafeFile,
   resolveSafePath,
   resolveWorkspaceFile,
-  type EgressPolicy,
   type MakeApiCallToolOptions,
   type ApiCallContext,
   type ApiCallFn,
@@ -105,6 +101,9 @@ export {
   HOP_BY_HOP_HEADERS,
   redactCredentialHost,
 } from "./api-call-engine.ts";
+
+// The failure codes every `api_call` path reports, and what maps onto them.
+export { URL_POLICY_REFUSAL_CODE, type ApiCallFailureCode } from "./api-call-failure-codes.ts";
 
 // Sticky-cookie jar shared by both credential proxies and the redirect follower.
 export { cookieScope, type CookieJar, type CookieScope } from "./cookie-jar.ts";

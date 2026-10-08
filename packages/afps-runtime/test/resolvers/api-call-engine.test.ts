@@ -16,7 +16,7 @@ import {
   ApiCallRefusedError,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
-import { hostLiterallyAllowlisted } from "../../src/resolvers/http-call-core.ts";
+import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/api-call-failure-codes.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 
 const publicResolver = async () => ["203.0.113.7"];
@@ -89,6 +89,31 @@ describe("fetchApiCall — a transport error", () => {
     expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
   });
 
+  it.each(["ConnectionRefused", "ECONNREFUSED"])(
+    "keeps the system code %s on a templated call",
+    async (systemCode) => {
+      const refused = Object.assign(bunError("refused SeCrEt-path-7"), { code: systemCode });
+      const out = await sendFailing(refused, { api_key: "SeCrEt-path-7" });
+      expect(classifyApiCallFailure(out)).toMatchObject({
+        code: "upstream_unreachable",
+        systemCode,
+        message: "refused {{api_key}}",
+      });
+    },
+  );
+
+  it("drops a code that is no system code on a templated call", async () => {
+    const odd = Object.assign(bunError(), { code: "SeCrEt-path-7" });
+    const out = await sendFailing(odd, { api_key: "x" });
+    expect(classifyApiCallFailure(out).systemCode).toBeUndefined();
+  });
+
+  it("drops a system-code-shaped code that holds a credential value", async () => {
+    const odd = Object.assign(bunError(), { code: "sk_live_abc" });
+    const out = await sendFailing(odd, { api_key: "sk_live_abc" });
+    expect(classifyApiCallFailure(out).systemCode).toBeUndefined();
+  });
+
   it("is rethrown untouched on an untemplated call", async () => {
     const err = bunError();
     expect(await sendFailing(err)).toBe(err);
@@ -128,61 +153,6 @@ describe("redirect loop error", () => {
     expect(err?.message).toContain("Too many redirects");
     expect(err!.message).toContain("api.acme.com");
     expect(err!.message).not.toContain(secret);
-  });
-});
-
-describe("hostLiterallyAllowlisted", () => {
-  it("pins an exact literal host", () => {
-    expect(
-      hostLiterallyAllowlisted("https://api.example.com/x", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins a glob host", () => {
-    expect(hostLiterallyAllowlisted("https://anything.example/x", ["https://**"])).toBe(false);
-    expect(hostLiterallyAllowlisted("https://a.example.com/x", ["https://*.example.com/**"])).toBe(
-      false,
-    );
-  });
-
-  it("tolerates a globbed scheme on a literal host", () => {
-    expect(hostLiterallyAllowlisted("https://intranet.corp/x", ["**://intranet.corp/**"])).toBe(
-      true,
-    );
-  });
-
-  it("tolerates a globbed port on a literal host", () => {
-    expect(
-      hostLiterallyAllowlisted("https://intranet.corp/x", ["https://intranet.corp:*/**"]),
-    ).toBe(true);
-  });
-
-  it("strips a literal port from the spec authority", () => {
-    expect(
-      hostLiterallyAllowlisted("https://api.example.com/x", ["https://api.example.com:8443/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins through a malformed entry, which the matcher refuses too", () => {
-    for (const spec of ["https://user@api.example.com/**", "https://api%2Eexample.com/**"]) {
-      expect(hostLiterallyAllowlisted("https://api.example.com/x", [spec])).toBe(false);
-    }
-  });
-
-  it("compares hosts case-insensitively", () => {
-    expect(
-      hostLiterallyAllowlisted("https://API.Example.com/x", ["https://api.example.com/**"]),
-    ).toBe(true);
-  });
-
-  it("never pins a templated host, even one spelled literally in the target", () => {
-    expect(
-      hostLiterallyAllowlisted("https://{$credential.host}/x", ["https://{$credential.host}/**"]),
-    ).toBe(false);
-  });
-
-  it("returns false on an unparseable URL", () => {
-    expect(hostLiterallyAllowlisted("::::", ["https://api.example.com/**"])).toBe(false);
   });
 });
 
@@ -464,7 +434,10 @@ describe("fetchApiCall — credentials across a redirect", () => {
       authorizedUris: ["https://api.dropboxapi.com/**"],
       allowAllUris: false,
     }).catch((e: unknown) => e);
-    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "not_authorized", redirect: true });
+    expect(classifyApiCallFailure(err)).toMatchObject({
+      code: "unauthorized_target",
+      redirect: true,
+    });
   });
 
   it("classifies a hop to a host with no DNS answer as unresolvable, not as SSRF", async () => {
@@ -488,7 +461,10 @@ describe("fetchApiCall — credentials across a redirect", () => {
         return ["203.0.113.7"];
       },
     }).catch((e: unknown) => e);
-    expect(classifyApiCallFailure(err)).toMatchObject({ kind: "unresolvable", redirect: true });
+    expect(classifyApiCallFailure(err)).toMatchObject({
+      code: "upstream_unresolvable",
+      redirect: true,
+    });
   });
 
   it("returns a streaming body's redirect unfollowed", async () => {
@@ -690,19 +666,44 @@ describe("fetchApiCall — transport", () => {
 describe("classifyApiCallFailure", () => {
   it("names what every path maps: refusal, redirect, timeout, transport", () => {
     expect(classifyApiCallFailure(new ApiCallRefusedError("unresolvable", "m"))).toEqual({
-      kind: "unresolvable",
+      code: "upstream_unresolvable",
       redirect: false,
       message: "m",
     });
     expect(classifyApiCallFailure(new ApiCallRefusedError("ssrf", "m", true))).toEqual({
-      kind: "ssrf",
+      code: "blocked_target",
       redirect: true,
       message: "m",
     });
-    expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).kind).toBe("timeout");
+    expect(classifyApiCallFailure(new DOMException("late", "TimeoutError")).code).toBe(
+      "upstream_timeout",
+    );
     expect(
       classifyApiCallFailure(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
-    ).toEqual({ kind: "transport", redirect: false, message: "refused", code: "ECONNREFUSED" });
+    ).toEqual({
+      code: "upstream_unreachable",
+      redirect: false,
+      message: "refused",
+      systemCode: "ECONNREFUSED",
+    });
+  });
+
+  // The one vocabulary of the three paths: a change here is a change of every path's wire.
+  it("pins each kind's shared code", () => {
+    const pinned = [
+      [new ApiCallRefusedError("not_authorized", "m"), "unauthorized_target"],
+      [new ApiCallRefusedError("ssrf", "m"), "blocked_target"],
+      [new ApiCallRefusedError("unresolvable", "m"), "upstream_unresolvable"],
+      [new InvalidHeaderValueError("X-Api-Key"), "credential_unusable"],
+      [new DOMException("late", "TimeoutError"), "upstream_timeout"],
+      [new Error("reset"), "upstream_unreachable"],
+    ] as const;
+    for (const [err, code] of pinned) expect(classifyApiCallFailure(err).code).toBe(code);
+    expect(URL_POLICY_REFUSAL_CODE).toEqual({
+      unrendered: "unauthorized_target",
+      unauthorized: "unauthorized_target",
+      exfiltration: "credential_exfiltration_refused",
+    });
   });
 });
 
@@ -741,7 +742,7 @@ describe("fetchApiCall — a header value that is no HTTP field value", () => {
         expect(JSON.stringify([err.message, { ...err }])).not.toContain(secret);
         expect(fetchFn).not.toHaveBeenCalled();
         expect(classifyApiCallFailure(err)).toMatchObject({
-          kind: "invalid_header",
+          code: "credential_unusable",
           redirect: false,
         });
       });

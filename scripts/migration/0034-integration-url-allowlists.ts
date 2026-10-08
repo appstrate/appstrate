@@ -32,7 +32,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
+import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
 import { decryptCredentials, encryptCredentialEnvelope } from "@appstrate/connect";
 
 /** `auths.primary.authorized_uris` of each integration, as shipped. */

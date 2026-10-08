@@ -49,11 +49,11 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
+import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
 import {
   compileEgressPolicy,
   matchesAuthorizedUriSpec,
-  planHttpDeliveryInjection,
-} from "@appstrate/afps-runtime/resolvers";
+} from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";

@@ -202,7 +202,7 @@
     },
     "packages/afps-shared": {
       "name": "@appstrate/afps-shared",
-      "version": "0.10.1",
+      "version": "0.11.0",
       "dependencies": {
         "@types/semver": "^7.8.0",
         "fflate": "^0.8.3",
@@ -228,7 +228,7 @@
       "version": "14.0.0",
       "dependencies": {
         "@afps-spec/schema": "^0.8.0",
-        "@appstrate/afps-shared": "^0.10.1",
+        "@appstrate/afps-shared": "^0.11.0",
         "@types/json-schema": "7.0.15",
         "@types/semver": "^7.8.0",
         "ajv": "^8.20.0",

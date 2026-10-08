@@ -43,7 +43,7 @@ import {
   isReproducibleBody,
   type ApiCallFn,
 } from "./http-call-core.ts";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import {
   apiCallToolNameForAuth,
   assertUniqueApiToolAuthTokens,
@@ -54,7 +54,8 @@ import {
 } from "@appstrate/afps-shared/mcp-naming";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { classifyApiCallFailure, fetchApiCall, forwardableHeaders } from "./api-call-engine.ts";
-import { AuthorizedUrisError, ResolverError } from "../errors.ts";
+import { URL_POLICY_REFUSAL_CODE, type ApiCallFailureCode } from "./api-call-failure-codes.ts";
+import { ApiCallFailureError, ResolverError } from "../errors.ts";
 import {
   planHttpDeliveryInjection,
   resolveHttpDelivery,
@@ -73,7 +74,6 @@ import {
   credentialUrlPolicy,
   redactionFields,
   urlPolicyRefusalMessage,
-  type UrlPolicyRefusal,
 } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
 
@@ -491,7 +491,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         authorizedUris,
         injectsCredential: injectedCredentialHeader !== null,
       });
-      if (policy.refuse) throw refusalError(policy.refuse, meta.name, req.target);
+      if (policy.refuse) {
+        throw apiCallFailure(
+          URL_POLICY_REFUSAL_CODE[policy.refuse],
+          urlPolicyRefusalMessage(policy.refuse, meta.name),
+          meta,
+          req.target,
+        );
+      }
       const redactFields = redactionFields(policy, fields);
 
       const resolvedBody = await resolveBodyForFetch(req.body, {
@@ -537,29 +544,14 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         });
         res = result.response;
       } catch (err) {
-        // Typed resolver errors; hosts are redacted (a redirect target may carry `?token=…`).
-        const failure = classifyApiCallFailure(err);
-        if (failure.kind === "timeout" || failure.kind === "transport") throw err;
-        if (failure.redirect) {
-          throw new ResolverError(
-            "RESOLVER_REDIRECT_BLOCKED",
-            `Integration ${meta.name}: redirect blocked (${failure.kind})`,
-            { integration: meta.name },
-          );
-        }
-        if (failure.kind === "invalid_header") throw headerInvalid(meta.name, failure.message);
-        if (failure.kind === "not_authorized") {
-          throw new AuthorizedUrisError(
-            "AUTHORIZED_URIS_MISMATCH",
-            `Integration ${meta.name}: ${failure.message}`,
-            { integration: meta.name, target: req.target, allowlist: meta.authorizedUris },
-          );
-        }
-        throw new ResolverError(
-          "RESOLVER_URL_BLOCKED",
-          `Integration ${meta.name}: ${failure.message}`,
-          { integration: meta.name, target: req.target },
-        );
+        // The caller cancelled: its own abort, not an outcome of the call.
+        if (ctx.signal?.aborted) throw err;
+        // No `cause`: Bun's error keeps the full URL (a redirect's `?token=…`) on `.path`.
+        const { code, message, redirect, systemCode } = classifyApiCallFailure(err);
+        throw apiCallFailure(code, `Integration ${meta.name}: ${message}`, meta, req.target, {
+          redirect,
+          ...(systemCode ? { systemCode } : {}),
+        });
       }
 
       return serializeFetchResponse(res, {
@@ -571,12 +563,20 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   }
 }
 
-/** A {@link credentialUrlPolicy} refusal as the resolver's typed error. */
-function refusalError(refusal: UrlPolicyRefusal, integration: string, target: string): Error {
-  const message = urlPolicyRefusalMessage(refusal, integration);
-  return refusal === "exfiltration"
-    ? new ResolverError("RESOLVER_CREDENTIAL_EXFIL_BLOCKED", message, { integration })
-    : new AuthorizedUrisError("AUTHORIZED_URIS_EMPTY", message, { integration, target });
+/** An outbound failure or URL-policy refusal: the target as written, the allowlist as declared. */
+function apiCallFailure(
+  code: ApiCallFailureCode,
+  message: string,
+  meta: ApiCallIntegrationMeta,
+  target: string,
+  extra: Record<string, unknown> = {},
+): ApiCallFailureError {
+  return new ApiCallFailureError(code, message, {
+    integration: meta.name,
+    target,
+    allowlist: meta.authorizedUris,
+    ...extra,
+  });
 }
 
 /** An agent header value that is no HTTP field value (the message names the header only). */

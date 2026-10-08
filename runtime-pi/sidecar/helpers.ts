@@ -18,11 +18,8 @@ export type { HostResolver } from "@appstrate/core/ssrf";
 
 // Imported (not just re-exported) because `readPositiveByteEnv` below defaults
 // its `ceiling` parameter to it. See the re-export note further down.
-import {
-  ABSOLUTE_BODY_CEILING,
-  API_CALL_TIMEOUT_MS,
-  type EgressPolicy,
-} from "@appstrate/afps-runtime/resolvers";
+import { ABSOLUTE_BODY_CEILING, API_CALL_TIMEOUT_MS } from "@appstrate/afps-runtime/resolvers";
+import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import type { Socket } from "node:net";
 // Compiled default for the inter-chunk idle bound, shared with the platform LLM
 // gateway. Imported (not just re-exported) because the env override below falls

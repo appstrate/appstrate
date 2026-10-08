@@ -7,13 +7,13 @@
  * the values it returns are persisted in the same write as the credential.
  */
 
+import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
 import {
   isVariableTemplate,
   renderUrlTemplate,
   unrenderableUrlTemplateVariables,
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
-import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/credential-template";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { validationFailed } from "../../lib/errors.ts";

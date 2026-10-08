@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/afps-shared",
-  "version": "0.10.1",
-  "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, delivery.http projection)",
+  "version": "0.11.0",
+  "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, authorized_uris rules, delivery.http projection)",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
@@ -40,6 +40,7 @@
     "./integrity": "./src/integrity.ts",
     "./credential-template": "./src/credential-template.ts",
     "./connection-variables": "./src/connection-variables.ts",
+    "./authorized-uris": "./src/authorized-uris.ts",
     "./delivery-http": "./src/delivery-http.ts",
     "./api-tool-naming": "./src/api-tool-naming.ts",
     "./mcp-naming": "./src/mcp-naming.ts",

@@ -44,14 +44,9 @@ export function buildUpstreamMeta(response: Response): UpstreamMeta {
 }
 
 /**
- * Build a sidecar-pre-flight `_meta` payload. Used when the sidecar
- * fails before issuing the upstream request (credential fetch failure,
- * URL not in `authorizedUris`, body too large) — we still attach
- * `_meta` so the runtime parser can rely on `_meta` always being
- * present, distinguishing "no upstream contact" (status 0) from
- * "upstream returned 5xx" via the status code rather than the absence
- * of metadata.
+ * The upstream `_meta` of an `api_call` the sidecar answered itself (a pre-flight refusal, or
+ * a failure after sending): status 0, so the parser can tell it from "upstream returned 5xx".
  */
-export function buildPreflightUpstreamMeta(): UpstreamMeta {
+export function buildSidecarAnswerUpstreamMeta(): UpstreamMeta {
   return { status: 0, headers: {} };
 }

@@ -65,6 +65,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `other_schedules_disabled_count`, which the delete dialog shows without
   names. Not a breaking API change: one enum value and one response field are
   added.
+- **One vocabulary of `api_call` failure codes on the platform proxy, the
+  sidecar and the CLI** (#1761). An agent sees a refused or failed call as
+  `[api_call status=0 code=<code>]` with
+  `_meta["dev.appstrate/api-call-error"]`, whichever path served it.
+  `appstrate run --integrations=local` reports the same codes; its retired
+  codes are listed in `packages/afps-runtime/CHANGELOG.md`.
 - **Remote MCP OAuth checks the protected-resource metadata and the
   authorization response more strictly.** The RFC 9728 document's `resource`
   must now be identical (modulo trailing `/`) to the identifier its location

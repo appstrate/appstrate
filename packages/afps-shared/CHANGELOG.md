@@ -30,9 +30,13 @@ return a `root` with each field.
   Host form: `.`-separated labels of 1 to 63 letters, digits and `-`, none
   starting or ending with `-`, lowercased, the rendered host at most 253
   characters. A value without any `{$…}` renders as itself.
-- **`{$variable.<name>}` in value templates and `authorized_uris`**
-  (`./credential-template`): `unsupportedTemplateExpressions` accepts it,
-  `renderCredentialTemplate` substitutes `opts.variables`, and
+- **`{$variable.<name>}` in value templates** (`./credential-template`):
+  `unsupportedTemplateExpressions` accepts it, `renderCredentialTemplate`
+  substitutes `opts.variables`, and `substituteCredentialRefs` takes the
+  connection's variables as an optional third argument, rendering both roots
+  in one pass (a variable missing from it renders empty). `TEMPLATE_REF`
+  matches either reference.
+- **`{$variable.<name>}` in `authorized_uris`** (`./authorized-uris`):
   `renderAuthorizedUris` / `unrenderableAuthorizedUriFields` take the
   connection's variables. A variable entry renders in the URL form under the
   URL-form rules, or fills the host of the authority form (alone or ahead of
@@ -43,8 +47,35 @@ return a `root` with each field.
 ### Changed
 
 - **BREAKING: `parseUrlFormPattern`** returns `{ root, field, suffix }` and
-  **`UnrenderableUriField`** gains `root` (`"credential" | "variable"`), so a
-  caller tells a credential field from a variable of the same name.
+  **`UnrenderableUriField`** gains `root` (`"credential" | "variable"`, exported
+  as `TemplateRoot`), so a caller tells a credential field from a variable of
+  the same name.
+
+## [0.11.0] — 2026-10-08
+
+Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new
+subpath (core raises its range to `^0.11.0`).
+
+### Added
+
+- **`./authorized-uris`**: the `authorized_uris` rules in one module —
+  `AuthorizedUriPattern`, `parseAuthorizedUriPattern`, `canonicalUrl`,
+  `parseUrlFormPattern`, `isHostUnboundedUriPattern`, `renderAuthorizedUris`,
+  `unrenderableAuthorizedUriFields`, `UnrenderableUriField`, and the matcher
+  and egress policy formerly in `@appstrate/afps-runtime`
+  (`matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`,
+  `compileEgressPolicy`, `EgressPolicy`). (#1763)
+- **`substituteCredentialRefs`** (`./credential-template`): each
+  `{$credential.<field>}` to its value, a missing or inherited field empty,
+  any other `{$…}` left as is. (#1763)
+
+### Removed
+
+- **`AuthorizedUriPattern`**, **`parseAuthorizedUriPattern`**,
+  **`canonicalUrl`**, **`parseUrlFormPattern`**,
+  **`isHostUnboundedUriPattern`**, **`renderAuthorizedUris`**,
+  **`unrenderableAuthorizedUriFields`** and **`UnrenderableUriField`** from
+  `./credential-template`: import them from `./authorized-uris`. (#1763)
 
 ## [0.10.1] — 2026-10-07
 

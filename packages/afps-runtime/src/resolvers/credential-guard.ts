@@ -3,7 +3,7 @@
 
 /** Credential-exfiltration guard of the three `api_call` paths: docs/architecture/SIDECAR.md. */
 
-import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/credential-template";
+import { isHostUnboundedUriPattern } from "@appstrate/afps-shared/authorized-uris";
 import { referencesField } from "./template-vars.ts";
 
 /** Why a call is refused before anything is sent; {@link urlPolicyRefusalMessage} says it. */

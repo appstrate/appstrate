@@ -12,7 +12,7 @@
  * own policy.
  */
 
-import { apiFetchRaw, problemFields } from "./api.ts";
+import { apiFetchRaw, problemFields, sessionRevokedError } from "./api.ts";
 import { encodePackageIdPath } from "@appstrate/core/naming";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
@@ -91,6 +91,8 @@ export async function fetchPackageDefinition(
   const what =
     ref.source === "draft" ? `the draft of ${ref.packageId}` : `${ref.packageId}@${ref.version}`;
   const res = await apiFetchRaw(profileName, path, ref.spaceId ? { spaceId: ref.spaceId } : {});
+  // What `apiFetch` makes of a 401 a refresh could not fix: the session, not this package.
+  if (res.status === 401) throw await sessionRevokedError(profileName);
   if (!res.ok) {
     const problem = problemFields(await res.json().catch(() => undefined));
     if (ref.source === "draft" && problem.code === "draft_not_writable") {
