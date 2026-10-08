@@ -17,6 +17,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`field: integrations.<id>`). A client matching on the `agent_not_ready`
   code breaks; no known consumer reads it (the CLI prints the status and body).
 
+### Fixed
+
+- **A `400 validation_failed` response reports a missing body field with
+  `errors[].code: "required"`** (#1790), as documented, instead of
+  `invalid_type`, `invalid_value` or `invalid_union`. The dashboard now shows
+  its "field is required" message for it. A missing coerced numeric field,
+  such as `size` on `POST /api/uploads`, still reports `invalid_type`.
+
 ## [1.0.0-beta.65] - 2026-10-07
 
 ### Operators
