@@ -1646,6 +1646,18 @@ detail/`, filled with the redesign's content (one OAuth client table, lock
   The status badge already says the outcome on every tab, and the journal
   carries the terminal error line. The run page no longer shows the unread
   dot on its own status: the page is the reading.
+- A schedule is changed in its Paramètres tab, built like an agent's: a
+  rail (Général, Récurrence, Identité, Entrées, Exécution, Connexions) and the
+  rule "the control IS the setting", each field patching
+  `/api/schedules/{id}` on its own (absent keys stay as stored; the inputs
+  and the execution overrides after a pause in typing). The one write that
+  cannot be split is a new actor on an armed schedule: when the server leaves
+  a connection choice open (`409 missing_integration_connection`), the
+  identity section asks for the picks and saves both together. The edit page
+  and its route are gone, "Modifier" left the Actions menu, the overview
+  cards open their section, and the create form is create-only. The time
+  zone select lists every IANA zone the browser knows (the old short list
+  left America/Toronto blank).
 - Every Alert is shadcn's grid alert: the icon sits on the middle of the
   text's first line, one line or several (the old absolute icon sat 5px
   low). An alert with a button in its row centres the button on that line
