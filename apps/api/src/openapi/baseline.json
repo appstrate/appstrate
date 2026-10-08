@@ -1889,7 +1889,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -1897,7 +1897,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     }
                   },
                   "dependency_overrides": {
@@ -2325,7 +2325,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -2333,7 +2333,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     }
                   },
                   "modelId": {
@@ -2591,7 +2591,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     },
                     "description": "Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. Same array shape and same bounds as on the launch surfaces."
                   },
@@ -4864,7 +4864,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`).",
+                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..20 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`).",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -4872,7 +4872,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     }
                   },
                   "dependency_overrides": {
@@ -5155,7 +5155,7 @@
                   },
                   "connection_overrides": {
                     "type": ["object", "null"],
-                    "description": "Per-integration connection sets frozen on the schedule, one array of 1..10 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`.",
+                    "description": "Per-integration connection sets frozen on the schedule, one array of 1..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -5163,7 +5163,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     }
                   },
                   "dependency_overrides": {
@@ -8118,7 +8118,7 @@
                       "format": "uuid"
                     },
                     "minItems": 1,
-                    "maxItems": 10,
+                    "maxItems": 20,
                     "description": "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org`."
                   }
                 },
@@ -8148,7 +8148,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively)."
+            "description": "Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8266,7 +8266,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     },
                     "enforce": {
                       "type": "boolean"
@@ -8338,7 +8338,7 @@
                       "format": "uuid"
                     },
                     "minItems": 1,
-                    "maxItems": 10,
+                    "maxItems": 20,
                     "description": "The WHOLE default set — this write replaces it."
                   },
                   "enforce": {
@@ -8384,7 +8384,7 @@
                         "format": "uuid"
                       },
                       "minItems": 1,
-                      "maxItems": 10
+                      "maxItems": 20
                     },
                     "enforce": {
                       "type": "boolean"
@@ -8404,7 +8404,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively)."
+            "description": "Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -13260,7 +13260,7 @@
                               "format": "uuid"
                             },
                             "minItems": 1,
-                            "maxItems": 10
+                            "maxItems": 20
                           }
                         }
                       }
@@ -13334,7 +13334,7 @@
                       "format": "uuid"
                     },
                     "minItems": 1,
-                    "maxItems": 10
+                    "maxItems": 20
                   }
                 },
                 "additionalProperties": false
@@ -13355,7 +13355,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Refused: an empty set, more than 10 ids, or a repeated id (compared case-insensitively)."
+            "description": "Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14556,7 +14556,7 @@
             "name": "connection_id",
             "in": "query",
             "required": false,
-            "description": "Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 10 connections per integration and each has its own credential surface, so there is no \"the connection of this integration\" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.",
+            "description": "Which of the connections this run bound to the integration the credentials are for. REQUIRED on an agent run (a connect run omits it): a run may bind up to 20 connections per integration and each has its own credential surface, so there is no \"the connection of this integration\" to fall back to. Must be a member of `runs.resolved_connections[<integration id>]` — an id the run did not bind is a `400 connection_not_in_run`, because the run token authorises the connections the run's cascade bound and no others. The one caller exempt from it is the ephemeral CONNECT run, which has no run row, no cascade and no bound set — it is authorised by its launcher-published grant and always receives the empty payload.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -29290,7 +29290,7 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..10 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.",
+            "description": "Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 1..20 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.",
             "additionalProperties": {
               "type": "array",
               "items": {
@@ -29298,7 +29298,7 @@
                 "format": "uuid"
               },
               "minItems": 1,
-              "maxItems": 10
+              "maxItems": 20
             }
           },
           "dependency_overrides": {
@@ -29477,7 +29477,7 @@
           },
           "connection_overrides": {
             "type": ["object", "null"],
-            "description": "Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..10 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.",
+            "description": "Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 1..20 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.",
             "additionalProperties": {
               "type": "array",
               "items": {
@@ -29485,7 +29485,7 @@
                 "format": "uuid"
               },
               "minItems": 1,
-              "maxItems": 10
+              "maxItems": 20
             }
           },
           "dependency_overrides": {
@@ -30194,7 +30194,7 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 10,
+            "maxItems": 20,
             "description": "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise."
           },
           "resolved_missing_scopes": {
@@ -30209,21 +30209,21 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 10
+            "maxItems": 20
           },
           "member_pinned_connection_ids": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "maxItems": 10
+            "maxItems": 20
           },
           "org_default_connection_ids": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "maxItems": 10
+            "maxItems": 20
           },
           "org_default_enforced": {
             "type": "boolean"
@@ -30454,7 +30454,7 @@
               "format": "uuid"
             },
             "minItems": 1,
-            "maxItems": 10,
+            "maxItems": 20,
             "description": "The whole pinned set, in the order it was written. A write replaces it."
           },
           "createdAt": {

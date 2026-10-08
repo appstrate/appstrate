@@ -699,12 +699,12 @@ constraint integration_oauth_clients integration_oauth_clients_space_id_spaces_i
 constraint integration_oauth_clients ioc_auth_method_values CHECK (((token_endpoint_auth_method IS NULL) OR (token_endpoint_auth_method = ANY (ARRAY['client_secret_post'::text, 'client_secret_basic'::text, 'none'::text]))))
 constraint integration_oauth_clients ioc_auto_provisioned_is_space CHECK (((NOT auto_provisioned) OR (space_id IS NOT NULL)))
 constraint integration_oauth_clients ioc_public_iff_no_secret CHECK ((((token_endpoint_auth_method = 'none'::text) AND (client_secret_encrypted = ''::text)) OR ((token_endpoint_auth_method IS DISTINCT FROM 'none'::text) AND (client_secret_encrypted <> ''::text))))
-constraint integration_org_defaults integration_org_defaults_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 10)))
+constraint integration_org_defaults integration_org_defaults_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 20)))
 constraint integration_org_defaults integration_org_defaults_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_org_defaults integration_org_defaults_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_org_defaults integration_org_defaults_pkey PRIMARY KEY (id)
 constraint integration_org_defaults integration_org_defaults_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint integration_pins integration_pins_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 10)))
+constraint integration_pins integration_pins_connection_ids_cardinality CHECK (((cardinality(connection_ids) >= 1) AND (cardinality(connection_ids) <= 20)))
 constraint integration_pins integration_pins_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_pins integration_pins_integration_package_id_packages_id_fk FOREIGN KEY (integration_package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE

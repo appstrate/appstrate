@@ -80,11 +80,11 @@ export const integrationOrgDefaults = pgTable(
     uniqueIndex("idx_integration_org_defaults_unique").on(table.spaceId, table.integrationId),
     // Reverse lookup (`connection_ids @> …`) for the unshare guard.
     index("idx_integration_org_defaults_connection_ids").using("gin", table.connectionIds),
-    // 10 = `MAX_CONNECTIONS_PER_INTEGRATION`, spelled out: the schema must not
+    // 20 = `MAX_CONNECTIONS_PER_INTEGRATION`, spelled out: the schema must not
     // pull `@appstrate/core/integration`'s AFPS graph into drizzle-kit.
     check(
       "integration_org_defaults_connection_ids_cardinality",
-      sql`cardinality(connection_ids) BETWEEN 1 AND 10`,
+      sql`cardinality(connection_ids) BETWEEN 1 AND 20`,
     ),
   ],
 );

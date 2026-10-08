@@ -3004,7 +3004,7 @@ async function dropFromOwnMemberPins(tx: Tx, connectionId: string, userId: strin
     eq(integrationPins.userId, userId),
     arrayContains(integrationPins.connectionIds, [connectionId]),
   );
-  // Delete before update: `cardinality BETWEEN 1 AND 10` refuses an emptied set.
+  // Delete before update: `cardinality BETWEEN 1 AND 20` refuses an emptied set.
   await tx
     .delete(integrationPins)
     .where(and(holding, sql`cardinality(${integrationPins.connectionIds}) = 1`));

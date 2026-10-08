@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
+  now `20` (was `10`): the cap on the connections one declared integration
+  binds in a run.
+
 - **BREAKING: `ModelSwapBacking` gains a required `dialect`**
   (`PiModelDialect | null`, `@appstrate/core/sidecar-types`): the
   sidecar builds the backing from it and no longer reads a record by

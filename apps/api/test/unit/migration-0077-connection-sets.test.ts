@@ -16,12 +16,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { resolve } from "node:path";
 import type { PGlite } from "@electric-sql/pglite";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { journalPGlite } from "../helpers/journal.ts";
 
 const MIGRATIONS_DIR = resolve(import.meta.dir, "../../../../packages/db/drizzle");
 const MIGRATION = `${MIGRATIONS_DIR}/0077_connection_sets.sql`;
 const REPLAY_THROUGH = "0076_space_packages_chat_enforced";
+/** The bound `0077` wrote; later migrations move it, this file tests `0077` alone. */
+const CAP_0077 = 10;
 
 const ORG = "e0000000-0000-4000-8000-00000000c077";
 const SPACE = "spc_c0770000-0000-4000-8000-000000000001";
@@ -229,16 +230,12 @@ describe("0077 — connection sets", () => {
     const pin = (ids: string) =>
       `UPDATE integration_pins SET connection_ids = ${ids} WHERE user_id IS NULL`;
     expect(await rejects(pin("ARRAY[]::uuid[]"))).toBe(true);
-    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION + 1)}]::uuid[]`))).toBe(
-      true,
-    );
+    expect(await rejects(pin(`ARRAY[${ids(CAP_0077 + 1)}]::uuid[]`))).toBe(true);
     expect(
       await rejects(`UPDATE integration_connections SET label = '' WHERE id = '${conn(5)}'`),
     ).toBe(true);
     // Control: a set at the cap and a real label land.
-    expect(await rejects(pin(`ARRAY[${ids(MAX_CONNECTIONS_PER_INTEGRATION)}]::uuid[]`))).toBe(
-      false,
-    );
+    expect(await rejects(pin(`ARRAY[${ids(CAP_0077)}]::uuid[]`))).toBe(false);
     expect(
       await rejects(`UPDATE integration_connections SET label = 'staging' WHERE id = '${conn(5)}'`),
     ).toBe(false);
