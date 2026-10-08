@@ -91,6 +91,18 @@ describe("fetchApiCall — a transport error", () => {
     expect(JSON.stringify({ ...out })).not.toContain("SeCrEt-path-7");
   });
 
+  it("keeps a system code, and only that shape, on a templated call", async () => {
+    const refused = Object.assign(bunError("refused SeCrEt-path-7"), { code: "ECONNREFUSED" });
+    const out = await sendFailing(refused, { api_key: "SeCrEt-path-7" });
+    expect(classifyApiCallFailure(out)).toMatchObject({
+      code: "upstream_unreachable",
+      errno: "ECONNREFUSED",
+      message: "refused {{api_key}}",
+    });
+    const odd = Object.assign(bunError(), { code: "SeCrEt-path-7" });
+    expect(classifyApiCallFailure(await sendFailing(odd, { api_key: "x" })).errno).toBeUndefined();
+  });
+
   it("is rethrown untouched on an untemplated call", async () => {
     const err = bunError();
     expect(await sendFailing(err)).toBe(err);

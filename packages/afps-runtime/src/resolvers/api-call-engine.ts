@@ -191,12 +191,15 @@ function redactCredentialMessage(
 
 /**
  * `err` as-is when `fields` is empty (untemplated call); otherwise a same-`name` Error with the
- * message scrubbed and nothing else — Bun keeps the full URL on `.path` even when the message has none.
+ * message scrubbed and a system `code` (`ECONNREFUSED`) kept, nothing else — Bun keeps the full URL
+ * on `.path` even when the message has none.
  */
 function scrubTransportError(err: unknown, fields: Readonly<Record<string, string>>): unknown {
   if (!(err instanceof Error) || Object.keys(fields).length === 0) return err;
   const clean = new Error(redactCredentialMessage(err.message, fields));
   clean.name = err.name;
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === "string" && /^E[A-Z0-9_]+$/.test(code)) Object.assign(clean, { code });
   return clean;
 }
 
