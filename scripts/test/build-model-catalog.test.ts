@@ -115,10 +115,11 @@ describe("build-model-catalog", () => {
     });
   });
 
-  // An instance serves the `off` it derives: a record whose payload says
-  // otherwise is dropped, not mislabelled. Mid-conversation effort makes Pi
-  // send adaptive thinking at every level, so `off` disables nothing there.
-  it("drops a record whose `off` Pi sends differently from the derived one", async () => {
+  // An instance serves the `off` it derives: a record whose payloads say
+  // otherwise is dropped, not mislabelled. Under mid-conversation effort Pi
+  // sends adaptive thinking whatever the level, so the `off` payload equals a
+  // non-reasoning model's — observed "unsent" — while the rule derives "disables".
+  it("drops a record whose observed `off` differs from the derived one", async () => {
     const { off: _off, ...offAllowed } = bundled.thinkingLevelMap!;
     expect(bundled.compat).toMatchObject({ supportsMidConvoEffort: true });
     withRecords([{ id: "claude-next" }, { id: "claude-off", thinkingLevelMap: offAllowed }]);
@@ -129,7 +130,7 @@ describe("build-model-catalog", () => {
       {
         provider: "anthropic",
         id: "claude-off",
-        reason: 'reasoning off: derived "disables", Pi sends "unsent"',
+        reason: 'reasoning off: derived "disables", observed "unsent"',
       },
     ]);
   });

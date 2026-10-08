@@ -159,8 +159,8 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
   // dropped rather than mislabelled.
   const derived = piReasoningOff(built);
   if (derived) {
-    const sent = await observedReasoningOff(built);
-    if (sent !== derived) return `reasoning off: derived "${derived}", Pi sends "${sent}"`;
+    const observed = await observedReasoningOff(built);
+    if (observed !== derived) return `reasoning off: derived "${derived}", observed "${observed}"`;
   }
   return null;
 }

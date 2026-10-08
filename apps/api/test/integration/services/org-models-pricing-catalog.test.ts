@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { buildPiModel, piReasoningLevels } from "@appstrate/runner-pi/pi-model";
+import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -134,29 +136,64 @@ describe("loadModel — catalog fallback", () => {
     expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
   });
 
-  it("says what a gateway model's `off` sends from the Pi model built for its API", async () => {
-    const offOf = async (providerId: string, reasoning: boolean) => {
+  const OPENROUTER_URL = "https://openrouter.ai/api/v1";
+
+  it("says what `off` sends for a model outside the registry, from the model a run builds", async () => {
+    const offOf = async (
+      providerId: string,
+      modelId: string,
+      reasoning: boolean,
+      baseUrl?: string,
+    ) => {
       const cred = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         providerId,
         apiKey: "sk-test",
+        ...(baseUrl ? { baseUrl } : {}),
       });
       const model = await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: cred.id,
-        modelId: "my-model",
+        modelId,
         reasoning,
       });
-      const resolved = (await loadModel(ctx.orgId, model.id))!.generation?.reasoning;
+      const resolved = (await loadModel(ctx.orgId, model.id))!;
+      if (baseUrl) expect(resolved.baseUrl).toBe(baseUrl);
+      const generation = resolved.generation?.reasoning;
       const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
         ?.reasoning;
-      expect(listed).toEqual(resolved!);
-      return resolved;
+      expect(listed).toEqual(generation!);
+      // The model the runner builds from the resolved binding (`runtime-pi/env.ts`):
+      // its `MODEL_BASE_URL` is the sidecar's LLM proxy, never the upstream.
+      const run = buildPiModel({
+        id: resolved.modelId,
+        dialect: resolved.dialect,
+        apiShape: resolved.apiShape,
+        piProvider: resolved.piProvider,
+        baseUrl: "http://sidecar:8080/llm",
+        reasoning: resolved.reasoning,
+      });
+      expect(generation?.off).toBe(piReasoningOff(run)!);
+      const levels = piReasoningLevels(run);
+      expect(
+        Object.keys(generation!.levels).filter(
+          (l) => generation!.levels[l as never] === "supported",
+        ),
+      ).toEqual(levels);
+      return generation;
     };
-    // openai-completions sends no reasoning parameter at `off`; Anthropic disables thinking.
-    expect((await offOf("openai-compatible", true))?.off).toBe("unsent");
-    expect((await offOf("anthropic-compatible", true))?.off).toBe("disables");
-    expect(await offOf("openai-compatible", false)).not.toHaveProperty("off");
+    // A gateway's openai-completions sends no reasoning parameter at `off`;
+    // Anthropic disables thinking.
+    expect((await offOf("openai-compatible", "my-model", true))?.off).toBe("unsent");
+    expect((await offOf("anthropic-compatible", "my-model", true))?.off).toBe("disables");
+    expect(await offOf("openai-compatible", "my-model", false)).not.toHaveProperty("off");
+    // Pi never sees the gateway's upstream host, so OpenRouter's endpoint alone
+    // does not switch it to OpenRouter's dialect.
+    const viaOpenRouter = await offOf("openai-compatible", "my-model", true, OPENROUTER_URL);
+    expect(viaOpenRouter?.off).toBe("unsent");
+    // OpenRouter is searched live, so it serves ids its registry lacks: Pi still
+    // speaks its dialect there, which sends `reasoning: { effort: "none" }`.
+    expect((await offOf("openrouter", "vendor/unlisted-model", true))?.off).toBe("disables");
   });
 
   // Regression for #544: `org_models.id` is a uuid column. A non-UUID id (e.g.

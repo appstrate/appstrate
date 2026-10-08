@@ -5875,7 +5875,7 @@ export interface components {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
                 /**
-                 * @description What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason or does not take `off`. An alias reports its backing model's.
+                 * @description What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason or does not take `off`. An alias reports its backing model's, and omits it when the backing does not take `off`.
                  * @enum {string}
                  */
                 off?: "disables" | "unsent";

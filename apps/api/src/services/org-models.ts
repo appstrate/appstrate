@@ -307,6 +307,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         id,
         ...metadata,
         generation: generationOf(defaults, {
+          providerId: def.providerId,
           apiShape: def.apiShape,
           reasoning: metadata.reasoning,
           aliased: def.aliased === true,
@@ -340,6 +341,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         id: row.id,
         ...metadata,
         generation: generationOf(defaults, {
+          providerId: creds.providerId,
           apiShape: creds.apiShape,
           reasoning: metadata.reasoning,
           aliased: row.aliased,
@@ -874,8 +876,12 @@ export function resolveCatalogDefaults(
   };
 }
 
-/** What decides the controls of a model: its API, its declared reasoning, and whether it is an alias. */
+/**
+ * What decides the controls of a model: its provider and API, its declared
+ * reasoning, and whether it is an alias.
+ */
 interface GenerationSubject {
+  providerId: string;
   apiShape: string;
   reasoning: boolean | null;
   aliased: boolean;
@@ -883,14 +889,24 @@ interface GenerationSubject {
 
 /**
  * The controls of a model the catalog has no record of: the reasoning levels Pi
- * takes, and what its `off` sends, for the model this platform builds for it
+ * takes, and what its `off` sends, for the model a run builds for it
  * ({@link buildPiModel}). Its temperature support stays unknown.
  */
 function unrecordedGeneration({
+  providerId,
   apiShape,
   reasoning,
 }: GenerationSubject): ModelGenerationCapabilities {
-  const model = buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning });
+  const model = buildPiModel({
+    id: "",
+    dialect: null,
+    apiShape,
+    piProvider: resolvePiProvider(providerId),
+    // Pi talks to the sidecar or the llm-proxy, never the upstream URL: only the
+    // provider shapes the request, so no endpoint is passed.
+    baseUrl: "",
+    reasoning,
+  });
   const levels = new Set<string>(piReasoningLevels(model));
   const off = piReasoningOff(model);
   return {
@@ -948,6 +964,7 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     apiKey: def.apiKey,
     ...metadata,
     generation: generationOf(defaults, {
+      providerId: def.providerId,
       apiShape: def.apiShape,
       reasoning: metadata.reasoning,
       aliased: def.aliased === true,
@@ -979,6 +996,7 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     apiKey: creds.apiKey,
     ...metadata,
     generation: generationOf(defaults, {
+      providerId: creds.providerId,
       apiShape: creds.apiShape,
       reasoning: metadata.reasoning,
       aliased: row.aliased,
