@@ -24,7 +24,12 @@ import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
 import { deleteTokens } from "../src/lib/keyring.ts";
 import { cleanupProfileSkills } from "../src/lib/skills-sync/cleanup.ts";
-import { syncProblemNotice, writeNotice } from "../src/lib/skills-sync/notice.ts";
+import {
+  loginFix,
+  switchFix,
+  syncProblemNotice,
+  writeNotice,
+} from "../src/lib/skills-sync/notice.ts";
 import {
   getNoticePath,
   getStatePath,
@@ -388,7 +393,9 @@ describe("code sync — guards and dry run", () => {
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
       ExitError,
     );
-    expect(stderr()).toBe("No space pinned. Run: appstrate space switch\n");
+    expect(stderr()).toBe(
+      "No space pinned. Run: appstrate space switch <space-id> --profile default\n",
+    );
   });
 
   it("exits 1 with a remedy when the profile is not configured", async () => {
@@ -1160,7 +1167,9 @@ describe("code sync — fresh install", () => {
     await codeSyncCommand({ target: ["claude-plugin"], profile: "nope", printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
-    expect(stderr()).toBe('Profile "nope" not configured. Run: appstrate login --profile nope\n');
+    expect(stderr()).toBe(
+      'Profile "nope" not configured. Run: appstrate login --profile nope --instance <url>\n',
+    );
     const skill = await readText(setupSkill());
     expect(skill).toContain("name: setup");
     expect(skill).toContain("appstrate login --profile nope");
@@ -1201,7 +1210,9 @@ describe("code sync — fresh install", () => {
     expect(skill).toContain("appstrate org list");
     expect(skill).not.toContain("--instance");
     const out = await hookOutput();
-    expect(out.systemMessage).toContain("`appstrate org switch <org-id-or-slug>`");
+    expect(out.systemMessage).toContain(
+      "`appstrate org switch <org-id-or-slug> --profile default`",
+    );
     expect(out.hookSpecificOutput.additionalContext).toContain("`appstrate org list`");
     expect(JSON.stringify(out)).not.toContain("--instance");
   });
@@ -1316,7 +1327,7 @@ describe("code sync — session notice", () => {
     expect(await snapshot(pluginRoot())).toEqual(before);
     const out = await hookOutput();
     // `login` prompts for the instance unless it is named, and Claude's shell has no TTY.
-    const login = "`appstrate login --profile default --instance 'https://app.example.com'`";
+    const login = "`appstrate login --profile default --instance https://app.example.com`";
     expect(out.systemMessage).toContain(login);
     expect(out.systemMessage).toContain(PLUGIN_UPDATE);
     expect(out.systemMessage).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
@@ -1359,27 +1370,36 @@ describe("code sync — session notice", () => {
       ExitError,
     );
 
-    expect(stderr()).toBe("No space pinned. Run: appstrate space switch\n");
-    expect((await hookOutput()).systemMessage).toContain("`appstrate space switch <space-id>`");
+    expect(stderr()).toBe(
+      "No space pinned. Run: appstrate space switch <space-id> --profile default\n",
+    );
+    expect((await hookOutput()).systemMessage).toContain(
+      "`appstrate space switch <space-id> --profile default`",
+    );
   });
 
-  it("keeps the plugin ledger when logout cannot write the notice, so a retry redoes both", async () => {
+  it("still resets to the setup plugin when logout cannot write the notice", async () => {
     createSkillServer(ONE_SKILL).install();
     await syncPlugin();
     await mkdir(getNoticePath());
 
-    const failed = await cleanupProfileSkills("default");
+    const result = await cleanupProfileSkills("default");
 
-    expect(failed.pluginReset).toBe(false);
-    expect(failed.warnings).toHaveLength(1);
-    expect((await readSyncState()).state.targets["claude-plugin"]).toBeDefined();
-
-    await rm(getNoticePath(), { recursive: true });
-    const retried = await cleanupProfileSkills("default");
-
-    expect(retried).toEqual({ warnings: [], pluginReset: true });
+    expect(result.pluginReset).toBe(true);
+    expect(result.warnings).toEqual([expect.stringContaining(getNoticePath())]);
     expect((await readSyncState()).state.targets["claude-plugin"]).toBeUndefined();
-    expect((await hookOutput()).systemMessage).toContain("Signed out");
+    expect(await readText(join(pluginRoot(), "skills", "setup", "SKILL.md"))).toContain(
+      "appstrate login --profile default --instance https://app.example.com",
+    );
+  });
+
+  it("quotes a remedy argument only when the shell would read it", () => {
+    expect(loginFix("x", "work laptop", "https://app.example.com/").remedy).toBe(
+      "appstrate login --profile 'work laptop' --instance https://app.example.com/",
+    );
+    expect(switchFix("x", "space", "$(touch pwned)").remedy).toBe(
+      "appstrate space switch <space-id> --profile '$(touch pwned)'",
+    );
   });
 
   it("says nothing about a failure no command fixes, and keeps an older notice", async () => {
@@ -1413,7 +1433,7 @@ describe("code sync — session notice", () => {
     const out = await hookOutput();
     expect(out.systemMessage).toContain('Pinned space "spc_1" is not accessible');
     // `space switch` opens a picker without a ref, and Claude's shell has no TTY.
-    expect(out.systemMessage).toContain("`appstrate space switch <space-id>`");
+    expect(out.systemMessage).toContain("`appstrate space switch <space-id> --profile default`");
     expect(out.hookSpecificOutput.additionalContext).toContain("`appstrate space list`");
   });
 
@@ -1449,7 +1469,9 @@ describe("code sync — session notice", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
     const out = await hookOutput();
     expect(out.systemMessage).toContain("no longer grants this profile access to its spaces");
-    expect(out.systemMessage).toContain("`appstrate org switch <org-id-or-slug>`");
+    expect(out.systemMessage).toContain(
+      "`appstrate org switch <org-id-or-slug> --profile default`",
+    );
   });
 
   it("leaves the notice alone under --dry-run", async () => {

@@ -142,7 +142,7 @@ export const SETUP_SLUG = "setup";
  * The plugin a machine gets before the CLI is connected, so the marketplace
  * install succeeds and the remedy sits where the user works: one skill that
  * says how, while `setupNotice` (`notice.ts`) says it at every session start.
- * The first connected sync replaces the whole tree. The fix is a `NoticeFix`,
+ * The first connected sync replaces the whole tree. The fix is an `Actionable`,
  * typed structurally here because `notice.ts` imports this module.
  */
 export function setupPluginFiles({
@@ -175,8 +175,8 @@ export function setupPluginFiles({
     "",
     "   A login opens the browser on the device-flow page; the user only has to approve " +
       "there. With several organizations, add `--org <slug>` to it.",
-    `2. Reload the plugin with \`${PLUGIN_UPDATE_COMMAND}\`, or start a new ` +
-      "Claude Code session. The organization's skills then replace this one.",
+    `2. Run \`${PLUGIN_UPDATE_COMMAND}\`, then start a new Claude Code session: ` +
+      "the organization's skills replace this one there.",
     "",
   ].join("\n");
   return {
@@ -188,6 +188,11 @@ export function setupPluginFiles({
 /** POSIX single-quote quoting: the only escape is closing, backslash-quoting, reopening. */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/** `value` as one shell word: bare when nothing in it is special, {@link shellQuote}d otherwise. */
+export function shellArg(value: string): string {
+  return /^[A-Za-z0-9._@%+=:,/-]+$/.test(value) ? value : shellQuote(value);
 }
 
 /** Atomic swap of the whole plugin root, same staging discipline as {@link writePluginTree}. */

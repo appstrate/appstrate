@@ -8,7 +8,7 @@
  * touches — the file is how a failure still reaches the next session.
  *
  * Every notice closes its own loop: after the fix, `PLUGIN_UPDATE_COMMAND`
- * re-runs the sync, which clears the file, and reloads the skills.
+ * re-runs the sync, which clears the file, and a new session picks up the result.
  */
 
 import { mkdir, rm } from "node:fs/promises";
@@ -16,7 +16,7 @@ import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { getDataDir } from "../config.ts";
 import { getNoticePath } from "./state.ts";
-import { PLUGIN_NAME, PLUGIN_UPDATE_COMMAND, SETUP_SLUG, shellQuote } from "./targets.ts";
+import { PLUGIN_NAME, PLUGIN_UPDATE_COMMAND, SETUP_SLUG, shellArg } from "./targets.ts";
 
 /** Claude Code's `SessionStart` hook output: one line for the user, context for the model. */
 export interface SessionNotice {
@@ -24,19 +24,15 @@ export interface SessionNotice {
   hookSpecificOutput: { hookEventName: "SessionStart"; additionalContext: string };
 }
 
-/** A problem the user fixes by running one command. */
-export interface Actionable {
-  problem: string;
-  remedy: string;
-}
-
 /**
- * An {@link Actionable} as the notice offers it to the model, which runs it
- * from a shell with no TTY: `remedy` must not prompt, `ask` is what to ask the
+ * A problem one command fixes. A human reads it on stderr and Claude runs it
+ * from a shell with no TTY, so `remedy` never prompts: `ask` is what to ask the
  * user for first (the `<…>` placeholder in `remedy`), and `check` is a
  * non-interactive command that succeeds once the problem is gone.
  */
-export interface NoticeFix extends Actionable {
+export interface Actionable {
+  problem: string;
+  remedy: string;
   ask?: string;
   check?: string;
 }
@@ -45,53 +41,60 @@ const INSTANCE_QUESTION =
   "their Appstrate instance URL (`https://app.appstrate.com` for the hosted service)";
 
 /** `login` prompts for the instance unless `--instance` names it. */
-export function loginFix(problem: string, profileName: string, instance?: string): NoticeFix {
+export function loginFix(problem: string, profileName: string, instance?: string): Actionable {
+  const profile = shellArg(profileName);
   return {
     problem,
-    remedy: `appstrate login --profile ${profileName} --instance ${instance ? shellQuote(instance) : "<url>"}`,
-    check: `appstrate whoami --profile ${profileName}`,
+    remedy: `appstrate login --profile ${profile} --instance ${instance ? shellArg(instance) : "<url>"}`,
+    check: `appstrate whoami --profile ${profile}`,
     ...(instance ? {} : { ask: INSTANCE_QUESTION }),
   };
 }
 
 const SWITCHES = {
   org: {
-    remedy: "appstrate org switch <org-id-or-slug>",
+    command: "appstrate org switch <org-id-or-slug>",
     ask: "the organization to use (`appstrate org list` lists them)",
   },
   space: {
-    remedy: "appstrate space switch <space-id>",
+    command: "appstrate space switch <space-id>",
     ask: "the space to use (`appstrate space list` lists them)",
   },
 };
 
-/** `org switch` / `space switch` open a picker unless given a ref, and a picker needs a TTY. */
-export function switchFix(problem: string, pin: keyof typeof SWITCHES): NoticeFix {
-  return { problem, ...SWITCHES[pin] };
+/**
+ * `org switch` / `space switch` open a picker unless given a ref, and a picker
+ * needs a TTY. `--profile`, or Claude would re-pin whichever profile is active.
+ */
+export function switchFix(
+  problem: string,
+  pin: keyof typeof SWITCHES,
+  profileName: string,
+): Actionable {
+  const { command, ask } = SWITCHES[pin];
+  return { problem, remedy: `${command} --profile ${shellArg(profileName)}`, ask };
 }
 
-/**
- * Every notice ends the same way: the fix, and `PLUGIN_UPDATE_COMMAND` to
- * re-run the sync, which clears the notice. Only the leads differ.
- */
+/** Every notice ends the same way, with the fix and how it takes effect; only the leads differ. */
 function render(
-  { remedy, ask, check }: NoticeFix,
+  { remedy, ask, check }: Actionable,
   lead: { user: string; model: string },
   tail = "",
 ): SessionNotice {
   const update = `\`${PLUGIN_UPDATE_COMMAND}\``;
   return {
-    systemMessage: `${lead.user} run \`${remedy}\` (or ask Claude to), then ${update}.`,
+    systemMessage: `${lead.user} run \`${remedy}\` (or ask Claude to), then ${update}, then start a new Claude Code session.`,
     hookSpecificOutput: {
       hookEventName: "SessionStart",
       additionalContext:
         `${lead.model} This may already be fixed: ` +
         (check
-          ? `if \`${check}\` succeeds, it is, and only ${update} is needed. `
-          : `if the user already fixed it, only ${update} is needed. `) +
+          ? `if \`${check}\` succeeds, it is; skip to the last step. `
+          : "if the user already fixed it, skip to the last step. ") +
         `Otherwise offer to run \`${remedy}\` for the user` +
         (ask ? `, asking them for ${ask} first` : "") +
-        `, then ${update}: it re-runs the sync, which clears this notice, and reloads the skills.` +
+        `. Last step: ${update}, which re-runs the sync and clears this notice; ` +
+        "the new skills and connection take effect in a new Claude Code session." +
         tail,
     },
   };
@@ -103,7 +106,7 @@ function render(
  * and the notice it prints may predate a fix, or the sync running beside it.
  */
 export function syncProblemNotice(
-  fix: NoticeFix,
+  fix: Actionable,
   { stale }: { stale: boolean },
   at = new Date(),
 ): SessionNotice {
@@ -119,7 +122,7 @@ export function syncProblemNotice(
 }
 
 /** What a setup plugin's session start says, to the user and to the model. */
-export function setupNotice(fix: NoticeFix): SessionNotice {
+export function setupNotice(fix: Actionable): SessionNotice {
   return render(
     fix,
     {

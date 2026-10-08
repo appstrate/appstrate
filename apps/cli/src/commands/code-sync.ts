@@ -32,7 +32,6 @@ import {
   syncProblemNotice,
   writeNotice,
   type Actionable,
-  type NoticeFix,
   type SessionNotice,
 } from "../lib/skills-sync/notice.ts";
 import {
@@ -304,7 +303,7 @@ interface ActiveProfile {
 }
 
 /** Whatever an `AuthError` says went wrong with the session, logging in again fixes it. */
-function signedOut({ name, instance }: ActiveProfile): NoticeFix {
+function signedOut({ name, instance }: ActiveProfile): Actionable {
   return loginFix(
     `The CLI login for profile "${name}" is missing or no longer valid`,
     name,
@@ -340,30 +339,17 @@ async function updateNotice(
   }
 }
 
-/** `fix`: the remedy as the notice offers it, which may differ from the stderr one. */
-interface ConnectionGap extends Actionable {
-  fix: NoticeFix;
-}
-
 /** What still separates this profile from a syncable space, if anything. */
-function connectionGap(profileName: string, profile: Profile | undefined): ConnectionGap | null {
-  if (!profile) {
-    const problem = `Profile "${profileName}" not configured`;
-    return {
-      problem,
-      remedy: `appstrate login --profile ${profileName}`,
-      fix: loginFix(problem, profileName),
-    };
-  }
-  const pin = !profile.orgId ? "org" : !profile.spaceId ? "space" : null;
-  if (!pin) return null;
-  const problem = pin === "org" ? "No organization pinned" : "No space pinned";
-  return { problem, remedy: `appstrate ${pin} switch`, fix: switchFix(problem, pin) };
+function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
+  if (!profile) return loginFix(`Profile "${profileName}" not configured`, profileName);
+  if (!profile.orgId) return switchFix("No organization pinned", "org", profileName);
+  if (!profile.spaceId) return switchFix("No space pinned", "space", profileName);
+  return null;
 }
 
 /** A gap outside the setup case: the run fails, and the next session is told why. */
-function reportGap(gap: ConnectionGap, report: Report): void {
-  report.run(remedyLine(gap), syncProblemNotice(gap.fix, { stale: true }));
+function reportGap(gap: Actionable, report: Report): void {
+  report.run(remedyLine(gap), syncProblemNotice(gap, { stale: true }));
 }
 
 /**
@@ -373,7 +359,7 @@ function reportGap(gap: ConnectionGap, report: Report): void {
  * lapsed login never takes working skills away.
  */
 async function bootstrapPlugin(
-  gap: ConnectionGap,
+  gap: Actionable,
   state: SyncState,
   report: Report,
 ): Promise<boolean> {
@@ -383,9 +369,9 @@ async function bootstrapPlugin(
     reportGap(gap, report);
     return false;
   }
-  report.note(remedyLine(gap), setupNotice(gap.fix));
+  report.note(remedyLine(gap), setupNotice(gap));
   try {
-    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.fix));
+    await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap));
     return true;
   } catch (err) {
     report.run(`Failed to write claude-plugin: ${formatError(err)}`);
@@ -790,14 +776,12 @@ async function reachableSpaces(
     return await listSpaces(profileName);
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 403) throw err;
-    const revoked: Actionable = {
-      problem: `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
-      remedy: "appstrate org switch",
-    };
-    report.note(
-      remedyLine(revoked),
-      syncProblemNotice(switchFix(revoked.problem, "org"), { stale: false }),
+    const revoked = switchFix(
+      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
+      "org",
+      profileName,
     );
+    report.note(remedyLine(revoked), syncProblemNotice(revoked, { stale: false }));
     return null;
   }
 }
@@ -834,14 +818,12 @@ async function selectSources(
   // the header either way — so membership, not presence in the list, is the test.
   const pinned = spaces.find((space) => space.id === profile.spaceId);
   if (profile.spaceId && (!pinned || pinned.access === "none")) {
-    const deadPin: Actionable = {
-      problem: `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
-      remedy: "appstrate space switch",
-    };
-    report.note(
-      remedyLine(deadPin),
-      syncProblemNotice(switchFix(deadPin.problem, "space"), { stale: false }),
+    const deadPin = switchFix(
+      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
+      "space",
+      profileName,
     );
+    report.note(remedyLine(deadPin), syncProblemNotice(deadPin, { stale: false }));
   }
   const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };
