@@ -81,9 +81,6 @@ const ScheduleDetailPage = lazy(() =>
 const ScheduleCreatePage = lazy(() =>
   import("./pages/schedule-create").then((m) => ({ default: m.ScheduleCreatePage })),
 );
-const ScheduleEditPage = lazy(() =>
-  import("./pages/schedule-edit").then((m) => ({ default: m.ScheduleEditPage })),
-);
 const SkillsPage = lazy(() =>
   import("./pages/skills-page").then((m) => ({ default: m.SkillsPage })),
 );
@@ -272,11 +269,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules/:id": (
     <LazyRoute>
       <ScheduleDetailPage />
-    </LazyRoute>
-  ),
-  "/schedules/:id/edit": (
-    <LazyRoute>
-      <ScheduleEditPage />
     </LazyRoute>
   ),
   "/skills": (

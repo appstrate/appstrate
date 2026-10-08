@@ -37,13 +37,3 @@ export function useAgentDiagnostics(agentPackageId: string | undefined, version?
     ),
   );
 }
-
-/**
- * Blocking connection diagnostics remain launchable because Run opens the
- * existing 412 recovery flow. Every other blocker disables launch. The status
- * badge still remains blocking, so this is an interaction capability, not a
- * second readiness verdict.
- */
-export function diagnosticsAllowLaunch(data: AgentDiagnostics | undefined): boolean {
-  return data?.can_launch ?? false;
-}

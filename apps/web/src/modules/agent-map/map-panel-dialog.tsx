@@ -73,7 +73,6 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
 
   return (
     <ScheduleForm
-      mode="create"
       // One option only — this agent. The map is agent-scoped, so letting the
       // form retarget another agent would be a trap, not a feature.
       agents={[{ id: packageId, displayName: detail?.display_name ?? packageId }]}

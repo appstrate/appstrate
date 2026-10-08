@@ -32,38 +32,24 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
 }
 
 interface ScheduleOverridePayload {
-  model_id_override?: string | null;
-  generation_config_override?: ModelGenerationSettings | null;
-  proxy_id_override?: string | null;
-  version_override?: string | null;
-  connection_overrides?: Record<string, string[]> | null;
+  model_id_override?: string;
+  generation_config_override?: ModelGenerationSettings;
+  proxy_id_override?: string;
+  version_override?: string;
+  connection_overrides?: Record<string, string[]>;
   actor?: ActorValue;
 }
 
 /**
- * The override half of a schedule write. Create omits whatever is empty. Edit sends every
- * override, `null` for a cleared one (an absent key leaves the row untouched), except
- * `version_override` and the actor, sent only when they changed.
+ * The override half of a schedule CREATE: whatever is empty is omitted. An
+ * existing schedule is patched one setting at a time by its Paramètres tab.
  */
 export function scheduleOverridePayload(args: {
-  isEdit: boolean;
   overrides: RunOverridesValue;
   versionOverride: string | undefined;
-  versionOverrideChanged: boolean;
   actor: ActorValue | undefined;
-  currentActor: ActorValue | undefined;
 }): ScheduleOverridePayload {
   const { overrides, versionOverride, actor } = args;
-  if (args.isEdit) {
-    return {
-      model_id_override: overrides.model_id_override ?? null,
-      generation_config_override: overrides.generation_config_override ?? null,
-      proxy_id_override: overrides.proxy_id_override ?? null,
-      ...(args.versionOverrideChanged ? { version_override: versionOverride ?? null } : {}),
-      connection_overrides: overrides.connection_overrides ?? null,
-      ...(actor && !sameActor(actor, args.currentActor) ? { actor } : {}),
-    };
-  }
   return {
     ...(overrides.model_id_override ? { model_id_override: overrides.model_id_override } : {}),
     ...(overrides.generation_config_override

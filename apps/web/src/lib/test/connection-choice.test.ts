@@ -105,32 +105,15 @@ const ALICE_PICKS = { "@acme/gmail": ["c_alice"] };
 const BOB_PICKS = { "@acme/gmail": ["c_bob"] };
 
 describe("picksAfterActorChange", () => {
-  const stored = { actor: ALICE, picks: ALICE_PICKS };
-
   it("keeps the picks while the identity does not change", () => {
-    expect(
-      picksAfterActorChange({ picks: BOB_PICKS, runsAs: ALICE, nextRunsAs: ALICE, stored }),
-    ).toBe(BOB_PICKS);
+    expect(picksAfterActorChange({ picks: BOB_PICKS, runsAs: ALICE, nextRunsAs: ALICE })).toBe(
+      BOB_PICKS,
+    );
   });
 
   it("drops them on a real change: they named the previous identity's connections", () => {
     expect(
-      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored }),
-    ).toBeUndefined();
-    expect(
-      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB, stored: null }),
-    ).toBeUndefined();
-  });
-
-  it("restores the stored picks back on the schedule's own actor", () => {
-    expect(
-      picksAfterActorChange({ picks: undefined, runsAs: BOB, nextRunsAs: ALICE, stored }),
-    ).toBe(ALICE_PICKS);
-  });
-
-  it("restores nothing on create, where no picks are stored", () => {
-    expect(
-      picksAfterActorChange({ picks: BOB_PICKS, runsAs: BOB, nextRunsAs: ALICE, stored: null }),
+      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB }),
     ).toBeUndefined();
   });
 });

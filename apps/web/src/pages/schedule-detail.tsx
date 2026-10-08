@@ -36,10 +36,11 @@ import { isQueryInFlight } from "../lib/query-state";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
+import { ScheduleSettings } from "../components/schedule-settings";
+import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
 import {
   ChevronDown,
-  Pencil,
   Trash2,
   Play,
   Pause,
@@ -49,7 +50,7 @@ import {
   CirclePlay,
 } from "lucide-react";
 
-type ScheduleTab = "details" | "runs";
+type ScheduleTab = "details" | "runs" | "settings";
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -65,7 +66,9 @@ export function ScheduleDetailPage() {
 
   // A schedule's runs are runs: `schedules:read` alone does not list them.
   const readsRuns = canReadRuns(can);
-  const tabs: readonly ScheduleTab[] = readsRuns ? ["details", "runs"] : ["details"];
+  const tabs: readonly ScheduleTab[] = readsRuns
+    ? ["details", "runs", "settings"]
+    : ["details", "settings"];
   const [activeTab, setActiveTab] = useTabWithHash(tabs, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -98,7 +101,12 @@ export function ScheduleDetailPage() {
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
             { label: schedule.name || t("schedule.unnamed"), href: `/schedules/${schedule.id}` },
             {
-              label: activeTab === "details" ? t("detail.overview.summary") : t("schedule.tabRuns"),
+              label:
+                activeTab === "details"
+                  ? t("detail.overview.summary")
+                  : activeTab === "runs"
+                    ? t("schedule.tabRuns")
+                    : t("schedule.tabSettings"),
             },
           ]}
           actions={
@@ -124,10 +132,6 @@ export function ScheduleDetailPage() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => navigate(`/schedules/${id}/edit`)}>
-                      <Pencil size={14} />
-                      {t("schedule.edit")}
-                    </DropdownMenuItem>
                     <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
                       {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
                       {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
@@ -165,7 +169,7 @@ export function ScheduleDetailPage() {
                   size="sm"
                   variant="outline"
                   className="-my-1.5 shrink-0"
-                  onClick={() => navigate(`/schedules/${schedule.id}/edit#connections`)}
+                  onClick={() => navigate(scheduleSettingsHref(schedule.id, "connections"))}
                 >
                   {t("schedule.chooseConnections")}
                 </Button>
@@ -176,6 +180,7 @@ export function ScheduleDetailPage() {
         <DetailTabsList className="mt-6 mb-3">
           <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
           {readsRuns && <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>}
+          <DetailTabsTrigger value="settings">{t("schedule.tabSettings")}</DetailTabsTrigger>
         </DetailTabsList>
 
         {readsRuns && (
@@ -186,6 +191,13 @@ export function ScheduleDetailPage() {
 
         <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <ScheduleParams schedule={schedule} />
+        </TabsContent>
+
+        <TabsContent
+          value="settings"
+          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
+        >
+          <ScheduleSettings schedule={schedule} />
         </TabsContent>
       </Tabs>
 
@@ -222,10 +234,20 @@ function ScheduleParams({
   const agentDisplayName =
     agents?.find((f) => f.id === schedule.packageId)?.display_name ?? schedule.packageId;
   const input = schedule.input;
+  const navigate = useNavigate();
+  const open = (section: ScheduleSettingsSection) => ({
+    label: t("schedule.settings.open"),
+    onClick: () => navigate(scheduleSettingsHref(schedule.id, section)),
+  });
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-2">
-      <DetailSectionCard headerInside title={t("run.infoExecution")} icon={CirclePlay}>
+      <DetailSectionCard
+        headerInside
+        title={t("run.infoExecution")}
+        icon={CirclePlay}
+        headerAction={open("execution")}
+      >
         <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
           <div className="min-w-0">
             <dt className="text-muted-foreground text-xs">{t("schedule.paramAgent")}</dt>
@@ -251,7 +273,12 @@ function ScheduleParams({
           </div>
         </dl>
       </DetailSectionCard>
-      <DetailSectionCard headerInside title={t("schedule.timing")} icon={CalendarClock}>
+      <DetailSectionCard
+        headerInside
+        title={t("schedule.timing")}
+        icon={CalendarClock}
+        headerAction={open("recurrence")}
+      >
         <FactGrid
           facts={[
             { labelKey: "schedule.paramCron", value: schedule.cron_expression },
@@ -276,6 +303,7 @@ function ScheduleParams({
         headerInside
         title={t("schedule.tabInput")}
         icon={FileInput}
+        headerAction={open("inputs")}
         className="lg:col-span-2"
       >
         <p className="text-muted-foreground mb-4 text-sm">{t("schedule.inputHint")}</p>

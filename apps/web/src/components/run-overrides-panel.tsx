@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -296,7 +295,7 @@ export function RunOverridesPanel({
  * list, scope/lock verdicts and inline connect flow — only the
  * persistence target differs (transient form value vs. member pin).
  */
-function ScheduleConnectionOverridesSection({
+export function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
@@ -310,17 +309,8 @@ function ScheduleConnectionOverridesSection({
   onChange: (integrationId: string, connectionIds: string[]) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  // Reached by `#connections` (a schedule switched off over a lost
-  // connection): the section brings itself into view once it has rendered,
-  // which is after the agent's integrations loaded.
-  const sectionRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (window.location.hash === "#connections") {
-      sectionRef.current?.scrollIntoView({ block: "start" });
-    }
-  }, []);
   return (
-    <div ref={sectionRef} id="connections" className="scroll-mt-6 space-y-2">
+    <div className="space-y-2">
       <Label>{t("schedule.connectionOverrides.label")}</Label>
       <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
       <div className="border-border bg-card space-y-3 rounded-md border p-3">

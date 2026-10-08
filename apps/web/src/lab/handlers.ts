@@ -1900,6 +1900,26 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     },
   },
   {
+    // The Paramètres tab saves one setting at a time: absent keys stay as stored.
+    method: "PATCH",
+    pattern: /^\/api\/schedules\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const schedule = f.scheduleDetails[endUserId(url)];
+      if (!schedule) return { status: 404, body: {} };
+      const { actor, ...fields } = (typeof body === "object" && body !== null ? body : {}) as {
+        actor?: { userId?: string; endUserId?: string };
+      } & Partial<typeof schedule>;
+      const next = {
+        ...schedule,
+        ...fields,
+        ...(actor ? { userId: actor.userId ?? null, endUserId: actor.endUserId ?? null } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      if (scenario !== "error") Object.assign(schedule, next);
+      return { status: 200, body: next };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/schedules\/[^/]+\/runs$/,
     handler: (url, scenario) => {

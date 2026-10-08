@@ -205,7 +205,8 @@ interface ScheduleFormDeps {
 
 /**
  * Aggregates the agent-detail / model / proxy lookups that both
- * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
+ * `ScheduleCreatePage` and the map's new-schedule panel feed into `<ScheduleForm>`; the
+ * schedule's Paramètres tab reads it for the sections that depend on the agent.
  *
  * `deps` is `null` until the agent detail has landed — or when no agent is
  * selected — so a consumer can never mount a form on settings it does not have

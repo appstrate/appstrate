@@ -88,20 +88,13 @@ export function refusalForActor(
   return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
 }
 
-/**
- * Picks name the previous identity's connections, so an actor change drops them — except back
- * on the schedule's stored actor (`stored`, edit only), whose stored picks hold again.
- */
+/** Picks name the previous identity's connections, so an actor change drops them. */
 export function picksAfterActorChange(args: {
   picks: Record<string, string[]> | undefined;
   runsAs: ActorValue | undefined;
   nextRunsAs: ActorValue | undefined;
-  stored: { actor: ActorValue | undefined; picks: Record<string, string[]> | undefined } | null;
 }): Record<string, string[]> | undefined {
-  if (sameActor(args.nextRunsAs, args.runsAs)) return args.picks;
-  return args.stored && sameActor(args.nextRunsAs, args.stored.actor)
-    ? args.stored.picks
-    : undefined;
+  return sameActor(args.nextRunsAs, args.runsAs) ? args.picks : undefined;
 }
 
 /**

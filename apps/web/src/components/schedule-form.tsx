@@ -6,7 +6,6 @@ import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -47,44 +46,20 @@ import {
   scheduleOverridePayload,
 } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
+import { timezoneOptions } from "../lib/timezones";
+import { CRON_PRESETS, VERSION_INHERIT } from "../lib/schedule-options";
 import { usePackageDetail } from "../hooks/use-packages";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-
-// Sentinel for the schedule's "inherit" version choice — nothing stored; the
-// agent's version resolution applies at fire time, which means the latest
-// published version.
-const VERSION_INHERIT = "__inherit__";
 
 /** Stable "no agent loaded yet" layers — a per-render literal would change
  * identity and defeat the launch form's memoized partition. */
 const EMPTY_INPUT_SETTINGS: AgentInputSettings = { values: {}, locked_fields: [] };
-
-function getCronPresets(t: (key: string) => string) {
-  return [
-    { label: t("schedule.preset30min"), cron: "*/30 * * * *" },
-    { label: t("schedule.presetHourly"), cron: "0 * * * *" },
-    { label: t("schedule.presetDaily9"), cron: "0 9 * * *" },
-    { label: t("schedule.presetWeekday9"), cron: "0 9 * * 1-5" },
-    { label: t("schedule.presetMonday9"), cron: "0 9 * * 1" },
-  ];
-}
-
-const TIMEZONES = [
-  "UTC",
-  "Europe/Paris",
-  "Europe/London",
-  "America/New_York",
-  "America/Chicago",
-  "America/Los_Angeles",
-  "Asia/Tokyo",
-] as const;
 
 interface ScheduleSaveData {
   name?: string;
   cron_expression: string;
   timezone?: string;
   input?: Record<string, unknown>;
-  enabled?: boolean;
   model_id_override?: string | null;
   generation_config_override?: ModelGenerationSettings | null;
   proxy_id_override?: string | null;
@@ -92,33 +67,18 @@ interface ScheduleSaveData {
   /**
    * Per-integration connection picks frozen on the schedule row
    * (`package_schedules.connection_overrides`), same wire shape as the run
-   * route's `connection_overrides`; `null` clears on edit.
+   * route's `connection_overrides`.
    */
   connection_overrides?: Record<string, string[]> | null;
-  /**
-   * Schedule execution identity (#738). Omitted on create → server defaults to
-   * the caller. Omitted on edit → actor left unchanged (never cleared).
-   */
+  /** Schedule execution identity (#738). Omitted → the server defaults to the caller. */
   actor?: ActorValue;
 }
 
+/**
+ * Creating a schedule: everything it needs to exist, in one write. An existing
+ * schedule is changed in its Paramètres tab (`ScheduleSettings`), field by field.
+ */
 interface ScheduleFormProps {
-  mode: "create" | "edit";
-  defaultValues?: {
-    name?: string;
-    cron_expression?: string;
-    timezone?: string;
-    enabled?: boolean;
-    input?: Record<string, unknown>;
-    model_id_override?: string | null;
-    generation_config_override?: ModelGenerationSettings | null;
-    proxy_id_override?: string | null;
-    version_override?: string | null;
-    connection_overrides?: Record<string, string[]> | null;
-    actor?: ActorValue;
-  };
-  /** The schedule's current actor (edit mode) — used to detect a real change. */
-  currentActor?: ActorValue;
   /**
    * The agent's input wrapper (schema + hints + order) plus the
    * per-space layers behind it (`values` + `locked_fields`).
@@ -142,7 +102,6 @@ interface ScheduleFormProps {
   onAgentChange?: (agentId: string) => void;
   onSubmit: (data: ScheduleSaveData) => void;
   onCancel: () => void;
-  onDelete?: () => void;
   isPending?: boolean;
   blockedMessage?: string;
   /**
@@ -156,13 +115,9 @@ interface FormFields {
   name: string;
   cron_expression: string;
   timezone: string;
-  enabled: boolean;
 }
 
 export function ScheduleForm({
-  mode,
-  defaultValues,
-  currentActor,
   inputWrapper,
   persistedModelId,
   persistedGenerationConfig,
@@ -174,49 +129,30 @@ export function ScheduleForm({
   onAgentChange,
   onSubmit,
   onCancel,
-  onDelete,
   isPending,
   blockedMessage,
   connectionChoices,
 }: ScheduleFormProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const cronPresets = getCronPresets(t);
-  const isEdit = mode === "edit";
-
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // The wrapper carries the stored values and locks; the constant stands in
   // only while the agent detail is still loading.
   const settings: AgentInputSettings = inputWrapper ?? EMPTY_INPUT_SETTINGS;
   const hasInput = hasInputFields(inputWrapper);
 
-  // Seeded from the schedule's frozen values on top of the agent's resolved
-  // defaults, minus every locked field: a schedule that still carries a value
-  // for a field locked since it was saved would be refused on the next save
-  // (400 `locked_input_field`).
+  // Seeded from the agent's resolved defaults, minus every locked field.
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(() =>
-    initialInputValues(inputWrapper, settings, defaultValues?.input),
+    initialInputValues(inputWrapper, settings, undefined),
   );
 
   // Override-layer state — mirrors the Run modal's accordion, except
   // these overrides are persisted on the schedule row and replayed on
   // every fire (vs. the Run modal which only applies them once).
-  const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
-    const v: RunOverridesValue = {};
-    if (defaultValues?.connection_overrides)
-      v.connection_overrides = defaultValues.connection_overrides;
-    if (defaultValues?.model_id_override) v.model_id_override = defaultValues.model_id_override;
-    if (defaultValues?.generation_config_override)
-      v.generation_config_override = defaultValues.generation_config_override;
-    if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
-    return v;
-  });
+  const [overrides, setOverrides] = useState<RunOverridesValue>({});
   // Version override lives outside the model/proxy panel: a schedule either
   // "inherits" (nothing stored → resolve at fire time) or freezes one version.
   // `undefined` = inherit (no override stored).
-  const [versionOverride, setVersionOverride] = useState<string | undefined>(
-    defaultValues?.version_override ?? undefined,
-  );
+  const [versionOverride, setVersionOverride] = useState<string | undefined>(undefined);
   const versionSelectValue = versionOverride ?? VERSION_INHERIT;
   const setVersion = (next: string) => {
     // Only the inherit option means "no override". Every other pick is stored
@@ -225,44 +161,13 @@ export function ScheduleForm({
     // a schedule its author deliberately froze.
     setVersionOverride(next === VERSION_INHERIT ? undefined : next);
   };
-  // Naming the working copy is an author's act, and the route judges
-  // `version_override` (403 `draft_not_writable`) on every write that decides
-  // it. Echoing back the value the row already holds decides nothing, so a
-  // reader who only moves the cron of someone else's draft schedule must not be
-  // refused for a choice they did not make. Send the key only on a real change;
-  // an absent key leaves the stored value untouched, per the route's optional
-  // rule. The route ignores an unchanged value too, so either half alone spares
-  // that reader the refusal — both exist because a client must not CLAIM an act
-  // its user did not make, and a route must not judge one it was not asked for.
-  const versionOverrideChanged =
-    (versionOverride ?? null) !== (defaultValues?.version_override ?? null);
+  const [overridesOpen, setOverridesOpen] = useState(false);
 
-  const initialOverridesNonEmpty =
-    !!defaultValues?.model_id_override ||
-    !!defaultValues?.generation_config_override ||
-    !!defaultValues?.proxy_id_override ||
-    !!defaultValues?.version_override ||
-    !!(
-      defaultValues?.connection_overrides &&
-      Object.keys(defaultValues.connection_overrides).length > 0
-    );
-  // `#connections`: the detail page's "choose connections" link, from a
-  // schedule the platform switched off over a lost connection. The choice
-  // lives in this block, so it opens (the section scrolls itself into view).
-  const [overridesOpen, setOverridesOpen] = useState(
-    () => initialOverridesNonEmpty || window.location.hash === "#connections",
-  );
-
-  // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
-  const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
+  // #738: execution identity. `undefined` = the caller.
+  const [actor, setActor] = useState<ActorValue | undefined>(undefined);
   const { user } = useAuth();
-  // Who a fire runs as while the select holds nothing: the schedule's own actor
-  // on edit, the caller on create.
-  const baseActor: ActorValue | undefined = isEdit
-    ? currentActor
-    : user
-      ? { userId: user.id }
-      : undefined;
+  // Who a fire runs as while the select holds nothing: the caller.
+  const baseActor: ActorValue | undefined = user ? { userId: user.id } : undefined;
   const runsAs = actor ?? baseActor;
   // The pickers judge the VIEWER's connections; they only speak for a schedule
   // that runs as the viewer.
@@ -274,9 +179,6 @@ export function ScheduleForm({
         picks,
         runsAs,
         nextRunsAs: next ?? baseActor,
-        stored: isEdit
-          ? { actor: currentActor, picks: defaultValues?.connection_overrides ?? undefined }
-          : null,
       });
       return kept ? { ...rest, connection_overrides: kept } : rest;
     });
@@ -323,16 +225,15 @@ export function ScheduleForm({
     formState: { errors },
   } = useAppForm<FormFields>({
     defaultValues: {
-      name: defaultValues?.name ?? "",
-      cron_expression: defaultValues?.cron_expression ?? "0 9 * * *",
-      timezone: defaultValues?.timezone ?? "UTC",
-      enabled: defaultValues?.enabled ?? true,
+      name: "",
+      cron_expression: "0 9 * * *",
+      timezone: "UTC",
     },
   });
 
-  const [cronExpression, timezone, enabled] = useWatch({
+  const [cronExpression, timezone] = useWatch({
     control,
-    name: ["cron_expression", "timezone", "enabled"],
+    name: ["cron_expression", "timezone"],
   });
 
   const onFormSubmit = handleSubmit((data) => {
@@ -345,11 +246,6 @@ export function ScheduleForm({
     // editor layer supplies exactly that key at fire time, and it supplies the
     // value it holds THEN, which is the whole point.
     //
-    // Always sent, even empty: on edit an absent `input` means "leave the row
-    // untouched" (`updateSchedule` only assigns when `!== undefined`), so an
-    // empty object is how a schedule that no longer decides anything releases
-    // the values it used to freeze. On create the route defaults it to `{}`
-    // anyway, so the two paths agree.
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
     setSubmitted({ runsAs, picks: declaredOverrides.connection_overrides ?? {} });
@@ -358,23 +254,15 @@ export function ScheduleForm({
       cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
-      ...(isEdit ? { enabled: data.enabled } : {}),
-      ...scheduleOverridePayload({
-        isEdit,
-        overrides: declaredOverrides,
-        versionOverride,
-        versionOverrideChanged,
-        actor,
-        currentActor,
-      }),
+      ...scheduleOverridePayload({ overrides: declaredOverrides, versionOverride, actor }),
     });
   });
 
   return (
     <form onSubmit={onFormSubmit} className="space-y-6">
-      {/* Agent selector (create mode only) — kept visible even when blocked so
-          the user can pick a compatible agent instead of hitting a dead end. */}
-      {mode === "create" && agents && onAgentChange && (
+      {/* Agent selector — kept visible even when blocked so the user can pick
+          a compatible agent instead of hitting a dead end. */}
+      {agents && onAgentChange && (
         <div className="space-y-3">
           <Label htmlFor="sched-agent">{t("schedule.agent")}</Label>
           <Select value={selectedAgentId ?? ""} onValueChange={onAgentChange}>
@@ -413,7 +301,7 @@ export function ScheduleForm({
           <div className="space-y-3">
             <Label>{t("schedule.frequency")}</Label>
             <div className="flex flex-wrap gap-1">
-              {cronPresets.map((p) => (
+              {CRON_PRESETS.map((p) => (
                 <Button
                   key={p.cron}
                   type="button"
@@ -430,7 +318,7 @@ export function ScheduleForm({
                     clearErrors("cron_expression");
                   }}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </Button>
               ))}
             </div>
@@ -464,7 +352,7 @@ export function ScheduleForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TIMEZONES.map((tz) => (
+                {timezoneOptions(timezone).map((tz) => (
                   <SelectItem key={tz} value={tz}>
                     {tz}
                   </SelectItem>
@@ -473,28 +361,9 @@ export function ScheduleForm({
             </Select>
           </div>
 
-          {/* Enabled toggle (edit mode only) */}
-          {isEdit && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="schedule-enabled"
-                  checked={enabled}
-                  onCheckedChange={(checked) => setValue("enabled", Boolean(checked))}
-                />
-                <Label htmlFor="schedule-enabled" className="cursor-pointer font-normal">
-                  {t("schedule.enabled")}
-                </Label>
-              </div>
-            </div>
-          )}
-
           {/* Execution identity (#738) */}
           <div className="space-y-2">
             <Label>{t("schedule.actorTitle")}</Label>
-            {/* Edit seeds `actor` with the schedule's current identity, so the
-                placeholder only shows in create mode — where the default really
-                is the caller. */}
             <ActorSelect
               value={actor}
               onChange={changeActor}
@@ -585,40 +454,11 @@ export function ScheduleForm({
 
       {/* Footer */}
       <div className="border-border flex justify-end gap-2 border-t pt-4">
-        {isEdit && onDelete && (
-          <div className="mr-auto flex gap-2">
-            {confirmDelete ? (
-              <>
-                <Button type="button" variant="destructive" size="sm" onClick={onDelete}>
-                  {t("btn.confirm")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  {t("btn.cancel")}
-                </Button>
-              </>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive/80"
-                onClick={() => setConfirmDelete(true)}
-              >
-                {t("btn.delete")}
-              </Button>
-            )}
-          </div>
-        )}
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
         <Button type="submit" disabled={isPending || Boolean(blockedMessage)}>
-          {isEdit ? t("btn.save") : t("btn.create")}
+          {t("btn.create")}
         </Button>
       </div>
     </form>
