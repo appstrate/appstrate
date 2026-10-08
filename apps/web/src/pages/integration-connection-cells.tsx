@@ -20,7 +20,8 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bot, ShieldCheck, Trash2 } from "lucide-react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -38,16 +39,67 @@ import {
   useUpdateIntegrationConnection,
   type IntegrationAuthType,
   type IntegrationConnection,
+  useAgentsConsumingIntegration,
+  useIntegrationPins,
 } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCanReach } from "../hooks/use-can-reach";
+import { packageDetailPath } from "../lib/package-paths";
 import { TableRowActions } from "../components/table-row-actions";
+
+/**
+ * The agents an admin pin binds this connection to, named so a locked row says WHICH
+ * agents hold it. The pins list is readable with `integrations:read`, like this page;
+ * the query only runs for a row an admin pin locks.
+ */
+function usePinningAgents(connection: IntegrationConnection, packageId: string) {
+  const pinned = connection.locked_by === "admin_pin";
+  const { data: pins } = useIntegrationPins(pinned ? packageId : undefined);
+  const { data: agents } = useAgentsConsumingIntegration(pinned ? packageId : undefined);
+  if (!pinned || !pins) return [];
+  return pins
+    .filter((pin) => pin.connection_ids.includes(connection.id))
+    .map((pin) => ({
+      id: pin.packageId,
+      name:
+        agents?.find((agent) => agent.packageId === pin.packageId)?.display_name ?? pin.packageId,
+    }));
+}
+
+/**
+ * Why a locked row refuses an unshare or delete, in words: for an admin pin, the agents
+ * that hold it when they are known, else the generic sentence.
+ */
+function useLockText(
+  connection: IntegrationConnection,
+  packageId: string,
+  isAdmin: boolean,
+  lockKey: string | null,
+) {
+  const { t } = useTranslation("settings");
+  const agents = usePinningAgents(connection, packageId);
+  if (!lockKey) return { agents, text: null };
+  if (agents.length === 0) return { agents, text: t(lockKey) };
+  return {
+    agents,
+    text: [
+      t("integration.connection.lock.pinnedTo", { agents: agents.map((a) => a.name).join(", ") }),
+      t(
+        isAdmin
+          ? "integration.connection.lock.removeFromAgents"
+          : "integration.connection.lock.askRemoveFromAgents",
+        { count: agents.length },
+      ),
+    ].join(" "),
+  };
+}
 
 /** What the caller may do to this row, as the API enforces it. */
 function useRowGrants(connection: IntegrationConnection, isOwn: boolean, isAdmin: boolean) {
   const { can } = usePermissions();
   const canConnect = can("integrations:connect");
-  const lockKey = connectionLockHintKey(connection.locked_by);
+  const lockKey = connectionLockHintKey(connection.locked_by, isAdmin);
   return {
     canConnect,
     ...connectionRowGrants({
@@ -150,8 +202,9 @@ export function SharedCell({
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
   const { canToggleShare, shareLocked, lockKey } = useRowGrants(connection, isOwn, isAdmin);
+  const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
   return (
-    <DisabledReasonTooltip reason={shareLocked && lockKey ? t(lockKey) : null}>
+    <DisabledReasonTooltip reason={shareLocked ? lockText : null}>
       <Checkbox
         checked={connection.shared_with_org === true}
         disabled={!canToggleShare || shareLocked || updateConnection.isPending}
@@ -199,10 +252,16 @@ export function ConnectionActionsCell({
   const disconnect = useDisconnectIntegrationConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { canConnect, lockKey } = useRowGrants(connection, isOwn, isAdmin);
+  const { text: lockHint, agents: pinningAgents } = useLockText(
+    connection,
+    packageId,
+    isAdmin,
+    lockKey,
+  );
+  const canReach = useCanReach();
   if (!isOwn) return <span className="text-muted-foreground text-xs">—</span>;
   // An admin pin or the space default names the row: deleting it is refused
   // until it is removed from there.
-  const lockHint = lockKey ? t(lockKey) : null;
   return (
     <>
       <div className="relative z-10 flex items-center justify-end gap-1">
@@ -236,13 +295,34 @@ export function ConnectionActionsCell({
               {lockHint}
             </DropdownMenuLabel>
           )}
+          {/* Each agent holding it, one click away for whoever may open it. */}
+          {pinningAgents
+            .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
+            .map((agent) => (
+              <DropdownMenuItem key={agent.id} asChild>
+                <Link to={packageDetailPath("agent", agent.id)}>
+                  <Bot />
+                  {agent.name}
+                </Link>
+              </DropdownMenuItem>
+            ))}
+          {/* And the way to unlock it, one click away, for whoever may. */}
+          {lockHint && isAdmin && (
+            <DropdownMenuItem asChild>
+              <Link to={{ search: "?integrationSettings=access", hash: "#configuration" }}>
+                <ShieldCheck />
+                {t("integration.connection.lock.openAccessRules")}
+              </Link>
+            </DropdownMenuItem>
+          )}
         </TableRowActions>
       </div>
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("integration.connection.deleteTitle", { name: connection.label })}
         description={t("integration.connection.deleteConfirm")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={disconnect.isPending}
         onConfirm={() =>
           disconnect.mutate(

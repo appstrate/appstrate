@@ -23,6 +23,7 @@ import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shar
 import { useCanReach } from "../../hooks/use-can-reach";
 import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
+import { usePermissions } from "../../hooks/use-permissions";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -131,8 +132,9 @@ function ConnectionRow({
   updating: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
   // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
-  const lockKey = connectionLockHintKey(conn.locked_by);
+  const lockKey = connectionLockHintKey(conn.locked_by, can("integrations:configure"));
   const lockHint = lockKey ? t(lockKey) : null;
 
   const rows: { label: string; value: React.ReactNode }[] = [];
@@ -434,17 +436,13 @@ export function PreferencesConnectionsPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
         // The blast radius is `ConnectionDeleteImpact` below — the caller's own
-        // pins and schedules the delete rewrites — not a second sentence here.
-        description={
-          confirmState
-            ? t("connections.deleteConfirm", {
-                name: confirmState.displayName,
-                account: confirmState.identity ?? "",
-              })
-            : ""
-        }
+        // pins and schedules the delete rewrites. Same words as the integration page.
+        title={t("integration.connection.deleteTitle", {
+          name: confirmState?.identity ?? confirmState?.displayName ?? "",
+        })}
+        description={t("integration.connection.deleteConfirm")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         isPending={disconnectIntegration.isPending}
         onConfirm={() => {
           if (!confirmState) return;

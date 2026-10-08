@@ -52,12 +52,11 @@ describe("ConnectionDeleteImpact", () => {
       ],
       schedules: [],
     });
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.intro", { count: 2 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Ops multi");
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.shrinks", { count: 2, from: 3 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.shrinks", { count: 2, from: 3 }));
     expect(html).toContain("Audit");
-    expect(html).toContain(i18n.t("settings:connections.pinImpact.resets"));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 1 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.agentResets"));
   });
 
   it("names each schedule and what its override becomes", () => {
@@ -84,16 +83,13 @@ describe("ConnectionDeleteImpact", () => {
         },
       ],
     });
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 2 }));
+    expect(html).toContain(i18n.t("settings:connections.impact.title"));
     expect(html).toContain("Rapport du lundi");
-    expect(html).toContain(
-      i18n.t("settings:connections.scheduleImpact.shrinks", { count: 1, from: 2 }),
-    );
+    expect(html).toContain(i18n.t("settings:connections.impact.shrinks", { count: 1, from: 2 }));
     expect(html).toContain(i18n.t("settings:connections.scheduleImpact.unnamed"));
     expect(html).toContain("(Audit)");
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.resets"));
-    expect(html).not.toContain(i18n.t("settings:connections.pinImpact.intro", { count: 1 }));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.disables"));
+    expect(html).toContain(i18n.t("settings:connections.impact.scheduleResets"));
+    expect(html).not.toContain(i18n.t("settings:connections.impact.scheduleDisables"));
   });
 
   it("says an enabled schedule the delete leaves with no connection is disabled", () => {
@@ -113,8 +109,8 @@ describe("ConnectionDeleteImpact", () => {
     });
     expect(html).toContain("Veille");
     expect(html).toContain("(Ops multi)");
-    expect(html).toContain(i18n.t("settings:connections.scheduleImpact.disables"));
-    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.resets"));
+    expect(html).toContain(i18n.t("settings:connections.impact.scheduleDisables"));
+    expect(html).not.toContain(i18n.t("settings:connections.impact.scheduleResets"));
   });
 
   it("renders nothing when the delete rewrites none of the caller's references", () => {

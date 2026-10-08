@@ -6,7 +6,7 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { $api } from "../../api/client";
 
 export function ConnectionDeleteImpact({ connectionId }: { connectionId: string }) {
@@ -23,49 +23,38 @@ export function ConnectionDeleteImpact({ connectionId }: { connectionId: string 
 
   return (
     <Alert variant="warning" className="mt-4" data-testid="connection-delete-impact">
-      <AlertDescription className="space-y-3">
-        {data.pins.length > 0 && (
-          <div>
-            <p>{t("connections.pinImpact.intro", { count: data.pins.length })}</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {data.pins.map((pin) => (
-                <li key={`${pin.agent_package_id}|${pin.integration_package_id}`}>
-                  <span className="font-medium">{pin.agent_display_name}</span>
-                  {" — "}
-                  {pin.connection_count > 1
-                    ? t("connections.pinImpact.shrinks", {
-                        count: pin.connection_count - 1,
-                        from: pin.connection_count,
-                      })
-                    : t("connections.pinImpact.resets")}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {data.schedules.length > 0 && (
-          <div>
-            <p>{t("connections.scheduleImpact.intro", { count: data.schedules.length })}</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {data.schedules.map((schedule) => (
-                <li key={`${schedule.scheduleId}|${schedule.integration_package_id}`}>
-                  <span className="font-medium">
-                    {schedule.schedule_name ?? t("connections.scheduleImpact.unnamed")}
-                  </span>
-                  {` (${schedule.agent_display_name}) — `}
-                  {schedule.disables
-                    ? t("connections.scheduleImpact.disables")
-                    : schedule.connection_count > 1
-                      ? t("connections.scheduleImpact.shrinks", {
-                          count: schedule.connection_count - 1,
-                          from: schedule.connection_count,
-                        })
-                      : t("connections.scheduleImpact.resets")}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+      <AlertTitle>{t("connections.impact.title")}</AlertTitle>
+      <AlertDescription>
+        <ul className="mt-1 list-disc space-y-1 pl-5">
+          {data.pins.map((pin) => (
+            <li key={`${pin.agent_package_id}|${pin.integration_package_id}`}>
+              <span className="font-medium">{pin.agent_display_name}</span>
+              {" : "}
+              {pin.connection_count > 1
+                ? t("connections.impact.shrinks", {
+                    count: pin.connection_count - 1,
+                    from: pin.connection_count,
+                  })
+                : t("connections.impact.agentResets")}
+            </li>
+          ))}
+          {data.schedules.map((schedule) => (
+            <li key={`${schedule.scheduleId}|${schedule.integration_package_id}`}>
+              <span className="font-medium">
+                {schedule.schedule_name ?? t("connections.scheduleImpact.unnamed")}
+              </span>
+              {` (${schedule.agent_display_name}) : `}
+              {schedule.disables
+                ? t("connections.impact.scheduleDisables")
+                : schedule.connection_count > 1
+                  ? t("connections.impact.shrinks", {
+                      count: schedule.connection_count - 1,
+                      from: schedule.connection_count,
+                    })
+                  : t("connections.impact.scheduleResets")}
+            </li>
+          ))}
+        </ul>
       </AlertDescription>
     </Alert>
   );

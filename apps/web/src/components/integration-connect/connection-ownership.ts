@@ -13,12 +13,24 @@ export function isConnectionOwnedBy(c: ConnectionOwnerFields, userId: string | u
   return c.owner_type === "user" && !!userId && c.owner_id === userId;
 }
 
-/** The `settings` key saying why a locked connection refuses an unshare or delete; null unlocked. */
-export function connectionLockHintKey(lockedBy: "admin_pin" | "org_default" | null | undefined) {
+/**
+ * The `settings` key saying why a locked connection refuses an unshare or delete, and what
+ * unlocks it: where to go for whoever may change the access rules, whom to ask for anyone
+ * else. Null when unlocked.
+ */
+export function connectionLockHintKey(
+  lockedBy: "admin_pin" | "org_default" | null | undefined,
+  canConfigure: boolean,
+) {
   if (!lockedBy) return null;
-  return lockedBy === "admin_pin"
-    ? "integration.connection.lock.adminPin"
-    : "integration.connection.lock.orgDefault";
+  if (lockedBy === "admin_pin") {
+    return canConfigure
+      ? "integration.connection.lock.adminPin"
+      : "integration.connection.lock.adminPinAsk";
+  }
+  return canConfigure
+    ? "integration.connection.lock.orgDefault"
+    : "integration.connection.lock.orgDefaultAsk";
 }
 
 /**
