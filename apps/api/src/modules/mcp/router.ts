@@ -81,8 +81,17 @@ import {
   type McpObserver,
   type McpSurface,
 } from "./tools.ts";
-import { buildOperationIndex, operationIdGranted } from "./catalog.ts";
+import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
+import {
+  describeSpace,
+  isPinnedConnection,
+  listReachableSpaces,
+  pickSpace,
+  requestedSpaceId,
+  NO_FALLBACK_HINT,
+  type OrgWideSpaces,
+} from "./spaces.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -162,13 +171,17 @@ export function buildServerInstructions(
   ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
   contextInjected = false,
+  orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
   const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
-  // unless the gate it sits under already implies that grant.
+  // unless the gate it sits under already implies that grant. Org-wide: in any
+  // reachable space, the same union the surface is.
   const granted = (operationId: string): boolean =>
-    operationIdGranted(operationId, permissions, ceiling);
+    orgSpaces
+      ? orgSpaces.reachable.some((s) => operationIdGranted(operationId, s.permissions, ceiling))
+      : operationIdGranted(operationId, permissions, ceiling);
   const listsIntegrations = invokes && granted("listIntegrations");
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
@@ -249,7 +262,7 @@ export function buildServerInstructions(
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
-This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default space; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default space unless an operation takes an explicit space id.
+${orgSpaces ? orgWideSpaceContext(orgSpaces) : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
@@ -267,7 +280,17 @@ ${heavyListBullet}${concurrencyBullet}${
   }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
-${buildOperationIndex(permissions, ceiling)}`;
+${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOperationIndex(permissions, ceiling)}`;
+}
+
+const pinnedSpaceContext =
+  "This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default space; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default space unless an operation takes an explicit space id.";
+
+function orgWideSpaceContext(spaces: OrgWideSpaces): string {
+  return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it listed below. To act in another organization, connect that organization's own MCP server (its URL carries its id).
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. Pick the space from the user's request; when it is ambiguous, ask.
+- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
+- Spaces you can act in: ${spaces.reachable.map(describeSpace).join("; ")}.`;
 }
 
 function forwardAuthHeaders(src: Headers): Headers {
@@ -304,6 +327,22 @@ async function enterMcpSpace(c: Context<AppEnv>, orgId: string): Promise<void> {
   // un-migrated `spaces` table would otherwise slip in unnoticed.
   assertSpaceId(active.id);
   await applySpacePermissions(c, active);
+}
+
+/** The org-wide spaces of a request, set by the space-entry middleware. */
+const orgWideSpaces = new WeakMap<Request, OrgWideSpaces>();
+
+/** A tool or act is offered when one reachable space grants it; the guard decides each call. */
+function unionSurface(surfaces: McpSurface[]): McpSurface {
+  const any = (key: keyof McpSurface) => surfaces.some((s) => s[key]);
+  return {
+    invokes: any("invokes"),
+    runs: any("runs"),
+    composes: any("composes"),
+    authors: any("authors"),
+    listsFiles: any("listsFiles"),
+    importsPackages: any("importsPackages"),
+  };
 }
 
 /**
@@ -433,7 +472,26 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   app.use(MCP_PATH, async (c, next) => {
     const orgId = c.get("orgId");
     if (!orgId) return next();
-    await enterMcpSpace(c, orgId);
+    if (isPinnedConnection(c)) {
+      await enterMcpSpace(c, orgId);
+      return next();
+    }
+    // Org-wide: enter the space the call names, through the header's own door.
+    // A request naming none (initialize, tools/list) enters a reachable one only
+    // to pass the `mcp:read` guard; a tool call without `space_id` is refused.
+    // No reachable space: the default, which refuses.
+    const reachable = await listReachableSpaces(c, orgId);
+    const message = await c.req.raw
+      .clone()
+      .json()
+      .catch(() => undefined);
+    const current = pickSpace(reachable, requestedSpaceId(message));
+    if (!current) {
+      await enterMcpSpace(c, orgId);
+      return next();
+    }
+    await enterSpaceById(c, current.id, orgId);
+    orgWideSpaces.set(c.req.raw, { reachable, current });
     return next();
   });
   app.use(MCP_PATH, requireModulePermission("mcp", "read"));
@@ -467,6 +525,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // A delegated credential's scopes; ceiling guards refuse what they omit.
     const ceiling = c.get("scopeCeiling");
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
+    const orgSpaces = orgWideSpaces.get(c.req.raw);
+    // Dispatched calls re-enter the space this request entered, by the header
+    // the route guard reads — never the default-space fallback.
+    if (orgSpaces) authHeaders.set("x-space-id", orgSpaces.current.id);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
@@ -505,6 +567,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         outcome: event.outcome,
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,
+        spaceId: scope.spaceId,
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
         // `void`: deliberately off the response path — the rationale, and what
@@ -519,6 +582,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
               path: event.path ?? null,
               status: event.status ?? null,
               outcome: event.outcome,
+              spaceId: scope.spaceId,
             },
           }),
         );
@@ -545,8 +609,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       contextInjected,
       actor,
       scope,
+      orgSpaces,
     };
-    const surface = deriveMcpSurface(permissions, ceiling, actor);
+    const surface = orgSpaces
+      ? unionSurface(
+          orgSpaces.reachable.map((s) => deriveMcpSurface(s.permissions, ceiling, actor)),
+        )
+      : deriveMcpSurface(permissions, ceiling, actor);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
@@ -556,7 +625,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
       {
-        instructions: buildServerInstructions(permissions, ceiling, surface, contextInjected),
+        instructions: buildServerInstructions(
+          permissions,
+          ceiling,
+          surface,
+          contextInjected,
+          orgSpaces,
+        ),
         resources,
       },
     );

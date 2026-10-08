@@ -95,9 +95,21 @@ What happens under the hood:
 > client needs **no** `X-Org-Id` header and there is no org-switch tool. To use
 > several organizations, add one MCP server entry per org (each runs its own
 > OAuth flow and gets its own org-bound token); the entries can be connected at
-> the same time. Within an org, calls run against that org's **default
-> space**. A client that needs a different space sends an
-> `X-Space-Id` header (it must belong to the org).
+> the same time.
+>
+> Within an org, one connection reaches **every space you hold a role in**.
+> The server instructions list them (name, `spc_…` id, your role there), and
+> every tool that acts in a space requires a `space_id` argument, reads and
+> writes alike: there is no default space. A tool or an operation your roles
+> allow in only some spaces names them (`Available in: …` on the tool,
+> `createAgent [gestion]` in the operation index, `granted_in` in results). A
+> refusal in one space is final: it carries `granted_in` and asks the model to
+> report it rather than redo the action in another space.
+>
+> To confine a client to one space, send an `X-Space-Id` header (it must
+> belong to the org): the connection is then pinned, `space_id` is not
+> declared, and every call runs in that space. An API key is always pinned to
+> its own space.
 
 ### Self-hosting requirements for Path B
 

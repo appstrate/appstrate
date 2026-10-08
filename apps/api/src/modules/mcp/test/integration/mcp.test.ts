@@ -628,7 +628,12 @@ describe("mcp tool round-trip", () => {
     const runs = await seedSpace({ orgId: owner.orgId, name: "Runs", visibility: "closed" });
     await seedSpaceMember({ spaceId: runs.id, userId: caller.user.id, presetRole: "admin" });
     const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
-    const headers = { Cookie: caller.cookie, "X-Org-Id": owner.orgId };
+    // Pinned on A: an unpinned connection would require `space_id` on each call.
+    const headers = {
+      Cookie: caller.cookie,
+      "X-Org-Id": owner.orgId,
+      "X-Space-Id": owner.defaultSpaceId,
+    };
 
     const call = async (id: number, name: string, args: Record<string, unknown>) => {
       const { envelope } = await rpc(headers, {
