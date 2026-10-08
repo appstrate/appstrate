@@ -174,6 +174,19 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(await refusal([own], own, {})).toEqual(await refusal([unknown], unknown, {}));
     });
 
+    it("refuses an end user's shared row under the shared-only default, with the same answer", async () => {
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: scope.spaceId });
+      const endUserShared = await seedConnection({
+        spaceId: scope.spaceId,
+        endUserId: endUser.id,
+        sharedWithOrg: true,
+      });
+      const unknown = crypto.randomUUID();
+      expect(await refusal([endUserShared], endUserShared, {})).toEqual(
+        await refusal([unknown], unknown, {}),
+      );
+    });
+
     it("accepts allowOwnedBy for the caller's own row beside a shared one", async () => {
       const ids = [
         await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id }),

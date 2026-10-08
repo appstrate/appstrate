@@ -12,8 +12,9 @@
  *
  * Same target validation as admin pins (`validatePinTargets`, shared-only):
  * the connection must exist, belong to this space,
- * reference this integration, and be `sharedWithOrg = true` — an admin
- * can't coerce a member's personal connection.
+ * reference this integration, and be `sharedWithOrg = true` with a member
+ * owner — an admin can't coerce a member's personal connection, nor bind an
+ * end user's.
  */
 
 import { and, eq } from "drizzle-orm";

@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -55,7 +55,7 @@ import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integ
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import { assertConnectionsUnpinned, lockConnectionLabels } from "./integration-connections.ts";
-import { assertOwnerReachesSpaceForShare } from "./space-members.ts";
+import { assertConnectionShareable } from "./space-members.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -228,7 +228,8 @@ interface SetPinInput {
  *   1. exists in the same space,
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
- *      leak the admin's identity to other members at run time).
+ *      leak the admin's identity to other members at run time),
+ *   4. is owned by a member, never by an end user.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -360,9 +361,10 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
- * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. Every refusal — unknown id,
- * another space or integration, a row neither shared nor the caller's own — is the SAME 404 naming
- * the first refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
+ * here: rows a member owns and shares for an admin pin or an org default, shared rows plus
+ * `allowOwnedBy`'s own for a member pin. Every refusal — unknown id, another space or integration,
+ * a row neither shared nor the caller's own, an end user's — is the SAME 404 naming the first
+ * refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -380,7 +382,7 @@ export async function validatePinTargets(
         eq(c.spaceId, scope.spaceId),
         eq(c.integrationId, integrationId),
         opts.allowOwnedBy === undefined
-          ? eq(c.sharedWithOrg, true)
+          ? and(eq(c.sharedWithOrg, true), isNotNull(c.userId))
           : or(eq(c.userId, opts.allowOwnedBy), eq(c.sharedWithOrg, true)),
       ),
     );
@@ -469,7 +471,8 @@ interface UpdateConnectionMetadataInput {
  * is enforced in the route: the owner or an `integrations:configure` holder
  * may edit, but only the owner may share (sharing is consent).
  *
- * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, and a label
+ * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, sharedWithOrg=true per
+ * `assertConnectionShareable` (never an end user's connection), and a label
  * another connection of the (space, integration) holds (409
  * `connection_label_taken`, raised by the unique index). A rename takes the
  * insert's label lock, so it cannot land between an insert's pick and its write.
@@ -503,10 +506,10 @@ export async function updateConnectionMetadata(
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
-      // The owner may have lost the space since the route checked; the unshare that loss ran
-      // could not see this share yet.
+      // Never an end user's connection; and the owner may have lost the space since the route
+      // checked, an unshare that loss ran could not see this share yet.
       if (input.sharedWithOrg === true) {
-        await assertOwnerReachesSpaceForShare(tx, connectionId);
+        await assertConnectionShareable(tx, connectionId);
       }
       return tx
         .update(integrationConnections)
