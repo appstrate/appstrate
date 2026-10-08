@@ -28,10 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
-  deleteTokens,
   saveTokens,
   loadTokens,
   _setKeyringFactoryForTesting,
@@ -40,7 +37,7 @@ import {
 import { FileLockBusyError } from "../src/lib/file-lock.ts";
 // Imported directly for the one test that needs a profile with NO stored
 // tokens — the shared seed always writes a pair.
-import { getConfigDir, setProfile } from "../src/lib/config.ts";
+import { setProfile } from "../src/lib/config.ts";
 import {
   apiFetchRaw,
   explicitApiKey,
@@ -587,21 +584,20 @@ describe("apiFetchRaw — another writer landed first (issue #1806)", () => {
       accessExpiresIn: -60_000,
       refresh: "stale-refresh",
     });
-    // Login's own order, under the lock this refresher then waits on: delete,
-    // the profile's new instance, then the new pair. Adopting that pair here
-    // would send the other instance's bearer to this one.
+    // Login's two writes, under the lock this refresher then waits on: the new
+    // pair, then the profile's new instance. Adopting that pair here would send
+    // the other instance's bearer to this one.
     const holding = Promise.withResolvers<void>();
     const reading = Promise.withResolvers<void>();
     const login = withCredentialsLock(async () => {
       holding.resolve();
       await reading.promise;
-      await deleteTokens("default");
+      await saveTokens("default", peerRotatedTokens());
       await setProfile("default", {
         instance: "https://other.example",
         userId: "u_1",
         email: "a@example.com",
       });
-      await saveTokens("default", peerRotatedTokens());
     });
     await holding.promise;
     changeAfterRead(1, () => reading.resolve());
@@ -615,43 +611,6 @@ describe("apiFetchRaw — another writer landed first (issue #1806)", () => {
     expect((error as Error).message).toContain("changed instance during this command");
     expect(fetchCalls).toHaveLength(0);
     expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
-  });
-
-  it("plain read: a login to another instance landing between profile and pair is refused", async () => {
-    await seedProfile("default", { access: "access-1", accessExpiresIn: 5 * 60 * 1000 });
-    // The reader has read the profile; the login lands, in its own order,
-    // before the reader reads the pair, which is then the other instance's.
-    const configPath = join(getConfigDir(), "config.toml");
-    let landed = false;
-    _setKeyringFactoryForTesting((profile) => ({
-      setPassword(value: string): void {
-        keyring.store.set(profile, value);
-      },
-      getPassword(): string | null {
-        if (!landed) {
-          landed = true;
-          keyring.store.delete(profile);
-          const config = readFileSync(configPath, "utf-8");
-          writeFileSync(
-            configPath,
-            config.replace("https://app.example.com", "https://other.example"),
-          );
-          keyring.store.set(profile, JSON.stringify(peerRotatedTokens()));
-        }
-        return keyring.store.get(profile) ?? null;
-      },
-      deletePassword(): void {
-        keyring.store.delete(profile);
-      },
-    }));
-    installFetch(async () => jsonResponse(200, { ok: true }));
-
-    const error = await settle(apiFetchRaw("default", "/api/data"));
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error).not.toBeInstanceOf(AuthError);
-    expect((error as Error).message).toContain("changed instance during this command");
-    expect(fetchCalls).toHaveLength(0);
   });
 
   it("a logout that landed meanwhile stays a logout: no redemption, nothing saved back", async () => {

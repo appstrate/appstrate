@@ -270,34 +270,31 @@ async function runLogin(
   const sameUser =
     existingProfile?.userId === identity.userId &&
     normalizeInstance(existingProfile.instance) === instance;
-  // Only a profile on another instance can hold a pair this login must not sit beside.
-  const otherInstance =
-    existingProfile !== undefined && normalizeInstance(existingProfile.instance) !== instance;
   const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
-  // Under the credentials lock, so a refresh in flight elsewhere cannot write
-  // the old session over this one; it re-reads and adopts the new pair.
-  // Order: delete → profile → pair, the delete only when an existing profile
-  // names another instance (a first login has no pair to clear).
-  // Readers check profile → pair → profile (`loadPairFor` in `api.ts`), so no
-  // pair is ever used beside an instance that did not issue it — not even when
-  // the save fails: the old pair is gone by then, which reads as "log in".
-  // Same instance, no delete: a failed save keeps the old, still valid session.
+  // Both writes under one hold of the credentials lock, so a refresh in flight
+  // elsewhere sees neither or both: it cannot write the old session over this
+  // one. A refused save writes nothing; a failed profile write takes the new
+  // pair back out, so it never sits beside the previous profile.
   await withCredentialsLockForUser(async () => {
-    if (otherInstance) await deleteTokens(profileName);
-    await setProfile(profileName, {
-      instance,
-      userId: identity.userId,
-      email: identity.email,
-      ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
-      ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
-      ...(sameUser && existingProfile?.syncSpaces
-        ? { syncSpaces: existingProfile.syncSpaces }
-        : {}),
-    });
     await saveTokens(profileName, tokens);
+    try {
+      await setProfile(profileName, {
+        instance,
+        userId: identity.userId,
+        email: identity.email,
+        ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
+        ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
+        ...(sameUser && existingProfile?.syncSpaces
+          ? { syncSpaces: existingProfile.syncSpaces }
+          : {}),
+      });
+    } catch (err) {
+      await deleteTokens(profileName).catch(() => {});
+      throw err;
+    }
   }, io);
 
   // Step 7 — pin an organization. Issue #209. Credentials are already

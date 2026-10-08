@@ -399,12 +399,16 @@ export async function revokeCliRefreshToken(
 /**
  * A non-2xx answer from an OAuth endpoint: its OAuth error body as a
  * `DeviceFlowError`, or, with no OAuth `error` code in it (a proxy's 502
- * page, say), a plain `Error` naming the status. That one says nothing about
- * the grant, so it must never read as an OAuth verdict like `invalid_request`.
+ * page, say), a plain `Error` naming the status, and the `error_description`
+ * when there is one. That one says nothing about the grant, so it must never
+ * read as an OAuth verdict like `invalid_request`.
  */
 async function endpointError(res: Response, endpoint: string): Promise<Error> {
   const err = await parseErrorBody(res);
-  if (typeof err.error !== "string") return new Error(`${endpoint} returned HTTP ${res.status}`);
+  if (typeof err.error !== "string") {
+    const detail = typeof err.error_description === "string" ? `: ${err.error_description}` : "";
+    return new Error(`${endpoint} returned HTTP ${res.status}${detail}`);
+  }
   return new DeviceFlowError(err.error, err.error_description, res.status);
 }
 

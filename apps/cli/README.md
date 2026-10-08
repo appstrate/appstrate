@@ -485,17 +485,18 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 
 **Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and `@scope/name` is not a legal skill name, so the directory is the frontmatter `name` when it is legal, else the slugified package `name` segment. An installed name stays with its package while the catalogue still lists it, even when this run could not read it; it changes owner only when its holder leaves or renames itself. A newcomer claiming a held name becomes `<scope>-<name>`, then `-2`, `-3`, … Every rename is reported on stderr.
 
-**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors; the actionable ones also write the session notice (see above). The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
+**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors; the actionable ones also write the session notice (see above). The first, fourth and fifth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
-| Condition                                                   | stderr                                                                                                                         |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Not logged in (or profile not configured)                   | `Profile "default" not configured. Run: appstrate login --profile default --instance <url>`                                    |
-| Refresh token expired / session revoked                     | `Session for profile "default" is no longer valid … Run: appstrate login --profile default --instance https://app.example.com` |
-| No organization pinned                                      | `No organization pinned. Run: appstrate org switch <org-id-or-slug> --profile default`                                         |
-| No space pinned                                             | `No space pinned. Run: appstrate space switch <space-id> --profile default`                                                    |
-| `--print-path` without the plugin target                    | `--print-path prints the Claude Code plugin directory. Add: --target claude-plugin`                                            |
-| `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`                                                  |
-| The catalogue call, a target write or the state file failed | the underlying error                                                                                                           |
+| Condition                                                   | stderr                                                                                                                                        |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Not logged in (or profile not configured)                   | `Profile "default" not configured. Run: appstrate login --profile default --instance <url>`                                                   |
+| No credentials (never stored, or refresh token expired)     | `No credentials for profile "default". Run: appstrate login --profile default --instance https://app.example.com`                             |
+| Session revoked (`invalid_grant`)                           | `Session for profile "default" is no longer valid (invalid_grant). Run: appstrate login --profile default --instance https://app.example.com` |
+| No organization pinned                                      | `No organization pinned. Run: appstrate org switch <org-id-or-slug> --profile default`                                                        |
+| No space pinned                                             | `No space pinned. Run: appstrate space switch <space-id> --profile default`                                                                   |
+| `--print-path` without the plugin target                    | `--print-path prints the Claude Code plugin directory. Add: --target claude-plugin`                                                           |
+| `--print-path` together with `--dry-run`                    | `--print-path cannot be combined with --dry-run: a dry run writes no plugin.`                                                                 |
+| The catalogue call, a target write or the state file failed | the underlying error                                                                                                                          |
 
 **Per-skill failures within the same installed context are graded differently under `--print-path`.** A skill that was never published, whose bytes do not match the server's `X-Integrity`, or whose destination is not ours is reported on stderr and skipped; the rest of the sync completes.
 

@@ -524,6 +524,13 @@ describe("a non-2xx answer with no OAuth error body", () => {
     });
   }
 
+  it("keeps the error_description of a body that carries no OAuth error code", async () => {
+    installFetch(async () => jsonResponse(503, { error_description: "Down for maintenance" }));
+    await expect(refreshCliTokens("https://app", "c", "x")).rejects.toThrow(
+      "Token endpoint returned HTTP 503: Down for maintenance",
+    );
+  });
+
   it("an abort while reading the error body surfaces as the timeout, not as the status", async () => {
     const timeout = new DOMException("The operation timed out.", "TimeoutError");
     installFetch(

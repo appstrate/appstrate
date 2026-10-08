@@ -1400,16 +1400,17 @@ describe("code sync — session notice", () => {
     );
   });
 
-  it("tells logout to retry a removal it could not finish", async () => {
+  it("tells logout to retry a removal it could not finish, as a command that runs", async () => {
     createSkillServer(ONE_SKILL).install();
-    await codeSyncCommand({ target: ["codex"] }, createMemoryIO().io);
+    await seedLoggedInProfile("work laptop", { orgId: "org_1", spaceId: "spc_1" });
+    await codeSyncCommand({ target: ["codex"], profile: "work laptop" }, createMemoryIO().io);
     await rm(join(codexRoot(), "pdf-tools"), { recursive: true });
     await writeFile(join(codexRoot(), "pdf-tools"), "blocks deletion");
 
-    const result = await cleanupProfileSkills("default");
+    const result = await cleanupProfileSkills("work laptop");
 
     expect(result.warnings).toEqual([
-      expect.stringContaining("Retry appstrate logout --profile default."),
+      expect.stringContaining("Retry appstrate logout --profile 'work laptop'."),
     ]);
   });
 
