@@ -1003,5 +1003,11 @@
   "run.outputShowJson": "Show JSON",
   "run.outputShowFields": "Show fields",
   "log.recalledNone": "No memory recalled.",
-  "log.historyNone": "No previous run."
+  "log.historyNone": "No previous run.",
+  "detail.roleLimit.overview": "Your role lets you launch this agent and follow your runs, not see what it is made of (instructions, skills, integrations).",
+  "detail.roleLimit.seeRuns": "See your runs",
+  "detail.roleLimit.runs": "Your role does not give access to this agent's runs.",
+  "detail.roleLimit.memory": "Your role does not give access to this agent's memory.",
+  "detail.roleLimit.section": "Your role does not give access to this section. Ask an admin if you need it.",
+  "detail.roleLimit.editDefinition": "Your role does not let you change this agent's definition."
 }

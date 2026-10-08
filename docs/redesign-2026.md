@@ -372,13 +372,17 @@ and dropped are at the end of this section, so they are not tried again.
   (`services/state/notifications.ts` filters on both), which is why the bell is
   not parked next to the profile: there it would read as "mine" and be wrong.
 - **The foot is the identity** — avatar, name, email, opening the profile menu
-  — and the collapse control beside it. Collapse changes the column's WIDTH, so
-  it belongs at the end of the column, not in the head competing with the
-  product name. Usage and Settings are NOT there: both configure the
-  organisation and its switcher already carries them (the gear on the row you
-  are in, the settings link under the panel). Usage costs one click more, and
-  when the Usage page of its own exists it will want a home — that is the
-  argument to re-open then.
+  — and nothing else. The collapse control sat beside it while collapsing
+  only changed the column's width; since collapsed means hidden, with a burger
+  at the top left of the header to bring the sidebar back, it moved to the
+  sidebar's head, right of the workspace name (6 October, Olivier): closing
+  and reopening happen in the same corner. It shows while the pointer is anywhere
+  on the sidebar, or on focus, Notion's way, so it does not compete with the name at rest.
+  Usage and Settings are NOT in the foot: both configure the organisation and
+  its switcher already carries them (the gear on the row you are in, the
+  settings link under the panel). Usage costs one click more, and when the
+  Usage page of its own exists it will want a home — that is the argument to
+  re-open then.
 - **`ShellSidebar` + `ShellHeader`** (`components/shell-frame.tsx`) are written
   once and used by both products; each passes only its own navigation. They
   were extracted after the chat's copy had already drifted from Studio's by a
@@ -392,9 +396,25 @@ and dropped are at the end of this section, so they are not tried again.
   the burger (or Cmd+B, or the panel's own collapse control) pins it open
   again. The peek stays while the pointer is on the panel, the strip or the
   burger, or while one of its menus is open (portalled, and a modal menu
-  makes the page inert), and closes 300ms after the pointer leaves. It lives
-  in `@appstrate/ui`'s `Sidebar` (`peeking` in the context), so the rail
-  styles of the icon mode were removed from the shell's five components.
+  makes the page inert), and closes 80ms after the pointer leaves. The
+  context switcher counts as one of those menus although it is a popover:
+  the peek used to close under it and leave it floating over the page. The
+  card carries its shadow only while peeking, since parked just off the edge
+  it cast it onto the page. It lives in `@appstrate/ui`'s `Sidebar`
+  (`peeking` in the context), so the rail styles of the icon mode were
+  removed from the shell's five components.
+- **The header is edge to edge, always** (6 October, Olivier). Its row is no
+  longer centred on the page column (`max-w-page`), in Studio as in the chat,
+  and the `fullBleed` prop that made the chat the exception is gone. The
+  header belongs to the shell, not to the page: centred, its trail and its
+  icons floated in the middle of a wide screen, and the collapsed burger
+  stood 346px from the left edge at 1920 while the panel it opens slides in
+  at 0, so the pointer had to cross bare page to reach the panel and the peek
+  closed on the way. Open, the row keeps the page gutter on both sides, so
+  the trail starts where the content does until the page outgrows its column.
+  Collapsed, the left inset becomes the sidebar's own (`px-2`): the burger
+  stands at 8px, where the brand cell stood, its icon at 16px over the
+  navigation's icons. The page content below keeps its centred column.
 - Header height is `--spacing-header` (56px), a constant. It used to shrink on
   sidebar collapse while two surfaces subtracted a hard-coded 3.5rem.
 
