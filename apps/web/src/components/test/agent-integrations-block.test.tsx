@@ -3,8 +3,8 @@
 /**
  * An agent's integration card against its readiness entry: a "Requise" badge
  * for an integration the agent requires, and — for one the run starts without —
- * why: switched off in the space, a pin to none (whose), only other members'
- * shared connections, or nothing usable. Switched off reads as blocking only
+ * why: switched off in the space, a pin to none (whose), connections on another
+ * auth method, only other members' shared connections, or nothing usable. Switched off reads as blocking only
  * for a required integration.
  */
 
@@ -54,6 +54,8 @@ function unbound(over: Partial<Resolution> = {}): Resolution {
     source: null,
     error_code: null,
     warning_code: "integration_unbound",
+    required_auth_key: null,
+    available_auth_keys: [],
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
@@ -182,6 +184,12 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     expect(html).not.toContain(label("integrationUnbound"));
   });
 
+  it("connections on another auth method: the agent runs without them", () => {
+    const html = renderCard(unbound({ required_auth_key: "oauth", available_auth_keys: ["pat"] }));
+    expect(html).toContain(label("integrationUnboundOtherAuth"));
+    expect(html).not.toContain(label("integrationUnbound"));
+  });
+
   it("says nothing of the kind while a connection binds", () => {
     const html = renderCard(
       unbound({
@@ -195,6 +203,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
       "integrationUnbound",
       "integrationUnboundAdminNone",
       "integrationUnboundMemberNone",
+      "integrationUnboundOtherAuth",
       "integrationUnboundSharedOnly",
       "integrationUnboundInactive",
     ]) {

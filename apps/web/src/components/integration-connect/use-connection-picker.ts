@@ -139,7 +139,11 @@ export function useConnectionPicker(
   // client (else the connect 403s); api_key/basic/custom always can. Without
   // this the "add connection" entries offered a flow doomed to 403.
   const connectable = connectableAuthKeys(manifest, authStatuses);
-  const authKeys = Object.keys(auths).filter((k) => connectable.has(k));
+  // When the actor's connections sit on another auth, only the agent's own auth fixes it.
+  const requiredAuthKey = resolution?.required_auth_key ?? null;
+  const authKeys = Object.keys(auths).filter(
+    (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
+  );
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);

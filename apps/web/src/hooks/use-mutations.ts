@@ -18,7 +18,7 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchFlight, launchedVersion, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
@@ -106,6 +106,12 @@ function useRunAgent(packageId: string) {
   });
 }
 
+/** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
+interface LaunchRefusal {
+  errors: MissingIntegrationFieldError[];
+  version: string;
+}
+
 /**
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
@@ -116,7 +122,7 @@ function useRunAgent(packageId: string) {
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
-  const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
+  const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
@@ -129,13 +135,13 @@ export function useRunLauncher(packageId: string) {
       },
       {
         onSuccess: () => {
-          setMissingErrors(null);
+          setRefusal(null);
           onSuccess?.();
         },
         // The mutation cache reports every failure; this picks up the 409.
         onError: (err) => {
           const errors = missingConnectionErrors(err);
-          if (errors) setMissingErrors(errors);
+          if (errors) setRefusal({ errors, version: launchedVersion(launch) });
         },
       },
     );
@@ -143,17 +149,18 @@ export function useRunLauncher(packageId: string) {
 
   return {
     isPending,
-    missingErrors,
+    missingErrors: refusal?.errors ?? null,
+    missingVersion: refusal?.version,
     /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
     launch: send,
     retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
+      send(retryLaunch(launch, picks, refusal?.errors ?? []), onSuccess);
     },
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();
-      setMissingErrors(null);
+      setRefusal(null);
       runAgent.reset();
     },
   };

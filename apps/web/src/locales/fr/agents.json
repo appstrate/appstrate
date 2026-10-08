@@ -38,6 +38,7 @@
   "detail.integrationUnbound": "Non connectée — l'agent s'exécute sans",
   "detail.integrationUnboundAdminNone": "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
   "detail.integrationUnboundMemberNone": "Aucune connexion (votre choix) — l'agent s'exécute sans",
+  "detail.integrationUnboundOtherAuth": "Connectée avec une autre méthode d'authentification — l'agent s'exécute sans",
   "detail.integrationUnboundSharedOnly": "Seules des connexions partagées existent — choisissez-en une pour l'utiliser",
   "detail.integrationUnboundInactive": "Désactivée dans cet espace — l'agent s'exécute sans",
   "detail.integrationRequiredBadge": "Requise",

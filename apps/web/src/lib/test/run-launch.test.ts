@@ -11,7 +11,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { inheritedEntry, launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
+import {
+  inheritedEntry,
+  launchedVersion,
+  launchFromOptions,
+  launchFlight,
+  retryLaunch,
+} from "../run-launch.ts";
 
 describe("launchFlight", () => {
   /** A launch whose request the test settles by hand. */
@@ -89,6 +95,16 @@ describe("launchFlight", () => {
     const next = pendingLaunch();
     flight.run(next.start, {});
     expect(next.started()).toBe(1);
+  });
+});
+
+describe("launchedVersion", () => {
+  it("names the version a refused launch ran, so recovery reads that version's readiness", () => {
+    expect(launchedVersion({ version: "draft" })).toBe("draft");
+    expect(launchedVersion({ version: "1.2.0" })).toBe("1.2.0");
+    // An omitted selector runs the latest published version; readiness would read the
+    // draft for a writer, so it is spelled out.
+    expect(launchedVersion({})).toBe("published");
   });
 });
 

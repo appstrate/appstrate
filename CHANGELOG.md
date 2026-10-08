@@ -56,13 +56,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `candidate_connections`, or `required_auth_key` and
     `available_auth_keys`, plus a `connect_url` when the caller sent
     `X-Appstrate-Connect-Offers` (never stored with an idempotent response,
-    so a replay carries none; over MCP `run_and_wait`, only the in-app chat
+    the `201` or a `409`, so a replay carries none; over MCP `run_and_wait`, only the in-app chat
     receives it, and an external MCP client gets the warning and can call
     `initiateIntegrationConnect`); and when a cascade layer holds `[]` (below),
     with a message naming that layer and no connect target, since the choice
     was deliberate;
   - `integration_not_active` when the integration is switched off in the
-    space; the run's `integrations_unbound` lists it too.
+    space; the run's `integrations_unbound` lists it too. An inert one
+    (selecting no tool or scope, needing no auth) is skipped first and
+    yields nothing, as the run would not start it anyway.
 
   A `required` integration keeps the old behaviour: a
   `409 missing_integration_connection` with `not_connected`,
@@ -87,7 +89,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pins, member pins, run and schedule `connection_overrides`, and MCP
   `run_and_wait`'s `connection_overrides`. A layer holding `[]` wins and stops
   the cascade: the integration starts with no connection, with an
-  `integration_unbound` warning. `[]` in `connection_overrides` for an
+  `integration_unbound` warning, and the agent is told it runs without it
+  whatever its tool selection. `[]` in `connection_overrides` for an
   integration the launched manifest marks `required` is refused
   (`400 invalid_request`, `param` `connection_overrides`) at a run launch and
   at a schedule write. A pin accepts `[]` whatever the manifest says; a run
@@ -100,9 +103,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`GET /api/agents/{scope}/{name}/connection-readiness`) gains `required`
   per integration, and `admin_pinned_connection_ids` /
   `member_pinned_connection_ids` become `string[] | null` (`null` = no pin,
-  `[]` = pinned to none). An unbound non-required integration reads
-  `run_blocking: false`, `error_code: null` and `resolved_connection_ids: []`
-  (#1830).
+  `[]` = pinned to none). It also gains `warning_code` per integration: the
+  code of the launch's `warnings[]` item (`integration_unbound` or
+  `integration_not_active`), `null` when the run binds the integration, is
+  refused over it, or never needed it. A non-required integration the run
+  starts without reads `run_blocking: false`, `error_code: null`,
+  `resolved_connection_ids: []` and a non-null `warning_code` (#1830).
 - **BREAKING (API): integration status reads an auth's
   `_meta["dev.appstrate/auth"].required` as absent = `false`** (#1830), like
   the rest of the platform, instead of absent = `true`: `auths[].required` on

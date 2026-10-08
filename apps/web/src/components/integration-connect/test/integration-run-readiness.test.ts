@@ -34,6 +34,8 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     source: "fallback_auto",
     error_code: null,
     warning_code: null,
+    required_auth_key: null,
+    available_auth_keys: [],
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
@@ -183,6 +185,20 @@ describe("describeResolution — empty picker prompt", () => {
       expect(describeResolution(resolution({ error_code })).emptyPickerPrompt).toBe(prompt);
     }
   });
+
+  it("asks for a pick when only colleagues' shared connections are reachable", () => {
+    const unbound = {
+      source: null,
+      warning_code: "integration_unbound" as const,
+      resolved_connection_ids: [],
+    };
+    const shared = { ...candidate(), is_own: false };
+    expect(
+      describeResolution(resolution({ ...unbound, candidates: [shared] })).emptyPickerPrompt,
+    ).toBe("choose");
+    // Control: nothing reachable at all asks for a connection.
+    expect(describeResolution(resolution(unbound)).emptyPickerPrompt).toBe("connect");
+  });
 });
 
 describe("unboundReason", () => {
@@ -231,6 +247,24 @@ describe("unboundReason", () => {
     expect(unboundReason(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
       "member_none",
     );
+  });
+
+  it("names connections on another auth method, after a deliberate none", () => {
+    const otherAuth = { ...empty, required_auth_key: "oauth", available_auth_keys: ["pat"] };
+    expect(unboundReason(entry(false, otherAuth))).toBe("other_auth");
+    expect(unboundReason(entry(false, { ...otherAuth, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+    expect(
+      unboundReason(entry(false, { ...otherAuth, warning_code: "integration_not_active" })),
+    ).toBe("inactive");
+  });
+
+  it("asks to connect, not to choose, when the actor's connections are on another auth", () => {
+    const view = describeResolution(
+      resolution({ ...empty, required_auth_key: "oauth", available_auth_keys: ["pat"] }),
+    );
+    expect(view.emptyPickerPrompt).toBe("connect");
   });
 
   it("tells only-shared connections from nothing usable", () => {

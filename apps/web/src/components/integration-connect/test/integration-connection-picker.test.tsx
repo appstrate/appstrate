@@ -69,6 +69,8 @@ function resolution(overrides: Partial<Resolution>): Resolution {
     source: "member_pin",
     error_code: null,
     warning_code: null,
+    required_auth_key: null,
+    available_auth_keys: [],
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
@@ -357,20 +359,25 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
 
 function PickerProbe({
   persistence,
+  version,
+  manifest = MANIFEST,
   onPicker,
 }: {
   persistence: ConnectionPickerPersistence;
+  version?: string;
+  manifest?: IntegrationManifestView;
   onPicker: (picker: ConnectionPicker | null) => void;
 }) {
   onPicker(
     useConnectionPicker({
       integrationId: INTEGRATION,
       agentPackageId: AGENT,
-      manifest: MANIFEST,
+      manifest,
       authStatuses: [],
       agentTools: undefined,
       agentScopes: undefined,
       persistence,
+      version,
     }),
   );
   return null;
@@ -404,6 +411,72 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     const unbound = resolution({ source: null, resolved_connection_ids: [] });
     expect(pickerFor(unbound).required).toBe(false);
     expect(pickerFor(unbound, { required: true }).required).toBe(true);
+  });
+
+  it("reads `required` off the version it is given, not the default one", () => {
+    // The draft drops the requirement the published version (the one a plain launch runs) keeps.
+    const unbound = resolution({ source: null, resolved_connection_ids: [] });
+    const qc = new QueryClient();
+    qc.setQueryData(READINESS_KEY, readiness(unbound, false, false));
+    const publishedKey = $api.queryOptions(
+      "get",
+      "/api/agents/{scope}/{name}/connection-readiness",
+      {
+        params: {
+          path: { scope: "@acme", name: "ops" },
+          query: { version: "published" },
+          header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+        },
+      },
+    ).queryKey;
+    qc.setQueryData(publishedKey, readiness(unbound, false, true));
+    const required = (version?: string) => {
+      const pickers: Array<ConnectionPicker | null> = [];
+      render(
+        <PickerProbe
+          persistence={{ mode: "override", value: null, onChange: () => {} }}
+          version={version}
+          onPicker={(p) => pickers.push(p)}
+        />,
+        { queryClient: qc },
+      );
+      return pickers[0]?.required;
+    };
+    expect(required("published")).toBe(true);
+    expect(required()).toBe(false);
+  });
+
+  it("offers to connect only the agent's auth when the actor's connections are on another", () => {
+    const twoAuths = {
+      auths: { primary: { type: "custom" }, token: { type: "api_key" } },
+    } as unknown as IntegrationManifestView;
+    const authKeysFor = (res: Resolution) => {
+      const qc = new QueryClient();
+      qc.setQueryData(READINESS_KEY, readiness(res));
+      const pickers: Array<ConnectionPicker | null> = [];
+      render(
+        <PickerProbe
+          persistence={{ mode: "pin" }}
+          manifest={twoAuths}
+          onPicker={(p) => pickers.push(p)}
+        />,
+        { queryClient: qc },
+      );
+      return pickers[0]?.authKeys;
+    };
+    const unbound = {
+      source: null,
+      warning_code: "integration_unbound" as const,
+      resolved_connection_ids: [],
+      candidates: [],
+    };
+    const otherAuth = resolution({
+      ...unbound,
+      required_auth_key: "primary",
+      available_auth_keys: ["token"],
+    });
+    expect(authKeysFor(otherAuth)).toEqual(["primary"]);
+    expect(authKeysFor(resolution(unbound))).toEqual(["primary", "token"]);
   });
 
   it("persists [] for 'no connection' and null for inherit, as two different overrides", async () => {

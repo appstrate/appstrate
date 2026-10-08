@@ -38,6 +38,8 @@ interface MissingConnectionsModalProps {
   errors: MissingIntegrationFieldError[];
   /** The agent whose run 409'd; keys the server resolution each picker consumes. */
   agentPackageId?: string;
+  /** The version the refused launch ran: `required` (and so "no connection") is that version's. */
+  version?: string;
   /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
   integrationEntries?: AgentIntegrationEntry[];
   /** Re-run with the picked overrides. */
@@ -57,6 +59,7 @@ export function MissingConnectionsModal({
   onClose,
   errors,
   agentPackageId,
+  version,
   integrationEntries,
   onRetryWithOverrides,
   retrying,
@@ -116,6 +119,7 @@ export function MissingConnectionsModal({
             key={`${err.field}-${i}`}
             err={err}
             agentPackageId={agentPackageId}
+            version={version}
             integrationEntries={integrationEntries}
             pick={picks[integrationIdOfField(err.field)] ?? null}
             onPick={setPick}
@@ -129,12 +133,14 @@ export function MissingConnectionsModal({
 function MissingRow({
   err,
   agentPackageId,
+  version,
   integrationEntries,
   pick,
   onPick,
 }: {
   err: MissingIntegrationFieldError;
   agentPackageId?: string;
+  version?: string;
   integrationEntries?: AgentIntegrationEntry[];
   /** Current per-run pick set for this integration; `null` = no override. */
   pick: ConnectionSet;
@@ -157,6 +163,7 @@ function MissingRow({
   const { data: verdict } = useIntegrationReadinessEntry(
     isStructural ? undefined : packageId,
     isStructural ? undefined : agentPackageId,
+    version,
   );
   const resolution = verdict?.resolution;
   const entry = integrationEntries?.find((e) => e.id === packageId);
@@ -218,6 +225,7 @@ function MissingRow({
             authStatuses={detail.auths}
             agentTools={entry?.tools}
             agentScopes={entry?.scopes}
+            version={version}
             persistence={{
               mode: "override",
               value: pick,

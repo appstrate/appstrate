@@ -38,6 +38,7 @@
   "detail.integrationUnbound": "Not connected — the agent runs without it",
   "detail.integrationUnboundAdminNone": "No connection (an admin's choice) — the agent runs without it",
   "detail.integrationUnboundMemberNone": "No connection (your choice) — the agent runs without it",
+  "detail.integrationUnboundOtherAuth": "Connected with another authentication method — the agent runs without it",
   "detail.integrationUnboundSharedOnly": "Only shared connections exist — pick one to use it",
   "detail.integrationUnboundInactive": "Turned off in this space — the agent runs without it",
   "detail.integrationRequiredBadge": "Required",
