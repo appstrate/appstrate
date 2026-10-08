@@ -451,11 +451,10 @@ export type FieldErrorCode =
   | "invalid_request";
 
 function mapZodCode(issue: z.core.$ZodIssue): FieldErrorCode {
-  // A missing field is an `invalid_type` issue carrying an own `input` that is
-  // `undefined`. Zod 4 sets `input` only when the issues were produced with
-  // `reportInput: true`; without it the issue stays `invalid_type`, never a
-  // false `required`.
-  if (issue.code === "invalid_type" && "input" in issue && issue.input === undefined) {
+  // A missing field is an issue whose own `input` is `undefined`, whatever the
+  // code (`invalid_type`, `invalid_value` for an enum/literal, `invalid_union`).
+  // Zod 4 only sets `input` under `reportInput: true`.
+  if ("input" in issue && issue.input === undefined) {
     return "required";
   }
   switch (issue.code) {
@@ -521,7 +520,8 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * pointer.
  *
  * The `required` code needs issues parsed with `reportInput: true` (as
- * `parseBody` does); otherwise a missing field reports `invalid_type`.
+ * `parseBody` does); otherwise a missing field keeps its Zod-derived code
+ * (`invalid_type`, `invalid_value`, `invalid_union`).
  *
  * `unrecognized_keys` is the one issue that does NOT name its field through
  * `path`: Zod reports the container's path (EMPTY for a top-level body) and
@@ -569,7 +569,6 @@ export function parseBody<T extends z.ZodType>(
   body: unknown,
   param?: string,
 ): z.output<T> {
-  // `reportInput` lets `required` be told from `invalid_type`; `input` never reaches the wire.
   const parsed = schema.safeParse(body, { reportInput: true });
   if (!parsed.success) {
     throw validationFailed(zodIssuesToFieldErrors(parsed.error.issues, param));

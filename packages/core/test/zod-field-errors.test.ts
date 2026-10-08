@@ -2,7 +2,7 @@
 
 /**
  * Public field-error codes derived from Zod issues (#1790): a missing field
- * reports `required`, a present-but-wrong one `invalid_type`.
+ * reports `required`, a present-but-wrong one keeps its own code.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -14,10 +14,24 @@ const schema = z.object({
   nick: z.string().optional(),
   profile: z.object({ email: z.string() }),
   items: z.array(z.object({ id: z.string() })),
+  role: z.enum(["admin", "member"]),
+  kind: z.literal("user"),
+  ref: z.union([z.string(), z.number()]),
 });
 
-const profile = { email: "a@b.c" };
-const items = [{ id: "1" }];
+const valid = {
+  name: "a",
+  profile: { email: "a@b.c" },
+  items: [{ id: "1" }],
+  role: "admin",
+  kind: "user",
+  ref: 1,
+} satisfies z.input<typeof schema>;
+
+/** `valid` without `key` — the key is absent, not set to `undefined`. */
+function omit(key: keyof typeof valid) {
+  return Object.fromEntries(Object.entries(valid).filter(([k]) => k !== key));
+}
 
 function fieldErrorsOf(body: unknown, param?: string) {
   try {
@@ -31,27 +45,27 @@ function fieldErrorsOf(body: unknown, param?: string) {
 
 describe("parseBody field-error codes", () => {
   it.each([
-    ["a missing field", { profile, items }, "name", "required"],
-    ["a wrong-typed field", { name: 42, profile, items }, "name", "invalid_type"],
-    ["null for a non-nullable field", { name: null, profile, items }, "name", "invalid_type"],
-    ["a missing nested field", { name: "a", profile: {}, items }, "profile.email", "required"],
-    ["a missing nested object", { name: "a", items }, "profile", "required"],
-    [
-      "a missing array element field",
-      { name: "a", profile, items: [{}] },
-      "items[0].id",
-      "required",
-    ],
+    ["a missing field", omit("name"), "name", "required"],
+    ["a wrong-typed field", { ...valid, name: 42 }, "name", "invalid_type"],
+    ["null for a non-nullable field", { ...valid, name: null }, "name", "invalid_type"],
+    ["a missing nested field", { ...valid, profile: {} }, "profile.email", "required"],
+    ["a missing nested object", omit("profile"), "profile", "required"],
+    ["a missing array element field", { ...valid, items: [{}] }, "items[0].id", "required"],
+    ["a missing enum field", omit("role"), "role", "required"],
+    ["a missing literal field", omit("kind"), "kind", "required"],
+    ["a missing union field", omit("ref"), "ref", "required"],
+    ["a wrong enum value", { ...valid, role: "owner" }, "role", "invalid_value"],
+    ["a wrong-typed union value", { ...valid, ref: true }, "ref", "invalid_union"],
   ])("reports %s", (_label, body, field, code) => {
     expect(fieldErrorsOf(body)).toEqual([{ field, code }]);
   });
 
   it("accepts an absent optional field", () => {
-    expect(parseBody(schema, { name: "a", profile, items })).toEqual({ name: "a", profile, items });
+    expect(parseBody(schema, valid)).toEqual(valid);
   });
 
   it("reports missing and wrong-typed fields together, each with its own code", () => {
-    expect(fieldErrorsOf({ profile: { email: 1 }, items })).toEqual([
+    expect(fieldErrorsOf({ ...omit("name"), profile: { email: 1 } })).toEqual([
       { field: "name", code: "required" },
       { field: "profile.email", code: "invalid_type" },
     ]);
@@ -63,11 +77,11 @@ describe("parseBody field-error codes", () => {
 });
 
 describe("zodIssuesToFieldErrors without reportInput", () => {
-  // Regression witness: Zod 4 omits `input` from issues unless `reportInput`
-  // is set, so a missing field must stay `invalid_type` here — never a false
-  // `required`. If Zod starts always reporting `input`, this test says so.
-  it("reports a missing field as invalid_type", () => {
-    const result = schema.safeParse({ profile, items });
+  // Canary: pins that Zod strips `input` from issues unless `reportInput` is
+  // set. If Zod starts always reporting `input`, this fails and `parseBody`
+  // can drop `reportInput`.
+  it("reports a missing field with its Zod-derived code", () => {
+    const result = schema.safeParse(omit("name"));
     if (result.success) throw new Error("schema accepted the body");
     expect(
       zodIssuesToFieldErrors(result.error.issues).map(({ field, code }) => ({ field, code })),
