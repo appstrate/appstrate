@@ -22,12 +22,15 @@ consumer's publish rather than the first user's `npm install`.
   summed over several requests carries, per price-tier threshold, the tokens of
   the requests priced at that tier (a subset of the totals), so the sum can be
   priced exactly. Optional; absent when no request reached a tier. (#1552)
-- **`isTokenUsageTiers`**: the one validation rule for `tiers` (positive
-  `input_tokens_above` unique across bands, non-negative finite counters),
+- **`isTokenUsageTiers`**: the one validation rule for `tiers` (at most
+  `MAX_TOKEN_USAGE_TIERS` bands, each holding only a positive integer
+  `input_tokens_above` unique across bands and non-negative integer counters),
   shared by core's `tokenUsageSchema` and the AFPS event guard.
-- **`TOKEN_USAGE_COUNTERS`**, **`TokenUsageCounter`**, **`TokenUsageCounters`**:
-  the four counters, declared once; `TokenUsage` and `TokenUsageTier` extend
-  `TokenUsageCounters`.
+- **`MAX_TOKEN_USAGE_TIERS`** (16): the band cap.
+- **`isTokenCount`**: a finite, non-negative counter — the rule the AFPS
+  event guard applies to `usage`'s top-level counters.
+- **`TOKEN_USAGE_COUNTERS`**: the four counters, declared once; `TokenUsage`
+  and `TokenUsageTier` are typed from it.
 
 ## [0.12.0] — 2026-10-08
 

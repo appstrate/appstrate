@@ -43,10 +43,11 @@ import {
   downloadRunFileStream,
 } from "../services/run-workspace-storage.ts";
 import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
+import { tokenUsageSchema, tokenUsageTiersDropped } from "@appstrate/core/token-usage";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
+import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -169,6 +170,7 @@ export const RunResultSchema = z
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage for finalize liveness and the terminal
     // `runs.tokenUsage` write. Required on a success (refinement below).
+    // Malformed tier bands drop only the bands (logged by the handler).
     usage: tokenUsageSchema.optional().catch(undefined),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`
@@ -308,6 +310,11 @@ export function createRunsEventsRouter() {
     // we project explicitly to the runtime's RunResult shape so the
     // service's type checks are enforced without a cast.
     const d = await readJsonBody(c, RunResultSchema);
+    // Hono caches the parsed body: this re-read costs no second parse.
+    const rawUsage = ((await c.req.json()) as { usage?: unknown }).usage;
+    if (tokenUsageTiersDropped(rawUsage, d.usage)) {
+      logger.warn("finalize: malformed usage tiers dropped", { runId: run.id });
+    }
     const result: TerminalRunResult = {
       memories: d.memories,
       ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),

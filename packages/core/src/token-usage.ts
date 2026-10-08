@@ -25,17 +25,41 @@ export const tokenUsageSchema = z.object({
   output_tokens: z.number().nonnegative().optional(),
   cache_creation_input_tokens: z.number().nonnegative().optional(),
   cache_read_input_tokens: z.number().nonnegative().optional(),
-  // One rule, shared with the AFPS event guard (`isCanonicalRunEvent`).
-  tiers: z.custom<TokenUsageTier[]>(isTokenUsageTiers, "invalid token usage tiers").optional(),
+  // One rule, shared with the AFPS event guard (`isCanonicalRunEvent`). Malformed
+  // bands degrade to none — the counters survive and price at the base rate —
+  // rather than failing the whole snapshot; see `tokenUsageTiersDropped`.
+  tiers: z
+    .custom<TokenUsageTier[]>(isTokenUsageTiers, "invalid token usage tiers")
+    .optional()
+    .catch(undefined),
 });
+
+/**
+ * Whether `raw` carried tier bands that {@link tokenUsageSchema} dropped as
+ * malformed when it parsed `parsed` out of it — what an ingestion seam logs,
+ * since the schema degrades silently.
+ */
+export function tokenUsageTiersDropped(
+  raw: unknown,
+  parsed: TokenUsage | null | undefined,
+): boolean {
+  return (
+    parsed != null &&
+    parsed.tiers === undefined &&
+    typeof raw === "object" &&
+    raw !== null &&
+    (raw as { tiers?: unknown }).tiers !== undefined
+  );
+}
 
 /**
  * In-place accumulator for {@link TokenUsage} totals.
  *
- * Adds every field of `addition` onto `total`. Optional fields default to
- * zero on both sides — `undefined` on `addition` is a no-op, and the
- * cache-creation / cache-read totals are coerced to a numeric zero on
- * `total` so subsequent reads always yield a number.
+ * Adds the four counters of `addition` onto `total`. Optional counters default
+ * to zero on both sides, so every counter on `total` reads as a number
+ * afterwards. It does NOT sum the tier bands (`tiers`): `total.tiers` is left
+ * as it was and no longer describes the sum. Summing usage that must price
+ * tiers exactly is `addRequestUsage` (`@appstrate/runner-pi/pi-model`).
  */
 export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens = (total.input_tokens ?? 0) + (addition.input_tokens ?? 0);

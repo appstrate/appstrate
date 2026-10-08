@@ -1103,6 +1103,32 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
   });
 
+  it("drops malformed tier bands but keeps a success and its counters", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const res = await postFinalize(runId, {
+        status: "success",
+        output: { ok: true },
+        usage: {
+          input_tokens: 12,
+          output_tokens: 3,
+          tiers: [{ input_tokens_above: 1, input_tokens: -1 }],
+        },
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("success");
+      expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
+      expect(
+        warnSpy.mock.calls.filter(([message]) => message.includes("malformed usage tiers")),
+      ).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   // B2 preservation semantics: a NON-success terminal that carries no
   // runner-posted usage must keep the cumulative snapshot the
   // `appstrate.metric` side-channel wrote during the run — done atomically

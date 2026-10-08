@@ -16,6 +16,7 @@ import {
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
@@ -309,6 +310,7 @@ export const schemas = {
   },
   TokenUsageTier: {
     type: "object",
+    additionalProperties: false,
     required: ["input_tokens_above"],
     description:
       "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request.",
@@ -1151,7 +1153,7 @@ export const schemas = {
       token_usage: {
         type: ["object", "null"],
         description:
-          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
+          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB.",
         properties: {
           input_tokens: { type: "integer", minimum: 0 },
           output_tokens: { type: "integer", minimum: 0 },
@@ -1161,12 +1163,14 @@ export const schemas = {
             type: "array",
             description:
               "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+            maxItems: MAX_TOKEN_USAGE_TIERS,
             items: { $ref: "#/components/schemas/TokenUsageTier" },
           },
         },
-        // Stored verbatim from the runner's JSONB — a runner may emit provider-
-        // specific extra keys beyond the four documented above. additionalProperties
-        // stays `true` so those pass-through keys don't fail spec==runtime validation.
+        // Both writers (the metric and finalize ingestion paths) parse with
+        // `tokenUsageSchema`, which strips unknown keys; a row the metric path
+        // wrote verbatim before it parsed may still carry a runner's extra
+        // keys, and the column is served as stored — so this stays `true`.
         additionalProperties: true,
       },
       started_at: { type: ["string", "null"], format: "date-time" },

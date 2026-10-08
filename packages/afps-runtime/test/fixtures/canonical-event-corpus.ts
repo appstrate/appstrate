@@ -325,6 +325,11 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     valid: false,
   },
   {
+    label: "appstrate.metric — negative input_tokens",
+    event: { ...base, type: "appstrate.metric", usage: { input_tokens: -1 } },
+    valid: false,
+  },
+  {
     label: "appstrate.metric — null output_tokens",
     event: { ...base, type: "appstrate.metric", usage: { output_tokens: null } },
     valid: false,

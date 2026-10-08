@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { totalTokens, accumulateTokenUsage, tokenUsageSchema } from "../src/token-usage.ts";
+import {
+  totalTokens,
+  accumulateTokenUsage,
+  tokenUsageSchema,
+  tokenUsageTiersDropped,
+} from "../src/token-usage.ts";
 
 describe("totalTokens", () => {
   it("sums all four buckets", () => {
@@ -66,14 +71,31 @@ describe("tokenUsageSchema tiers", () => {
     expect(tokenUsageSchema.parse({ ...usage, tiers })).toEqual({ ...usage, tiers });
   });
 
-  it("rejects a repeated threshold, a non-positive threshold and a negative count", () => {
+  it("drops malformed bands and keeps the counters", () => {
     const band = { input_tokens_above: 200_000, input_tokens: 1 };
     for (const tiers of [
       [band, band],
       [{ input_tokens_above: 0 }],
       [{ input_tokens_above: 200_000, output_tokens: -1 }],
+      [{ ...band, extra: 1 }],
     ]) {
-      expect(tokenUsageSchema.safeParse({ ...usage, tiers }).success).toBe(false);
+      const raw = { ...usage, tiers };
+      const parsed = tokenUsageSchema.parse(raw);
+      expect(parsed).toEqual(usage);
+      expect(tokenUsageTiersDropped(raw, parsed)).toBe(true);
     }
+  });
+
+  it("still rejects a malformed counter", () => {
+    expect(tokenUsageSchema.safeParse({ input_tokens: -1 }).success).toBe(false);
+  });
+});
+
+describe("tokenUsageTiersDropped", () => {
+  it("is false when nothing was dropped", () => {
+    const tiers = [{ input_tokens_above: 200_000 }];
+    expect(tokenUsageTiersDropped({ input_tokens: 1 }, { input_tokens: 1 })).toBe(false);
+    expect(tokenUsageTiersDropped({ tiers }, { tiers })).toBe(false);
+    expect(tokenUsageTiersDropped({ tiers: "x" }, null)).toBe(false);
   });
 });

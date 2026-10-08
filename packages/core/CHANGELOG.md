@@ -11,9 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`tokenUsageSchema`** (`@appstrate/core/token-usage`) validates the optional
   `tiers` of a `TokenUsage` (`@appstrate/afps-shared` `TokenUsage.tiers`) with
-  afps-shared's `isTokenUsageTiers`: a positive `input_tokens_above` unique
-  across bands, and non-negative finite counters. It previously stripped the
-  field. (#1552)
+  afps-shared's `isTokenUsageTiers` (at most 16 bands, each holding only a
+  positive integer `input_tokens_above` unique across bands and non-negative
+  integer counters). It previously stripped the field. Malformed bands are
+  dropped and the counters kept: the snapshot still parses. (#1552)
+
+- **`tokenUsageTiersDropped`** (`@appstrate/core/token-usage`): whether a raw
+  usage carried bands that `tokenUsageSchema` dropped, for the seam that
+  ingests it to log. (#1552)
 
 - **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
   per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model

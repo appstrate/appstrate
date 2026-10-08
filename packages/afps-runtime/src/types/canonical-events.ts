@@ -25,7 +25,11 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import { isTokenUsageTiers, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
+import {
+  isTokenCount,
+  isTokenUsageTiers,
+  TOKEN_USAGE_COUNTERS,
+} from "@appstrate/afps-shared/token-usage";
 import type { TokenUsage } from "./run-result.ts";
 
 interface BaseEnvelope {
@@ -261,7 +265,7 @@ export const CANONICAL_CONSTRAINTS = {
     // this table on its own, and the coverage guard then demands a fixture.
     ...TOKEN_USAGE_COUNTERS.map((counter) => ({
       path: `usage.${counter}`,
-      holds: optional(isWireNumber),
+      holds: optional(isTokenCount),
     })),
     { path: "usage.tiers", holds: optional(isTokenUsageTiers) },
     { path: "cost", holds: optional((v) => isWireNumber(v) && v >= 0) },

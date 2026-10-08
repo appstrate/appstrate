@@ -23,6 +23,7 @@
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import { isTokenUsageTiers, type TokenUsage } from "@appstrate/afps-shared/token-usage";
+import { tokenUsageTiersDropped } from "@appstrate/core/token-usage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
@@ -158,13 +159,12 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
       : Math.max(0, record.cacheWriteTokens);
   // The record crosses a module boundary: malformed bands are dropped (base
   // rate) rather than failing a turn that already streamed.
-  let tiers = record.tiers;
-  if (tiers !== undefined && !isTokenUsageTiers(tiers)) {
+  const tiers = isTokenUsageTiers(record.tiers) ? record.tiers : undefined;
+  if (tokenUsageTiersDropped(record, { tiers })) {
     logger.warn("chat: dropped invalid usage tiers", {
       orgId: record.orgId,
       presetId: record.presetId,
     });
-    tiers = undefined;
   }
   // The usage as the shared helpers consume it — built once and reused for
   // both the cost and its provenance so the two can never describe different

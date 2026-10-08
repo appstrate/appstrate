@@ -5,6 +5,7 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -1490,7 +1491,8 @@ const canonicalRunsPaths = {
                     tiers: {
                       type: "array",
                       description:
-                        "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+                        "Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept.",
+                      maxItems: MAX_TOKEN_USAGE_TIERS,
                       items: { $ref: "#/components/schemas/TokenUsageTier" },
                     },
                   },

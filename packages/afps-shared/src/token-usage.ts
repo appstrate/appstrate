@@ -9,10 +9,10 @@ export const TOKEN_USAGE_COUNTERS = [
   "cache_read_input_tokens",
 ] as const;
 
-export type TokenUsageCounter = (typeof TOKEN_USAGE_COUNTERS)[number];
+type TokenUsageCounter = (typeof TOKEN_USAGE_COUNTERS)[number];
 
 /** Every token counter, each optional. */
-export type TokenUsageCounters = { [K in TokenUsageCounter]?: number };
+type TokenUsageCounters = { [K in TokenUsageCounter]?: number };
 
 /**
  * Canonical token-usage shape reported by an LLM provider for a completion.
@@ -41,24 +41,41 @@ export interface TokenUsageTier extends TokenUsageCounters {
   input_tokens_above: number;
 }
 
-const isCount = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0;
+/**
+ * Most bands a {@link TokenUsage.tiers} may hold. A Pi model card carries one
+ * or two tiers; the cap bounds what is stored verbatim from untrusted runners.
+ */
+export const MAX_TOKEN_USAGE_TIERS = 16;
+
+/** A {@link TokenUsage} counter the wire can carry: finite and non-negative. */
+export function isTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+const isWholeCount = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
+
+const TIER_KEYS = new Set<string>(["input_tokens_above", ...TOKEN_USAGE_COUNTERS]);
 
 /**
  * The rule for {@link TokenUsage.tiers}, shared by every validator of the wire
- * shape: an array of objects, each with a positive `input_tokens_above`
- * unique across entries and non-negative finite counters.
+ * shape: at most {@link MAX_TOKEN_USAGE_TIERS} objects, each holding only a
+ * positive integer `input_tokens_above` unique across entries and non-negative
+ * integer counters (Pi thresholds and token counts are integers).
  */
 export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
-  if (!Array.isArray(value)) return false;
+  if (!Array.isArray(value) || value.length > MAX_TOKEN_USAGE_TIERS) return false;
   const thresholds = new Set<number>();
   for (const entry of value) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
     const tier = entry as Record<string, unknown>;
+    if (Object.keys(tier).some((key) => !TIER_KEYS.has(key))) return false;
     const threshold = tier.input_tokens_above;
-    if (!isCount(threshold) || threshold === 0 || thresholds.has(threshold)) return false;
+    if (!isWholeCount(threshold) || threshold === 0 || thresholds.has(threshold)) return false;
     thresholds.add(threshold);
-    if (TOKEN_USAGE_COUNTERS.some((c) => tier[c] !== undefined && !isCount(tier[c]))) return false;
+    if (TOKEN_USAGE_COUNTERS.some((c) => tier[c] !== undefined && !isWholeCount(tier[c]))) {
+      return false;
+    }
   }
   return true;
 }

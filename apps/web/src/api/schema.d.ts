@@ -6449,7 +6449,7 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             error: string | null;
-            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
+            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB. */
             token_usage: ({
                 input_tokens?: number;
                 output_tokens?: number;
@@ -22482,7 +22482,7 @@ export interface operations {
                         output_tokens?: number;
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
-                        /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
+                        /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept. */
                         tiers?: components["schemas"]["TokenUsageTier"][];
                     };
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */

@@ -616,6 +616,32 @@ describe("persistRunEvent", () => {
       }
     });
 
+    it("malformed tier bands are dropped and logged, the counters kept", async () => {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await persistLedger(
+          event("appstrate.metric", {
+            usage: {
+              input_tokens: 900,
+              output_tokens: 300,
+              tiers: [{ input_tokens_above: 0, input_tokens: 900 }],
+            },
+          }),
+          { modelSource: "org", modelCost: rates },
+        );
+        const row = await runnerRow();
+        expect(row!.inputTokens).toBe(900);
+        expect(row!.outputTokens).toBe(300);
+        const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+        expect(runRow?.tokenUsage).toEqual({ input_tokens: 900, output_tokens: 300 });
+        expect(
+          warnSpy.mock.calls.filter(([message]) => message.includes("malformed usage tiers")),
+        ).toHaveLength(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
     it("a cost-only metric on a platform run mints no row", async () => {
       // The degenerate-event guard now keys on the input the cost is DERIVED
       // from. With no usage snapshot the recompute is exactly 0, so the row

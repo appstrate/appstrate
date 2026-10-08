@@ -2,9 +2,9 @@
 
 /**
  * Hand-computed prices for each ledger path (docs/architecture/RUN_COST.md),
- * on a tiered rate card: a proxy row per request, the runner row from the
- * summed usage and its tier bands, and the container's own per-request figures
- * — all three the same dollars.
+ * on a tiered rate card: a proxy row per request and the runner row from the
+ * summed usage and its tier bands — the same dollars. The container's own sum
+ * of its per-request figures is `packages/runner-pi/test/session-bridge.test.ts`'s.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -118,10 +118,6 @@ describe("ledger prices", () => {
     ]);
     expect(cumulativeCostUsd(usage, COST)).toBeCloseTo(RUN_USD, 10);
     expect(cumulativeCostUsd({ ...usage, tiers: undefined }, COST)).toBeCloseTo(RUN_BASE_USD, 10);
-  });
-
-  it("container: its reported cost is the runner row", () => {
-    expect(runContainerSession().getCost()).toBeCloseTo(RUN_USD, 10);
   });
 
   it("the container's model record refuses long cache retention", () => {

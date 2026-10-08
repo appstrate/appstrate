@@ -18,7 +18,7 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
+import { tokenUsageSchema, tokenUsageTiersDropped } from "@appstrate/core/token-usage";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import type { CredentialSource } from "@appstrate/db/schema";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -176,12 +176,18 @@ export async function persistRunEvent(
 /**
  * The metric's usage snapshot, or null. A malformed one (a non-numeric counter
  * would price as NaN) is dropped and logged, never thrown: a throw rolls the
- * ingestion back and the runner replays it forever (#1501).
+ * ingestion back and the runner replays it forever (#1501). Malformed tier
+ * bands alone drop only the bands.
  */
 function parseMetricUsage(runId: string, value: unknown): TokenUsage | null {
   if (value == null) return null;
   const parsed = tokenUsageSchema.safeParse(value);
-  if (parsed.success) return parsed.data;
+  if (parsed.success) {
+    if (tokenUsageTiersDropped(value, parsed.data)) {
+      logger.warn("appstrate.metric: malformed usage tiers dropped", { runId });
+    }
+    return parsed.data;
+  }
   logger.warn("appstrate.metric: malformed usage dropped", {
     runId,
     error: parsed.error.message,
