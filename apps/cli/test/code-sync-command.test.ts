@@ -22,6 +22,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
+import { deleteTokens } from "../src/lib/keyring.ts";
+import { getNoticePath, syncProblemNotice, writeNotice } from "../src/lib/skills-sync/notice.ts";
 import { getStatePath, readSyncState, STATE_VERSION } from "../src/lib/skills-sync/state.ts";
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { runCli } from "./helpers/isolated-process.ts";
@@ -37,6 +39,34 @@ const ONE_SKILL: SkillFixture[] = [
   { id: "@acme/pdf-tools", skillMd: skillMd("PDF Tools", "Work with PDFs.") },
 ];
 const TARGET_REQUIRED = "--target is required (repeatable): claude-plugin | codex | claude-user\n";
+
+interface HookOutput {
+  systemMessage: string;
+  hookSpecificOutput: { hookEventName: string; additionalContext: string };
+}
+
+/** The plugin's `SessionStart` hook, run as Claude Code runs it: its command through `sh -c`. */
+async function runHook(): Promise<{ exitCode: number; stdout: string }> {
+  const hooks = JSON.parse(await readText(join(pluginRoot(), "hooks", "hooks.json"))) as {
+    hooks: { SessionStart: { matcher: string; hooks: { type: string; command: string }[] }[] };
+  };
+  const [entry] = hooks.hooks.SessionStart;
+  expect(entry?.matcher).toBe("startup");
+  expect(entry?.hooks[0]?.type).toBe("command");
+  const proc = Bun.spawnSync(["sh", "-c", entry!.hooks[0]!.command]);
+  return { exitCode: proc.exitCode, stdout: proc.stdout.toString() };
+}
+
+/** What the hook printed, asserting it exited 0 with the shape Claude Code reads. */
+async function hookOutput(): Promise<HookOutput> {
+  const { exitCode, stdout } = await runHook();
+  expect(exitCode).toBe(0);
+  const out = JSON.parse(stdout) as HookOutput;
+  expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
+  return out;
+}
+
+const SILENT_HOOK = { exitCode: 0, stdout: "" };
 
 describe("code sync — claude-plugin target", () => {
   it("writes a complete plugin: manifest without a version, MCP config, README, and one skill dir", async () => {
@@ -1057,6 +1087,7 @@ describe("code sync — the plugin tree is repaired, not just extended", () => {
       ".claude-plugin",
       ".mcp.json",
       "README.md",
+      "hooks",
       "skills",
     ]);
   });
@@ -1137,20 +1168,10 @@ describe("code sync — fresh install", () => {
       createMemoryIO().io,
     );
 
-    const hooks = JSON.parse(await readText(join(pluginRoot(), "hooks", "hooks.json"))) as {
-      hooks: { SessionStart: { matcher: string; hooks: { type: string; command: string }[] }[] };
-    };
-    const [entry] = hooks.hooks.SessionStart;
-    expect(entry?.matcher).toBe("startup");
-    const proc = Bun.spawnSync(["sh", "-c", entry!.hooks[0]!.command]);
-    expect(proc.exitCode).toBe(0);
-    const out = JSON.parse(proc.stdout.toString()) as {
-      systemMessage: string;
-      hookSpecificOutput: { hookEventName: string; additionalContext: string };
-    };
+    const out = await hookOutput();
     expect(out.systemMessage).toContain("appstrate login --profile nope");
-    expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(out.hookSpecificOutput.additionalContext).toContain("--instance <url>");
+    expect(out.hookSpecificOutput.additionalContext).toContain("/appstrate:setup");
   });
 
   it("names the missing space pin in the setup skill", async () => {
@@ -1241,8 +1262,155 @@ describe("code sync — fresh install", () => {
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
-    expect(await exists(join(pluginRoot(), "hooks"))).toBe(false);
+    expect(await runHook()).toEqual(SILENT_HOOK);
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(true);
+  });
+});
+
+describe("code sync — session notice", () => {
+  const syncPlugin = (): Promise<void> =>
+    codeSyncCommand({ target: ["claude-plugin"], printPath: true }, createMemoryIO().io);
+  const older = syncProblemNotice(
+    { problem: "Something older", remedy: "appstrate whoami" },
+    { stale: true },
+    new Date("2026-01-02T03:04:05Z"),
+  );
+
+  it("says at the next session that the login is gone, keeps the plugin, and goes quiet once a sync succeeds", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    expect(await runHook()).toEqual(SILENT_HOOK);
+    const before = await snapshot(pluginRoot());
+    await deleteTokens("default");
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(stdout()).toBe("");
+    expect(stderr()).toContain("Run: appstrate login --profile default");
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    const out = await hookOutput();
+    expect(out.systemMessage).toContain("`appstrate login --profile default`");
+    expect(out.systemMessage).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    expect(out.hookSpecificOutput.additionalContext).toContain("appstrate login --profile default");
+
+    await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
+    await syncPlugin();
+
+    expect(await exists(getNoticePath())).toBe(false);
+    expect(await runHook()).toEqual(SILENT_HOOK);
+  });
+
+  it("names the remedy when an existing plugin loses its profile", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+
+    await expect(
+      codeSyncCommand(
+        { target: ["claude-plugin"], profile: "nope", printPath: true },
+        createMemoryIO().io,
+      ),
+    ).rejects.toBeInstanceOf(ExitError);
+
+    expect(await exists(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toBe(true);
+    expect((await hookOutput()).systemMessage).toContain("`appstrate login --profile nope`");
+  });
+
+  it("says nothing about a failure no command fixes, and keeps an older notice", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    const before = await snapshot(pluginRoot());
+    globalThis.fetch = (async () =>
+      new Response("unavailable", { status: 503 })) as unknown as typeof fetch;
+
+    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    expect(await exists(getNoticePath())).toBe(false);
+
+    await writeNotice(older);
+    globalThis.fetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    expect(await hookOutput()).toEqual(older);
+    expect(await snapshot(pluginRoot())).toEqual(before);
+  });
+
+  it("warns about a pinned space this profile cannot use, although the sync succeeds", async () => {
+    createSkillServer(ONE_SKILL, [{ id: "spc_2", name: "Space Two", isDefault: true }]).install();
+    const { io, stdout } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
+
+    expect(stdout()).toBe(`${pluginRoot()}\n`);
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    const out = await hookOutput();
+    expect(out.systemMessage).toContain('Pinned space "spc_1" is not accessible');
+    expect(out.systemMessage).toContain("`appstrate space switch`");
+  });
+
+  it("drops the pin warning when the same run then fails on a transient error", async () => {
+    createSkillServer(ONE_SKILL, [{ id: "spc_2", name: "Space Two", isDefault: true }]).install();
+    const serve = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/packages/skills"
+        ? new Response("unavailable", { status: 503 })
+        : serve(input, init)) as unknown as typeof fetch;
+    const { io, stdout, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stdout()).toBe("");
+    expect(stderr()).toContain('Pinned space "spc_1" is not accessible');
+    expect(await exists(getNoticePath())).toBe(false);
+
+    await writeNotice(older);
+    const before = await readText(getNoticePath());
+    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    expect(await readText(getNoticePath())).toBe(before);
+  });
+
+  it("warns when the organization revoked this profile, while removing its skills", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    failSpaceListing(403);
+
+    await syncPlugin();
+
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual([]);
+    const out = await hookOutput();
+    expect(out.systemMessage).toContain("no longer grants this profile access to its spaces");
+    expect(out.systemMessage).toContain("`appstrate org switch`");
+  });
+
+  it("leaves the notice alone under --dry-run", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    await writeNotice(older);
+
+    await codeSyncCommand({ target: ["claude-plugin"], dryRun: true }, createMemoryIO().io);
+    expect(await hookOutput()).toEqual(older);
+
+    await deleteTokens("default");
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], dryRun: true }, createMemoryIO().io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(await hookOutput()).toEqual(older);
+  });
+
+  it("does not rebuild an up-to-date plugin: the hook is part of its fixed files", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await syncPlugin();
+    const before = await snapshot(pluginRoot());
+    const hookStats = await lstat(join(pluginRoot(), "hooks", "hooks.json"));
+
+    await syncPlugin();
+
+    expect(await snapshot(pluginRoot())).toEqual(before);
+    expect((await lstat(join(pluginRoot(), "hooks", "hooks.json"))).ino).toBe(hookStats.ino);
   });
 });
 
@@ -1597,6 +1765,9 @@ describe("logout — managed skills", () => {
     expect(await exists(join(pluginRoot(), ".mcp.json"))).toBe(false);
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["setup"]);
     expect(await readdir(codexRoot())).toEqual(["personal"]);
+    const out = await hookOutput();
+    expect(out.systemMessage).toContain("Signed out");
+    expect(out.systemMessage).toContain("appstrate login --profile default");
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, createMemoryIO().io);
   });
 

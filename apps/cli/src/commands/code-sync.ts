@@ -13,7 +13,7 @@
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { agentCapabilities, reaches } from "@appstrate/core/permissions";
 import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
-import { ApiError } from "../lib/api.ts";
+import { ApiError, AuthError } from "../lib/api.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -24,6 +24,14 @@ import {
   type AgentLaunchView,
 } from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
+import {
+  clearNotice,
+  getNoticePath,
+  syncProblemNotice,
+  writeNotice,
+  type Actionable,
+  type SessionNotice,
+} from "../lib/skills-sync/notice.ts";
 import {
   assignSlugs,
   diffTarget,
@@ -57,6 +65,7 @@ import {
   pluginFixedFiles,
   pluginTreeMatches,
   removeManagedDir,
+  setupNotice,
   setupPluginFiles,
   skillDir,
   SYNC_TARGETS,
@@ -81,13 +90,18 @@ interface LineSink {
   write(chunk: string): void;
 }
 
+/**
+ * `notice`: what the next Claude Code session start says about it, for a
+ * problem only the user can fix (`notice.ts`). A per-skill failure never has one.
+ * `run` carries a failure's, `note` a warning's; {@link updateNotice} picks which stands.
+ */
 interface Report {
   /** Per-skill failure: information under `--print-path`, exit 1 otherwise. */
   skill(message: string): void;
   /** Whole-run failure: the plugin on disk is not what the server describes. */
-  run(message: string): void;
+  run(message: string, notice?: SessionNotice): void;
   /** Worth telling the user, not worth an exit code. */
-  note(message: string): void;
+  note(message: string, notice?: SessionNotice): void;
 }
 
 export async function codeSyncCommand(
@@ -122,120 +136,150 @@ export async function codeSyncCommand(
   // Two grades, because `--print-path` treats them differently.
   let skillFailures = 0;
   let runFailures = 0;
+  // For `updateNotice`; within a grade, the last one reported wins.
+  const notices: Notices = {};
   const report: Report = {
     skill: (message) => {
       skillFailures += 1;
       io.stderr.write(`${message}\n`);
     },
-    run: (message) => {
+    run: (message, notice) => {
       runFailures += 1;
       io.stderr.write(`${message}\n`);
+      notices.failure = notice ?? notices.failure;
     },
-    note: (message) => io.stderr.write(`${message}\n`),
+    note: (message, notice) => {
+      io.stderr.write(`${message}\n`);
+      notices.warning = notice ?? notices.warning;
+    },
   };
-  // Only read under `--print-path`, which already requires `claude-plugin`.
+  // Whether `claude-plugin` ended the run as the server describes it: the
+  // `--print-path` verdict, and which of the run's notices stands.
   let pluginOk = false;
+  // Resolved under the lock with everything else; an `AuthError` names it.
+  let activeProfile: string | undefined;
+  const fail = (err: unknown): void => {
+    pluginOk = false;
+    report.run(
+      formatError(err),
+      err instanceof AuthError && activeProfile
+        ? syncProblemNotice(signedOut(activeProfile), { stale: true })
+        : undefined,
+    );
+  };
+
+  const sync = async (): Promise<void> => {
+    const { profileName, profile } = await resolveActiveProfile(opts.profile);
+    activeProfile = profileName;
+    const gap = connectionGap(profileName, profile);
+    if (gap && !printPath) throw new Error(remedyLine(gap));
+    const { state, corrupt } = await readSyncState();
+    if (corrupt) {
+      io.stderr.write(
+        "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
+      );
+    }
+
+    if (gap) {
+      pluginOk = await bootstrapPlugin(gap, state, report);
+      return;
+    }
+
+    const context = syncContext(profileName, profile!);
+    // The pin is checked here although it is NOT part of the context: it is
+    // what `fixedFiles` was computed from at the start of the run, so a swap
+    // after it moved would commit a `.mcp.json` naming the previous space.
+    // The next run rewrites that file without treating anything as a switch.
+    const validate = async (): Promise<void> => {
+      const current = await resolveActiveProfile(opts.profile);
+      if (
+        !current.profile ||
+        !sameContext(context, syncContext(current.profileName, current.profile)) ||
+        current.profile.spaceId !== profile!.spaceId ||
+        JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
+      ) {
+        throw new Error("Active sync context changed; run the same command again.");
+      }
+    };
+    const sources = await selectSources(
+      profileName,
+      profile!,
+      opts.space,
+      targets.includes("claude-plugin"),
+      report,
+    );
+    const catalogue = await resolveAll(
+      profileName,
+      source,
+      state,
+      targets,
+      report,
+      sources,
+      context,
+    );
+    const plans = await Promise.all(
+      targets.map((target) => diffTarget(target, catalogue, state, source, context)),
+    );
+    const unresolvedKinds = [...catalogue.unresolved.values()];
+    if (
+      plans.some(
+        (plan) =>
+          plan.contextChanged && unresolvedKinds.some((kind) => targetCarries(plan.target, kind)),
+      )
+    ) {
+      throw new Error(
+        "Could not resolve the new context completely; previous installation preserved.",
+      );
+    }
+    for (const plan of plans) {
+      for (const slug of plan.blocked) {
+        report.skill(
+          `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
+        );
+      }
+    }
+
+    if (opts.dryRun) {
+      reportPlans(plans, catalogue.bySlug, io.stdout);
+      return;
+    }
+    const fixedFiles = pluginFixedFiles({
+      instance: profile!.instance,
+      orgId: profile!.orgId!,
+      spaceId: profile!.spaceId!,
+    });
+    pluginOk = await executePlans(
+      profileName,
+      source,
+      plans,
+      state,
+      catalogue.bySlug,
+      fixedFiles,
+      report,
+      context,
+      validate,
+    );
+    if (!printPath) reportPlans(plans, catalogue.bySlug, io.stdout);
+  };
 
   try {
     await withSyncLock(
       async () => {
-        const { profileName, profile } = await resolveActiveProfile(opts.profile);
-        const gap = connectionGap(profileName, profile);
-        if (gap && !printPath) throw new Error(`${gap.problem}. Run: ${gap.remedy}`);
-        const { state, corrupt } = await readSyncState();
-        if (corrupt) {
-          io.stderr.write(
-            "Sync state could not be used and has been ignored — this run re-materializes everything.\n",
-          );
+        try {
+          await sync();
+        } catch (err) {
+          fail(err);
         }
-
-        if (gap) {
-          pluginOk = await bootstrapPlugin(gap, state, report);
-          return;
+        // Under the lock, like the plugin it speaks for: a queued run's verdict
+        // must not be overwritten by an older one.
+        if (targets.includes("claude-plugin") && !opts.dryRun) {
+          await updateNotice(notices, pluginOk, io.stderr);
         }
-
-        const context = syncContext(profileName, profile!);
-        // The pin is checked here although it is NOT part of the context: it is
-        // what `fixedFiles` was computed from at the start of the run, so a swap
-        // after it moved would commit a `.mcp.json` naming the previous space.
-        // The next run rewrites that file without treating anything as a switch.
-        const validate = async (): Promise<void> => {
-          const current = await resolveActiveProfile(opts.profile);
-          if (
-            !current.profile ||
-            !sameContext(context, syncContext(current.profileName, current.profile)) ||
-            current.profile.spaceId !== profile!.spaceId ||
-            JSON.stringify(current.profile.syncSpaces) !== JSON.stringify(profile!.syncSpaces)
-          ) {
-            throw new Error("Active sync context changed; run the same command again.");
-          }
-        };
-        const sources = await selectSources(
-          profileName,
-          profile!,
-          opts.space,
-          targets.includes("claude-plugin"),
-          report,
-        );
-        const catalogue = await resolveAll(
-          profileName,
-          source,
-          state,
-          targets,
-          report,
-          sources,
-          context,
-        );
-        const plans = await Promise.all(
-          targets.map((target) => diffTarget(target, catalogue, state, source, context)),
-        );
-        const unresolvedKinds = [...catalogue.unresolved.values()];
-        if (
-          plans.some(
-            (plan) =>
-              plan.contextChanged &&
-              unresolvedKinds.some((kind) => targetCarries(plan.target, kind)),
-          )
-        ) {
-          throw new Error(
-            "Could not resolve the new context completely; previous installation preserved.",
-          );
-        }
-        for (const plan of plans) {
-          for (const slug of plan.blocked) {
-            report.skill(
-              `Skipped ${catalogue.bySlug.get(slug)!.packageId} on ${plan.target}: ${skillDir(plan.target, slug)} exists and is not managed by appstrate — remove or rename it`,
-            );
-          }
-        }
-
-        if (opts.dryRun) {
-          reportPlans(plans, catalogue.bySlug, io.stdout);
-          return;
-        }
-        const fixedFiles = pluginFixedFiles({
-          instance: profile!.instance,
-          orgId: profile!.orgId!,
-          spaceId: profile!.spaceId!,
-        });
-        pluginOk = await executePlans(
-          profileName,
-          source,
-          plans,
-          state,
-          catalogue.bySlug,
-          fixedFiles,
-          report,
-          context,
-          validate,
-        );
-        if (!printPath) reportPlans(plans, catalogue.bySlug, io.stdout);
       },
       { io },
     );
   } catch (err) {
-    report.run(formatError(err));
-    pluginOk = false;
+    fail(err);
   }
 
   const failed = printPath ? runFailures > 0 || !pluginOk : runFailures + skillFailures > 0;
@@ -243,13 +287,49 @@ export async function codeSyncCommand(
   if (failed) io.exit(1);
 }
 
-interface ConnectionGap {
-  problem: string;
-  remedy: string;
+/** The stderr form of an {@link Actionable}. */
+function remedyLine({ problem, remedy }: Actionable): string {
+  return `${problem}. Run: ${remedy}`;
+}
+
+/** Whatever an `AuthError` says went wrong with the session, logging in again fixes it. */
+function signedOut(profileName: string): Actionable {
+  return {
+    problem: `The CLI login for profile "${profileName}" is missing or no longer valid`,
+    remedy: `appstrate login --profile ${profileName}`,
+  };
+}
+
+interface Notices {
+  failure?: SessionNotice;
+  warning?: SessionNotice;
+}
+
+/**
+ * A plugin sync that went through states its warning, or clears the notice —
+ * skipped skills included, so a broken artifact cannot pin an old notice
+ * forever. A warning from a run that then failed is dropped: it would claim a
+ * sync that never happened. A failed run speaks only through an actionable
+ * failure; anything else — offline, a 5xx — leaves the file alone: a transient
+ * failure heals on its own and must not speak at every offline session, and an
+ * older notice stays true until a run proves otherwise. Best effort: it never
+ * changes the exit code or the plugin.
+ */
+async function updateNotice(
+  { failure, warning }: Notices,
+  pluginOk: boolean,
+  sink: LineSink,
+): Promise<void> {
+  try {
+    if (pluginOk) await (warning ? writeNotice(warning) : clearNotice());
+    else if (failure) await writeNotice(failure);
+  } catch (err) {
+    sink.write(`Could not update ${getNoticePath()}: ${formatError(err)}\n`);
+  }
 }
 
 /** What still separates this profile from a syncable space, if anything. */
-function connectionGap(profileName: string, profile: Profile | undefined): ConnectionGap | null {
+function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
   if (!profile) {
     return {
       problem: `Profile "${profileName}" not configured`,
@@ -268,18 +348,18 @@ function connectionGap(profileName: string, profile: Profile | undefined): Conne
  * lapsed login never takes working skills away.
  */
 async function bootstrapPlugin(
-  gap: ConnectionGap,
+  gap: Actionable,
   state: SyncState,
   report: Report,
 ): Promise<boolean> {
-  const message = `${gap.problem}. Run: ${gap.remedy}`;
+  const message = remedyLine(gap);
   // Connected syncs record a target even with no skills. Setup never records
   // one: a lost profile must preserve an empty plugin's working MCP server too.
   if (state.targets["claude-plugin"]?.root === targetRoot("claude-plugin")) {
-    report.run(message);
+    report.run(message, syncProblemNotice(gap, { stale: true }));
     return false;
   }
-  report.note(message);
+  report.note(message, setupNotice(gap.problem, gap.remedy));
   try {
     await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap.problem, gap.remedy));
     return true;
@@ -686,9 +766,11 @@ async function reachableSpaces(
     return await listSpaces(profileName);
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 403) throw err;
-    report.note(
-      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it. Run: appstrate org switch`,
-    );
+    const revoked: Actionable = {
+      problem: `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
+      remedy: "appstrate org switch",
+    };
+    report.note(remedyLine(revoked), syncProblemNotice(revoked, { stale: false }));
     return null;
   }
 }
@@ -724,10 +806,13 @@ async function selectSources(
   // Listed-but-not-joined is the same refusal as absent — the MCP request sends
   // the header either way — so membership, not presence in the list, is the test.
   const pinned = spaces.find((space) => space.id === profile.spaceId);
-  if (profile.spaceId && (!pinned || pinned.access === "none"))
-    report.note(
-      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused. Run: appstrate space switch`,
-    );
+  if (profile.spaceId && (!pinned || pinned.access === "none")) {
+    const deadPin: Actionable = {
+      problem: `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
+      remedy: "appstrate space switch",
+    };
+    report.note(remedyLine(deadPin), syncProblemNotice(deadPin, { stale: false }));
+  }
   const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };
   if (suppliesAgents(pinned)) return { skillSpaces, agentSpace: pinned.id };

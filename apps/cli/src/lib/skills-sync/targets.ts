@@ -20,6 +20,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getDataDir, homeDir } from "../config.ts";
+import { getNoticePath, type SessionNotice } from "./notice.ts";
 
 export const SYNC_TARGETS = ["claude-plugin", "codex", "claude-user"] as const;
 export type SyncTarget = (typeof SYNC_TARGETS)[number];
@@ -70,6 +71,28 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 export const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
 
 /**
+ * Every plugin, connected or setup, carries this one hook so a sync that later
+ * FAILS can still speak: it prints the notice the CLI keeps outside the tree
+ * (`notice.ts`), which a failed run updates while Claude Code keeps running its
+ * cached copy. No network, no CLI start, and it always exits 0.
+ */
+function noticeHook(): string {
+  const hooks = {
+    hooks: {
+      SessionStart: [
+        {
+          matcher: "startup",
+          hooks: [
+            { type: "command", command: `cat ${shellQuote(getNoticePath())} 2>/dev/null || true` },
+          ],
+        },
+      ],
+    },
+  };
+  return `${JSON.stringify(hooks, null, 2)}\n`;
+}
+
+/**
  * Only public connection coordinates belong in a plugin, never CLI credentials.
  * The active space travels as `X-Space-Id` independently of which spaces
  * supply the installed skills; the server validates it against the org
@@ -82,7 +105,10 @@ export function pluginFixedFiles(connection?: {
 }): Record<string, Uint8Array> {
   const encoder = new TextEncoder();
   const files = Object.fromEntries(
-    Object.entries(PLUGIN_FILES).map(([path, text]) => [path, encoder.encode(text)]),
+    Object.entries({ ...PLUGIN_FILES, "hooks/hooks.json": noticeHook() }).map(([path, text]) => [
+      path,
+      encoder.encode(text),
+    ]),
   );
   if (connection) {
     const config = {
@@ -115,9 +141,8 @@ const SETUP_SLUG = "setup";
 /**
  * The plugin a machine gets before the CLI is connected, so the marketplace
  * install succeeds and the remedy sits where the user works: one skill that
- * says how, plus a `SessionStart` hook that says it at every session start —
- * to the user, and to the model so it can offer to run the login itself.
- * The first connected sync replaces the whole tree.
+ * says how, while {@link setupNotice} says it at every session start. The
+ * first connected sync replaces the whole tree.
  */
 export function setupPluginFiles(problem: string, remedy: string): Record<string, Uint8Array> {
   const skillMd = [
@@ -146,7 +171,18 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
       "Claude Code session. The organization's skills then replace this one.",
     "",
   ].join("\n");
-  const hookOutput = {
+  return {
+    ...pluginFixedFiles(),
+    [`skills/${SETUP_SLUG}/SKILL.md`]: new TextEncoder().encode(skillMd),
+  };
+}
+
+/**
+ * What a setup plugin's session start says: to the user, and to the model so it
+ * can offer to run the login itself.
+ */
+export function setupNotice(problem: string, remedy: string): SessionNotice {
+  return {
     systemMessage:
       `Appstrate skills: this machine is not connected (${problem}). ` +
       `Run \`${remedy}\`, or ask Claude to run it for you.`,
@@ -158,24 +194,6 @@ export function setupPluginFiles(problem: string, remedy: string): Record<string
         `they only approve there), then \`${PLUGIN_UPDATE_COMMAND}\`. ` +
         `The /${PLUGIN_NAME}:${SETUP_SLUG} skill has the details.`,
     },
-  };
-  const hooks = {
-    hooks: {
-      SessionStart: [
-        {
-          matcher: "startup",
-          hooks: [
-            { type: "command", command: `printf '%s' ${shellQuote(JSON.stringify(hookOutput))}` },
-          ],
-        },
-      ],
-    },
-  };
-  const encoder = new TextEncoder();
-  return {
-    ...pluginFixedFiles(),
-    "hooks/hooks.json": encoder.encode(`${JSON.stringify(hooks, null, 2)}\n`),
-    [`skills/${SETUP_SLUG}/SKILL.md`]: encoder.encode(skillMd),
   };
 }
 

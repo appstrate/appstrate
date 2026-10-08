@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { getNoticePath, writeNotice } from "./notice.ts";
 import { readSyncState, writeSyncState } from "./state.ts";
 import {
   SYNC_TARGETS,
   removeManagedDir,
+  setupNotice,
   setupPluginFiles,
   skillDir,
   targetRoot,
@@ -31,15 +33,19 @@ export async function cleanupProfileSkills(
     // every directory under it — there is nothing to decide per entry.
     if (ledger.context.profileName !== profileName) continue;
     if (target === "claude-plugin") {
+      const remedy = `appstrate login --profile ${profileName}`;
       try {
-        await writeSetupPlugin(
-          ledger.root,
-          setupPluginFiles("Signed out", `appstrate login --profile ${profileName}`),
-        );
+        await writeSetupPlugin(ledger.root, setupPluginFiles("Signed out", remedy));
         delete state.targets[target];
         pluginReset = true;
       } catch (error) {
         failures.push(`Could not reset ${target}: ${String(error)}`);
+        continue;
+      }
+      try {
+        await writeNotice(setupNotice("Signed out", remedy));
+      } catch (error) {
+        failures.push(`Could not write ${getNoticePath()}: ${String(error)}`);
       }
       continue;
     }

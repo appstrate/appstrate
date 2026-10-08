@@ -443,7 +443,9 @@ if command -v appstrate >/dev/null 2>&1; then exec appstrate code sync --target 
 
 It must stay byte-stable: changing it stops the background re-runs until the user re-accepts via `claude plugin update appstrate@appstrate` — so a change ships with the CLI release that introduces it, and is announced in the CHANGELOG. Skills then appear as `/appstrate:<skill>`, agents as `/appstrate:run-<agent>`.
 
-**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, plus a `SessionStart` hook that says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run and leaves the installed plugin untouched. Explicit logout performs the cleanup described above.
+**Fresh machine.** Installing the plugin is the only step that has to come first. The command uses the installed CLI when there is one and `npx` otherwise, and `--print-path` on a machine whose profile is not configured (or has no org / space pinned) still succeeds: it installs a plugin whose only skill, `/appstrate:setup`, states what is missing and the exact command to run, and the session notice (below) says so at every session start — to the user, and to Claude so it can offer to run `appstrate login` itself (the CLI opens the browser; the user only approves there; `login` pins the single organization and its default space by itself). The first connected sync replaces that skill with the organization's. Outside explicit logout, this only happens on a fresh plugin: once skills have been synced, a lapsed login fails the run, leaves the installed plugin untouched, and writes the session notice. Explicit logout performs the cleanup described above.
+
+**Session notice.** Every generated plugin carries one `SessionStart` hook that only prints `$XDG_DATA_HOME/appstrate/skills-sync/notice.json` when it exists — no network, no CLI start, always exit 0. The file lives outside the plugin, so a failed sync can still update it while Claude Code keeps its cached copy. A problem one command fixes writes it, with the time of the run and that command: a lost or rejected login, a profile gap on an existing plugin, a pinned space this profile cannot use, an organization that revoked this profile (the last two only when the sync itself went through). The setup plugin and `appstrate logout` write it too. A plugin sync without such a problem deletes it; a network error, a 5xx or a busy lock leaves it as it is. The hook runs alongside that session's own sync, so a problem shows at the next session start, and an older notice may still show while the current sync succeeds — hence the timestamp. A CLI that cannot start at all writes nothing.
 
 **MCP connection.** A connected sync writes this `.mcp.json` at the plugin root, using the profile's instance, pinned organization and pinned space:
 
@@ -483,7 +485,7 @@ Appstrate refuses to publish a skill whose frontmatter is not valid Agent Skills
 
 **Directory names.** The Agent Skills spec requires the frontmatter `name` to equal the parent directory name, and `@scope/name` is not a legal skill name, so the directory is the frontmatter `name` when it is legal, else the slugified package `name` segment. An installed name stays with its package while the catalogue still lists it, even when this run could not read it; it changes owner only when its holder leaves or renames itself. A newcomer claiming a held name becomes `<scope>-<name>`, then `-2`, `-3`, … Every rename is reported on stderr.
 
-**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors. The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
+**Failure modes.** The command never prompts and never assumes a TTY. Each of these is a _whole-run_ failure: it exits 1 with a one-line remedy on stderr, which Claude Code surfaces under `/plugin` → Errors; the actionable ones also write the session notice (see above). The first, third and fourth rows become the `/appstrate:setup` plugin instead under `--print-path` on a fresh plugin (see above).
 
 | Condition                                                   | stderr                                                                                      |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -926,11 +928,13 @@ The fallback activates transparently when the keyring backend is missing (common
 ```
 $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 ├── config.toml                          # profiles, default profile pointer
-└── credentials.json                     # keyring fallback (only if keyring unavailable)
+├── credentials.json                     # keyring fallback (only if keyring unavailable)
+└── token-refresh.lock                   # flock(2) target serializing token refreshes across processes (never removed; unlocked where flock(2) is absent)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate code sync`)
 ├── skills-sync/state.json               # which skill directory each target owns, and from which artifact
+├── skills-sync/notice.json              # what the plugin's `SessionStart` hook prints (written and deleted by `code sync` and logout)
 ├── packages/<profile>-locks.json       # working folder → package and the draft `ETag` it last saw (`appstrate packages`)
 ├── packages/<profile>-locks.lock       # flock(2) target serializing updates of that file (never removed)
 └── skills-sync/sync.lock                # flock(2) target serializing concurrent syncs (never removed; unlocked where flock(2) is absent)
