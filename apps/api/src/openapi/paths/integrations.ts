@@ -16,6 +16,46 @@ import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 /** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
 const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
 
+const oauthCallbackQueryParameters = [
+  {
+    name: "code",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Authorization code returned by the IdP",
+  },
+  {
+    name: "state",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "OAuth state parameter (UUID)",
+  },
+  {
+    name: "error",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "OAuth error code (if the IdP rejected the request)",
+  },
+  {
+    name: "iss",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present.",
+  },
+] as const;
+
+const oauthCallbackResponses = {
+  "200": {
+    description:
+      "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure).",
+    headers: STD_RESPONSE_HEADERS,
+  },
+} as const;
+
 const packageIdParam = {
   name: "packageId",
   in: "path",
@@ -110,6 +150,15 @@ const integrationSummarySchema = {
   },
 } as const;
 
+/** Connection variables (AFPS §7.12): variable name → submitted string value. */
+const connectionVariablesSchema = {
+  type: "object",
+  propertyNames: { type: "string", maxLength: 64 },
+  additionalProperties: { type: "string", maxLength: 2048 },
+  description:
+    "Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`.",
+} as const;
+
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
 // not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
 // universal DB-convention carve-outs (camelCase everywhere per
@@ -132,6 +181,7 @@ const integrationConnectionSchema = {
     "owner_id",
     "label",
     "client_ref",
+    "variables",
     "createdAt",
     "updatedAt",
   ],
@@ -165,6 +215,12 @@ const integrationConnectionSchema = {
       type: ["string", "null"],
       description:
         "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+    },
+    variables: {
+      type: ["object", "null"],
+      additionalProperties: { type: "string" },
+      description:
+        "The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect.",
     },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -576,37 +632,31 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
-        "Browser-side OAuth callback. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window.",
+        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+      parameters: oauthCallbackQueryParameters,
+      responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/callback/{tag}": {
+    get: {
+      operationId: "integrationsOAuthCallbackForServer",
+      tags: ["Integrations"],
+      summary:
+        "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
+      description:
+        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
       parameters: [
         {
-          name: "code",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Authorization code returned by the IdP",
-        },
-        {
-          name: "state",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "OAuth state parameter (UUID)",
-        },
-        {
-          name: "error",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "OAuth error code (if the IdP rejected the request)",
-        },
-      ],
-      responses: {
-        "200": {
+          name: "tag",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9_-]{22}$" },
           description:
-            "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
-          headers: STD_RESPONSE_HEADERS,
+            "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata.",
         },
-      },
+        ...oauthCallbackQueryParameters,
+      ],
+      responses: oauthCallbackResponses,
     },
   },
   "/api/integrations/{packageId}": {
@@ -885,6 +935,7 @@ export const integrationsPaths = {
                   description:
                     "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
                 },
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -927,6 +978,7 @@ export const integrationsPaths = {
                 scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
                 connection_id: connectKickoffRelayProperties.connection_id,
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -1018,7 +1070,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
-        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
+        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
       parameters: [
         {
           name: "token",
@@ -1036,7 +1088,10 @@ export const integrationsPaths = {
         // the 400/410 error conditions (routes/integrations.ts:/connect/start
         // returns c.html(popupHtmlError(...), 400|410)), so each condition now
         // maps to exactly one status.
-        "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
+        "302": {
+          description:
+            "Redirect to the provider OAuth screen, or to the hosted form (non-oauth, or oauth2 with connection variables).",
+        },
         "400": {
           description:
             "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
@@ -1094,6 +1149,25 @@ export const integrationsPaths = {
                   },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
+                  variables: {
+                    type: ["object", "null"],
+                    required: ["schema", "values"],
+                    properties: {
+                      schema: {
+                        type: "object",
+                        additionalProperties: true,
+                        description: "The integration's `variables.schema` (AFPS §7.12).",
+                      },
+                      values: {
+                        type: "object",
+                        additionalProperties: { type: "string" },
+                        description:
+                          "The values of the connection being reconnected, to prefill the form; `{}` on a fresh connect.",
+                      },
+                    },
+                    description:
+                      "The connection variables the form collects (AFPS §7.12); null when the integration declares none.",
+                  },
                 },
               },
             },
@@ -1109,7 +1183,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+        "Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -1125,9 +1199,14 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["credentials"],
               properties: {
-                credentials: { type: "object", additionalProperties: true },
+                credentials: {
+                  type: "object",
+                  additionalProperties: true,
+                  description:
+                    "The credential fields. Required for a non-oauth auth, refused for oauth2.",
+                },
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -1142,10 +1221,19 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["ok", "connection"],
+                required: ["ok"],
                 properties: {
                   ok: { type: "boolean" },
-                  connection: integrationConnectionSchema,
+                  connection: {
+                    ...integrationConnectionSchema,
+                    description: "The connection stored (non-oauth auth).",
+                  },
+                  redirect_url: {
+                    type: "string",
+                    format: "uri",
+                    description:
+                      "oauth2 auth: the authorization server's URL to navigate to; the callback creates the connection.",
+                  },
                   handoff_steps: {
                     type: "array",
                     description:
@@ -1158,7 +1246,21 @@ export const integrationsPaths = {
           },
         },
         "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": {
+          description:
+            "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         ...connectRunResponses,
       },
     },

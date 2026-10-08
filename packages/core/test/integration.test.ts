@@ -2576,25 +2576,17 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
     ]);
   });
 
-  it("findUnevaluableExpressions accepts a login url template on a declared variable", () => {
-    const connect = (url: string) => ({
+  it("findUnevaluableExpressions refuses a variable in a login request url", () => {
+    const login = {
       login: {
-        request: { method: "POST", url, body: "p={{password}}" },
+        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
         outputs: { token: "$response.body#/token" },
       },
-    });
-    const declared = { ...customWithConnect(connect("{$variable.base_url}/login")), variables };
-    expect(findUnevaluableExpressions(declared)).toEqual([]);
-    const undeclared = { ...customWithConnect(connect("{$variable.host}/login")), variables };
-    expect(findUnevaluableExpressions(undeclared).map((v) => v.path.join("."))).toEqual([
-      "auths.session.connect.login.request.url",
-    ]);
-    const mixed = {
-      ...customWithConnect(connect("{$variable.base_url}/login?u={{user}}")),
-      variables,
     };
-    expect(findUnevaluableExpressions(mixed).map((v) => v.path.join("."))).toEqual([
-      "auths.session.connect.login.request.url",
-    ]);
+    expect(
+      findUnevaluableExpressions({ ...customWithConnect(login), variables }).map((v) =>
+        v.path.join("."),
+      ),
+    ).toEqual(["auths.session.connect.login.request.url"]);
   });
 });

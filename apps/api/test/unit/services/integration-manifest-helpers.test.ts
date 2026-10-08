@@ -36,26 +36,36 @@ function manifest(source: unknown, auths?: Record<string, unknown>): Integration
 
 describe("renderCredentialTemplate", () => {
   it("substitutes known refs and returns the rendered string", () => {
-    expect(renderCredentialTemplate("Bearer {$credential.token}", { token: "abc" })).toBe(
+    expect(renderCredentialTemplate("Bearer {$credential.token}", { token: "abc" }, {})).toBe(
       "Bearer abc",
     );
   });
 
   it("renders unknown refs as empty but keeps surrounding literal text", () => {
     // A partial render still has the literal prefix, so it is non-empty.
-    expect(renderCredentialTemplate("k={$credential.missing}", {})).toBe("k=");
+    expect(renderCredentialTemplate("k={$credential.missing}", {}, {})).toBe("k=");
   });
 
   it("returns null when the whole template resolves to empty (field absent → skip)", () => {
     // A bare ref against a missing field collapses to "" → null, so the caller
     // skips emitting the env var / file entirely.
-    expect(renderCredentialTemplate("{$credential.absent}", {})).toBeNull();
+    expect(renderCredentialTemplate("{$credential.absent}", {}, {})).toBeNull();
   });
 
   it("handles multiple refs in one template", () => {
-    expect(renderCredentialTemplate("{$credential.a}:{$credential.b}", { a: "1", b: "2" })).toBe(
-      "1:2",
-    );
+    expect(
+      renderCredentialTemplate("{$credential.a}:{$credential.b}", { a: "1", b: "2" }, {}),
+    ).toBe("1:2");
+  });
+  it("renders the connection's variables beside its credential fields", () => {
+    expect(
+      renderCredentialTemplate(
+        "{$variable.base_url}|{$credential.token}",
+        { token: "t" },
+        { base_url: "https://forge.example.com" },
+      ),
+    ).toBe("https://forge.example.com|t");
+    expect(renderCredentialTemplate("{$variable.absent}", {}, {})).toBeNull();
   });
 });
 
@@ -217,23 +227,31 @@ describe("renderAuthAuthorizedUris", () => {
   const ssh = { authorized_uris: ["ssh://{$credential.host}:{$credential.port}"] };
 
   it("renders a templated entry from the connection's fields", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" })).toEqual(["ssh://h:22"]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" }, {})).toEqual(["ssh://h:22"]);
   });
 
   it("drops a templated entry whose field is missing (deny-all), never the raw template", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "h" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "h" }, {})).toEqual([]);
   });
 
   it("drops a templated entry whose value is not a literal host label or port", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" })).toEqual([]);
-    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" }, {})).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" }, {})).toEqual([]);
   });
 
   it("passes static entries unchanged and treats an absent list as empty", () => {
-    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {})).toEqual([
-      "https://a.example/**",
-    ]);
-    expect(renderAuthAuthorizedUris({}, {})).toEqual([]);
+    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {}, {})).toEqual(
+      ["https://a.example/**"],
+    );
+    expect(renderAuthAuthorizedUris({}, {}, {})).toEqual([]);
+  });
+  it("renders a variable entry from the connection's variables, dropping an invalid value", () => {
+    const forge = { authorized_uris: ["{$variable.base_url}/api/v4/**"] };
+    expect(renderAuthAuthorizedUris(forge, {}, { base_url: "https://forge.example.com/" })).toEqual(
+      ["https://forge.example.com/api/v4/**"],
+    );
+    expect(renderAuthAuthorizedUris(forge, {}, { base_url: "https://x.example/?q" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(forge, {}, {})).toEqual([]);
   });
 });
 

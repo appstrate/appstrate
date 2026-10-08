@@ -70,6 +70,14 @@ export interface OAuthEndpointResolution {
    * MCP). `undefined` when the document omits the field.
    */
   grantTypesSupported?: string[];
+  /**
+   * The `issuer` member of the document that passed the §7.3 equality check, verbatim. It
+   * identifies the authorization server a client is bound to and an RFC 9207 `iss` is compared
+   * with; `undefined` when no document was validated.
+   */
+  issuer?: string;
+  /** RFC 9207 §3 `authorization_response_iss_parameter_supported` of the validated document. */
+  authorizationResponseIssParameterSupported?: boolean;
 }
 
 export interface ResolveOAuthEndpointsInput {
@@ -150,10 +158,10 @@ export function buildDiscoveryProbes(issuer: string): string[] {
  *
  * Discovery documents are stable IdP configuration that rotates on the order
  * of weeks/months — we cache the projected fields per issuer URL so a connect
- * burst doesn't hammer the IdP's well-known endpoints. Process-lifetime is
- * the conservative ceiling (no neighbouring TTL cache pattern exists in this
- * package, and tests reset state by reloading the module); operators who need
- * a refresh roll the process. Only SUCCESSFUL projections are cached — a failed
+ * burst doesn't hammer the IdP's well-known endpoints. An entry lives an hour and
+ * the cache holds at most {@link DISCOVERY_CACHE_MAX} issuers, oldest evicted
+ * first: a connection's user may choose its authorization server (AFPS §7.3), so
+ * the key space is theirs to grow. Only SUCCESSFUL projections are cached — a failed
  * discovery is left uncached so the next call re-discovers (a negative entry
  * would permanently disable enrichment / brick refresh on a transient blip).
  *
@@ -165,11 +173,31 @@ interface CachedDiscovery {
   userinfoEndpoint?: string;
   registrationEndpoint?: string;
   grantTypesSupported?: string[];
+  issuer?: string;
+  authorizationResponseIssParameterSupported?: boolean;
   /** Discovered endpoints (NOT applied unless manifest leaves them undeclared). */
   discoveredAuthorizationEndpoint?: string;
   discoveredTokenEndpoint?: string;
 }
-const discoveryCache = new Map<string, CachedDiscovery>();
+const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000;
+const DISCOVERY_CACHE_MAX = 500;
+const discoveryCache = new Map<string, CachedDiscovery & { expiresAt: number }>();
+
+function readDiscoveryCache(issuer: string): CachedDiscovery | undefined {
+  const entry = discoveryCache.get(issuer);
+  if (entry && entry.expiresAt > Date.now()) return entry;
+  discoveryCache.delete(issuer);
+  return undefined;
+}
+
+function writeDiscoveryCache(issuer: string, entry: CachedDiscovery): void {
+  discoveryCache.delete(issuer);
+  discoveryCache.set(issuer, { ...entry, expiresAt: Date.now() + DISCOVERY_CACHE_TTL_MS });
+  // Map iteration follows insertion order: the first key is the oldest entry.
+  while (discoveryCache.size > DISCOVERY_CACHE_MAX) {
+    discoveryCache.delete(discoveryCache.keys().next().value as string);
+  }
+}
 
 /** Test-only hook so unit tests can run with a clean cache state. */
 export function __clearOAuthDiscoveryCache(): void {
@@ -196,6 +224,8 @@ export async function resolveOAuthEndpoints(
   let userinfoEndpoint: string | undefined;
   let registrationEndpoint: string | undefined;
   let grantTypesSupported: string[] | undefined;
+  let issuer: string | undefined;
+  let authorizationResponseIssParameterSupported: boolean | undefined;
 
   // No issuer — nothing to discover.
   if (!input.issuer) {
@@ -207,7 +237,7 @@ export async function resolveOAuthEndpoints(
   // Cache hit — apply enrichment without any network I/O. Only successful
   // projections are cached (no negative entries), so a miss simply falls
   // through to a fresh discovery below.
-  const cached = discoveryCache.get(configuredIssuer);
+  const cached = readDiscoveryCache(configuredIssuer);
   if (cached) {
     if (!authorizationEndpoint && cached.discoveredAuthorizationEndpoint) {
       authorizationEndpoint = cached.discoveredAuthorizationEndpoint;
@@ -219,6 +249,8 @@ export async function resolveOAuthEndpoints(
     userinfoEndpoint = cached.userinfoEndpoint;
     registrationEndpoint = cached.registrationEndpoint;
     grantTypesSupported = cached.grantTypesSupported;
+    issuer = cached.issuer;
+    authorizationResponseIssParameterSupported = cached.authorizationResponseIssParameterSupported;
     return {
       authorizationEndpoint,
       tokenEndpoint,
@@ -226,6 +258,10 @@ export async function resolveOAuthEndpoints(
       ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
       ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
       ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
+      ...(issuer !== undefined ? { issuer } : {}),
+      ...(authorizationResponseIssParameterSupported !== undefined
+        ? { authorizationResponseIssParameterSupported }
+        : {}),
     };
   }
 
@@ -242,6 +278,14 @@ export async function resolveOAuthEndpoints(
     if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) {
       // Discovery is best-effort — reject + try the next probe on mismatch.
       continue;
+    }
+    if (issuer === undefined) issuer = doc.issuer as string;
+    if (
+      authorizationResponseIssParameterSupported === undefined &&
+      typeof doc.authorization_response_iss_parameter_supported === "boolean"
+    ) {
+      authorizationResponseIssParameterSupported =
+        doc.authorization_response_iss_parameter_supported;
     }
     if (
       discoveredAuthorizationEndpoint === undefined &&
@@ -309,6 +353,7 @@ export async function resolveOAuthEndpoints(
   // Leaving it uncached means the next call re-discovers; the spec-mandated
   // silent fallback to manual endpoints still holds for THIS call.
   const anyDiscovered =
+    issuer !== undefined ||
     discoveredAuthorizationEndpoint !== undefined ||
     discoveredTokenEndpoint !== undefined ||
     codeChallengeMethodsSupported !== undefined ||
@@ -316,13 +361,15 @@ export async function resolveOAuthEndpoints(
     registrationEndpoint !== undefined ||
     grantTypesSupported !== undefined;
   if (anyDiscovered) {
-    discoveryCache.set(configuredIssuer, {
+    writeDiscoveryCache(configuredIssuer, {
       discoveredAuthorizationEndpoint,
       discoveredTokenEndpoint,
       codeChallengeMethodsSupported,
       userinfoEndpoint,
       registrationEndpoint,
       grantTypesSupported,
+      issuer,
+      authorizationResponseIssParameterSupported,
     });
   }
 
@@ -341,6 +388,10 @@ export async function resolveOAuthEndpoints(
     ...(userinfoEndpoint !== undefined ? { userinfoEndpoint } : {}),
     ...(registrationEndpoint !== undefined ? { registrationEndpoint } : {}),
     ...(grantTypesSupported !== undefined ? { grantTypesSupported } : {}),
+    ...(issuer !== undefined ? { issuer } : {}),
+    ...(authorizationResponseIssParameterSupported !== undefined
+      ? { authorizationResponseIssParameterSupported }
+      : {}),
   };
 }
 
@@ -352,6 +403,7 @@ interface DiscoveryDocument {
   code_challenge_methods_supported?: unknown;
   registration_endpoint?: unknown;
   grant_types_supported?: unknown;
+  authorization_response_iss_parameter_supported?: unknown;
 }
 
 /** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */

@@ -84,6 +84,11 @@ export interface IntegrationConnection {
    * clients list to show which client minted each connection.
    */
   client_ref: string | null;
+  /**
+   * The connection variables (AFPS §7.12) the user chose its upstream with — non-secret,
+   * displayable (e.g. an instance URL). `null` when the integration declares none.
+   */
+  variables: Record<string, string> | null;
   createdAt: string;
   updatedAt: string;
 }

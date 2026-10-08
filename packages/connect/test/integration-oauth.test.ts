@@ -796,3 +796,156 @@ describe("integration OAuth clientRef round-trip", () => {
     expect(await store.get(state)).toBeNull();
   });
 });
+
+describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
+  const ISSUER = "https://forge.example.com";
+  let store: ReturnType<typeof memoryStore>;
+
+  beforeEach(() => {
+    store = memoryStore();
+  });
+
+  /** Discovery stub validating `ISSUER`, optionally advertising RFC 9207 support. */
+  function discoverFor(
+    issSupported: boolean,
+  ): typeof import("../src/index.ts").resolveOAuthEndpoints {
+    return async () => ({
+      issuer: ISSUER,
+      authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+      tokenEndpoint: `${ISSUER}/oauth/token`,
+      ...(issSupported ? { authorizationResponseIssParameterSupported: true } : {}),
+    });
+  }
+
+  async function initiate(opts: { issSupported?: boolean; redirectTag?: string } = {}) {
+    return initiateIntegrationOAuth(store, {
+      packageId: "@org/forge",
+      authKey: "oauth",
+      issuer: ISSUER,
+      clientId: "client-id",
+      clientRef: "client-ref",
+      redirectUri: "http://localhost:3000/api/integrations/callback/tag",
+      orgId: "org_1",
+      spaceId: "spc_1",
+      actor: { type: "user", id: "u_1" },
+      discover: discoverFor(opts.issSupported ?? false),
+      variables: { base_url: ISSUER },
+      ...(opts.redirectTag ? { redirectTag: opts.redirectTag } : {}),
+    });
+  }
+
+  const tokenStub = (() => {
+    const calls: string[] = [];
+    const impl = (async (input: string | URL | Request) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ access_token: "AT", expires_in: 3600 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  })();
+
+  async function refusal(promise: Promise<unknown>): Promise<OAuthCallbackError> {
+    const err = await promise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OAuthCallbackError);
+    expect((err as OAuthCallbackError).kind).toBe("issuer_mismatch");
+    return err as OAuthCallbackError;
+  }
+
+  it("records the validated issuer, the RFC 9207 flag, the tag and the variables in the state", async () => {
+    const { state } = await initiate({ issSupported: true, redirectTag: "T".repeat(22) });
+    expect(store._data.get(state)?.integration).toMatchObject({
+      issuer: ISSUER,
+      issParameterSupported: true,
+      redirectTag: "T".repeat(22),
+      variables: { base_url: ISSUER },
+    });
+  });
+
+  it("accepts a matching iss and returns the issuer and variables", async () => {
+    const { state } = await initiate({ issSupported: true });
+    const result = await handleIntegrationOAuthCallback(
+      store,
+      resolverFor({ tokenEndpointAuthMethod: "none", clientSecret: "", issuer: ISSUER }),
+      "CODE",
+      state,
+      tokenStub.impl,
+      { iss: ISSUER, redirectTag: null },
+    );
+    expect(result.issuer).toBe(ISSUER);
+    expect(result.variables).toEqual({ base_url: ISSUER });
+  });
+
+  it("refuses an iss naming another server, before any exchange, and drops the state", async () => {
+    const { state } = await initiate();
+    const before = tokenStub.calls.length;
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+        iss: "https://gitlab.com",
+        redirectTag: null,
+      }),
+    );
+    expect(tokenStub.calls.length).toBe(before);
+    expect(await store.get(state)).toBeNull();
+  });
+
+  it("refuses a missing iss when the server advertises it", async () => {
+    const { state } = await initiate({ issSupported: true });
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+        redirectTag: null,
+      }),
+    );
+  });
+
+  it("accepts a missing iss when the server does not advertise it", async () => {
+    const { state } = await initiate();
+    const result = await handleIntegrationOAuthCallback(
+      store,
+      resolverFor(),
+      "CODE",
+      state,
+      tokenStub.impl,
+      { redirectTag: null },
+    );
+    expect(result.accessToken).toBe("AT");
+  });
+
+  it("refuses a response at another server's redirect URI, both ways", async () => {
+    const tagged = await initiate({ redirectTag: "A".repeat(22) });
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", tagged.state, tokenStub.impl, {
+        redirectTag: null,
+      }),
+    );
+    const tagged2 = await initiate({ redirectTag: "A".repeat(22) });
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", tagged2.state, tokenStub.impl, {
+        redirectTag: "B".repeat(22),
+      }),
+    );
+    const plain = await initiate();
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", plain.state, tokenStub.impl, {
+        redirectTag: "A".repeat(22),
+      }),
+    );
+  });
+
+  it("never presents a client bound to another authorization server", async () => {
+    const { state } = await initiate();
+    const before = tokenStub.calls.length;
+    await refusal(
+      handleIntegrationOAuthCallback(
+        store,
+        resolverFor({ issuer: "https://other.example.com" }),
+        "CODE",
+        state,
+        tokenStub.impl,
+        { redirectTag: null },
+      ),
+    );
+    expect(tokenStub.calls.length).toBe(before);
+  });
+});

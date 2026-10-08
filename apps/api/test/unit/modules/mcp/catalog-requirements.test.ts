@@ -190,6 +190,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     why: "the provider's OAuth redirect — the PKCE `state` it echoes is the credential",
   },
   {
+    path: "/api/integrations/callback/{tag}",
+    why: "the per-authorization-server OAuth redirect (AFPS §7.3) — the echoed `state` is the credential, and its tag must match",
+  },
+  {
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },

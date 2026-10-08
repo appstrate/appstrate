@@ -62,6 +62,21 @@ export interface OAuthStateRecord {
      * INSERT.
      */
     connectionId?: string;
+    /**
+     * The `issuer` of the authorization server's validated metadata (RFC 8414), when discovery
+     * validated one: an authorization response carrying `iss` must name it (RFC 9207).
+     */
+    issuer?: string;
+    /** The server advertised `authorization_response_iss_parameter_supported`: `iss` is required. */
+    issParameterSupported?: boolean;
+    /**
+     * The per-authorization-server redirect tag (`/callback/<tag>`) of an authorization server
+     * chosen per connection (AFPS §7.3); absent for the shared `/callback`. A response is accepted
+     * only at the redirect URI of the server the request was sent to.
+     */
+    redirectTag?: string;
+    /** The connection variables (AFPS §7.12) the connection is created with. */
+    variables?: Record<string, string>;
   };
 }
 
@@ -71,6 +86,11 @@ export interface ResolvedOAuthClient {
   /** Empty for a public client (`token_endpoint_auth_method=none`). */
   clientSecret: string;
   tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+  /**
+   * The authorization server the client is bound to, when it was registered with one chosen per
+   * connection (AFPS §7.3); absent for a client of the manifest's fixed server.
+   */
+  issuer?: string;
 }
 
 /** A `clientRef` → its current credentials within the state's space; `null` = gone. */

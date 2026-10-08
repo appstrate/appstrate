@@ -6,7 +6,6 @@
  * (`@appstrate/connect`) and of import validation (`@appstrate/core/integration`).
  */
 
-import { isUrlTemplate, isVariableTemplate } from "./connection-variables.ts";
 import { parseCredentialRef, templateExpressions } from "./credential-template.ts";
 
 export type ResponseExpression =
@@ -60,16 +59,8 @@ const isJwtOutput = (o: unknown) => (o as { from?: unknown } | null)?.from === "
 export function loginBlockIssues(login: LoginBlockView): LoginBlockIssue[] {
   const issues: LoginBlockIssue[] = [];
   const request = login.request ?? {};
-  // §7.7: a url MAY instead be a §7.12 URL template, which then carries no {{name}}.
-  const variableUrl = isVariableTemplate(request.url);
-  if (variableUrl && !isUrlTemplate(request.url!)) {
-    issues.push({
-      message: `'${request.url}' must be a URL template ({$variable.<name>} heading it, or https://{$variable.<name>}.<domain>) then a literal path, with no {{name}}`,
-      path: ["request", "url"],
-    });
-  }
   const requestTemplates: [string | undefined, (string | number)[]][] = [
-    [variableUrl ? undefined : request.url, ["request", "url"]],
+    [request.url, ["request", "url"]],
     [request.body, ["request", "body"]],
     ...Object.entries(request.headers ?? {}).map(([k, v]): [string, (string | number)[]] => [
       v,

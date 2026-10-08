@@ -213,30 +213,32 @@ interface AppstrateConnectMeta {
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 
 /**
- * Render an AFPS `{$credential.<field>}` value template (used by
- * `delivery.env` / `delivery.files`) against a decrypted credential bag.
+ * Render an AFPS value template (used by `delivery.env` / `delivery.files`) against a decrypted
+ * credential bag (`{$credential.<field>}`) and the connection's variables (`{$variable.<name>}`).
  * Unknown refs render empty — a missing field means "nothing to inject".
  * Returns `null` when the template resolves to an empty string (so callers can
  * skip env vars / files whose backing credential field is absent), mirroring
  * the old `delivery.env.from` "field missing → skip" behaviour.
  *
  * Thin wrapper over the shared `@appstrate/afps-shared/credential-template` renderer
- * (single implementation of the `{$credential.<field>}` syntax) pinned to the
+ * (single implementation of the template syntax) pinned to the
  * `delivery.env` / `delivery.files` empty→null policy.
  */
 export function renderCredentialTemplate(
   template: string,
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>>,
 ): string | null {
-  return renderCredentialTemplateCore(template, fields, { emptyAs: "null" });
+  return renderCredentialTemplateCore(template, fields, { emptyAs: "null", variables });
 }
 
 /** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
 export function renderAuthAuthorizedUris(
   auth: Pick<AfpsManifestAuth, "authorized_uris">,
   fields: Readonly<Record<string, string>>,
+  variables: Readonly<Record<string, string>>,
 ): string[] {
-  return renderAuthorizedUris(auth.authorized_uris ?? [], fields);
+  return renderAuthorizedUris(auth.authorized_uris ?? [], fields, variables);
 }
 
 /** Local runner egress policy; `undefined` when the auth declares no outbound surface. */

@@ -670,8 +670,8 @@ interface DeliveryView {
 /**
  * List the templates and runtime expressions the platform cannot evaluate: a `{$…}` other than
  * `{$credential.<field>}` or a declared `{$variable.<name>}` in a delivery template (http, env,
- * files) or in `authorized_uris`, an undeclared variable in a login request url, and a
- * `connect.login` expression outside {@link loginBlockIssues}. A WRITE-path policy, not part of
+ * files) or in `authorized_uris`, and a `connect.login` expression outside
+ * {@link loginBlockIssues}. A WRITE-path policy, not part of
  * {@link integrationManifestSchema}; rendering and the login engine refuse the same at run time.
  */
 export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
@@ -724,7 +724,6 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
       }
       undeclaredVariables(template, at);
     }
-    undeclaredVariables(login?.request?.url, ["connect", "login", "request", "url"]);
     for (const issue of login ? loginBlockIssues(login) : []) {
       push(issue.message, ["connect", "login", ...issue.path]);
     }

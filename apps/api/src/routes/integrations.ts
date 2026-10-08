@@ -86,6 +86,7 @@ import {
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   getIntegrationConnectionCredentialFields,
+  getIntegrationConnectionVariables,
   listIntegrationClients,
   listIntegrationConnections,
   promoteIntegrationOAuthClient,
@@ -112,6 +113,7 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+  getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -159,6 +161,10 @@ import {
 // integration manifest's `credentials.schema` (AJV) downstream. Narrowing to
 // `Record<string, string>` here would silently reject every well-formed
 // non-string credential shape before AJV ever got to see it.
+// Connection variables (AFPS §7.12): non-secret strings choosing the upstream. Names, values and
+// the manifest's `variables.schema` are checked by `resolveConnectionVariables`; this bounds size.
+const connectionVariablesSchema = z.record(z.string().max(64), z.string().max(2048));
+
 // Porte B programmatic import — the backend already holds the credential and
 // submits it directly ("import a connection", Nango `POST /connection`).
 export const importConnectionSchema = z
@@ -171,6 +177,9 @@ export const importConnectionSchema = z
     // id so the write UPDATEs the dead row instead of INSERTing a duplicate
     // (single-writer contract, integration-connections.ts:persistCredentialBundle).
     connection_id: z.uuid().optional(),
+    // Required when the integration declares variables, refused when it declares none — also on
+    // a reconnect, which re-acquires the credential for the values submitted.
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -179,6 +188,7 @@ export const connectOAuthSchema = z
     scopes: z.array(z.string()).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -193,12 +203,17 @@ export const connectSessionSchema = z
   })
   .strict();
 
-// Hosted-form submit — credentials only; all context comes from the page cookie.
+// Hosted-form submit — credentials (none for an oauth2 auth) and connection variables; all
+// context comes from the page cookie.
 export const connectSubmitSchema = z
   .object({
-    credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
-      message: "credentials must contain at least one field",
-    }),
+    credentials: z
+      .record(z.string(), z.unknown())
+      .refine((c) => Object.keys(c).length > 0, {
+        message: "credentials must contain at least one field",
+      })
+      .optional(),
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -593,6 +608,94 @@ const resolveCallbackClient: OAuthClientResolver = async (ref) => {
   );
 };
 
+type IntegrationAuthDef = Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+type IntegrationManifestDef = Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
+
+/**
+ * Begin the OAuth flow of a hosted-connect session from `/connect/submit`, once the form has
+ * collected the integration's connection variables (AFPS §7.12), and return the provider URL the
+ * page navigates to. The capability token's jti was burned by `/connect/start`; the page cookie
+ * now plays its part, with the same failure semantics as that route's oauth2 branch, as problem
+ * JSON for the XHR:
+ *
+ *  - a variable the user must fix (400 `validation_failed`) passes through verbatim — the form
+ *    shows it beside the field — and the cookie stays;
+ *  - any other client-side refusal keeps its status but not its detail (operator artefacts; the
+ *    portal carries no session) and keeps the cookie only when it provably preceded any egress —
+ *    an auto-provisioned client may have registered upstream already (#1344);
+ *  - anything else is a 502 and clears the cookie: it may have gone half way.
+ */
+async function beginHostedOAuth(
+  c: Context<AppEnv>,
+  claims: NonNullable<ReturnType<typeof readConnectPageCookie>>,
+  manifest: IntegrationManifestDef,
+  auth: IntegrationAuthDef,
+  variables: Record<string, string> | undefined,
+): Promise<string> {
+  const scope = scopeFromClaims(claims);
+  const actor = actorFromClaims(claims);
+  const granted = claims.connection_id
+    ? await getCurrentScopesGranted({
+        scope,
+        integrationId: claims.package_id,
+        authKey: claims.auth_key,
+        actor,
+        connectionId: claims.connection_id,
+      })
+    : [];
+  const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+  const scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
+  const strategy = resolveStrategy(auth);
+  if (!strategy.begin) throw internalError();
+  try {
+    const result = await strategy.begin(
+      {
+        scope,
+        actor,
+        integrationId: claims.package_id,
+        authKey: claims.auth_key,
+        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(variables ? { variables } : {}),
+      },
+      { scopes, forceAccountSelect: claims.force_account_select ?? false },
+    );
+    return result.redirectUrl;
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "validation_failed") throw err;
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      logger.warn("Hosted connect OAuth begin refused", {
+        status: err.status,
+        code: err.code,
+        detail: err.message,
+        packageId: claims.package_id,
+        authKey: claims.auth_key,
+      });
+      const reusable = !usesAutoProvisionedClient(manifest, auth);
+      if (!reusable) clearConnectPageCookie(c);
+      throw new ApiError({
+        status: err.status,
+        code: "connection_not_ready",
+        title: "Connection Not Ready",
+        detail: `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${
+          reusable ? "submit this form again" : "request a new connection link"
+        }.`,
+      });
+    }
+    logger.error("Hosted connect OAuth begin failed", {
+      err: String(err),
+      packageId: claims.package_id,
+      authKey: claims.auth_key,
+    });
+    clearConnectPageCookie(c);
+    throw new ApiError({
+      status: 502,
+      code: "connect_start_failed",
+      title: "Bad Gateway",
+      detail: "Could not start the connection. Please request a new connection link.",
+    });
+  }
+}
+
 // ─────────────────────────────────────────────
 // Router
 // ─────────────────────────────────────────────
@@ -641,7 +744,10 @@ export function createIntegrationsRouter() {
     return c.json(listResponse(projected, { hasMore, total }));
   });
 
-  router.get("/callback", async (c) => {
+  // One handler for the shared `/callback` and the per-authorization-server
+  // `/callback/:tag` of a server chosen per connection (AFPS §7.3): the state
+  // names which of the two the response must arrive at, both ways.
+  const oauthCallback = async (c: Context<AppEnv>, redirectTag: string | null) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
     const error = c.req.query("error");
@@ -666,11 +772,14 @@ export function createIntegrationsRouter() {
     }
     let result: IntegrationOAuthCallbackResult;
     try {
+      const iss = c.req.query("iss");
       result = await handleIntegrationOAuthCallback(
         oauthStateStore,
         resolveCallbackClient,
         code,
         state,
+        undefined,
+        { redirectTag, ...(iss !== undefined ? { iss } : {}) },
       );
     } catch (err) {
       if (err instanceof OAuthCallbackError) {
@@ -686,6 +795,8 @@ export function createIntegrationsRouter() {
           client_unavailable:
             "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
           transient: "Could not complete the connection. Please try again in a moment.",
+          issuer_mismatch:
+            "The authorization response did not come from the authorization server this connection was started with. Please retry the connection.",
         }[err.kind];
         const userMessage = `${reason}${diagnostic}`;
         logger.error("Integration OAuth callback failed", {
@@ -723,6 +834,7 @@ export function createIntegrationsRouter() {
           integrationId: result.packageId,
           authKey: result.authKey,
           ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+          ...(result.variables ? { variables: result.variables } : {}),
         },
         { kind: "oauth2-result", result },
       );
@@ -755,7 +867,9 @@ export function createIntegrationsRouter() {
       );
     }
     return c.html(popupHtmlClose({ state, packageId: result.packageId }));
-  });
+  };
+  router.get("/callback", (c) => oauthCallback(c, null));
+  router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;
@@ -863,6 +977,7 @@ export function createIntegrationsRouter() {
             integrationId: packageId,
             authKey,
             ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+            ...(body.variables ? { variables: body.variables } : {}),
           },
           { kind: "fields", credentials: body.credentials },
         );
@@ -941,6 +1056,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          ...(body.variables ? { variables: body.variables } : {}),
         },
         {
           scopes,
@@ -1040,7 +1156,9 @@ export function createIntegrationsRouter() {
       );
     }
 
-    if (auth.type === "oauth2") {
+    // An integration declaring connection variables (AFPS §7.12) collects them on the hosted form
+    // first: its oauth2 begins from `/connect/submit`, once the user has chosen the upstream.
+    if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
       // Same scope-union semantics as POST /connect/oauth2 — except that here
       // it runs AFTER the burn and reads the database, so an unguarded fault
       // escaped to the global error handler and rendered raw
@@ -1153,10 +1271,10 @@ export function createIntegrationsRouter() {
       return c.redirect(result.redirectUrl);
     }
 
-    // Non-oauth → hand off to the hosted SPA form. Pin the page cookie so the
-    // form can read context via GET /connect/context (no token in the URL). The
-    // oauth2 branch above never reaches here, so the cookie is set only when the
-    // hosted form actually needs it.
+    // Non-oauth, or oauth2 with connection variables → hand off to the hosted
+    // SPA form. Pin the page cookie so the form can read context via
+    // GET /connect/context (no token in the URL). The oauth2 branch above never
+    // reaches here, so the cookie is set only when the hosted form needs it.
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
@@ -1168,6 +1286,13 @@ export function createIntegrationsRouter() {
     if (!claims) throw notFound("No active connect session");
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    const variablesSchema = getVariablesSchema(manifest);
+    // A reconnect shows the values the connection was made with; `connection_id` rides signed
+    // claims minted after `assertConnectionBelongsToActor`.
+    const values =
+      variablesSchema && claims.connection_id
+        ? await getIntegrationConnectionVariables(claims.connection_id)
+        : null;
     return c.json({
       packageId: claims.package_id,
       auth_key: claims.auth_key,
@@ -1176,6 +1301,7 @@ export function createIntegrationsRouter() {
       auth: authWithoutMintedCredentials(claims.package_id, claims.auth_key, auth),
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
+      variables: variablesSchema ? { schema: variablesSchema, values: values ?? {} } : null,
     });
   });
 
@@ -1194,10 +1320,26 @@ export function createIntegrationsRouter() {
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
     try {
-      const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+      const { manifest, auth } = await readIntegrationAuth(
+        scope,
+        claims.package_id,
+        claims.auth_key,
+      );
       if (auth.type === "oauth2") {
-        throw invalidRequest("This integration uses OAuth — open the connect link instead");
+        if (body.credentials) {
+          throw invalidRequest(
+            "This integration uses OAuth: submit its connection variables only",
+            "credentials",
+          );
+        }
+        const redirectUrl = await beginHostedOAuth(c, claims, manifest, auth, body.variables);
+        // The page cookie stays: the form can be resubmitted (other variables) until it expires.
+        return c.json({ ok: true, redirect_url: redirectUrl });
       }
+      if (!body.credentials) {
+        throw invalidRequest("credentials payload cannot be empty", "credentials");
+      }
+      const submittedCredentials = body.credentials;
       const provisioning = readProvisioning(claims.package_id, claims.auth_key);
       // On a reconnect, the stored bundle, so the provisioner can reuse the key
       // already installed on the target. Decrypted only for a provisioning
@@ -1212,10 +1354,12 @@ export function createIntegrationsRouter() {
       const provisioned = await provisionCredentials(
         claims.package_id,
         claims.auth_key,
-        body.credentials,
+        submittedCredentials,
         existing,
       );
-      const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
+      const credentials = provisioned
+        ? { ...submittedCredentials, ...provisioned }
+        : submittedCredentials;
 
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
@@ -1226,6 +1370,7 @@ export function createIntegrationsRouter() {
           integrationId: claims.package_id,
           authKey: claims.auth_key,
           ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+          ...(body.variables ? { variables: body.variables } : {}),
         },
         { kind: "fields", credentials },
       );

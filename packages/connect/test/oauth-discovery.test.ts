@@ -501,3 +501,68 @@ describe("resolveOAuthEndpoints — registration_endpoint projection (RFC 7591)"
     expect(result.registrationEndpoint).toBeUndefined();
   });
 });
+
+describe("resolveOAuthEndpoints — the validated issuer and RFC 9207", () => {
+  it("returns the validated document's issuer verbatim and its iss-parameter support", async () => {
+    // A URL-form template renders with a trailing `/`: the server is identified by what its
+    // metadata says, not by the string that found it.
+    const fetchImpl = (async () =>
+      jsonResponse({
+        issuer: "https://forge.example.com",
+        authorization_endpoint: "https://forge.example.com/oauth/authorize",
+        token_endpoint: "https://forge.example.com/oauth/token",
+        authorization_response_iss_parameter_supported: true,
+      })) as unknown as typeof fetch;
+    const first = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://forge.example.com/" });
+    expect(first.issuer).toBe("https://forge.example.com");
+    expect(first.authorizationResponseIssParameterSupported).toBe(true);
+    // Served from the cache the same way.
+    const cached = await resolveOAuthEndpoints({
+      fetchImpl: (async () => {
+        throw new Error("no network on a cache hit");
+      }) as unknown as typeof fetch,
+      issuer: "https://forge.example.com",
+    });
+    expect(cached.issuer).toBe("https://forge.example.com");
+    expect(cached.authorizationResponseIssParameterSupported).toBe(true);
+  });
+
+  it("names no issuer when no document passes the issuer check", async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({
+        issuer: "https://gitlab.com",
+        authorization_endpoint: "https://gitlab.com/oauth/authorize",
+        token_endpoint: "https://gitlab.com/oauth/token",
+      })) as unknown as typeof fetch;
+    const result = await resolveOAuthEndpoints({ fetchImpl, issuer: "https://forge.example.com" });
+    expect(result.issuer).toBeUndefined();
+    expect(result.tokenEndpoint).toBeUndefined();
+  });
+});
+
+describe("resolveOAuthEndpoints — cache bound", () => {
+  it("evicts the oldest issuer once more than 500 are cached", async () => {
+    let as0Fetches = 0;
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input : input.url,
+      );
+      if (url.origin === "https://as0.example.com") as0Fetches++;
+      return jsonResponse({
+        issuer: url.origin,
+        authorization_endpoint: `${url.origin}/authorize`,
+        token_endpoint: `${url.origin}/token`,
+      });
+    }) as unknown as typeof fetch;
+    const resolve = (n: number) =>
+      resolveOAuthEndpoints({ fetchImpl, issuer: `https://as${n}.example.com` });
+
+    await resolve(0);
+    const discovered = as0Fetches;
+    await resolve(0);
+    expect(as0Fetches).toBe(discovered);
+    for (let n = 1; n <= 500; n++) await resolve(n);
+    await resolve(0);
+    expect(as0Fetches).toBeGreaterThan(discovered);
+  });
+});

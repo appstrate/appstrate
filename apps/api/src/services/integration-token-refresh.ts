@@ -29,6 +29,7 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
@@ -399,18 +400,44 @@ export async function buildIntegrationOAuthRefreshContext(
    * function (guarded below).
    */
   clientRef: string | null,
+  /** Discovery seam for tests; production uses the cached RFC 8414 resolver. */
+  discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
-  // only an `issuer` (Drive/OneDrive and other issuer-only providers), resolve
-  // the endpoint with the SAME OIDC/RFC-8414 discovery the authorize flow uses
-  // (`resolveOAuthEndpoints`, cached per-issuer). Without this, issuer-only
-  // connections connect fine but can NEVER refresh — they die when the access
-  // token expires (~1h) and the user is stuck re-connecting hourly.
   const afpsAuth = authDef;
-  const { tokenEndpoint } = await resolveOAuthEndpoints({
-    issuer: afpsAuth.issuer,
-    tokenEndpoint: afpsAuth.token_endpoint,
+  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // Resolve the SAME client that minted the connection by its pinned id (system
+  // env or space/org custom row), with the cross-scope escalation guard.
+  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
+  const client =
+    clientRef === null
+      ? null
+      : await resolveIntegrationClientById(
+          clientRef,
+          spaceId,
+          packageId,
+          authKey,
+          manifestAuthMethod,
+        );
+
+  // AFPS §7.3: refresh POSTs to `token_endpoint` of the authorization server the
+  // connection was acquired from. A client bound to a server chosen per
+  // connection names it (`integration_oauth_clients.issuer`), and only that
+  // server's validated metadata is used — never a manifest endpoint. Otherwise
+  // the manifest's fixed server: when it declares only an `issuer`
+  // (Drive/OneDrive and other issuer-only providers), resolve the endpoint with
+  // the SAME OIDC/RFC-8414 discovery the authorize flow uses (cached
+  // per-issuer). Without this, issuer-only connections connect fine but can
+  // NEVER refresh — they die when the access token expires (~1h). A templated
+  // manifest issuer names no server by itself.
+  const boundIssuer = client?.issuer;
+  const issuer = boundIssuer ?? (isVariableTemplate(afpsAuth.issuer) ? undefined : afpsAuth.issuer);
+  const { tokenEndpoint } = await discover({
+    issuer,
+    ...(boundIssuer === undefined && !isVariableTemplate(afpsAuth.issuer)
+      ? { tokenEndpoint: afpsAuth.token_endpoint }
+      : {}),
   });
   if (!tokenEndpoint) {
     // An `issuer`-only manifest (Drive/OneDrive …) whose discovery yielded no
@@ -421,7 +448,7 @@ export async function buildIntegrationOAuthRefreshContext(
     // longer negatively-caches, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
-    if (afpsAuth.issuer) {
+    if (issuer) {
       throw new RefreshError(
         `Integration '${packageId}' auth '${authKey}' token_endpoint discovery yielded none (transient)`,
         "transient",
@@ -433,7 +460,6 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
 
   // INVARIANT: an oauth2 connection always pins its minting client. A null here
   // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
@@ -446,17 +472,6 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-
-  // Resolve the SAME client that minted the connection by its pinned id (system
-  // env or space/org custom row), with the cross-scope escalation guard.
-  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
-  const client = await resolveIntegrationClientById(
-    clientRef,
-    spaceId,
-    packageId,
-    authKey,
-    manifestAuthMethod,
-  );
   if (!client) {
     logger.info("Integration auth refresh skipped — pinned client unresolved", {
       packageId,
@@ -468,5 +483,6 @@ export async function buildIntegrationOAuthRefreshContext(
   // The resolver returns the method already paired with the secret it hands
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
-  return { tokenEndpoint, ...client };
+  const { issuer: _boundIssuer, ...credentials } = client;
+  return { tokenEndpoint, ...credentials };
 }

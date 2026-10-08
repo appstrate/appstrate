@@ -20,12 +20,13 @@
  *   discoverProtectedResourceMetadata → resolveOAuthEndpoints(issuer) →
  *   registerDynamicClient → persist.
  *
- * Resolution order (first hit wins):
- *   1. Explicit `resourceMetadataUrl` (e.g. parsed from a WWW-Authenticate
- *      challenge the caller already has) — authoritative.
- *   2. RFC 9728 §3 well-known probes derived from the resource URL.
- *   3. Best-effort `401` probe of the resource URL itself, parsing the
- *      `resource_metadata` challenge param, then fetching that.
+ * Resolution order (MCP authorization, RFC 9728 §3 and §5): the caller's explicit
+ * `resourceMetadataUrl`, then the `resource_metadata` of a `WWW-Authenticate` challenge to an
+ * unauthenticated request, then the path-inserted well-known location, then the root one. A
+ * document is used only when its `resource` is identical (modulo a trailing `/`) to the resource
+ * identifier its location was derived from (§3.3): the resource URL for an explicit URL, a
+ * challenge or the path-inserted location, its origin for the root location. Any other document is
+ * skipped, not fatal: the next location is tried.
  *
  * Best-effort throughout: any network/parse/validation failure falls through
  * to the next strategy and ultimately returns `null` (the caller then surfaces
@@ -75,19 +76,17 @@ function isHttpUrl(raw: string): boolean {
 }
 
 /**
- * RFC 9728 §3.3: the `resource` value in a protected-resource metadata document
- * MUST identify the resource server the client is talking to. Validate that its
- * origin matches the MCP server URL we discovered it for — otherwise a hostile
- * (or misconfigured) metadata document could bind the token's audience to an
- * unrelated resource. Compared by origin (scheme+host+port) to tolerate path /
- * trailing-slash differences in the canonical identifier.
+ * RFC 9728 §3.3: a metadata document describes the resource identifier its location was derived
+ * from, and nothing else. Identical strings once every trailing `/` is stripped (AFPS §7.12's
+ * comparison rule); a document for another resource on the same origin must not bind the token's
+ * audience.
  */
-function metadataResourceMatchesOrigin(resource: string, resourceServerUrl: string): boolean {
-  try {
-    return new URL(resource).origin === new URL(resourceServerUrl).origin;
-  } catch {
-    return false;
-  }
+export function resourceIdentifierMatches(resource: string, identifier: string): boolean {
+  return stripTrailingSlashes(resource) === stripTrailingSlashes(identifier);
+}
+
+function stripTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, "");
 }
 
 /** Strip a single trailing slash so well-known suffixes join cleanly. */
@@ -95,23 +94,34 @@ function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
+/** A well-known metadata location and the resource identifier it was derived from. */
+interface MetadataLocation {
+  metadataUrl: string;
+  resource: string;
+}
+
 /**
- * Build RFC 9728 §3 well-known probe URLs for a resource server URL. The
- * well-known segment is inserted between the host and the path component:
- *   `https://host/mcp` → `https://host/.well-known/oauth-protected-resource/mcp`
- * The path-less variant is always included as a fallback.
+ * RFC 9728 §3 well-known locations for a resource URL, path-inserted first:
+ *   `https://host/mcp` → `https://host/.well-known/oauth-protected-resource/mcp` (resource
+ *   `https://host/mcp`), then `https://host/.well-known/oauth-protected-resource` (resource
+ *   `https://host`). One location for a path-less URL.
  */
-export function buildProtectedResourceProbes(resourceServerUrl: string): string[] {
+export function buildProtectedResourceProbes(resourceServerUrl: string): MetadataLocation[] {
   try {
     const u = new URL(resourceServerUrl);
     const base = `${u.protocol}//${u.host}`;
     let path = trimTrailingSlash(u.pathname);
     if (path === "/" || path === "") path = "";
-    const probes = [
-      `${base}/.well-known/oauth-protected-resource${path}`,
-      `${base}/.well-known/oauth-protected-resource`,
-    ];
-    return [...new Set(probes)];
+    const root = { metadataUrl: `${base}/.well-known/oauth-protected-resource`, resource: base };
+    return path === ""
+      ? [root]
+      : [
+          {
+            metadataUrl: `${base}/.well-known/oauth-protected-resource${path}`,
+            resource: resourceServerUrl,
+          },
+          root,
+        ];
   } catch {
     return [];
   }
@@ -195,25 +205,21 @@ export async function discoverProtectedResourceMetadata(
   // metadata and must not reach the network layer.
   if (!isHttpUrl(input.resourceServerUrl)) return null;
 
-  // Any resolved document is only accepted when its RFC 8707 `resource`
-  // identifier matches the MCP server's origin (RFC 9728 §3.3).
-  const accept = (md: ProtectedResourceMetadata | null): ProtectedResourceMetadata | null =>
-    md && metadataResourceMatchesOrigin(md.resource, input.resourceServerUrl) ? md : null;
+  const fetchAt = async (
+    metadataUrl: string,
+    resource: string,
+  ): Promise<ProtectedResourceMetadata | null> => {
+    const md = await fetchResourceMetadata(metadataUrl, fetchImpl);
+    return md && resourceIdentifierMatches(md.resource, resource) ? md : null;
+  };
 
-  // 1. Explicit metadata URL (authoritative).
+  // 1. Explicit metadata URL (a challenge the caller already holds).
   if (input.resourceMetadataUrl) {
-    const md = accept(await fetchResourceMetadata(input.resourceMetadataUrl, fetchImpl));
+    const md = await fetchAt(input.resourceMetadataUrl, input.resourceServerUrl);
     if (md) return md;
   }
 
-  // 2. RFC 9728 §3 well-known probes.
-  for (const url of buildProtectedResourceProbes(input.resourceServerUrl)) {
-    const md = accept(await fetchResourceMetadata(url, fetchImpl));
-    if (md) return md;
-  }
-
-  // 3. Best-effort 401 probe — read the `resource_metadata` challenge the
-  //    server advertises on an unauthenticated request, then fetch it.
+  // 2. The `resource_metadata` challenge of an unauthenticated request (RFC 9728 §5.1).
   try {
     const res = await fetchImpl(input.resourceServerUrl, {
       method: "GET",
@@ -221,15 +227,19 @@ export async function discoverProtectedResourceMetadata(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     const challenge = res.headers.get("www-authenticate");
-    if (challenge) {
-      const metadataUrl = parseResourceMetadataChallenge(challenge);
-      if (metadataUrl) {
-        const md = accept(await fetchResourceMetadata(metadataUrl, fetchImpl));
-        if (md) return md;
-      }
+    const metadataUrl = challenge ? parseResourceMetadataChallenge(challenge) : undefined;
+    if (metadataUrl) {
+      const md = await fetchAt(metadataUrl, input.resourceServerUrl);
+      if (md) return md;
     }
   } catch {
-    // Best-effort — fall through to null.
+    // Best-effort — fall through to the well-known locations.
+  }
+
+  // 3. RFC 9728 §3 well-known locations, path-inserted then root.
+  for (const location of buildProtectedResourceProbes(input.resourceServerUrl)) {
+    const md = await fetchAt(location.metadataUrl, location.resource);
+    if (md) return md;
   }
 
   return null;

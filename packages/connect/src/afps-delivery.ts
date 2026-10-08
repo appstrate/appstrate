@@ -8,7 +8,7 @@
  *
  *   { in: "header", name }              header channel + name
  *   { prefix }                          value prefix, e.g. "Bearer "
- *   { value: "{$credential.<field>}" }  value template
+ *   { value: "{$credential.<field>}" }  value template ({$variable.<name>} too, §7.12)
  *   { value: "<template>", encoding }   base64-encoded template
  *   { allow_server_override }           strip caller override when false
  *
@@ -47,6 +47,7 @@ export function resolveAfpsHttpDelivery(
   authType: string,
   fields: Readonly<Record<string, string>>,
   http: AfpsHttpDelivery | undefined,
+  variables: Readonly<Record<string, string>> = {},
 ): HttpDeliveryPlan | null {
-  return resolveHttpDelivery(authType, fields, projectHttpDeliveryConfig(http));
+  return resolveHttpDelivery(authType, fields, projectHttpDeliveryConfig(http), variables);
 }

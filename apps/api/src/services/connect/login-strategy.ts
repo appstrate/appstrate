@@ -29,6 +29,8 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
+import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 export class LoginStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -52,6 +54,11 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       stringInputs[k] = typeof v === "string" ? v : JSON.stringify(v);
     }
 
+    const variables = await resolveConnectionVariables(
+      manifest,
+      auth as unknown as AfpsManifestAuth,
+      ctx.variables,
+    );
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
       inputs: stringInputs,
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
@@ -77,6 +84,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       identityClaims: { ...identityClaims, ...identity.identityClaims },
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       actor: ctx.actor,
+      variables,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });
   }

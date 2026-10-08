@@ -1424,9 +1424,29 @@ export interface paths {
         };
         /**
          * Integration OAuth2 callback (popup)
-         * @description Browser-side OAuth callback. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window.
+         * @description Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.
          */
         get: operations["integrationsOAuthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/callback/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Integration OAuth2 callback of an authorization server chosen per connection (popup)
+         * @description The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.
+         */
+        get: operations["integrationsOAuthCallbackForServer"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1464,7 +1484,7 @@ export interface paths {
         };
         /**
          * Hosted connect dispatch (token)
-         * @description Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.
+         * @description Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.
          */
         get: operations["startIntegrationConnect"];
         put?: never;
@@ -1486,7 +1506,7 @@ export interface paths {
         put?: never;
         /**
          * Hosted form credential submit (page cookie + CSRF)
-         * @description Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.
+         * @description Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.
          */
         post: operations["submitIntegrationConnect"];
         delete?: never;
@@ -12245,6 +12265,8 @@ export interface operations {
                 state?: string;
                 /** @description OAuth error code (if the IdP rejected the request) */
                 error?: string;
+                /** @description RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present. */
+                iss?: string;
             };
             header?: never;
             path?: never;
@@ -12252,7 +12274,39 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure). */
+            /** @description HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure). */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    integrationsOAuthCallbackForServer: {
+        parameters: {
+            query?: {
+                /** @description Authorization code returned by the IdP */
+                code?: string;
+                /** @description OAuth state parameter (UUID) */
+                state?: string;
+                /** @description OAuth error code (if the IdP rejected the request) */
+                error?: string;
+                /** @description RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present. */
+                iss?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata. */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure). */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12291,6 +12345,17 @@ export interface operations {
                         };
                         connection_id?: string | null;
                         csrf?: string | null;
+                        /** @description The connection variables the form collects (AFPS §7.12); null when the integration declares none. */
+                        variables?: {
+                            /** @description The integration's `variables.schema` (AFPS §7.12). */
+                            schema: {
+                                [key: string]: unknown;
+                            };
+                            /** @description The values of the connection being reconnected, to prefill the form; `{}` on a fresh connect. */
+                            values: {
+                                [key: string]: string;
+                            };
+                        } | null;
                     };
                 };
             };
@@ -12309,7 +12374,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to the provider OAuth screen or the hosted form. */
+            /** @description Redirect to the provider OAuth screen, or to the hosted form (non-oauth, or oauth2 with connection variables). */
             302: {
                 headers: {
                     [name: string]: unknown;
@@ -12377,8 +12442,13 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    credentials: {
+                    /** @description The credential fields. Required for a non-oauth auth, refused for oauth2. */
+                    credentials?: {
                         [key: string]: unknown;
+                    };
+                    /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
+                    variables?: {
+                        [key: string]: string;
                     };
                 };
             };
@@ -12394,7 +12464,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         ok: boolean;
-                        connection: {
+                        /** @description The connection stored (non-oauth auth). */
+                        connection?: {
                             /** Format: uuid */
                             id: string;
                             integration_package_id: string;
@@ -12422,18 +12493,45 @@ export interface operations {
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
+                            /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                            variables: {
+                                [key: string]: string;
+                            } | null;
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
                             updatedAt: string;
                         };
+                        /**
+                         * Format: uri
+                         * @description oauth2 auth: the authorization server's URL to navigate to; the callback creates the connection.
+                         */
+                        redirect_url?: string;
                         /** @description Present when the platform minted credentials for this auth (`@appstrate/ssh`): what the user must do with the material the platform minted, in order. Never contains a secret. Steps flagged `deferred` are due at deletion and are served again by `getMyConnectionHandoff`. */
                         handoff_steps?: components["schemas"]["HandoffStep"][];
                     };
                 };
             };
             400: components["responses"]["ValidationError"];
+            /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             404: components["responses"]["NotFound"];
+            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
             503: {
                 headers: {
@@ -12542,6 +12640,10 @@ export interface operations {
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
+                                /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                                variables: {
+                                    [key: string]: string;
+                                } | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -12673,6 +12775,10 @@ export interface operations {
                      * @description Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.
                      */
                     connection_id?: string;
+                    /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
+                    variables?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };
@@ -12713,6 +12819,10 @@ export interface operations {
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
+                        /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                        variables: {
+                            [key: string]: string;
+                        } | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -12791,6 +12901,10 @@ export interface operations {
                      * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
                      */
                     connection_id?: string;
+                    /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
+                    variables?: {
+                        [key: string]: string;
+                    };
                 };
             };
         };
@@ -13065,6 +13179,10 @@ export interface operations {
                             shared_with_org?: boolean;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
+                            /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                            variables: {
+                                [key: string]: string;
+                            } | null;
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -13141,6 +13259,10 @@ export interface operations {
                         shared_with_org?: boolean;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
+                        /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                        variables: {
+                            [key: string]: string;
+                        } | null;
                         /** Format: date-time */
                         createdAt: string;
                         /** Format: date-time */
@@ -13691,6 +13813,10 @@ export interface operations {
                                 shared_with_org?: boolean;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
+                                /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                                variables: {
+                                    [key: string]: string;
+                                } | null;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
