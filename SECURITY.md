@@ -404,6 +404,8 @@ app.use("*", async (c, next) => {
 
 Sessions are managed by Better Auth (email/password + optional Google social login, cookie-based sessions). Account linking uses trusted providers (Google) with verified emails to prevent pre-account takeover. Email verification is opt-in (requires SMTP configuration). The session cookie is set on login/signup and verified server-side on every request via `auth.api.getSession()`.
 
+Changing or resetting a password ends every other session of the account and revokes its OAuth refresh and access tokens (`offline_access` included) and its CLI sessions; a change keeps the session that made it. Every path that changes or resets a password goes through `endOtherAccessAfterCredentialChange` (`packages/db/src/credential-change.ts`).
+
 ### Organization context verification
 
 Every authenticated request must include an `X-Org-Id` header. The middleware verifies the user is a member of the specified organization via Drizzle:

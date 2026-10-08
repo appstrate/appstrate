@@ -28,6 +28,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Changing or resetting a password signs the account out everywhere
+  else.** A change ends every other session of the account, revokes its OAuth
+  refresh and access tokens (`offline_access` ones included) and its CLI
+  sessions (`revoked_reason: password_changed`); the session that made the
+  change stays signed in, whichever client sent it. A reset, through
+  `/api/auth/reset-password` or the hosted `/api/oauth/reset-password` page,
+  does the same and ends every session. An MCP client or the CLI signs in
+  again afterwards. An OAuth access token already issued as a JWT keeps
+  working until it expires. If revoking fails once the password is written,
+  the error is logged and the change or reset answers
+  `500 credential_change_revocation_failed` instead of a success.
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

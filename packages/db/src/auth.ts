@@ -27,6 +27,7 @@ import {
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
+import { endOtherAccessAfterCredentialChange } from "./credential-change.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -805,6 +806,13 @@ function buildAuth(options: CreateAuthOptions) {
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
       requireEmailVerification: !!smtpTransport,
+      // Every reset path (`/reset-password`, and the hosted OIDC page calling
+      // it) lands here, after Better Auth has written the new password.
+      onPasswordReset: async ({ user }): Promise<void> => {
+        await notifyPasswordChanged(user.email);
+        const { internalAdapter } = await getAuth().$context;
+        await endOtherAccessAfterCredentialChange(internalAdapter, user.id, null);
+      },
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since
       // most tests sign up a real user per `beforeEach`. When the test harness
@@ -846,9 +854,6 @@ function buildAuth(options: CreateAuthOptions) {
           } catch {
             // Fire-and-forget — don't block reset flow if email fails
           }
-        },
-        onPasswordReset: async ({ user }) => {
-          await notifyPasswordChanged(user.email);
         },
         // The signup answer is the same as for a free address, so the SPA
         // announces an email: this is it, sent to the account's owner.
@@ -893,17 +898,28 @@ function buildAuth(options: CreateAuthOptions) {
           }
         },
       },
-      // The one account change Better Auth has no callback for.
-      hooks: {
-        after: createAuthMiddleware(async (ctx) => {
-          if (ctx.path !== "/change-password") return;
-          const returned = ctx.context.returned;
-          if (returned instanceof APIError) return;
-          const email = (returned as { user?: { email?: string } } | undefined)?.user?.email;
-          if (email) await notifyPasswordChanged(email);
-        }),
-      },
     }),
+
+    // The one credential change Better Auth has no callback for. Enforced
+    // here rather than through the client's `revokeOtherSessions`, so every
+    // caller gets it.
+    hooks: {
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/change-password") return;
+        const returned = ctx.context.returned;
+        if (returned instanceof APIError) return;
+        const { user: changed } = returned as { user: { id: string; email: string } };
+        // The caller's session, or the one Better Auth swapped it for when
+        // the caller passed `revokeOtherSessions`: the cookie it now holds.
+        const kept = ctx.context.newSession ?? ctx.context.session;
+        await notifyPasswordChanged(changed.email);
+        await endOtherAccessAfterCredentialChange(
+          ctx.context.internalAdapter,
+          changed.id,
+          kept?.session.id ?? null,
+        );
+      }),
+    },
 
     socialProviders,
 
