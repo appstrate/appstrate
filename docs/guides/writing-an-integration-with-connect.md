@@ -681,7 +681,7 @@ Every auth method MAY restrict which upstream URIs the integration may send
 credentials to (§7.9):
 
 - `authorized_uris` (array of strings) — allowed upstream URI patterns. Glob: `*`
-  (single segment), `**` (multi-segment).
+  matches within one path segment, and in the host it spans dots; `**` (multi-segment).
 - `allow_all_uris` (boolean, default `false`) — explicit override permitting any
   upstream URI. Treated as **security-sensitive** by consumers; surface a warning to
   the user. Appstrate honours it only on a call that carries no credential (below).
@@ -699,6 +699,29 @@ resolver and the platform proxy share this rule (`credentialUrlPolicy`); the sid
 MITM listener refuses the same calls. An auth that declares no `authorized_uris` and
 not `allow_all_uris` has every `api_call` refused, credential or not: an empty
 authorized set authorizes nothing.
+
+A wildcard in the host is bounded only when it sits under a registrable domain written
+literally in the entry, judged with the [Public Suffix List](https://publicsuffix.org/)
+(its ICANN and private sections): `https://*.zendesk.com/**` and
+`https://*.example.co.uk/**` are bounded; `https://*.co.uk/**`, `https://*.github.io/**`,
+`https://*.googleapis.com/**`, `https://*.supabase.co/**` and `https://*.workers.dev/**`
+are not, since the list makes those suffixes public. List such hosts literally
+(`https://sheets.googleapis.com/**`), or, when each customer's host sits under such a
+suffix, render it from the connection: `https://{$credential.shop_domain}/**`, with the
+field validated in `credentials.schema` (a `pattern`) so the rendered host is the one the
+API serves. A literal host is bounded whatever its suffix.
+
+Since a host `*` also matches dots, each target is judged as well: a credential reaches a
+host a wildcard matched only when that host's own registrable domain lies inside the
+literal part of the entry. `https://*.amazonaws.com/**` carries it to
+`sts.amazonaws.com` or `iam.amazonaws.com`, but never to a host of a whole region the list
+names (every `*.us-east-1.amazonaws.com`, `dynamodb.us-east-1.amazonaws.com` included) nor
+to any S3 host (`s3.amazonaws.com`, `bucket.s3.eu-west-1.amazonaws.com`): list those hosts
+literally.
+The list bounds only the suffixes their operators declare there: the same wildcard still
+reaches customer-named endpoints AWS has not listed
+(`search-<domain>.eu-west-1.es.amazonaws.com`, a regional search domain), so list hosts
+literally wherever that matters.
 
 An integration whose endpoint is per-connection declares it as a URL-form entry
 instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or

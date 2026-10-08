@@ -1002,6 +1002,44 @@ are left failing loudly until re-picked, and counted (`*_kept`). An admin pin or
 naming an id earlier deletions left dangling is counted, not rewritten: it fails its runs with
 `pinned_connection_unavailable` until an admin edits it.
 
+## Detail — Wildcards a public suffix leaves open, Shopify domains (script `0037`)
+
+**Not a runbook, and it writes nothing.** `isHostUnboundedUriPattern` now judges a wildcard host
+with the Public Suffix List, ICANN and private sections (#1656): a wildcard is bounded only under a
+registrable domain written literally in the entry. `https://*.zendesk.com/**` and
+`https://*.amazonaws.com/**` still pass; `https://*.co.uk/**`, `https://*.github.io/**` and, the
+likeliest in an organization's integrations, `https://*.googleapis.com/**`,
+`https://*.supabase.co/**` or `https://*.workers.dev/**` no longer do. A manifest whose injecting
+auth lists one is refused on its next write, and every call carrying its credential is refused at
+run time (`exfiltration`, the MITM listener's `credential not host-bounded`). On an auth that
+injects nothing (a `custom` auth without `delivery.http`) the write passes, but every call that
+substitutes a credential (`{{token}}` in a header, the URL or the body) is refused. `0037` prints
+each such entry, on every auth of every org integration draft and published version, suffixing
+the second kind `(refused when a credential is substituted)`. `0035` reports the injected ones
+among its `[exfiltration]` hits; `0037` covers both and is the one pre-flight for this change
+(`0035` need not be rerun). The fix is to list the hosts the integration calls literally
+(`https://sheets.googleapis.com/**`) or to render a per-connection host
+(`https://{$credential.host}/**`), then, as for `0035`: edit the draft, publish a version every
+range reaching the old one accepts, then delete the old one.
+
+`0037` cannot list the run-time refusals, which depend on the target: under an accepted
+`https://*.amazonaws.com/**`, every `*.us-east-1.amazonaws.com` host and every S3 host is refused
+(see the CHANGELOG); list such hosts literally.
+
+`@appstrate/shopify` 1.0.3 replaces `https://*.myshopify.com/**` with
+`https://{$credential.shop_domain}/**` and requires `shop_domain` to be `<store>.myshopify.com`.
+`0037` decrypts each Shopify connection, inspects `shop_domain` alone and lists every connection
+whose value is missing, does not render a host, or is not such a host — by id and reason, never
+the value. Its owner updates the connection with the store's myshopify.com domain; until then
+every call to the store is refused. `@appstrate/github` 1.0.6 lists its `githubusercontent.com`
+hosts by name and needs nothing.
+
+System integrations are not listed: the platform runs the version it ships, whatever an agent
+pins, so the older `shopify` and `github` versions left in `package_versions` authorize nothing.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0037-verify-authorized-uri-host-bounds.ts`.
+Exit 1 while a hit remains.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1041,3 +1079,4 @@ naming an id earlier deletions left dangling is counted, not rewritten: it fails
 | 0034 | not applied         | ActiveCampaign connections without `api_url`: `api_url` derived from `account_name` (`https://<account_name>.api-us1.com`), `account_name` kept; then a READ-ONLY audit of `@appstrate/{activecampaign,wordpress,woocommerce,webhooks}` connections whose URL field no longer renders an allowlist (#1627, #1628) — **`--apply` just BEFORE the deploy, dry run again after it**, env loaded (it decrypts); `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                | rehearsed 2026-10-07 on a production dump: 1.3 s, a second `--apply` rewrites nothing — prints every rewritten id and every refused id with its reason, exit 1 while any is refused; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 0035 | not applied         | READ-ONLY pre-flight: org integration drafts and published versions holding a template or runtime expression the platform does not evaluate (`findUnevaluableExpressions`), a `{{field}}` in a delivery template, or an injected credential runs will refuse as `exfiltration` (`findUnboundedInjectedCredentials`, filtered to what `credentialUrlPolicy` refuses) (#1641) — **run BEFORE deploying; exits non-zero while a hit remains** (a range resolves older versions too)                                                                                                                                          | read-only — prints every hit and the per-kind totals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 0036 | not applied         | end users' connections removed from admin pins and org defaults (a set emptied → its row deleted), then unshared (#1775) — **run before deploying the release carrying drizzle `0080`, app container stopped, on a database at `0078` (beta.65 deployed)**, only when the first three counts of the header's pre-flight are not 0 / 0 / 0 (its two dangling-id counts are informational: those pins and defaults are not rewritten); `0080` refuses the boot while an end user's connection is shared or named by an admin pin or an org default                                                                          | unmeasured — measured on the production database before the release, with the header's read-only pre-flight; prints before/after counts, every pin and default it rewrites and every connection it unshares, aborts unless all after counts are 0; idempotent                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 0037 | not applied         | READ-ONLY pre-flight: `authorized_uris` entries of any auth of an org integration draft or published version whose wildcard is not under a literal registrable domain (Public Suffix List), and `@appstrate/shopify` connections whose `shop_domain` is not a `<store>.myshopify.com` host (#1656) — **run BEFORE deploying, env loaded (it decrypts); exits non-zero while a hit remains**                                                                                                                                                                                                                               | read-only — prints every hit (never a value) and the totals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

@@ -12,7 +12,7 @@
  * the root; anything else is ambiguous and the collection comes back untouched,
  * by identity.
  *
- * Lives in the zero-dependency shared package because two packages that cannot
+ * Lives in the zero-internal-dependency shared package because two packages that cannot
  * import each other both have to strip the same prefix the same way:
  *
  *  - **Core** (`@appstrate/core/zip`) — the platform's package-ZIP parser, over

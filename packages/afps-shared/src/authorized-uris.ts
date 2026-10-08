@@ -4,11 +4,13 @@
 /**
  * AFPS `authorized_uris` rules — the SINGLE source of truth for the URL-pattern
  * grammar: parsing and canonicalising an entry, rendering its
- * `{$credential.<field>}` placeholders for one connection, the host-bound rule,
- * the URL matcher and the compiled (URL, host:port) egress policy. Consumers
- * import this module directly.
+ * `{$credential.<field>}` placeholders for one connection, the host-bound rule
+ * (judged with the Public Suffix List at write and at run time), the URL
+ * matcher and the compiled (URL, host:port) egress policy. Consumers import
+ * this module directly.
  */
 
+import { getDomain } from "tldts";
 import {
   CREDENTIAL_REF,
   credentialTemplateRefs,
@@ -131,27 +133,77 @@ export function parseAuthorizedUriPattern(pattern: string): AuthorizedUriPattern
 /** A last label that makes WHATWG parse the host as IPv4 (its "ends in a number" check). */
 const WHATWG_IPV4_NUMBER = /^(?:\d+|0x[0-9a-f]*)$/i;
 
+// Both list sections: a private suffix (`github.io`) hands out subdomains like an ICANN one.
+const PUBLIC_SUFFIX_LIST = { allowPrivateDomains: true, extractHostname: false } as const;
+
+// Stands for what a host wildcard expands to, so the list's wildcard rules apply to it too.
+const WILDCARD_PROBE = "afps-wildcard-probe";
+
+// A loop, not `/\.+$/`: that regex backtracks quadratically on a host full of dots.
+function normalisedHost(host: string): string {
+  let end = host.length;
+  while (end > 0 && host[end - 1] === ".") end--;
+  return host.slice(0, end).toLowerCase();
+}
+
+/** The labels right of the last one holding a `*`. */
+function wildcardLiteral(host: string): string {
+  const dot = host.indexOf(".", host.lastIndexOf("*"));
+  return dot === -1 ? "" : host.slice(dot + 1);
+}
+
+type EntryReading =
+  | { kind: "url-form" }
+  | Exclude<AuthorizedUriPattern, { kind: "url" }>
+  | { kind: "url"; scheme: string; host: string; literal: string | null };
+
+/** A template reads as one literal label; `literal` is `null` for a host without wildcard. */
+function readEntry(pattern: string): EntryReading {
+  if (parseUrlFormPattern(pattern)) return { kind: "url-form" };
+  const parsed = parseAuthorizedUriPattern(pattern.replace(CREDENTIAL_REF, "x"));
+  if (parsed.kind !== "url") return parsed;
+  const host = normalisedHost(parsed.host);
+  const literal = host.includes("*") ? wildcardLiteral(host) : null;
+  return { kind: "url", scheme: parsed.scheme, host, literal };
+}
+
+/** Whether `host`'s registrable domain lies inside the wildcard's literal part. */
+function domainWithin(literal: string, host: string): boolean {
+  if (literal === "") return false;
+  const domain = getDomain(host, PUBLIC_SUFFIX_LIST);
+  return domain !== null && (literal === domain || literal.endsWith(`.${domain}`));
+}
+
 /**
- * Whether an `authorized_uris` entry lets the caller pick the host, judged on its
- * {@link parseAuthorizedUriPattern} reading: malformed, no literal `scheme://`, an empty host, or
- * a wildcard in one of its last two labels (`https://*.com./**`) or anywhere in an IP literal or
- * IPv4-shaped host (last label numeric: `https://*.0.1/**` matches `0x2d210001`). `*.co.uk` is not
- * detected.
+ * Whether an `authorized_uris` entry lets the caller pick the host: malformed, no literal
+ * `scheme://`, an empty host, a wildcard in an IP-shaped host, or a wildcard not under a literal
+ * registrable domain per the Public Suffix List (`*.co.uk`, `*.github.io`). Write-time half.
  */
 export function isHostUnboundedUriPattern(pattern: string): boolean {
-  if (parseUrlFormPattern(pattern)) return false;
-  const parsed = parseAuthorizedUriPattern(pattern.replace(CREDENTIAL_REF, "x"));
-  if (parsed.kind === "path") return parsed.pattern.includes("*");
-  if (parsed.kind !== "url" || parsed.scheme.includes("*")) return true;
-  const host = parsed.host.replace(/\.+$/, "");
-  if (!host.includes("*")) return host === "";
-  const labels = host.split(".");
-  return (
-    host.startsWith("[") ||
-    WHATWG_IPV4_NUMBER.test(labels[labels.length - 1]!) ||
-    labels.length < 3 ||
-    labels.slice(-2).some((label) => label.includes("*"))
-  );
+  const entry = readEntry(pattern);
+  if (entry.kind === "url-form") return false;
+  if (entry.kind === "path") return entry.pattern.includes("*");
+  if (entry.kind !== "url" || entry.scheme.includes("*")) return true;
+  if (entry.literal === null) return entry.host === "";
+  const labels = entry.host.split(".");
+  if (entry.host.startsWith("[") || WHATWG_IPV4_NUMBER.test(labels[labels.length - 1]!)) {
+    return true;
+  }
+  return !domainWithin(entry.literal, `${WILDCARD_PROBE}.${entry.literal}`);
+}
+
+/**
+ * Run-time half: an authority `*` spans dots, so `https://*.amazonaws.com/**` also matches hosts
+ * under a deeper public suffix (`sqs.us-east-1.amazonaws.com`). True only when `targetHost`'s
+ * registrable domain lies inside the entry's literal part; always true without a host wildcard.
+ */
+export function wildcardMatchStaysWithinBound(pattern: string, targetHost: string): boolean {
+  const entry = readEntry(pattern);
+  // Only ever asked of an entry that matched an absolute target: a path entry never does.
+  if (entry.kind !== "url") return entry.kind === "url-form";
+  if (entry.literal === null) return true;
+  const target = normalisedHost(targetHost);
+  return !target.startsWith("[") && domainWithin(entry.literal, target);
 }
 
 /**

@@ -27,7 +27,7 @@
  * claims, so {@link verifyKeyringToken} returns the decoded payload after the
  * signature check and leaves semantics to the caller.
  *
- * Zero-dependency leaf so every package that mints or verifies one can sit
+ * Zero-internal-dependency leaf so every package that mints or verifies one can sit
  * above it without a cycle.
  */
 

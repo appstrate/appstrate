@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/github",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "GitHub (API)",
@@ -70,7 +70,12 @@
       "authorized_uris": [
         "https://api.github.com/**",
         "https://codeload.github.com/**",
-        "https://*.githubusercontent.com/**"
+        "https://raw.githubusercontent.com/**",
+        "https://gist.githubusercontent.com/**",
+        "https://objects.githubusercontent.com/**",
+        "https://media.githubusercontent.com/**",
+        "https://release-assets.githubusercontent.com/**",
+        "https://pipelines.actions.githubusercontent.com/**"
       ],
       "delivery": {
         "http": {

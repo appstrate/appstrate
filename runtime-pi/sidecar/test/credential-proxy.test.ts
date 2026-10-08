@@ -2445,7 +2445,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
   });
 
   it("does not replay a cookie across hosts a GLOB allowlist entry matched", async () => {
-    // `https://*.myshopify.com/**` (and `https://**`) admit a host the AGENT
+    // `https://*.zendesk.com/**` (and `https://**`) admit a host the AGENT
     // chose, so an allowlist match is no longer an operator statement that the
     // two hosts share a trust boundary — `system-packages/` ships wildcard
     // hosts on user-registrable subdomains for freshdesk, salesforce,
@@ -2453,20 +2453,20 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     // to decide the allowlist is a host-level declaration.
     const globCreds = mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "tok-123" },
-      authorizedUris: ["https://*.myshopify.com/**"],
+      authorizedUris: ["https://*.zendesk.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
       credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
-    const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=TENANT-A-SESSION");
     const deps = makeDeps({ fetchFn, fetchCredentials: globCreds });
 
     await executeApiCall(
       {
-        integrationId: "shopify",
+        integrationId: "zendesk",
         connectionId: "conn-1",
-        targetUrl: "https://victim.myshopify.com/admin",
+        targetUrl: "https://tenant-a.zendesk.com/api/v2/tickets",
         method: "GET",
         callerHeaders: {},
         body: { kind: "none" },
@@ -2475,19 +2475,19 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     );
     await executeApiCall(
       {
-        integrationId: "shopify",
+        integrationId: "zendesk",
         connectionId: "conn-1",
-        targetUrl: "https://attacker.myshopify.com/collect",
+        targetUrl: "https://tenant-b.zendesk.com/api/v2/tickets",
         method: "GET",
         callerHeaders: {},
         body: { kind: "none" },
       },
       deps,
     );
-    expect(cookiesSeen[1] ?? "").not.toContain("VICTIM-SESSION");
+    expect(cookiesSeen[1] ?? "").not.toContain("TENANT-A-SESSION");
     // Still sticky for the origin that captured it.
-    expect(jarCookies(deps, "shopify", "https://victim.myshopify.com/")).toBe(
-      "sess=VICTIM-SESSION",
+    expect(jarCookies(deps, "zendesk", "https://tenant-a.zendesk.com/")).toBe(
+      "sess=TENANT-A-SESSION",
     );
   });
 
@@ -2843,5 +2843,57 @@ describe("executeApiCall — a header value that is no HTTP field value", () => 
       expect(out.error).toContain("({{sub}}.nx.invalid)");
       expect(out.error).not.toContain("bcher");
     }
+  });
+});
+
+describe("executeApiCall — a rendered target past its wildcard's registrable domain", () => {
+  // The bound is judged on the RENDERED target: the template's host does not even parse.
+  const send = async (awsHost: string) => {
+    const seen: Headers[] = [];
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers));
+      return new Response("ok");
+    }) as unknown as typeof fetch;
+    const result = await executeApiCall(
+      {
+        integrationId: "@acme/aws",
+        connectionId: "conn-1",
+        targetUrl: "https://{{aws_host}}.amazonaws.com/q",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({
+        fetchFn,
+        declaredUris: ["https://*.amazonaws.com/**"],
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { access_token: "tok-123", aws_host: awsHost },
+          authorizedUris: ["https://*.amazonaws.com/**"],
+          allowAllUris: false,
+          credentialHeaderName: "Authorization",
+          credentialHeaderPrefix: "Bearer ",
+          credentialFieldName: "access_token",
+        })),
+      }),
+    );
+    return { result, seen };
+  };
+
+  it("sends nothing, and names the host as the template does", async () => {
+    const { result, seen } = await send("sqs.us-east-1");
+    expect(seen).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("credential_exfiltration_refused");
+      expect(result.error).toContain("{{aws_host}}.amazonaws.com");
+      expect(result.error).toContain("list that host in authorized_uris");
+      expect(result.error).not.toContain("sqs.us-east-1");
+    }
+  });
+
+  it("sends the credential to a rendered host inside the registrable domain", async () => {
+    const { result, seen } = await send("sts");
+    expect(result.ok).toBe(true);
+    expect(seen[0]!.get("authorization")).toBe("Bearer tok-123");
   });
 });

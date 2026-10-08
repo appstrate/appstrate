@@ -88,7 +88,12 @@ import {
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import { substituteVars } from "@appstrate/connect/proxy-primitives";
-import { HOP_BY_HOP_HEADERS, unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
+import {
+  beyondBoundReason,
+  credentialStaysWithinBound,
+  HOP_BY_HOP_HEADERS,
+  unresolvedPlaceholders,
+} from "@appstrate/afps-runtime/resolvers";
 import {
   isHostUnboundedUriPattern,
   matchesAuthorizedUriSpec,
@@ -907,11 +912,12 @@ async function forwardInnerRequest(
       result.url !== targetUrl ||
       result.bodyText !== bodyText ||
       Object.entries(result.headers).some(([k, v]) => v !== inboundHeaders[k]);
-    if (substituted && active.authorizedUris.some(isHostUnboundedUriPattern)) {
-      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
-      return new Response("MITM listener: credential allowlist leaves the host open", {
-        status: 403,
-      });
+    const refusal = substituted
+      ? credentialBoundRefusal(result.url, active.authorizedUris, url)
+      : null;
+    if (refusal) {
+      emit({ kind: "request-refused", url, reason: refusal.reason });
+      return new Response(refusal.body, { status: 403 });
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
@@ -933,10 +939,10 @@ async function forwardInnerRequest(
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
-  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
-  // auth's allowlist names, never to one an entry leaves to the caller. Applied to every build,
-  // the first attempt and the post-refresh replay alike; `null` = refused.
-  const buildAction = (): (MitmAction & { credentialRevision: string | undefined }) | null => {
+  // The api_call rule (`credentialUrlPolicy`), applied to every build: the first attempt and the
+  // post-refresh replay alike.
+  type PlannedAction = MitmAction & { credentialRevision: string | undefined };
+  const buildAction = (): { action: PlannedAction } | { refusal: BoundRefusal } => {
     const ctx: MitmRequestContext = {
       url: targetUrl,
       headerNames: callerHeaderNames,
@@ -944,22 +950,19 @@ async function forwardInnerRequest(
     };
     const held = credentials.current();
     const planned = { ...planMitmAction(ctx, held), credentialRevision: held.credentialRevision };
-    if (
-      planned.injectedHeader &&
-      planned.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)
-    ) {
-      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
-      return null;
+    const bound = planned.matchedAuth?.authorizedUris;
+    const refusal =
+      planned.injectedHeader && bound ? credentialBoundRefusal(targetUrl, bound, url) : null;
+    if (refusal) {
+      emit({ kind: "request-refused", url, reason: refusal.reason });
+      return { refusal };
     }
-    return planned;
+    return { action: planned };
   };
 
-  const action = buildAction();
-  if (!action) {
-    return new Response("MITM listener: credential allowlist leaves the host open", {
-      status: 403,
-    });
-  }
+  const built = buildAction();
+  if ("refusal" in built) return new Response(built.refusal.body, { status: 403 });
+  const { action } = built;
 
   const outboundHeaders = buildOutboundHeaders(
     headersForOutbound,
@@ -1028,8 +1031,9 @@ async function forwardInnerRequest(
   // re-login, identical for a same-credential replay) and re-issue the request
   // once. Returns the new response, or null if the rebuild was refused or the retry threw.
   const refetch = async (): Promise<Response | null> => {
-    const a = buildAction();
-    if (!a) return null;
+    const rebuilt = buildAction();
+    if ("refusal" in rebuilt) return null;
+    const a = rebuilt.action;
     lastAction = a;
     const outbound = buildOutboundHeaders(
       headersForOutbound,
@@ -1088,6 +1092,29 @@ async function forwardInnerRequest(
 }
 
 const INVALID_CREDENTIAL = "credential is not a valid header value";
+
+interface BoundRefusal {
+  reason: string;
+  body: string;
+}
+
+const HOST_OPEN: BoundRefusal = {
+  reason: "credential not host-bounded",
+  body: "MITM listener: credential allowlist leaves the host open",
+};
+/** `credentialUrlPolicy`'s rule; the body names `shownUrl`'s host, never a substituted one. */
+function credentialBoundRefusal(
+  url: string,
+  uris: readonly string[],
+  shownUrl: string,
+): BoundRefusal | null {
+  if (uris.some(isHostUnboundedUriPattern)) return HOST_OPEN;
+  if (credentialStaysWithinBound(url, uris)) return null;
+  return {
+    reason: "credential target beyond its wildcard's registrable domain",
+    body: `MITM listener: ${beyondBoundReason(new URL(shownUrl).hostname)}`,
+  };
+}
 
 /** A credential `Headers` would refuse in a TypeError quoting it: refused before it is set. */
 function refuseInvalidCredential(url: string, emit: (event: MitmListenerEvent) => void): Response {

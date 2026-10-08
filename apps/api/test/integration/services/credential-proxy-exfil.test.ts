@@ -136,6 +136,23 @@ describe("proxyCall — credential-exfiltration guard", () => {
     return message;
   }
 
+  it("refuses a target a wildcard reaches past its registrable domain, naming it", async () => {
+    // `us-east-1.amazonaws.com` is a public suffix: the bounded entry still matches below it.
+    await seedIntegration(ctx, ["https://*.amazonaws.com/**"]);
+    const { fetchImpl, hits } = upstream();
+    const err = await call(fetchImpl, "https://sqs.us-east-1.amazonaws.com/q").then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ProxyCallError);
+    expect((err as ProxyCallError).code).toBe("credential_exfiltration_refused");
+    expect((err as Error).message).toContain(
+      "sqs.us-east-1.amazonaws.com's registrable domain lies outside the literal part",
+    );
+    expect((err as Error).message).not.toContain(SECRET);
+    expect(hits).toEqual([]);
+  });
+
   it("refuses an unresolved header placeholder ahead of the URL policy", async () => {
     // A templated credential and no allowlist: alone, `credential_exfiltration_refused`.
     await seedEndpointIntegration(ctx, { token: SECRET });

@@ -3,6 +3,11 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  isHostUnboundedUriPattern,
+  matchesAuthorizedUriSpec,
+} from "@appstrate/afps-shared/authorized-uris";
+import {
+  credentialStaysWithinBound,
   credentialUrlPolicy,
   urlPolicyRefusalMessage,
 } from "../../src/resolvers/credential-guard.ts";
@@ -10,6 +15,7 @@ import { substituteVars, templateHost } from "../../src/resolvers/template-vars.
 
 const fields = { api_key: "SECRET" };
 const allowAll = {
+  target: "https://api.example.com/x",
   fields,
   allowAllUris: true,
   declaredUris: [] as string[],
@@ -47,6 +53,7 @@ describe("credentialUrlPolicy — detection", () => {
 describe("credentialUrlPolicy — downgrade and refusal", () => {
   it("keeps the declared policy when nothing is templated", () => {
     const policy = credentialUrlPolicy({
+      target: "https://api.example.com/x",
       templates: ["https://api.example.com/x"],
       fields: { site_url: "https://site.example.com" },
       allowAllUris: false,
@@ -60,6 +67,7 @@ describe("credentialUrlPolicy — downgrade and refusal", () => {
 
   it("drops allow_all_uris and does not refuse when an allowlist is declared", () => {
     const policy = credentialUrlPolicy({
+      target: "https://api.example.com/x",
       templates: ["{{api_key}}"],
       fields,
       allowAllUris: true,
@@ -104,6 +112,8 @@ describe("credentialUrlPolicy — a credential the proxy injects", () => {
     for (const unbounded of [
       "https://**",
       "https://*.com/**",
+      "https://*.co.uk/**",
+      "https://*.github.io/**",
       "https://@x:y@**/**",
       "https://%2A%2A\\**",
     ]) {
@@ -118,6 +128,65 @@ describe("credentialUrlPolicy — a credential the proxy injects", () => {
         }).refuse,
       ).toBe("exfiltration");
     }
+  });
+
+  it("holds the call to a host the connection rendered under a public suffix", () => {
+    // `https://{$credential.shop_domain}/**` as rendered: a literal host, whatever its suffix.
+    const policy = credentialUrlPolicy({
+      ...injected,
+      target: "https://mystore.myshopify.com/admin",
+      declaredUris: ["https://{$credential.shop_domain}/**"],
+      authorizedUris: ["https://mystore.myshopify.com/**"],
+    });
+    expect(policy.refuse).toBeNull();
+  });
+
+  describe("a target a wildcard reaches past its registrable domain", () => {
+    const authorizedUris = ["https://*.amazonaws.com/**"];
+
+    it.each<[string, string, boolean]>([
+      ["under a regional public suffix", "https://sqs.us-east-1.amazonaws.com/q", false],
+      ["under another one", "https://bedrock-runtime.us-east-1.amazonaws.com/model", false],
+      ["that is itself a public suffix", "https://s3.amazonaws.com/bucket/key", false],
+      ["inside the registrable domain", "https://sts.amazonaws.com/", true],
+      ["inside it, in a region", "https://dynamodb.eu-west-1.amazonaws.com/", true],
+    ])("is judged on the target %s", (_, target, within) => {
+      const refuse = within ? null : "beyond_bound";
+      expect(credentialUrlPolicy({ ...injected, target, authorizedUris }).refuse).toBe(refuse);
+      const templated = { ...allowAll, target, templates: ["{{api_key}}"], allowAllUris: false };
+      expect(credentialUrlPolicy({ ...templated, authorizedUris }).refuse).toBe(refuse);
+    });
+
+    it("names the host to list, not the generic allowlist failure", () => {
+      const host = "sqs.us-east-1.amazonaws.com";
+      const message = urlPolicyRefusalMessage("beyond_bound", "@x/aws", host);
+      expect(message).toContain(`${host}'s registrable domain lies outside the literal part`);
+      expect(message).toContain("list that host in authorized_uris");
+      const generic = urlPolicyRefusalMessage("exfiltration", "@x/aws", host);
+      expect(generic).not.toContain("registrable domain");
+    });
+
+    it("is refused when only the wildcard matches, and served once the host is listed", () => {
+      const target = "https://sqs.us-east-1.amazonaws.com/q";
+      const beside = ["https://sts.amazonaws.com/**", ...authorizedUris];
+      expect(credentialUrlPolicy({ ...injected, target, authorizedUris: beside }).refuse).toBe(
+        "beyond_bound",
+      );
+      const listed = ["https://sqs.us-east-1.amazonaws.com/**", ...authorizedUris];
+      const served = credentialUrlPolicy({ ...injected, target, authorizedUris: listed });
+      expect(served.refuse).toBeNull();
+    });
+
+    it("is left alone when no credential is carried", () => {
+      const policy = credentialUrlPolicy({
+        ...allowAll,
+        target: "https://s3.amazonaws.com/bucket/key",
+        templates: ["https://s3.amazonaws.com/bucket/key"],
+        allowAllUris: false,
+        authorizedUris,
+      });
+      expect(policy.refuse).toBeNull();
+    });
   });
 
   it("leaves an unbounded allowlist alone when no credential is carried", () => {
@@ -142,7 +211,9 @@ describe("credentialUrlPolicy — an allowlist that authorizes nothing", () => {
   it("names the connection's URL when the declared list renders to nothing", () => {
     const policy = credentialUrlPolicy({ ...bare, declaredUris: ["{$credential.site_url}/**"] });
     expect(policy.refuse).toBe("unrendered");
-    expect(urlPolicyRefusalMessage("unrendered", "@x/wp")).toContain("does not render");
+    expect(urlPolicyRefusalMessage("unrendered", "@x/wp", "wp.example")).toContain(
+      "does not render",
+    );
   });
 
   it("refuses an unrendered list even when allow_all_uris is dropped for a credential", () => {
@@ -184,5 +255,22 @@ describe("templateHost — the target host a message echoes", () => {
   it("is <templated> when the templated host does not parse, <unparseable> otherwise", () => {
     expect(templateHost("https://{{host}}:{{port}}/x")).toBe("<templated>");
     expect(templateHost("not a url")).toBe("<unparseable>");
+  });
+});
+
+describe("credentialStaysWithinBound", () => {
+  it("keeps a credential inside the bound of a wildcard the write-time rule accepts", () => {
+    // An authority `*` spans dots: the entry is bounded at write time yet matches a host under
+    // a deeper public suffix, which the run-time half refuses to carry a credential to.
+    const pattern = "https://*.amazonaws.com/**";
+    const beyond = "https://x.s3.amazonaws.com/object";
+    expect(isHostUnboundedUriPattern(pattern)).toBe(false);
+    expect(matchesAuthorizedUriSpec(pattern, beyond)).toBe(true);
+    expect(credentialStaysWithinBound(beyond, [pattern])).toBe(false);
+    expect(credentialStaysWithinBound("https://sts.amazonaws.com/", [pattern])).toBe(true);
+  });
+
+  it("leaves a URL that does not parse to the allowlist gate", () => {
+    expect(credentialStaysWithinBound("not a url", ["https://*.amazonaws.com/**"])).toBe(true);
   });
 });

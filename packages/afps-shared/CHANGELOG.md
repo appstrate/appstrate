@@ -28,9 +28,36 @@ subpath (core raises its range to `^0.11.0`).
   and egress policy formerly in `@appstrate/afps-runtime`
   (`matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`,
   `compileEgressPolicy`, `EgressPolicy`). (#1763)
+- **`wildcardMatchStaysWithinBound(pattern, targetHost)`**
+  (`./authorized-uris`): the run-time half of the host bound. An authority
+  `*` spans dots, so an entry matches hosts below a deeper public suffix
+  (`https://*.amazonaws.com/**` matches `sqs.us-east-1.amazonaws.com`); this
+  is true only when the target's registrable domain (Public Suffix List,
+  ICANN and private sections) lies inside the literal labels right of the
+  entry's last wildcard. Always true for an entry whose host holds no
+  wildcard (a literal, a `{$credential.<field>}` host, the URL form); false
+  for an IP target. (#1656)
 - **`substituteCredentialRefs`** (`./credential-template`): each
   `{$credential.<field>}` to its value, a missing or inherited field empty,
   any other `{$…}` left as is. (#1763)
+
+### Changed
+
+- **Breaking: `isHostUnboundedUriPattern` judges a wildcard host with the
+  Public Suffix List** (ICANN and private sections): a wildcard is bounded
+  only when it sits strictly under a registrable domain (eTLD+1) written
+  literally in the entry, and a host one label below it keeps its registrable
+  domain there. An entry that was accepted because its wildcard stayed out of
+  the host's last two labels is now refused when those labels are a public
+  suffix (`https://*.co.uk/**`, `https://*.github.io/**`,
+  `https://*.vercel.app/**`) or when the list makes the children of the
+  suffix public (`https://*.kawasaki.jp/**`). `https://*.example.com/**`,
+  `https://*.example.co.uk/**` and `https://*.someone.github.io/**` stay
+  bounded. A literal host, a `{$credential.<field>}` host and the URL form are
+  judged as before, and so are IP literals and IPv4-shaped hosts. (#1656)
+- **New runtime dependency: `tldts`** (MIT), which embeds the Public Suffix
+  List. The package is no longer described as zero-dependency; it still has no
+  internal one. (#1656)
 
 ### Removed
 

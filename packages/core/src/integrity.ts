@@ -9,7 +9,7 @@ import {
 
 import { stripScope } from "./naming.ts";
 
-// SRI primitives moved to the shared zero-dependency `@appstrate/afps-shared`
+// SRI primitives moved to the shared zero-internal-dependency `@appstrate/afps-shared`
 // package so the platform and the standalone `afps` CLI share one
 // implementation. The `@appstrate/core/integrity` public surface is preserved:
 // `computeIntegrity`, `IntegrityCheckResult`, and `verifyArtifactIntegrity`

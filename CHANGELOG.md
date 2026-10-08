@@ -25,6 +25,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or an org default. The pre-flight also counts admin pins and org defaults
   naming an id left dangling by earlier deletions; they are not rewritten and
   fail with `pinned_connection_unavailable` until an admin edits them.
+- **Before the deploy, run
+  `scripts/migration/0037-verify-authorized-uri-host-bounds.ts`** with the
+  env loaded (it decrypts Shopify connections; it writes nothing) (#1656). It
+  lists the org integration drafts and published versions whose
+  `authorized_uris` the release no longer accepts (below), on any auth; the
+  `@appstrate/shopify` connections whose `shop_domain` is not a
+  `<store>.myshopify.com` host, by id, never a value, and exits 1 while one
+  remains. What each line means and how to fix it:
+  `scripts/migration/README.md`.
 
 ### Changed
 
@@ -39,6 +48,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the password is written, the request answers
   `500 credential_change_revocation_failed`. What is deliberately not ended
   (API keys, linked accounts, …) is listed in `SECURITY.md`.
+- **BREAKING (manifest authors): an `authorized_uris` wildcard is bounded
+  only under a literal registrable domain, judged with the Public Suffix
+  List** (ICANN and private sections) (#1656). On an auth whose credential
+  the proxy injects, a wildcard right under a public suffix is refused when
+  the manifest is written: `https://*.co.uk/**`, `https://*.github.io/**`,
+  and the likeliest cases in organization integrations,
+  `https://*.googleapis.com/**`, `https://*.supabase.co/**`,
+  `https://*.workers.dev/**`, `https://*.vercel.app/**`. List the hosts
+  literally instead (`https://sheets.googleapis.com/**`), or render a
+  per-connection host (`https://{$credential.host}/**`). At run time a call
+  carrying a credential under such an entry is refused (sidecar, CLI
+  resolver, platform proxy, MITM listener), as under `https://*.com/**`
+  already, and the target is judged too: a host `*` spans dots, so a
+  credential goes to a host a wildcard matched only when that host's own
+  registrable domain lies inside the literal part of the entry.
+  `https://*.amazonaws.com/**` still passes, but it no longer carries a
+  credential to any host of a whole region whose suffix the list names
+  (every `*.us-east-1.amazonaws.com`: `dynamodb.us-east-1…`, `ec2.us-east-1…`,
+  `sqs.us-east-1…`) nor to any S3 host (`s3.amazonaws.com`,
+  `bucket.s3.eu-west-1.amazonaws.com`); `sts.amazonaws.com` and
+  `iam.amazonaws.com` still receive it. Such a call is refused as
+  `credential_exfiltration_refused`, with a message naming the host to list, and
+  such a redirect hop is followed without the credential. The list bounds
+  only the suffixes their operators declare there: the same wildcard still
+  reaches customer-named endpoints AWS has not listed
+  (`search-<domain>.eu-west-1.es.amazonaws.com`), so list hosts literally
+  where that matters. `https://*.zendesk.com/**` and `https://*.example.co.uk/**` still pass, and
+  so does a literal host or a host rendered from the connection. A stored
+  manifest that passed keeps loading but is refused on its next write; no
+  stored version is grandfathered. The cookie jar is unchanged.
+- **`@appstrate/shopify` 1.0.3 allows only the connection's own store**:
+  `authorized_uris` is `https://{$credential.shop_domain}/**` instead of
+  `https://*.myshopify.com/**`, and `shop_domain` must be
+  `<store>.myshopify.com` (no scheme) when a connection is created or
+  updated. A connection holding anything else no longer reaches its store
+  until its owner fixes the field (`0037` lists them). (#1656)
+- **`@appstrate/github` 1.0.6 names its `githubusercontent.com` hosts**:
+  `raw`, `gist`, `objects`, `media` (Git LFS files), `release-assets` and
+  `pipelines.actions` instead of `https://*.githubusercontent.com/**`. A call
+  or redirect hop to another `githubusercontent.com` host (`avatars`, user
+  attachments, `results-receiver.actions`) is refused. Actions
+  logs and artifacts that GitHub serves from Azure blob storage
+  (`*.blob.core.windows.net` signed URLs) stay out of reach, as before:
+  that redirect hop was never in the list. (#1656)
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`

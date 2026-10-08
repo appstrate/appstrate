@@ -25,6 +25,7 @@ import {
 } from "@appstrate/afps-shared/authorized-uris";
 import { cookieScope, type CookieScope } from "./cookie-jar.ts";
 import { ENGINE_FAILURE_CODE } from "./api-call-failure-codes.ts";
+import { credentialStaysWithinBound } from "./credential-guard.ts";
 
 /** Deadline of one upstream `api_call` exchange, body included, on every path. */
 export const API_CALL_TIMEOUT_MS = 30_000;
@@ -238,6 +239,11 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
   const gated = !allowAllUris;
   const inAllowlist = (url: URL) =>
     authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
+  // The pre-send guard bounds the target; a credential follows a hop only inside the same bound.
+  const carriesCredential = opts.credentialHeaders.length > 0 || Object.keys(fields).length > 0;
+  const forwardCredentials = (url: URL) =>
+    inAllowlist(url) &&
+    (!carriesCredential || credentialStaysWithinBound(url.href, authorizedUris));
   const warn = (message: string, hop: number, host: string) =>
     opts.logger?.warn(message, { integrationId: opts.integrationId, hop, host });
   const redirectRefused = (kind: ApiCallRefusedError["kind"], host: string) =>
@@ -277,7 +283,7 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
                 warn("Redirect refused (not in authorizedUris)", hop, host);
                 throw redirectRefused("not_authorized", host);
               },
-              forwardCredentials: inAllowlist,
+              forwardCredentials,
             }
           : {}),
         allowHost: (hostname: string) =>

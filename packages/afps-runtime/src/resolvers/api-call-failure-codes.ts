@@ -18,6 +18,7 @@ export const URL_POLICY_REFUSAL_CODE = {
   unrendered: "unauthorized_target",
   unauthorized: "unauthorized_target",
   exfiltration: "credential_exfiltration_refused",
+  beyond_bound: "credential_exfiltration_refused",
 } as const satisfies Record<UrlPolicyRefusal, ApiCallFailureCode>;
 
 /** `fetchApiCall`'s failure kinds: past preparation, an invalid header value is the credential's. */

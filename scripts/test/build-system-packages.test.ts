@@ -6,12 +6,17 @@
  *
  * Driven from synthetic manifests, not the repo's sources: the gate must hold
  * whatever version the tree happens to be at. A guard that stops comparing
- * passes everything, so each rejection is paired with an accepted case.
+ * passes everything, so each rejection is paired with an accepted case. The
+ * last block pins tenant hosts the real sources' wildcards must keep reaching.
  */
 
 import { describe, it, expect } from "bun:test";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { findSchemaVersionDrift } from "../build-system-packages.ts";
+import {
+  matchesAuthorizedUriSpec,
+  wildcardMatchStaysWithinBound,
+} from "@appstrate/afps-shared/authorized-uris";
 
 const manifest = (schemaVersion?: unknown) => ({
   name: "@appstrate/zoom",
@@ -56,5 +61,40 @@ describe("findSchemaVersionDrift", () => {
       { dirName: "integration-e-1.0.0", declared: undefined },
       { dirName: "integration-f-1.0.0", declared: undefined },
     ]);
+  });
+});
+
+type Source = { auths?: Record<string, { authorized_uris?: string[] }> };
+const SOURCES = `${import.meta.dir}/../system-packages`;
+const wildcards: string[] = [];
+for (const path of new Bun.Glob("*/manifest.json").scanSync({ cwd: SOURCES })) {
+  const manifest = (await Bun.file(`${SOURCES}/${path}`).json()) as Source;
+  for (const auth of Object.values(manifest.auths ?? {})) {
+    wildcards.push(...(auth.authorized_uris ?? []).filter((uri) => uri.includes("*.")));
+  }
+}
+
+describe("system package sources — tenant hosts under their wildcards", () => {
+  // A failure here means the Public Suffix List moved under a system integration.
+  it.each([
+    "https://acme.zendesk.com/api/v2/tickets",
+    "https://acme.my.salesforce.com/services/data/v61.0",
+    "https://x.lightning.force.com/services/data",
+    "https://org.crm4.dynamics.com/api/data/v9.2",
+    "https://org.api.crm4.dynamics.com/api/data/v9.2",
+    "https://us1.api.mailchimp.com/3.0/lists",
+    "https://acme.freshdesk.com/api/v2/tickets",
+    "https://acme.myfreshworks.com/crm/sales/api/contacts",
+    "https://acme.freshsales.io/api/contacts",
+    "https://acme.teamwork.com/projects.json",
+    "https://acme.pipedrive.com/api/v1/deals",
+    "https://app-eu.wrike.com/api/v4/tasks",
+  ])("keeps the credential of %s", (url) => {
+    const host = new URL(url).hostname;
+    expect(
+      wildcards.some(
+        (uri) => matchesAuthorizedUriSpec(uri, url) && wildcardMatchStaysWithinBound(uri, host),
+      ),
+    ).toBe(true);
   });
 });

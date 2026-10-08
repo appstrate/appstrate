@@ -37,6 +37,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the type `EgressPolicy` are no longer exported from `./resolvers`:
   import them from `@appstrate/afps-shared/authorized-uris`.
 
+### Changed — a credential stays inside a wildcard's registrable domain (#1656, BREAKING)
+
+- `credentialUrlPolicy` takes the call's rendered `target` (required) and
+  refuses with the new `UrlPolicyRefusal` `beyond_bound` a call carrying a
+  credential whose target the `authorized_uris` entries match only through a
+  host wildcard reaching past the registrable domain written under it
+  (`https://*.amazonaws.com/**` → `sqs.us-east-1.amazonaws.com`).
+  `URL_POLICY_REFUSAL_CODE` maps it to `credential_exfiltration_refused`, as
+  `exfiltration`: no new code on any path. A
+  wildcard entry under a public suffix is refused whatever the target
+  (`isHostUnboundedUriPattern`).
+- `urlPolicyRefusalMessage` takes a third argument, the target host as its
+  template names it (`templateHost`), which the `beyond_bound` message names
+  as the host to list (`beyondBoundReason`, shared with the MITM listener).
+- `credentialStaysWithinBound(url, authorizedUris)` (`./resolvers`): that
+  per-target test, shared with the sidecar MITM listener. `fetchApiCall`
+  applies it on each redirect hop of a call carrying a credential: such a
+  hop is still followed when the allowlist matches it, without the
+  credential headers, Cookie or body.
+
 ### Fixed — a sticky cookie expires (#1778)
 
 - `CookieScope.capture` keeps each cookie's expiry: `Max-Age` (capped at
