@@ -358,7 +358,7 @@ export function CataloguePreview({
           <Inbox className="h-4 w-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <AlertTitle className="mb-0">
+              <AlertTitle>
                 {offer.offeredBy
                   ? t("catalogue.sheet.offerBy", { name: offer.offeredBy, space: offer.name })
                   : t("catalogue.sheet.offer", { space: offer.name })}

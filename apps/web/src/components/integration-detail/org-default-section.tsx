@@ -83,7 +83,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
       {unavailableIds.length > 0 && (
         <Alert variant="warning" data-testid="org-default-unavailable-warning">
           <AlertTriangle className="size-4" />
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+          <AlertDescription className="flex flex-wrap items-start justify-between gap-3">
             <span>
               {t("integration.admin.orgDefault.unavailableWarning", {
                 count: unavailableIds.length,
@@ -92,6 +92,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
             <Button
               size="sm"
               variant="outline"
+              className="-my-1.5"
               disabled={pendingValue !== null}
               onClick={() => void save(connectionIds, enforce)}
               data-testid="org-default-drop-unavailable"

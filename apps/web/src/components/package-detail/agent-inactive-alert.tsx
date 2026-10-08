@@ -43,11 +43,14 @@ export function AgentInactiveAlert({ packageId }: { packageId: string }) {
   return (
     <Alert variant="destructive" className="mb-4">
       <AlertTriangle className="h-4 w-4" />
-      <div className="flex items-center justify-between gap-3">
-        <AlertTitle className="mb-0">{t("detail.deactivatedHere")}</AlertTitle>
+      {/* The button centres on the title's line (-my-1.5: 32px on a 20px line),
+          which is where the alert's icon sits too. */}
+      <div className="flex items-start justify-between gap-3">
+        <AlertTitle>{t("detail.deactivatedHere")}</AlertTitle>
         {mayActivate && currentSpaceId && (
           <Button
             size="sm"
+            className="-my-1.5"
             disabled={setActive.isPending}
             onClick={() => setActive.mutate({ spaceId: currentSpaceId, packageId, active: true })}
           >
