@@ -41,7 +41,8 @@ import {
   removeScheduleJobs,
 } from "../../../src/services/scheduler.ts";
 import { deleteIntegrationConnection } from "../../../src/services/integration-connections.ts";
-import { leaveOrganization } from "../../../src/services/organizations.ts";
+import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import { leaveOrganization, updateMemberRole } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
@@ -1137,6 +1138,49 @@ describeRequiresRedis("scheduler service", () => {
       }
     });
   });
+
+  describe("an unshare and a colleague's schedule job", () => {
+    it("a demotion that loses the owner the space removes the job of a colleague's schedule", async () => {
+      const integrationId = `@${orgSlug}/svc`;
+      await seedPackage({ orgId, id: integrationId, type: "integration", source: "local" });
+      const admin = await createTestUser();
+      await addOrgMember(orgId, admin.id, "admin");
+      // No member row: an admin reaches a closed space by org role alone.
+      const closed = await seedSpace({ orgId, visibility: "closed" });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-admin",
+          spaceId: closed.id,
+          userId: admin.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          sharedWithOrg: true,
+          label: "admin's",
+        })
+        .returning({ id: integrationConnections.id });
+      const schedule = await createSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
+        cronExpression: "0 * * * *",
+        connectionOverrides: { [integrationId]: [conn!.id] },
+      });
+      const queue = new Queue("schedules", {
+        connection: getRedisQueueConnection() as unknown as ConnectionOptions,
+      });
+      try {
+        expect(await queue.getJobScheduler(schedule.id)).toBeDefined();
+
+        await updateMemberRole(orgId, admin.id, "member", { userId, firstPartySession: true });
+
+        const [after] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+        expect(after).toMatchObject({ enabled: false, disabledReason: "connection_unshared" });
+        expect(await queue.getJobScheduler(schedule.id)).toBeUndefined();
+      } finally {
+        await queue.close();
+      }
+    });
+  });
 });
 
 // A plain `describe`: the compare-and-set is SQL on `updated_at`, no queue semantics, so every tier
@@ -1246,6 +1290,41 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     await expect(
       updateSchedule(scope, created, { name: "renamed" }, null, undefined),
     ).rejects.toMatchObject(refusedAsStale);
+  });
+
+  it("a colleague deleting or unsharing a connection the schedule names makes the read stale", async () => {
+    const member = await memberContext(ctx, "member");
+    const integrationId = "@casorg/svc";
+    await seedPackage({ orgId: ctx.orgId, id: integrationId, type: "integration" });
+    const [deleted, unshared] = await db
+      .insert(integrationConnections)
+      .values(
+        ["deleted", "unshared"].map((label) => ({
+          integrationId,
+          authKey: "primary",
+          accountId: label,
+          spaceId: ctx.defaultSpaceId,
+          userId: member.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          sharedWithOrg: true,
+          label,
+        })),
+      )
+      .returning({ id: integrationConnections.id });
+    const reads = [
+      await read(actor, { [integrationId]: [deleted!.id] }),
+      await read(actor, { [integrationId]: [unshared!.id] }),
+    ];
+
+    await deleteIntegrationConnection(scope, deleted!.id, { type: "user", id: member.user.id });
+    await updateConnectionMetadata(unshared!.id, { sharedWithOrg: false });
+
+    for (const created of reads) {
+      await expect(
+        updateSchedule(scope, created, { name: "renamed" }, null, undefined),
+      ).rejects.toMatchObject(refusedAsStale);
+    }
   });
 
   it("the actor leaving the organization, which disables the schedule, makes the read stale", async () => {

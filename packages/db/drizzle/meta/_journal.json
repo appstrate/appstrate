@@ -568,6 +568,13 @@
       "when": 1791500000000,
       "tag": "0080_integration_connections_end_user_not_shared",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1791500060000,
+      "tag": "0081_schedule_disabled_reason_connection_unshared",
+      "breakpoints": true
     }
   ]
 }

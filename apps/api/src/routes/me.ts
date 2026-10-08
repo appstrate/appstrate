@@ -49,6 +49,7 @@ import {
   listMeConnections,
   type MeConnectionAuthority,
   getConnectionDeleteImpact,
+  noConnectionDeleteImpact,
 } from "../services/me-connections.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
@@ -210,15 +211,16 @@ router.get("/connections", requireCeiling("integrations", "read"), async (c) => 
 
 /**
  * `GET /api/me/connections/:connectionId/delete-impact` — the caller's own member pins and
- * schedules the delete would rewrite. Empty for a non-UUID, unknown or not-owned id, or a connection
- * outside a bound credential's org (and space); a pinned connection is listed (its delete is a 409).
+ * schedules the delete would rewrite, and how many schedules of other actors it disables. Empty
+ * for a non-UUID, unknown or not-owned id, or a connection outside a bound credential's org (and
+ * space); a pinned connection is listed (its delete is a 409).
  */
 router.get(
   "/connections/:connectionId/delete-impact",
   requireCeiling("integrations", "read"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    if (!z.uuid().safeParse(connectionId).success) return c.json({ pins: [], schedules: [] });
+    if (!z.uuid().safeParse(connectionId).success) return c.json(noConnectionDeleteImpact());
     return c.json(
       await getConnectionDeleteImpact(
         getActor(c),

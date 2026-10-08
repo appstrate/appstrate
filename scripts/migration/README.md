@@ -937,7 +937,7 @@ shared connection whose owner no longer reaches its space, with
 `unshareConnectionsOfOwnersWithoutAccess` — the predicate the release applies at
 every live access loss. An admin pin or org default naming one is left as it is
 and fails its runs with `pinned_connection_unavailable`, as after a live loss.
-It touches no column `0077` changes.
+It touches no column `0077` changes. Run it from the `v1.0.0-beta.65` checkout.
 
 `set -a && . ./.env && set +a && bun scripts/migration/0033-unshare-space-access-loss.ts`
 is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL` (the

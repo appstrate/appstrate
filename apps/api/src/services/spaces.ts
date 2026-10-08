@@ -24,7 +24,7 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
-import { unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
+import { nothingUnshared, unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -233,7 +233,8 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4). Returns the connections a close unshared, for the audit.
+ * (RBAC spec §4.4). Returns the connections a close unshared, for the audit, and the schedules
+ * that disabled, whose jobs the caller removes.
  */
 export async function updateSpace(
   orgId: string,
@@ -266,7 +267,7 @@ export async function updateSpace(
       );
     }
   }
-  const { space, unsharedConnectionIds } = await db.transaction(async (tx) => {
+  const { space, unshared } = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(spaces)
       .set({
@@ -292,11 +293,17 @@ export async function updateSpace(
     const unshared =
       updated && changesAccess
         ? await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId, spaceId })
-        : [];
-    return { space: updated, unsharedConnectionIds: unshared };
+        : nothingUnshared();
+    return { space: updated, unshared };
   });
 
-  if (space) return { space, unsharedConnectionIds };
+  if (space) {
+    return {
+      space,
+      unsharedConnectionIds: unshared.connectionIds,
+      disabledScheduleIds: unshared.disabledScheduleIds,
+    };
+  }
   if (changesAccess) {
     await getSpace(orgId, spaceId); // 404 when it is gone rather than changed
     throw conflict(

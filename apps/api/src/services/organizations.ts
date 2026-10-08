@@ -525,16 +525,22 @@ async function removeMemberInTx(
 
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
+  // The member's own armed schedules are disabled, not deleted (org history): they would keep
+  // firing under the departed identity, whose user row survives (CRIT-13).
+  const departedSchedules = and(
+    eq(schedules.orgId, orgId),
+    eq(schedules.userId, userId),
+    eq(schedules.enabled, true),
+  );
   // No space lock needed, unlike a role change: with the membership gone the owner reaches no
   // space whatever a concurrent close leaves, so this unshares every shared connection. A close
-  // unsharing the same rows is ordered against this by the row locks the unshare takes.
-  const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
-    orgId,
-    userId,
-  });
-
-  // Disabled, not deleted (org history): they would keep firing under the
-  // departed identity, whose user row survives (CRIT-13).
+  // unsharing the same rows is ordered against this by the row locks the unshare takes, which
+  // cover the member's schedules too, in the same id-ordered statement.
+  const unshared = await unshareConnectionsOfOwnersWithoutAccess(
+    tx,
+    { orgId, userId },
+    departedSchedules,
+  );
   const disabled = await tx
     .update(schedules)
     .set({
@@ -543,16 +549,14 @@ async function removeMemberInTx(
       nextRunAt: null,
       updatedAt: new Date(),
     })
-    .where(
-      and(eq(schedules.orgId, orgId), eq(schedules.userId, userId), eq(schedules.enabled, true)),
-    )
+    .where(departedSchedules)
     .returning({ id: schedules.id });
 
   return {
     orphanedSpaceIds,
     revokedApiKeyIds: revokedKeys.map((row) => row.id),
-    unsharedConnectionIds,
-    disabledScheduleIds: disabled.map((row) => row.id),
+    unsharedConnectionIds: unshared.connectionIds,
+    disabledScheduleIds: [...unshared.disabledScheduleIds, ...disabled.map((row) => row.id)],
   };
 }
 
@@ -572,7 +576,7 @@ async function exitOrg(
     return removeMemberInTx(tx, orgId, userId);
   });
 
-  // Outside the transaction, best-effort; the scheduler revalidates the actor at fire time.
+  // Outside the transaction, best-effort: a surviving job's fire finds its row disabled.
   await removeScheduleJobs(disabledScheduleIds);
   await emitEvent("onOrgMemberRemove", orgId, userId);
   return result;
@@ -623,7 +627,7 @@ export async function updateMemberRole(
   revoked: RevokedSpaceAssignment[];
   unsharedConnectionIds: string[];
 }> {
-  return db.transaction(async (tx) => {
+  const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
     await lockOrgOwnership(tx, orgId);
     const target = await lockOrgMember(tx, orgId, targetUserId);
     if (!target) throw notFound("Member not found");
@@ -655,12 +659,19 @@ export async function updateMemberRole(
     // A demotion drops the implicit reach of the org role (admin → member,
     // member → guest on open spaces). Member row (above), then the spaces: see `lockSpaceRow`.
     await lockSpacesOfSharedConnections(tx, orgId, targetUserId);
-    const unsharedConnectionIds = await unshareConnectionsOfOwnersWithoutAccess(tx, {
+    const unshared = await unshareConnectionsOfOwnersWithoutAccess(tx, {
       orgId,
       userId: targetUserId,
     });
-    return { previousRole: target.role, revoked, unsharedConnectionIds };
+    return {
+      previousRole: target.role,
+      revoked,
+      unsharedConnectionIds: unshared.connectionIds,
+      disabledScheduleIds: unshared.disabledScheduleIds,
+    };
   });
+  await removeScheduleJobs(disabledScheduleIds);
+  return result;
 }
 
 /** An expected refusal: no `cause`, so the error handler writes no error line. */

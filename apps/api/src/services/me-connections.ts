@@ -306,14 +306,21 @@ interface OwnScheduleHoldingConnection {
 export interface ConnectionDeleteImpact {
   pins: OwnPinHoldingConnection[];
   schedules: OwnScheduleHoldingConnection[];
+  /** How many enabled schedules of other actors name the connection: the delete disables them. */
+  other_schedules_disabled_count: number;
+}
+
+/** The impact of a delete that rewrites nothing the caller may see; a fresh value each call. */
+export function noConnectionDeleteImpact(): ConnectionDeleteImpact {
+  return { pins: [], schedules: [], other_schedules_disabled_count: 0 };
 }
 
 /**
  * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
- * and per (schedule, integration) naming `connectionId`. Empty for an unknown connection, one the
- * caller does not own, or one outside a bound credential's org (and space); a bound credential sees
- * only the owner's schedules of its org (and space), though the delete rewrites the others too. A
- * pinned connection is listed: its delete is a 409.
+ * and per (schedule, integration) naming `connectionId`, plus the number of other actors' schedules
+ * it disables. Empty for an unknown connection, one the caller does not own, or one outside a bound
+ * credential's org (and space); a bound credential sees only the schedules of its org (and space),
+ * though the delete rewrites the others too. A pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
   actor: Actor,
@@ -332,7 +339,7 @@ export async function getConnectionDeleteImpact(
       ),
     )
     .limit(1);
-  if (!row) return { pins: [], schedules: [] };
+  if (!row) return noConnectionDeleteImpact();
   // Member pins need no such filter: a pin write requires its connections in the pin's own space.
   const plan = await planConnectionForget(
     db,
@@ -368,5 +375,6 @@ export async function getConnectionDeleteImpact(
         disables: schedule.disables,
       })),
     ),
+    other_schedules_disabled_count: plan.foreignScheduleIds.length,
   };
 }

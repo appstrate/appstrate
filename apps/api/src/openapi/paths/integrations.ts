@@ -726,7 +726,8 @@ export const integrationsPaths = {
         "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) " +
         "and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration " +
         "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
-        "with `pinned_connection_unavailable`. " +
+        "with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted " +
+        "connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. " +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1209,6 +1210,11 @@ export const integrationsPaths = {
         "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
         "or an org default (enforced or soft) names the connection. A member pin does not block it: " +
         "that member's next run fails with `pinned_connection_unavailable` until they pick again. " +
+        "Unsharing a shared connection disables, in the same transaction, every enabled schedule of " +
+        "another actor than its owner whose `connection_overrides` name it " +
+        "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the " +
+        "connection stays unreachable, re-enabling it requires a new choice. The owner's own " +
+        "schedules are untouched. " +
         "A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
         "with 409 `connection_label_taken`.",

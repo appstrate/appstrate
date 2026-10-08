@@ -1078,6 +1078,8 @@ export async function dropLockedFieldsFromSchedules(
         extra: [eq(schedules.packageId, packageId)],
       }),
     )
+    // Id order, like every writer locking several schedules (`schedules-naming-connection.ts`).
+    .orderBy(asc(schedules.id))
     .for("update");
 
   for (const row of rows) {

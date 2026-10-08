@@ -66,8 +66,8 @@ export function useDisconnectIntegrationConnection() {
       await client.DELETE("/api/me/connections/{connectionId}", vars);
     },
     onSuccess: () => {
-      // The caller's own schedule overrides drop the connection; a colleague's keep
-      // its id and show it unavailable in their picker.
+      // The caller's own schedule overrides drop the connection; a colleague's schedule
+      // naming it is disabled, its overrides kept.
       invalidateSchedules(qc);
       // The connection list, the agent page's reuse hints and accessible-connection lists.
       void invalidateIntegrationQueries(qc);
@@ -112,8 +112,10 @@ export function useUpdateMeIntegrationConnection() {
       );
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, { sharedWithOrg }) => {
       void invalidateIntegrationQueries(qc);
+      // Unsharing disables other people's schedules naming the connection.
+      if (sharedWithOrg === false) invalidateSchedules(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
     },
   });

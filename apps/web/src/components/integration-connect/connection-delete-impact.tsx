@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What a delete rewrites among the caller's own member pins and schedule overrides, said
- * before the user confirms. The confirmation owns the query and keeps its button disabled
- * while it is in flight.
+ * What a delete rewrites among the caller's own member pins and schedule overrides, and how many
+ * schedules of other people it disables, said before the user confirms. The confirmation owns the
+ * query and keeps its button disabled while it is in flight.
  */
 
 import { useTranslation } from "react-i18next";
@@ -39,7 +39,8 @@ export function ConnectionDeleteImpact({
       </div>
     );
   }
-  if (data.pins.length === 0 && data.schedules.length === 0) return null;
+  const othersDisabled = data.other_schedules_disabled_count;
+  if (data.pins.length === 0 && data.schedules.length === 0 && othersDisabled === 0) return null;
 
   return (
     <div
@@ -87,6 +88,9 @@ export function ConnectionDeleteImpact({
             ))}
           </ul>
         </div>
+      )}
+      {othersDisabled > 0 && (
+        <p>{t("connections.scheduleImpact.othersDisabled", { count: othersDisabled })}</p>
       )}
     </div>
   );

@@ -360,8 +360,11 @@ export const mePaths = {
         "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
-        "re-enables it. One schedule entry per (schedule, integration). Other members' pins and schedules, " +
-        "admin pins and org defaults are not listed: the delete leaves them untouched. The lists are " +
+        "re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules " +
+        "naming the connection are disabled by the delete with their overrides kept " +
+        "(`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, " +
+        "never listed. Other members' pins, admin pins and org defaults are not listed: the delete " +
+        "leaves them untouched. The lists are " +
         "empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A " +
         "delegated or end-user credential sees its bound organization (and space) only: a connection " +
         "outside it answers empty lists, and only the owner's schedules inside it are listed, though " +
@@ -378,8 +381,14 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["pins", "schedules"],
+                required: ["pins", "schedules", "other_schedules_disabled_count"],
                 properties: {
+                  other_schedules_disabled_count: {
+                    type: "integer",
+                    minimum: 0,
+                    description:
+                      "How many enabled schedules of actors other than the caller name the connection: the delete disables them (`connection_deleted`) and keeps their overrides. A count only — their names and actors are not the caller's to read. A bound credential counts those of its organization (and space) only. 0 whenever the lists are empty for an unknown, unowned or out-of-scope connection.",
+                  },
                   pins: {
                     type: "array",
                     items: {
@@ -461,9 +470,13 @@ export const mePaths = {
         "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
-        "Another member's pins and schedules keep the id, and their next run fails " +
-        "(`pinned_connection_unavailable`, `override_connection_unavailable`) until they pick again — " +
-        "a set never shrinks behind its owner. " +
+        "Another member's pins keep the id, and their next run fails " +
+        "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
+        "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
+        "transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: " +
+        "while the connection stays unreachable, re-enabling one requires a new choice. " +
+        "Delete-impact counts them " +
+        "(`other_schedules_disabled_count`). " +
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +

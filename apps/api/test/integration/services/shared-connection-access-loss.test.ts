@@ -17,12 +17,24 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedPackage,
+  seedSchedule,
+  seedSpace,
+  seedSpaceMember,
+} from "../../helpers/seed.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationPins,
+  runs,
+  schedules,
+  spaces,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   leaveOrganization,
@@ -33,6 +45,7 @@ import {
 import { removeSpaceMember } from "../../../src/services/space-members.ts";
 import { updateSpace } from "../../../src/services/spaces.ts";
 import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { presetPermissions } from "../../../src/lib/permissions.ts";
@@ -260,6 +273,133 @@ describe("unsharing on access loss", () => {
     // Control: the same write where the owner still reaches the space.
     await updateConnectionMetadata(kept, { sharedWithOrg: true });
     expect(await stillShared([lost, kept])).toEqual([kept]);
+  });
+
+  // Never refused and never shrunk: the colleague re-picks before re-enabling.
+  describe("a colleague's schedule naming the connection", () => {
+    beforeEach(async () => {
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest,
+      });
+    });
+
+    function scheduleOf(userId: string, connectionId: string, spaceId = ctx.defaultSpaceId) {
+      return seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId,
+        userId,
+        nextRunAt: new Date(Date.now() + 3_600_000),
+        connectionOverrides: { [INTEGRATION]: [connectionId] },
+      });
+    }
+
+    async function rowOf(scheduleId: string) {
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
+      return row!;
+    }
+
+    const unsharedFor = (connectionId: string) => ({
+      enabled: false,
+      disabledReason: "connection_unshared",
+      nextRunAt: null,
+      connectionOverrides: { [INTEGRATION]: [connectionId] },
+    });
+
+    it("is disabled when the owner unshares, its pin and the owner's own schedule untouched", async () => {
+      const member = await addMember();
+      const conn = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      const colleagues = await scheduleOf(ctx.user.id, conn);
+      const owners = await scheduleOf(member, conn);
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: ctx.user.id,
+        connectionIds: [conn],
+      });
+
+      const { disabledScheduleIds } = await updateConnectionMetadata(conn, {
+        sharedWithOrg: false,
+      });
+
+      expect(disabledScheduleIds).toEqual([colleagues.id]);
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+      expect(await rowOf(owners.id)).toEqual(owners);
+      const pins = await db
+        .select({ connectionIds: integrationPins.connectionIds })
+        .from(integrationPins);
+      expect(pins).toEqual([{ connectionIds: [conn] }]);
+      // Its fire is skipped: no failed run.
+      expect(await triggerScheduledRun(colleagues.id)).toBeNull();
+      expect(await db.select({ id: runs.id }).from(runs)).toEqual([]);
+    });
+
+    it("is disabled when the owner leaves the org, whose own schedule is the exit's", async () => {
+      const member = await addMember();
+      const conn = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      const colleagues = await scheduleOf(ctx.user.id, conn);
+      const owners = await scheduleOf(member, conn);
+
+      await removeMember(ctx.orgId, member, asOwner());
+
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+      expect(await rowOf(owners.id)).toMatchObject({
+        enabled: false,
+        disabledReason: "actor_left_org",
+      });
+    });
+
+    it("is disabled, and reported for its job, when the owner is removed from the space", async () => {
+      const member = await addMember();
+      const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+      await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
+      const conn = await seedConnection({ spaceId: closed.id, userId: member });
+      const colleagues = await scheduleOf(ctx.user.id, conn, closed.id);
+
+      const { disabledScheduleIds } = await removeSpaceMember({
+        orgId: ctx.orgId,
+        space: closed,
+        userId: member,
+        actorPermissions: presetPermissions("admin"),
+      });
+
+      expect(disabledScheduleIds).toEqual([colleagues.id]);
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    it("is disabled, and reported for its job, when the owner's open space closes", async () => {
+      const implicit = await addMember();
+      const space = await seedSpace({ orgId: ctx.orgId, visibility: "open" });
+      const conn = await seedConnection({ spaceId: space.id, userId: implicit });
+      const colleagues = await scheduleOf(ctx.user.id, conn, space.id);
+
+      const { disabledScheduleIds } = await updateSpace(
+        ctx.orgId,
+        space.id,
+        { visibility: "closed" },
+        space,
+      );
+
+      expect(disabledScheduleIds).toEqual([colleagues.id]);
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    it("is disabled when the owner's demotion loses the space", async () => {
+      const admin = await addMember("admin");
+      // No member row: an admin reaches a closed space by org role alone.
+      const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+      const conn = await seedConnection({ spaceId: closed.id, userId: admin });
+      const colleagues = await scheduleOf(ctx.user.id, conn, closed.id);
+
+      await updateMemberRole(ctx.orgId, admin, "member", asOwner());
+
+      expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
   });
 
   it("an admin pin on a departed member's connection fails loudly at resolution", async () => {
