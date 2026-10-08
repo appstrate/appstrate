@@ -16,6 +16,7 @@ import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.
 import { ApiError } from "../lib/api.ts";
 import {
   ActionableError,
+  pinMissing,
   profileMissing,
   remedyLine,
   switchFix,
@@ -302,8 +303,8 @@ async function updateNotice(notices: Notices, pluginOk: boolean, sink: LineSink)
 /** What still separates this profile from a syncable space, if anything. */
 function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
   if (!profile) return profileMissing(profileName);
-  if (!profile.orgId) return switchFix("No organization pinned", "org", profileName);
-  if (!profile.spaceId) return switchFix("No space pinned", "space", profileName);
+  if (!profile.orgId) return pinMissing("org", profileName);
+  if (!profile.spaceId) return pinMissing("space", profileName);
   return null;
 }
 

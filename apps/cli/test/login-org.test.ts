@@ -50,7 +50,7 @@ let fetchCalls: FetchCall[];
 
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { credentialsLockHeld } from "./helpers/credentials-lock.ts";
+import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 
 /**
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
@@ -295,6 +295,50 @@ describe("login credentials write", () => {
 
       expect(await loadTokens("default")).toBeNull();
     });
+  });
+});
+
+describe("login under a held credentials lock", () => {
+  it("fails with the busy lock and saves nothing", async () => {
+    // The clock jumps only once the device code is redeemed: started earlier,
+    // it would expire the device code before the poll.
+    const clock: { stop?: () => void } = {};
+    installDefaultResponders({
+      cliToken: () => {
+        clock.stop ??= jumpClock();
+        return Response.json({
+          access_token: makeJwt(),
+          refresh_token: "rt-approved",
+          token_type: "Bearer",
+          expires_in: 900,
+          refresh_expires_in: 30 * 24 * 60 * 60,
+          scope: "cli",
+        });
+      },
+    });
+    const release = await holdCredentialsLock();
+
+    const { io, stdout } = createMemoryIO();
+    let error: unknown;
+    try {
+      error = await loginCommand(
+        { profile: "default", instance: "https://app.example.com", noOrg: true },
+        io,
+      ).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    } finally {
+      clock.stop?.();
+      await release();
+    }
+
+    expect(error).toBeInstanceOf(ExitError);
+    expect((error as ExitError).code).toBe(1);
+    // `exitWithError` renders through `io.cancel`, which the sink records with stdout.
+    expect(stdout()).toContain("Another appstrate credential update is running");
+    expect(await loadTokens("default")).toBeNull();
+    expect((await readConfig()).profiles.default).toBeUndefined();
   });
 });
 

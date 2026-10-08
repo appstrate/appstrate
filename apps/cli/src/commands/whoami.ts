@@ -16,12 +16,11 @@
  * the Bearer JWT issued by `/api/auth/cli/token`.
  */
 
-import { readConfig, resolveProfileName } from "../lib/config.ts";
+import { readConfig, requireLoggedIn, resolveProfileName } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { profileMissing, remedyLine } from "../lib/remedy.ts";
 
 interface WhoamiOptions {
   profile?: string;
@@ -50,10 +49,7 @@ export async function whoamiCommand(
   const profileName = resolveProfileName(opts.profile, config);
   const profile = config.profiles[profileName];
 
-  if (!profile) {
-    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
-    io.exit(1);
-  }
+  requireLoggedIn(profileName, profile, io);
 
   try {
     const me = await apiFetch<ProfileResponse>(profileName, "/api/profile");

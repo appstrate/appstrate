@@ -360,11 +360,10 @@ export async function refreshCliTokens(
  * `appstrate logout` before local credential cleanup.
  *
  * Contract: throws on a network error or any non-2xx response. Callers that
- * want best-effort revocation (e.g.
- * `logout.ts`) MUST wrap the call in try/catch and proceed with local
- * cleanup on failure — revocation state is advisory from the client's
- * perspective, but surfacing the error at the call site lets the
- * command render a clear warning rather than silently skipping it.
+ * want best-effort revocation (e.g. `logout.ts`) MUST wrap the call in
+ * try/catch and proceed with local cleanup on failure — revocation state is
+ * advisory from the client's perspective, but surfacing the error at the call
+ * site lets the command render a clear warning rather than silently skipping it.
  *
  * The 200 body (`{ revoked: boolean }`) is intentionally ignored —
  * `revoked: false` just means the token was unknown or client-mismatched

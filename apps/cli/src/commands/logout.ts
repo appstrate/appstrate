@@ -17,6 +17,7 @@ import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
 import { withCredentialsLock } from "../lib/api.ts";
+import { FileLockBusyError } from "../lib/file-lock.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
@@ -52,6 +53,10 @@ export async function logoutCommand(
   const clearCredentials = async (): Promise<void> => {
     try {
       await withCredentialsLock(() => deleteTokens(profileName));
+    } catch (err) {
+      // A stuck holder must not keep the user signed in.
+      if (!(err instanceof FileLockBusyError)) throw err;
+      await deleteTokens(profileName);
     } finally {
       await deleteProfile(profileName);
       credentialsCleared = true;

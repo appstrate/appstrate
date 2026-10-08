@@ -19,12 +19,12 @@
  * identity check.
  */
 
-import { readConfig, resolveProfileName } from "../lib/config.ts";
+import { readConfig, requireLoggedIn, resolveProfileName } from "../lib/config.ts";
 import { loadTokens } from "../lib/keyring.ts";
 import { decodeJwtPayload } from "../lib/jwt-identity.ts";
 import { formatError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { loginFix, profileMissing, remedyLine } from "../lib/remedy.ts";
+import { loginFix, remedyLine } from "../lib/remedy.ts";
 
 interface TokenOptions {
   profile?: string;
@@ -41,11 +41,7 @@ export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_I
   const profileName = resolveProfileName(opts.profile, config);
   const profile = config.profiles[profileName];
 
-  if (!profile) {
-    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
-    io.exit(1);
-    return;
-  }
+  requireLoggedIn(profileName, profile, io);
 
   try {
     const stored = await loadTokens(profileName);

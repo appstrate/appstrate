@@ -29,6 +29,8 @@ import writeFileAtomic from "write-file-atomic";
 import { Mutex } from "async-mutex";
 import { getConfigDir } from "./config.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { logoutRetry } from "./remedy.ts";
+import { shellArg } from "./shell.ts";
 
 /**
  * Opt-in escape hatch for environments where the keyring daemon is
@@ -301,12 +303,12 @@ export async function deleteTokens(profile: string): Promise<void> {
       `  the keyring until the store is reachable again.\n\n` +
       `  Fixes:\n` +
       KEYRING_UNLOCK_HINT +
-      `\n      Then re-run \`appstrate logout --profile ${profile}\`.\n` +
+      `\n      Then: ${logoutRetry(profile)}\n` +
       `    • Or delete the "${SERVICE_NAME}" entry for "${profile}" with your\n` +
       `      platform's credential manager.\n` +
       `    • Or accept that the keyring copy survives until the store is\n` +
       `      reachable again:\n` +
-      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate logout --profile ${profile}`,
+      `        APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1 appstrate logout --profile ${shellArg(profile)}`,
   );
 }
 

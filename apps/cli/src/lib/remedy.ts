@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The commands the CLI tells the user, or Claude, to run: none prompts, since Claude has no TTY. */
+/** Commands the CLI tells the user, or Claude, to run: none prompts, since Claude has no TTY. */
 
 import { shellArg } from "./shell.ts";
 
@@ -50,6 +50,10 @@ export function switchFix(
   profileName: string,
 ): Actionable {
   return { problem, remedy: `${PICKERS[pin]} --profile ${shellArg(profileName)}` };
+}
+
+export function pinMissing(pin: keyof typeof PICKERS, profileName: string): Actionable {
+  return switchFix(`No ${pin === "org" ? "organization" : "space"} pinned`, pin, profileName);
 }
 
 export function logoutRetry(profileName: string): string {

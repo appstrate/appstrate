@@ -140,9 +140,9 @@ interface AuthContext {
  * body-stream semantics and would be broken by `apiFetchRaw`'s reactive
  * 401 retry (which replays a body that may have already been consumed).
  *
- * All the silent-refresh machinery (per-profile mutex, proactive margin,
- * keyring scrub on invalid_grant) is reused — this is purely a composer
- * over the existing internals.
+ * All the silent-refresh machinery (in-process dedup, cross-process credentials
+ * lock, proactive margin, keyring scrub on invalid_grant) is reused — this is
+ * purely a composer over the existing internals.
  */
 export async function resolveAuthContext(profileName: string): Promise<AuthContext> {
   const profile = await resolveProfileOrThrow(profileName);
@@ -364,9 +364,8 @@ export async function apiFetchRaw(
   }
   // If a parallel caller already rotated the token between our initial
   // resolve and this 401, the keyring now holds a newer access token.
-  // Retry with it first — we'd otherwise burn a refresh-token rotation
-  // for nothing, and in edge timing could even race the mutex into
-  // unnecessary network calls.
+  // Retry with it first — we'd otherwise burn a refresh-token rotation,
+  // a credentials-lock hold and a round-trip for nothing.
   if (stored.accessToken !== token) {
     const retry = await doFetch(stored.accessToken);
     if (retry.status !== 401) return retry;

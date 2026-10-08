@@ -37,6 +37,7 @@ import {
   expandHome,
   packageWorkDir,
   readConfig,
+  requireLoggedIn,
   resolveActiveProfile,
   resolveWorkDir,
   type Profile,
@@ -44,7 +45,7 @@ import {
 import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { ActionableError, profileMissing, remedyLine, switchFix } from "../lib/remedy.ts";
+import { ActionableError, pinMissing, remedyLine, switchFix } from "../lib/remedy.ts";
 import { DRAFT_SELECTOR, splitPackageSpec } from "../lib/package-spec.ts";
 import { ExplainedError, formatError } from "../lib/ui.ts";
 import {
@@ -88,13 +89,9 @@ interface Session {
 /** The active profile with an organization pinned, or a written reason and exit 1. */
 async function openSession(explicit: string | undefined, io: CommandIO): Promise<Session | null> {
   const { profileName, profile } = await resolveActiveProfile(explicit);
-  if (!profile) {
-    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
-    io.exit(1);
-    return null;
-  }
+  requireLoggedIn(profileName, profile, io);
   if (!profile.orgId) {
-    io.stderr.write(`${remedyLine(switchFix("No organization pinned", "org", profileName))}\n`);
+    io.stderr.write(`${remedyLine(pinMissing("org", profileName))}\n`);
     io.exit(1);
     return null;
   }
