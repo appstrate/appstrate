@@ -75,6 +75,30 @@ describe("platform auth e-mails (SMTP on)", () => {
       return firstLink(mails[0]!);
     }
 
+    it("sends nothing, and logs it, when the issued hook throws", async () => {
+      const previous = magicLinkSlot.swapForTesting(async () => {
+        throw new Error("binding refused");
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const mails = await captureMails(() =>
+          postAuth("/sign-in/magic-link", {
+            email: `magic-${crypto.randomUUID()}@example.test`,
+            callbackURL: "/",
+          }),
+        );
+
+        expect(mails).toHaveLength(0);
+        expect(warn).toHaveBeenCalledWith(
+          "auth: auth e-mail not sent",
+          expect.objectContaining({ template: "magic-link" }),
+        );
+      } finally {
+        warn.mockRestore();
+        magicLinkSlot.swapForTesting(previous);
+      }
+    });
+
     it("emails the dashboard's confirmation page, not the endpoint that spends the token", async () => {
       const link = await requestLink(`magic-${crypto.randomUUID()}@example.test`);
 
