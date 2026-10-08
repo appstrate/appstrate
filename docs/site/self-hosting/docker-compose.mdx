@@ -5,11 +5,12 @@ description: Run Appstrate with the shipped Docker Compose files, without the in
 
 `appstrate install` is the recommended path (see [Self-Hosting](/docs/self-hosting)). It renders one of the Compose templates below, generates the secrets and manages the stack for you. Use Compose directly when you need to adapt the stack to CI, an existing server or your own orchestration.
 
-| File                                                                                                                                                                  | What it is                                                                                                                                                                                          |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`docker-compose.yml`](https://github.com/appstrate/appstrate/blob/main/docker-compose.yml) (repository root)                                                         | The Tier 3 stack: PostgreSQL, Redis, bundled MinIO, Docker-isolated runs. Service names are `appstrate-postgres`, `appstrate-redis`, `appstrate-minio` and `appstrate`                              |
-| [`examples/self-hosting/docker-compose.tier1.yml`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/docker-compose.tier1.yml), `tier2`, `tier3` | The templates the installer writes. Tier 2 (PostgreSQL and Redis, files on a persisted volume) is the recommended single-node stack. Service names are `postgres`, `redis`, `minio` and `appstrate` |
-| [`examples/self-hosting/.env.example`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/.env.example)                                           | The operator contract for the variables these files read                                                                                                                                            |
+| File                                                                                                                                                                  | What it is                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docker-compose.yml`](https://github.com/appstrate/appstrate/blob/main/docker-compose.yml) (repository root)                                                         | The Tier 3 stack: PostgreSQL, Redis, bundled MinIO, Docker-isolated runs. Service names are `appstrate-postgres`, `appstrate-redis`, `appstrate-minio` and `appstrate`                                     |
+| [`examples/self-hosting/docker-compose.tier1.yml`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/docker-compose.tier1.yml), `tier2`, `tier3` | The templates the installer writes. Tier 2 (PostgreSQL and Redis, files on a persisted volume) is the recommended single-node stack. Service names are `postgres`, `redis`, `minio` and `appstrate`        |
+| [`examples/self-hosting/docker-compose.yml`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/docker-compose.yml)                               | The same Tier 3 stack as the root file (PostgreSQL, Redis, bundled MinIO), with the tier templates' service names `postgres`, `redis`, `minio` and `appstrate`. It reads `.env` copied from `.env.example` |
+| [`examples/self-hosting/.env.example`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/.env.example)                                           | The operator contract for the variables these files read                                                                                                                                                   |
 
 `deploy/docker-compose.yml` runs `app.appstrate.com` under Coolify. It is not a template.
 
@@ -97,7 +98,7 @@ The `appstrate` service gets its configuration from the `environment:` list of t
 
 Since 1.0.0-beta.65 the root file and the three tier templates forward the variables most installs set: the `AUTH_*` closed-mode settings including `AUTH_BOOTSTRAP_TOKEN`, `EGRESS_ALLOW_INTERNAL_HOSTS`, SMTP, Google and GitHub sign-in, `PLATFORM_RUN_LIMITS` and `INLINE_RUN_LIMITS`, `PROXY_URL` and `SYSTEM_PROXIES`, and `MODEL_CATALOG_URL`. The two sets differ a little: only the root file forwards the `STRIPE_*` and `EE_*` variables of the commercial module, and only the tier templates forward `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN`.
 
-Some variables are still not forwarded by any shipped file, for example `LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`, `FILE_MAX_BYTES`, `STORAGE_DELETION_WORKER_INTERVAL_MS`, `INTEGRATION_RUNTIME_ADAPTER` and `FIRECRACKER_RUNNER_TLS_REQUIRED`. Before relying on a variable, check that it appears under `appstrate.environment`. If it does not, add a bare `- NAME` line to pass it through from `.env`:
+Some variables are still not forwarded by the root file or by any file in `examples/self-hosting/`, for example `LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`, `FILE_MAX_BYTES`, `STORAGE_DELETION_WORKER_INTERVAL_MS`, `INTEGRATION_RUNTIME_ADAPTER` and `FIRECRACKER_RUNNER_TLS_REQUIRED`. Before relying on a variable, check that it appears under `appstrate.environment`. If it does not, add a bare `- NAME` line to pass it through from `.env`:
 
 ```yaml
 services:
@@ -135,7 +136,7 @@ Open the dashboard and follow [Auth modes](https://github.com/appstrate/appstrat
 
 ## Persistent data
 
-The root file declares three named volumes: `pgdata` (PostgreSQL), `redisdata` (Redis) and `miniodata` (MinIO). The tier templates use `pgdata`, `redisdata` and, on Tier 1 and 2, `storagedata` for uploaded files. Compose prefixes the names with the project name (`appstrate_pgdata` for the root file).
+The root file and `examples/self-hosting/docker-compose.yml` declare three named volumes: `pgdata` (PostgreSQL), `redisdata` (Redis) and `miniodata` (MinIO). The tier templates declare `pgdata` and `storagedata` (uploaded files) on Tier 1, `pgdata`, `redisdata` and `storagedata` on Tier 2, and `pgdata`, `redisdata` and `miniodata` on Tier 3. Compose prefixes the names with the project name (`appstrate_pgdata` for the root file).
 
 Back up PostgreSQL with a logical dump rather than a copy of the data directory:
 
@@ -155,7 +156,7 @@ docker compose down -v
 
 Appstrate does not terminate TLS. Put a reverse proxy in front, forward to the host port (`PORT`, default `3000`), and set `APP_URL`, `TRUSTED_ORIGINS` and `TRUST_PROXY` as above. Three things matter:
 
-- **Upload size.** Every upload goes through the platform on `APP_URL`, and the per-file ceiling is 100 MB by default (`FILE_MAX_BYTES`). Most proxies cap request bodies far lower, and a proxy-side `413` never reaches Appstrate.
+- **Upload size.** Every upload goes through the platform on `APP_URL`, and the per-file ceiling is 100 MiB by default (`FILE_MAX_BYTES`). Most proxies cap request bodies far lower, and a proxy-side `413` never reaches Appstrate.
 - **Streaming.** Chat tokens and run logs are Server-Sent Events. Do not buffer or compress `text/event-stream`. Appstrate sets `X-Accel-Buffering: no` on those responses.
 - **Client IP.** `TRUST_PROXY` must be the number of proxies that append to `X-Forwarded-For`. A value that is too high lets callers spoof their IP and evade per-IP rate limits. A TLS-terminating L4 load balancer appends nothing and does not count.
 

@@ -44,7 +44,7 @@ curl -X POST https://your-instance/api/webhooks \
 | `payloadMode` | `full` (default) or `summary`.                                                                                                                          |
 | `enabled`     | `true` by default.                                                                                                                                      |
 
-The response is the stored webhook plus the signing `secret` (`whsec_...`), **returned only once**. Update a webhook with `PATCH /api/webhooks/{id}` (merge semantics). The secret and the level cannot be changed. Deleting a webhook deletes its delivery history. `GET /api/webhooks` lists the webhooks you may read: the org-level ones by default, `spaceId=` adds one space's, and `all=true` (needs `org-webhooks:read`) spans every space.
+The response is the stored webhook plus the signing `secret` (`whsec_...`), **returned only once**. Update a webhook with `PATCH /api/webhooks/{id}` (merge semantics). The secret and the level cannot be changed. Deleting a webhook deletes its delivery history. `GET /api/webhooks` lists the webhooks you may read: the org-level ones by default, `spaceId=` adds one space's, and `all=true` (needs `org-webhooks:read`) spans every space. With an API key, the list is the webhooks of the key's space and these query parameters are ignored.
 
 In the web app, the **Webhooks** page creates and edits webhooks, shows the delivery history of each one, rotates the secret and sends a test ping.
 
@@ -96,7 +96,7 @@ For `run.connection_missing`, `data.object` has `object: "run_attempt"`, the `pa
 
 ### Payload modes
 
-- `full` includes `result`. If the payload would exceed 256 KB, `result` is dropped and `resultTruncated: true` is added.
+- `full` includes `result`. If the run object would exceed 256 KiB of serialized JSON, `result` is dropped and `resultTruncated: true` is added.
 - `summary` never includes `result`. Read it from the API.
 
 ## Verifying signatures
@@ -151,7 +151,7 @@ curl "https://your-instance/api/webhooks/wh_xxx/deliveries?limit=20" \
   -H "Authorization: Bearer apst_your_key"
 ```
 
-Each entry has `id`, `eventId`, `eventType`, `status` (`pending`, `success`, `failed`), `statusCode`, `latency`, `attempt`, `error` and `createdAt`. Request and response bodies are not stored. Pagination follows the `Link: rel="next"` header (`startingAfter`).
+Each entry has `id`, `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, `error` and `createdAt`. Request and response bodies are not stored. Pagination follows the `Link: rel="next"` header (`startingAfter`).
 
 ## Rotating the secret
 

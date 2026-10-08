@@ -20,7 +20,7 @@ An organization contains spaces, and most resources (agents, runs, schedules, en
 | Header              | Used with                                                      | Description                                                                                                                                                                                                 |
 | ------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Authorization`     | API keys, OIDC tokens                                          | `Bearer apst_...` or `Bearer ey...`                                                                                                                                                                         |
-| `X-Org-Id`          | Session cookies, instance-level OIDC tokens                    | Selects the organization. An API key is already bound to one. If you send both and they differ, the answer is `403`                                                                                         |
+| `X-Org-Id`          | Session cookies, instance-level OIDC tokens                    | Selects the organization. Ignored with an API key: the key is bound to its organization, and only `X-Space-Id` is checked                                                                                   |
 | `X-Space-Id`        | Session cookies, instance-level OIDC tokens                    | Selects the space on space-scoped routes. An API key is already pinned to one space. If they differ, the answer is `403`. If a space-scoped route gets none, the answer is `400` with `param: "X-Space-Id"` |
 | `Appstrate-User`    | API keys only                                                  | `eu_...` end-user id. Run the request on behalf of that end-user. See [End-user impersonation](#end-user-impersonation)                                                                                     |
 | `Appstrate-Version` | Optional                                                       | Date version of the API, `YYYY-MM-DD`. See [API Reference](/docs/api#versioning)                                                                                                                            |
@@ -35,7 +35,7 @@ API keys are the credential for servers and automation. A key is `apst_` followe
 
 ### Create a key
 
-In the dashboard: **Space Settings**, **API Keys**, **New API key**. Over the API, from a session that holds `api-keys:create`. An API key cannot mint another key, because `api-keys:*` is not a grantable scope:
+In the dashboard: **Organization settings**, **API Keys** under **Space**, **New API key**. Over the API, from a session that holds `api-keys:create`. An API key cannot mint another key, because `api-keys:*` is not a grantable scope:
 
 ```bash
 curl -X POST http://localhost:3000/api/api-keys \
@@ -121,7 +121,7 @@ curl http://localhost:3000/api/agents \
   -H "X-Space-Id: $SPACE_ID"
 ```
 
-Sign-in, sign-up and the other Better Auth routes are rate limited per client IP address; a refused call is a `429` with a JSON body. A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
+When `NODE_ENV` is `production`, sign-in, sign-up and the other Better Auth routes are rate limited per client IP address; a refused call is a `429` with a JSON body. A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
 
 ## OIDC access tokens
 

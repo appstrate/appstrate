@@ -47,14 +47,14 @@ On `/api/realtime/runs` you receive the channels you are allowed to read: `run_u
 
 ## Events
 
-| Event                 | Sent when                                                          |
-| --------------------- | ------------------------------------------------------------------ |
-| `run_update`          | A run row changes: created, started, finished.                     |
-| `run_log`             | A log line is written.                                             |
-| `run_metric`          | The running cost and token totals change (throttled per run).      |
-| `connection_update`   | An integration connection of yours is created, updated or deleted. |
-| `chat_session_update` | One of your chat sessions changed.                                 |
-| `ping`                | Keep-alive, sent on connect and then every 30 seconds. Empty data. |
+| Event                 | Sent when                                                                     |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `run_update`          | A run row changes: created, started, finished.                                |
+| `run_log`             | A log line is written.                                                        |
+| `run_metric`          | The running cost and token totals change (throttled per run).                 |
+| `connection_update`   | An integration connection of yours is created, updated or deleted.            |
+| `chat_session_update` | One of your chat sessions changed.                                            |
+| `ping`                | Keep-alive, sent on connect and after 30 seconds without a frame. Empty data. |
 
 There is no separate `result` event. The result is on the run: fetch `GET /api/runs/{id}` once the status is terminal.
 

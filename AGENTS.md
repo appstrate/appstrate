@@ -127,7 +127,7 @@ appstrate/
 │   ├── module-*/             # @appstrate/module-{chat,claude-code,codex,ee,observability} -- workspace modules; only module-chat is in the MODULES default
 │   └── connect/              # @appstrate/connect -- OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar (MCP server) + per-runtime MCP runner images
-└── system-packages/          # System package `.afps` archives -- integrations + one mcp-server (`ls system-packages/` for today's set)
+└── system-packages/          # System package `.afps` archives -- integrations + two mcp-servers (`ls system-packages/` for today's set)
 ```
 
 ### Workspace Imports

@@ -22,7 +22,7 @@ TRUSTED_ORIGINS=https://appstrate.example.com
 TRUST_PROXY=1
 ```
 
-With `NODE_ENV=production`, `APP_URL` must be HTTPS (loopback excepted), and an HTTPS `APP_URL` with `TRUST_PROXY=false` refuses to boot. `TRUST_PROXY` is the number of proxies that append to `X-Forwarded-For`, and a value higher than your topology lets callers spoof their IP. Raise the proxy's body limit above your largest upload (100 MB by default) and do not buffer or compress event streams. See [Docker Compose](/docs/self-hosting/docker-compose#reverse-proxy).
+With `NODE_ENV=production`, `APP_URL` must be HTTPS (loopback excepted), and an HTTPS `APP_URL` with `TRUST_PROXY=false` refuses to boot. `TRUST_PROXY` is the number of proxies that append to `X-Forwarded-For`, and a value higher than your topology lets callers spoof their IP. Raise the proxy's body limit above your largest upload (100 MiB by default) and do not buffer or compress event streams. See [Docker Compose](/docs/self-hosting/docker-compose#reverse-proxy).
 
 ## Generate and protect the secrets
 
@@ -50,7 +50,7 @@ The full recipes and pitfalls are in [AUTH_MODES.md](https://github.com/appstrat
 
 ## Restrict CORS
 
-`TRUSTED_ORIGINS` is a comma-separated list of the exact origins of your dashboards and integrations. The shipped Compose files default it to empty, so set it explicitly.
+`TRUSTED_ORIGINS` is a comma-separated list of the exact origins of your dashboards and integrations. The shipped Compose files leave it empty, and an empty value falls back to `http://localhost:3000,http://localhost:5173`, so set it explicitly.
 
 ## Review the limits
 
@@ -79,6 +79,8 @@ The API process itself also makes outbound requests to `get.appstrate.dev` to re
 ## Configure email
 
 Email verification and magic-link sign-in need SMTP. Set `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` together (`SMTP_PORT` defaults to `587`): mail is enabled only when all four are set, and no error is raised when they are not. Test with a magic link or a password reset before go-live.
+
+With SMTP on, the instance also mails account notices: a password change or reset is reported to the account's address, a sign-up with an address that already has an account is answered at that address, and an email change must be approved from the current address before anything is sent to the new one. Without SMTP, an email change applies at once, with no confirmation.
 
 The Compose files shipped since 1.0.0-beta.65 forward the SMTP and the Google and GitHub sign-in variables. The tier templates of earlier releases do not, so with an older file check that they are listed under `appstrate.environment` (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
 

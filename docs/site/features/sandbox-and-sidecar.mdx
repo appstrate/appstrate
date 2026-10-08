@@ -35,7 +35,7 @@ Isolation guarantees below (network separation, no direct egress) describe `dock
 
 For each run, the platform:
 
-1. Creates an **internal-only** Docker network (no direct route out) and a workspace volume. The workspace is a RAM-backed tmpfs capped at `WORKSPACE_TMPFS_SIZE_MB` (512 MB by default).
+1. Creates an **internal-only** Docker network (no direct route out) and a workspace volume. The workspace is a RAM-backed tmpfs capped at `WORKSPACE_TMPFS_SIZE_MB` (512 MiB by default).
 2. Starts the **sidecar**, attached to the run network and to a shared egress network, and the **agent** container, in parallel.
 3. Gives the agent the address of its sidecar, its prompt and its model endpoint. The agent's HTTP traffic is pointed at the sidecar's forward proxy.
 4. Runs the agent until it finishes, fails, is cancelled or times out, then removes both containers, the network and the workspace.

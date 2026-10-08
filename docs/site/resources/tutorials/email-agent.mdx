@@ -136,7 +136,7 @@ curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
 
 ### Add an output schema
 
-An output schema makes the result structured and validated. Open the editor's **JSON** tab, add an `output` member at the top level of the manifest, and click **Apply to form**:
+An output schema makes the result structured and validated. Open the editor's **JSON** tab, add an `output` member at the top level of the manifest, and click **Apply to form**. Excerpt of the agent manifest:
 
 ```json
 "output": {
@@ -172,7 +172,7 @@ The agent returns it through the `output` runtime tool. If the result does not m
 
 ### Schedule it
 
-On the agent page, open the **Schedules** tab and choose **New schedule**. Set a **Name** (optional), the **Cron expression** `0 8 * * 1-5`, and your **Timezone**. The page also offers presets, such as _Mon-Fri 9am_. The schedule shows its **Next run**.
+On the agent page, open the actions menu and choose **New schedule** (an agent with no schedule also shows **Add** in its **Schedules** tab). The form preselects the first agent of the space, so pick **Email daily digest** in it. Set a **Name** (optional), the **Cron expression** `0 8 * * 1-5`, and your **Timezone**. The page also offers presets, such as _Mon-Fri 9am_. The schedule shows its **Next run**.
 
 From the API:
 

@@ -37,9 +37,9 @@ The platform does not use row-level security in the database. Isolation is enfor
 Each authenticated request goes through the same steps, in order:
 
 1. **Authentication.** Module strategies (OAuth tokens) are tried first, then an API key (`apst_`), then the cookie session.
-2. **Organization context.** The organization comes from the key, or from the `X-Org-Id` header for a session, and the caller must be a member. A header that contradicts the key is a `403`.
+2. **Organization context.** The organization comes from the key, or from the `X-Org-Id` header for a session, and the caller must be a member. With an API key the `X-Org-Id` header is ignored.
 3. **Permissions.** The organization role is resolved, then the credential's ceiling (key scopes) applied.
-4. **Space context.** For space-scoped routes (agents, runs, schedules, end-users, API keys, notifications, packages, integrations, files, uploads), the space comes from the key, or from `X-Space-Id` for a session. The caller's role **in that space** is resolved and the effective permissions become `(organization ∪ space) ∩ ceiling`. No role in the space is a `403 not_a_space_member`, or a `404` for a private space.
+4. **Space context.** For space-scoped routes (agents, runs, schedules, end-users, API keys, notifications, packages, integrations, files, uploads), the space comes from the key, or from `X-Space-Id` for a session. An `X-Space-Id` that contradicts the key is a `403`. The caller's role **in that space** is resolved and the effective permissions become `(organization ∪ space) ∩ ceiling`. No role in the space is a `403 not_a_space_member`, or a `404` for a private space.
 5. **API version and idempotency**, then the route handler.
 
 Routes of the `/api/orgs/{orgId}` family carry the organization in the path instead of a header. Webhooks name their own space in the body or query. See [Spaces](/docs/features/spaces#space-ids-and-the-header) for the transports.

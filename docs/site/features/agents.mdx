@@ -31,7 +31,7 @@ A launch with no selector runs the **latest published version**. The draft runs 
 
 ### In the web app
 
-Open **Agents** in the sidebar and create a new agent. The editor lets you write the prompt, define the input and output schemas, attach skills and integrations, and pick the runtime tools. Saving edits the draft. **Publish** cuts a version.
+Open **Agents** in the sidebar and create a new agent. The editor lets you write the prompt, define the input and output schemas, attach skills and integrations, and pick the runtime tools. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
 
 ### Through the API
 
@@ -55,7 +55,7 @@ curl -X POST https://your-instance/api/packages/agents \
     "content": "Summarize the most recent emails and return the result."
   }'
 
-# 2. Later edits: update the draft under If-Match, then cut a version
+# 2. Later edits: update the draft under If-Match, then cut a version with a new number
 curl -X PATCH https://your-instance/api/packages/agents/@acme/email-summarizer \
   -H "Authorization: Bearer apst_your_key" \
   -H "If-Match: <ETag from the GET>" \
@@ -63,10 +63,12 @@ curl -X PATCH https://your-instance/api/packages/agents/@acme/email-summarizer \
   -d '{ "content": "Summarize the most recent emails in three bullets." }'
 
 curl -X POST https://your-instance/api/packages/agents/@acme/email-summarizer/versions \
-  -H "Authorization: Bearer apst_your_key"
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "version": "1.0.1" }'
 ```
 
-`content` is the prompt and must not be blank. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/docs/features/multi-tenancy)).
+`content` is the prompt and must not be blank. A version is cut at the draft's manifest `version` unless the body names another one; reusing a published number for changed content is `409 version_exists`, and a draft identical to the latest version is `409 no_changes`. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/docs/features/multi-tenancy)).
 
 You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See [Packages](/docs/features/packages).
 
@@ -148,8 +150,7 @@ Values resolve in this order, last one wins:
 
 1. the author `default` in the schema;
 2. the **stored value** saved for the agent in this space;
-3. the value frozen on a [schedule](/docs/features/scheduling);
-4. the caller's input at launch.
+3. the caller's input at launch, or, for a scheduled run, the value frozen on the [schedule](/docs/features/scheduling). A run has one or the other, never both.
 
 A member who holds `agents:configure` in the space (the `admin` and `builder` roles) can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
 
@@ -166,7 +167,7 @@ Without `agents:read`, run responses return `input: null` for registered agents,
 
 ### Output
 
-When `output.schema` is declared, the `output` tool takes the schema as its argument schema, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
+The `output` tool takes one argument, `data`, the object to return. When `output.schema` is declared, it is the schema of `data`, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
 
 A run with no output schema can finish without calling `output`.
 

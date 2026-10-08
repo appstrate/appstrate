@@ -101,7 +101,8 @@ appstrate api POST /api/models -d '{
 - `POST /api/model-provider-credentials/test` and `POST /api/model-provider-credentials/{id}/test` check a key before or after saving. `POST /api/models/{id}/test` checks one model.
 - `POST /api/model-provider-credentials/discover` lists the models an endpoint serves.
 - `POST /api/models/seed` creates several models from the provider's offer for one credential in a single call.
-- For OpenRouter, `GET /api/models/openrouter?q=claude` searches its catalogue.
+- For OpenRouter, `GET /api/models/openrouter?q=claude` searches its catalogue. The registry marks such a provider with `live_model_search: true`: its models are searched live, and any model id is accepted.
+- Each model returned by `GET /api/models` carries `pi_provider`, the key of the Pi registry provider it is served through (for example `moonshotai` for `moonshot`). It is `null` for a gateway and for an aliased system model.
 - Per-model overrides (`contextWindow`, `maxTokens`, `reasoning`, `input`, `cost`) are optional. Left out, they come from the model catalogue and follow catalogue updates.
 
 For a subscription provider, start from the dashboard so the pairing token and command are generated for you.
@@ -132,7 +133,7 @@ The first match wins:
 3. The organization default.
 4. The system default (the system model flagged as default).
 
-If none is configured, the run cannot start.
+If none is configured, the run cannot start: the launch answers `400 model_not_configured` and creates no run.
 
 A disabled model cannot be the organization default, and a model whose credential needs reconnection cannot either: `PUT /api/models/default` answers `409` with `model_disabled` or `model_needs_reconnection`. Disabling the current default (`PATCH /api/models/{id}` with `enabled: false`) is refused the same way (`model_disabled`): move or clear the default first. Two requests that would do both at once cannot both succeed, one of them gets the `409`.
 

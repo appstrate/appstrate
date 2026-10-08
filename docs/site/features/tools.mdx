@@ -13,7 +13,7 @@ A **tool** is a function the model can call during a run. A skill tells the agen
 
 All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
 
-> Earlier versions of Appstrate had a `tool` package type (`@appstrate/log`, `@appstrate/add-memory`, TypeScript extensions). It no longer exists. Runtime tools replaced the system tools, and integrations and MCP servers replaced custom tool code. Old manifests that still list a retired runtime tool id keep working: the id is dropped and reported.
+> Earlier versions of Appstrate had a `tool` package type (`@appstrate/log`, `@appstrate/add-memory`, TypeScript extensions). It no longer exists. Runtime tools replaced the system tools, and integrations and MCP servers replaced custom tool code. A retired runtime tool id is refused when you save a manifest in the editor or import a ZIP or a GitHub URL. A manifest already stored, or one in an `.afps-bundle`, keeps working: the id is dropped and reported.
 
 ## Sandbox tools
 
@@ -25,13 +25,15 @@ These tools act inside the sandbox only. Anything that reaches the outside world
 
 Runtime tools are first-party and **opt-in**. You choose them per agent with `runtime_tools`. None is injected by default, not even `output`.
 
-| Tool           | Purpose                                                                                                                                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `output`       | Returns the run's structured result. Its argument schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Required when the agent declares an output schema. |
-| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                            |
-| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                         |
-| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                       |
-| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                         |
+| Tool           | Purpose                                                                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Required when the agent declares an output schema. |
+| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                                            |
+| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                                         |
+| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                                       |
+| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                                         |
+
+Excerpt of the agent manifest:
 
 ```json
 { "runtime_tools": ["output", "log", "note"] }
@@ -45,7 +47,7 @@ The model's plain text is never delivered. To reach the user, an agent must call
 
 Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request (described in detail further down this page). The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools.
 
-The agent author picks which tools an agent can use:
+The agent author picks which tools an agent can use. Excerpt of the agent manifest:
 
 ```json
 {
@@ -91,7 +93,7 @@ When an integration opts several auths into `api_call`, each auth gets its own t
 
 Pass `{ "fromFile": "outputs/report.pdf" }` as the body to send a workspace file without putting its bytes in the model's context. The agent runtime, not the sidecar, reads the file, because the sidecar has no access to the workspace. The path is workspace-relative, and a path that escapes the workspace or goes through a symlink is refused.
 
-The file is sent in one request, so it is capped at 10 MB by default (`SIDECAR_MAX_REQUEST_BODY_BYTES`, with a hard ceiling of 100 MB). Because the bytes cross to the sidecar as base64 inside one MCP message, raising the cap also means raising `SIDECAR_MAX_MCP_ENVELOPE_BYTES`. A file over the cap, a missing file or a refused path comes back as a tool error the model can act on, not as a failed run. For anything larger use `api_upload`.
+The file is sent in one request, so it is capped at 10 MiB by default (`SIDECAR_MAX_REQUEST_BODY_BYTES`, with a hard ceiling of 100 MiB). Because the bytes cross to the sidecar as base64 inside one MCP message, raising the cap also means raising `SIDECAR_MAX_MCP_ENVELOPE_BYTES`. A file over the cap, a missing file or a refused path comes back as a tool error the model can act on, not as a failed run. For anything larger use `api_upload`.
 
 ### Receiving a file: `responseMode.toFile`
 
@@ -121,7 +123,7 @@ Without `toFile`, large responses still stay out of the model's context. A text 
 
 The four protocols the runtime can drive are `google-resumable` (Drive, Cloud Storage, YouTube), `s3-multipart` (S3 and compatible stores: R2, MinIO, Backblaze B2), `tus` and `ms-resumable` (OneDrive, SharePoint, Microsoft Graph). Each has its own part-size rules: Google needs a multiple of 256 KiB, S3 needs at least 5 MiB for every part except the last, Microsoft Graph needs a multiple of 320 KiB up to 60 MiB. A bad `partSizeBytes` comes back as an error before anything is sent.
 
-The agent runtime reads the file as a stream, cuts it into chunks and sends each chunk through the sibling `api_call` tool, so every chunk gets the same credential injection and `authorized_uris` check as any other call. The file is limited to 100 MB, a ceiling compiled into the runtime that no setting raises, and an empty file is refused. If an upload fails or is cancelled, the runtime tries to have the service discard the partial upload.
+The agent runtime reads the file as a stream, cuts it into chunks and sends each chunk through the sibling `api_call` tool, so every chunk gets the same credential injection and `authorized_uris` check as any other call. The file is limited to 100 MiB, a ceiling compiled into the runtime that no setting raises, and an empty file is refused. If an upload fails or is cancelled, the runtime tries to have the service discard the partial upload.
 
 The result is a single JSON object. On success it carries `ok: true`, the final upstream `status`, `headers` and `body`, the number of `chunks`, the `size` and the `sha256` of the bytes sent, so the agent can verify the upload. On failure it carries `ok: false`, an `error`, the last `status` and `bytesSent`.
 
@@ -134,7 +136,7 @@ A run can bind up to 10 connections of one integration, for example two mailboxe
 There is no tool-code package. To give agents a new capability, publish an **integration**:
 
 - an integration with `source.kind: "remote"` points at a hosted MCP server (Streamable HTTP or SSE);
-- an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per integration.
+- an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per connection bound to the run.
 
 Both are authored, versioned and shared like any [package](/docs/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/docs/integrations/overview) and [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure).
 

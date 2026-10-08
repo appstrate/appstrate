@@ -75,9 +75,9 @@ Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`,
 
 ## The library views
 
-| View                                                                       | Who                            | What it shows                                                                                                              |
-| -------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/library` and the **Library** page (`/library`)                   | Organization owners and admins | Every package of the organization, grouped by type, with the map of spaces it is placed in and whether each space runs it. |
-| `GET /api/spaces/{spaceId}/library` and the **Packages** page of the space | Readers of that space          | The packages placed in this space with their state and the switch, plus the ones you could still place here.               |
+| View                                                                                                                            | Who                            | What it shows                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/library` and the **Library** page (`/library`)                                                                        | Organization owners and admins | Every package of the organization, grouped by type, with the map of spaces it is placed in and whether each space runs it. |
+| `GET /api/spaces/{spaceId}/library` and the **Packages in this space** page (`/space/packages`, from the organization switcher) | Readers of that space          | The packages placed in this space with their state and the switch, plus the ones you could still place here.               |
 
 The agents, skills, integrations and MCP server lists of a space show only what the space can **launch**, meaning active packages. The library shows what is **placed**, active or not. Each view only lists the spaces and types you may read.

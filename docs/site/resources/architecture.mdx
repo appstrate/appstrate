@@ -95,11 +95,11 @@ Credentials are injected on the sidecar side, either into the tool's environment
 
 `RUN_ADAPTER` picks where a run executes. It is a registry: modules can add backends.
 
-| Backend     | `RUN_ADAPTER`       | Isolation                                                                                | Use                                                                       |
-| ----------- | ------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Process     | `process` (default) | None: the agent is a host subprocess                                                     | Development and Tier 0 to 2 installs. Refuses `local` integration runners |
-| Docker      | `docker`            | A container per agent and sidecar, on an isolated per-run network                        | Production, Tier 3                                                        |
-| Firecracker | `firecracker`       | One microVM per run, behind a KVM boundary, driven through the `appstrate-runner` daemon | Untrusted workloads. Opt-in `firecracker` module                          |
+| Backend     | `RUN_ADAPTER`       | Isolation                                                                                | Use                                                                  |
+| ----------- | ------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Process     | `process` (default) | None: the agent is a host subprocess                                                     | Development and Tier 0 installs. Refuses `local` integration runners |
+| Docker      | `docker`            | A container per agent and sidecar, on an isolated per-run network                        | Production, Tiers 1 to 3 (their Compose files default to it)         |
+| Firecracker | `firecracker`       | One microVM per run, behind a KVM boundary, driven through the `appstrate-runner` daemon | Untrusted workloads. Opt-in `firecracker` module                     |
 
 See [Progressive infrastructure](/docs/self-hosting/progressive-infrastructure) for tiers, and [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md) for the microVM backend and its threat model.
 
@@ -116,7 +116,7 @@ Optional features are modules loaded at boot from the `MODULES` environment vari
 | `@appstrate/module-chat`                                   | Yes                | The dashboard chat surface                                                          |
 | `firecracker`                                              | No                 | The Firecracker execution backend                                                   |
 | `@appstrate/module-codex`, `@appstrate/module-claude-code` | No                 | Run agents on a Codex or Claude Code subscription                                   |
-| `@appstrate/module-observability`                          | No                 | OpenTelemetry traces, metrics, and logs                                             |
+| `@appstrate/module-observability`                          | No                 | OpenTelemetry traces and metrics                                                    |
 | `@appstrate/module-ee`                                     | No                 | Stripe billing and credit quotas. Source-available, not Apache-2.0                  |
 
 The contract is published in `@appstrate/core`, so an external module can be installed from npm and listed in `MODULES`. The authoring guide is [`apps/api/src/modules/README.md`](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md). The default `MODULES` value is defined in `packages/env`; check [environment variables](/docs/self-hosting/environment-variables) rather than this table for what your version ships.

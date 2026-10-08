@@ -9,7 +9,7 @@ Every organization on an instance has its own **Model Context Protocol** endpoin
 https://<your-instance>/api/mcp/o/<orgId>
 ```
 
-The endpoint is served by the `mcp` module, which is in the default `MODULES`. It uses the Streamable HTTP transport and accepts POST requests only. To use several organizations, add one server entry per organization. There is no switch inside a session, on purpose.
+`<orgId>` is the organization's id, a UUID. Any other value, such as the organization's slug, is not found (`404`). The endpoint is served by the `mcp` module, which is in the default `MODULES`. It uses the Streamable HTTP transport and accepts POST requests only. To use several organizations, add one server entry per organization. There is no switch inside a session, on purpose.
 
 ## Get the connection details
 
@@ -25,7 +25,7 @@ The dashboard builds them for you. Open **Organization settings → General** an
 A spec-compliant client needs nothing but the URL. It discovers the authorization server, registers itself without any manual step, and opens a browser for you to sign in and consent.
 
 ```bash
-claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/org_123abc
+claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/0b9f3c6e-6a1d-4b8e-9c3f-2f1a7d5e8b40
 # then, in Claude Code: /mcp, select the server, Authenticate
 ```
 
@@ -38,7 +38,7 @@ Self-hosting, this flow needs the instance to be reachable over **HTTPS** at its
 Without a browser, create an API key and send it as a bearer token. In the dashboard, open **Organization settings**, go to the space section, and choose **API Keys**. Create a key in the space you want, with at least the `mcp:read` and `mcp:invoke` scopes plus whatever your task needs.
 
 ```bash
-claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/org_123abc \
+claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/0b9f3c6e-6a1d-4b8e-9c3f-2f1a7d5e8b40 \
   --header "Authorization: Bearer apst_xxx"
 ```
 
@@ -47,7 +47,7 @@ The key's own organization must match the one in the URL.
 ## Codex
 
 ```bash
-codex mcp add appstrate --url https://appstrate.example.com/api/mcp/o/org_123abc
+codex mcp add appstrate --url https://appstrate.example.com/api/mcp/o/0b9f3c6e-6a1d-4b8e-9c3f-2f1a7d5e8b40
 codex mcp login appstrate
 ```
 

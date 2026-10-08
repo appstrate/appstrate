@@ -67,7 +67,7 @@ This is the shape of the shipped Stripe integration, with your own scope:
 
 ## OAuth 2.0
 
-Add the endpoints and the scope catalogue. The Slack integration, trimmed:
+Add the endpoints and the scope catalogue. Excerpt of the Slack integration manifest:
 
 ```json
 "auths": {
@@ -100,14 +100,14 @@ Points that matter:
 
 - Discovery is optional. Set `issuer` to let the platform discover endpoints, or give them explicitly as above.
 - `scope_catalog` lists the scopes the provider offers. Entries can declare `implies` (a broad scope that satisfies narrower ones). Default scopes and tool scopes must belong to it.
-- `scope_separator` defaults to a space. Slack and Pinterest use a comma.
+- `scope_separator` defaults to a space. Some providers use a comma, for example Slack, Pinterest and Linear.
 - `identity_claims` maps the provider's user payload to an `account_id` (for example `"account_id": "$.email"`), which labels the connection and tells two accounts of the same service apart. Keys must be snake_case, and the platform refuses a manifest that uses another spelling. Without `account_id`, connections fall back to `Connexion 1`, `Connexion 2`.
 - `callback_url_hint` and `setup_guide` give the admin the steps shown when they register the OAuth app. Use the `{{callback_url}}` placeholder for the redirect URI.
 - An admin still has to register an OAuth client for it, as described in [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration). The `@acme` scope has no system client.
 
 ## Several fields (custom auth)
 
-When a service needs more than one value, use `type: "custom"` with a schema of your own. The shipped WordPress integration asks for a site URL, a user and an application password, and builds a Basic header from two of them:
+When a service needs more than one value, use `type: "custom"` with a schema of your own. The shipped WordPress integration asks for a site URL, a user and an application password, and builds a Basic header from two of them. Excerpt of the integration manifest:
 
 ```json
 "auths": {
@@ -144,6 +144,8 @@ Custom auths can also acquire the credential themselves: a declarative `connect.
 
 ## A hosted MCP server
 
+Excerpt of the integration manifest:
+
 ```json
 "source": {
   "kind": "remote",
@@ -151,7 +153,7 @@ Custom auths can also acquire the credential themselves: a declarative `connect.
 }
 ```
 
-Declare the tools you want agents to be able to pick in `tools_policy`, with the scopes each needs:
+Declare the tools you want agents to be able to pick in `tools_policy`, with the scopes each needs. Excerpt of the integration manifest:
 
 ```json
 "tools_policy": {
@@ -160,7 +162,7 @@ Declare the tools you want agents to be able to pick in `tools_policy`, with the
 }
 ```
 
-`hidden_tools` removes tools from what agents can see. A remote OAuth auth declared as a public client (`token_endpoint_auth_method: "none"`) gets its client registered automatically at connect time through discovery and dynamic client registration, so the admin has no client to create. This is how Notion, ClickUp and Canva work.
+`hidden_tools` removes tools from what agents can see. A remote OAuth auth declared as a public client (`token_endpoint_auth_method: "none"`) gets its client registered automatically at connect time through discovery and dynamic client registration, so the admin has no client to create. This is how the Notion, ClickUp and Canva MCP integrations and MCP Emails work.
 
 ## A local MCP server
 
@@ -187,7 +189,7 @@ The manifest uses the MCPB field names for the server and keeps the AFPS identit
 | `_meta["dev.appstrate/mcp-server"]` | Optional runtime hint. `{ "runtime": "bun" }` runs a TypeScript or JavaScript server under Bun. Keep `server.type: "node"`: the schema refuses a `bun` runtime with any other type.         |
 | `_meta["dev.appstrate/workspace"]`  | Optional. `{ "mount": "/workspace", "access": "rw" }` mounts the run's shared workspace into the runner. Without it the server cannot see the agent's files. `access` defaults to `ro`.     |
 
-The archive is a zip with `manifest.json` at its root and the entry point beside it, at most 10 MB compressed. Put whatever the server needs inside the archive. The runner images are minimal: the bun image has no `node_modules`, which is why the shipped SSH server is dependency-free.
+The archive is a zip with `manifest.json` at its root and the entry point beside it, at most 10 MiB compressed. Put whatever the server needs inside the archive. The runner images are minimal: the bun image has no `node_modules`, which is why the shipped SSH server is dependency-free.
 
 If you author through an agent connected to the instance's MCP server, its `get_runtime_capabilities` tool returns the runtimes this build accepts and a minimal manifest template for each.
 
@@ -196,7 +198,7 @@ If you author through an agent connected to the instance's MCP server, its `get_
 The integration's auth says where the credential lands inside the runner. A local server never gets it over HTTP: use `delivery.env`, `delivery.files`, or both.
 
 - `delivery.env` maps an environment variable name to an object: `{ "value": "{$credential.api_key}", "sensitive": true }`. A bare string is refused.
-- `delivery.files` maps an absolute path to `{ "value": "{$credential.client_cert}", "mode": "0400" }`. `mode` is an octal string and defaults to `"0400"`. Paths under system directories are refused, so keep to places such as `/run/secrets/`.
+- `delivery.files` maps an absolute path to `{ "value": "{$credential.client_cert}", "mode": "0400" }`. `mode` is an octal string and defaults to `"0400"`. Paths under system directories are refused when the runner starts (the import does not check them), so keep to places such as `/run/secrets/`.
 - `delivery.http` cannot be combined with `env` or `files` on the same auth.
 
 The credential reaches only the runner, never the agent's container. The runner's network access is limited to the auth's `authorized_uris`, rendered for the connection, so declare every host the server must call. Its HTTP traffic is routed through the sidecar, and a server that starts child processes must pass its own `process.env` on to them, or their requests cannot get out.
@@ -275,7 +277,7 @@ The integration, `tickets/manifest.json`. The server reads `ACME_API_KEY` from i
 }
 ```
 
-`source.server.version` is a semver range matched against the published versions of the server package. The agent then selects tools by the names in the server's `tools` list:
+`source.server.version` is a semver range matched against the published versions of the server package. The agent then selects tools by the names in the server's `tools` list. Excerpt of the agent manifest:
 
 ```json
 {
@@ -286,7 +288,7 @@ The integration, `tickets/manifest.json`. The server reads `ACME_API_KEY` from i
 }
 ```
 
-To also hand a certificate to the server as a file, add a `client_cert` field to the credential schema (and to `required`), and add this beside `env` in `delivery`:
+To also hand a certificate to the server as a file, add a `client_cert` field to the credential schema (and to `required`), and add this beside `env` in `delivery`. Excerpt of the integration manifest:
 
 ```json
 "files": {
@@ -311,9 +313,11 @@ appstrate api POST /api/packages/import -F file=@../my-integration.afps
 
 The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` is evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
 
+In the dashboard, **New integration** on the **Integrations** page (with `integrations:write`) opens the package editor on a new integration instead.
+
 You can also edit a package as a local folder with `appstrate packages pull`, `status`, `push` and `publish`, which writes to the package's draft and publishes a version as a separate step. Use a scope of your own: `@appstrate` ids belong to the system packages and cannot be created. Forking a system integration (`POST /api/packages/@appstrate/{name}/fork`) gives you an editable copy under your scope.
 
-Activate the integration in a space, register an OAuth client if it needs one, then reference it from an agent as any other integration:
+Activate the integration in a space, register an OAuth client if it needs one, then reference it from an agent as any other integration. Excerpt of the agent manifest:
 
 ```json
 {

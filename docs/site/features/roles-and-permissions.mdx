@@ -37,13 +37,13 @@ An organization can have several owners and always keeps at least one. See [Orga
 
 ## Space role presets
 
-| Preset     | Intent               | Holds                                                                                                                                                                |
-| ---------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin`    | Run the space        | Every space-level permission.                                                                                                                                        |
-| `builder`  | Author and operate   | Everything except space settings, space members and API keys.                                                                                                        |
-| `operator` | Use what is built    | Read agents, skills and MCP servers, **run** agents, read and cancel your own runs, read files and schedules, manage your own connections, read and write end-users. |
-| `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                              |
-| `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                  |
+| Preset     | Intent               | Holds                                                                                                                                                                                                           |
+| ---------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin`    | Run the space        | Every space-level permission.                                                                                                                                                                                   |
+| `builder`  | Author and operate   | Everything except space settings, space members and API keys.                                                                                                                                                   |
+| `operator` | Use what is built    | Read agents, skills and MCP servers, **run** agents, read and cancel your own runs, read files, schedules and memory, browse the integration catalog and manage your own connections, read and write end-users. |
+| `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                                                                         |
+| `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                                                             |
 
 `runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/docs/using-appstrate/chat) and [MCP server](/docs/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/docs/features/webhooks)).
 
@@ -61,7 +61,7 @@ An organization can have several owners and always keeps at least one. See [Orga
 | `llm-proxy`                                       | `call`                                    |
 | `org-integrations`                                | `configure`                               |
 
-Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and admins only).
+Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and admins only), and `@appstrate/module-ee` adds `billing` with `read` (owners, admins and members) and `manage` (owners and admins).
 
 ### Space level
 

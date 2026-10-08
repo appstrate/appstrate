@@ -18,11 +18,11 @@ effective = what the creator can do now in the key's space  ∩  the key's scope
 - A key cannot grant itself anything its creator lacks: when you mint it, requested scopes the creator does not hold are dropped from the key, and a scope that no key can carry is a `400`.
 - Some permissions can never be put on a key, such as `share`, `integrations:configure`, member and role management. A key cannot create spaces or organizations either. See [Roles and permissions](/docs/features/roles-and-permissions).
 
-Only people holding `api-keys:create` in the space (the `admin` space role, so owners and admins) can mint keys. A personal space takes no keys (`409 personal_space_takes_no_keys`).
+Only people holding `api-keys:create` in the space can mint keys: the `admin` space role (which organization owners and admins hold in every space), or a custom space role that includes it. A personal space takes no keys (`409 personal_space_takes_no_keys`).
 
 ## Creating a key
 
-In the web app, open **Settings > Space > API keys** and create a key with a name, scopes and an optional expiry. The key is shown **once**.
+In the web app, open **Organization settings > Space > API Keys** and create a key with a name, scopes and an optional expiry. The key is shown **once**.
 
 Through the API, in the space you are acting in:
 
@@ -47,7 +47,7 @@ The response is `{ id, key, keyPrefix, scopes }` and the only time `key` is retu
 
 The key format is `apst_` followed by 30 random characters and a 6 character checksum, so a leaked key can be recognised by secret scanners. `keyPrefix` (`apst_` plus 8 characters) identifies a key in lists without exposing it.
 
-`GET /api/api-keys/available-scopes` returns the scopes you can grant in the current space, and `GET /api/api-keys` lists the active (not revoked) keys of the space with `id`, `name`, `keyPrefix`, `scopes`, `created_by`, `expiresAt`, `lastUsedAt`, `revokedAt` and `createdAt`.
+`GET /api/api-keys/available-scopes` returns the scopes you can grant in the current space, and `GET /api/api-keys` lists the active (not revoked) keys of the space with `id`, `name`, `keyPrefix`, `scopes`, `created_by`, `created_by_name`, `expiresAt`, `lastUsedAt`, `revokedAt` and `createdAt`.
 
 ## Using a key
 
@@ -56,10 +56,10 @@ curl https://your-instance/api/agents \
   -H "Authorization: Bearer apst_your_key"
 ```
 
-- The organization and the space come from the key. You do not need `X-Org-Id` or `X-Space-Id`, and a header that disagrees with the key is a `403`.
+- The organization and the space come from the key. You do not need `X-Org-Id` or `X-Space-Id`. `X-Org-Id` is ignored with an API key (the key is bound to its organization), and an `X-Space-Id` that disagrees with the key is a `403`.
 - Server-Sent Event streams take the key as `?token=apst_...`, since browsers cannot set headers on `EventSource`. See [Realtime](/docs/features/realtime).
 - A key can act for an [end-user](/docs/features/end-users) with the `Appstrate-User` header.
-- Rate limits are counted per key, not per user. Mutating `POST` routes accept `Idempotency-Key`.
+- Rate limits are counted per key, not per user. Only the operations listed in [Idempotency](/docs/api/idempotency) honor `Idempotency-Key`; another mutating route that receives it answers `400 idempotency_not_supported`.
 
 |                            | Browser session                          | API key                          |
 | -------------------------- | ---------------------------------------- | -------------------------------- |

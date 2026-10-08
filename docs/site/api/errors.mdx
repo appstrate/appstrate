@@ -62,16 +62,16 @@ Every response, success or error, carries a `Request-Id` header of the form `req
 
 A request body that fails validation returns `400` with `code: "validation_failed"` and one `errors[]` entry per offending field, all in the same response. Bodies are strict: an unknown field is an error, not silently dropped, and a malformed JSON body is a `400` rather than a `500`.
 
-| Field `code`                                      | Meaning                                                 |
-| ------------------------------------------------- | ------------------------------------------------------- |
-| `required`                                        | A required field is missing                             |
-| `invalid_type`                                    | Wrong type, such as a string where an array is expected |
-| `invalid_format`                                  | Wrong format: not an email, not a URL, not an ISO date  |
-| `out_of_range`                                    | Too short, too long, too small, or too large            |
-| `unknown_field`                                   | The body contains a field the schema does not accept    |
-| `invalid_value`                                   | Not one of the allowed values, or a custom rule failed  |
-| `invalid_union`, `invalid_key`, `invalid_element` | A nested union, map key, or array element failed        |
-| `invalid_request`                                 | Any other validation failure                            |
+| Field `code`                                      | Meaning                                                |
+| ------------------------------------------------- | ------------------------------------------------------ |
+| `invalid_type`                                    | Wrong type, or a required field is missing             |
+| `invalid_format`                                  | Wrong format: not an email, not a URL, not an ISO date |
+| `out_of_range`                                    | Too short, too long, too small, or too large           |
+| `unknown_field`                                   | The body contains a field the schema does not accept   |
+| `invalid_value`                                   | Not one of the allowed values, or a custom rule failed |
+| `invalid_union`, `invalid_key`, `invalid_element` | A nested union, map key, or array element failed       |
+| `invalid_manifest`                                | A field of a package manifest is invalid               |
+| `invalid_request`                                 | Any other validation failure                           |
 
 `field` is a path: `scopes`, `metadata.plan`, or `items[0].name` for array elements.
 
@@ -92,7 +92,7 @@ The set of `code` values is open: the platform adds specific codes (`no_publishe
 | 403    | `forbidden`                                                       | The credential lacks the permission                                                                       |
 | 403    | `not_a_space_member`                                              | The caller holds no role in the requested space                                                           |
 | 404    | `not_found`                                                       | The resource does not exist, or is outside the caller's reach. The two are deliberately indistinguishable |
-| 405    | `method_not_allowed`                                              | An `Allow` header lists the permitted methods                                                             |
+| 405    | `method_not_allowed`                                              | Only from the MCP endpoint, on a method other than `POST`. An `Allow` header lists the permitted methods  |
 | 409    | `conflict` and specific codes                                     | A state conflict. Examples: `idempotency_in_progress`, `must_choose_connection`                           |
 | 410    | specific codes                                                    | The resource is gone                                                                                      |
 | 412    | `precondition_failed`                                             | `If-Match` did not match the current `ETag`. The response carries the current `ETag`                      |

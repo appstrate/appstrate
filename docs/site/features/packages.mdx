@@ -29,6 +29,8 @@ my-agent.afps          (a ZIP)
 
 A package can be edited and imported as a folder or a ZIP (`.afps` or `.zip`). Several packages travel together as an `.afps-bundle`.
 
+In the web app, a package's **Content** tab browses the files of the version you are viewing, previews text files and downloads any file. In the editor, the **Files** tab creates, uploads, renames, replaces and deletes files, up to 1 MiB each (import a ZIP for larger files); the changes are written with the manifest when you save. `manifest.json` itself is edited on the **JSON** tab.
+
 ## Drafts and versions
 
 Every package has a mutable **draft** and immutable **versions**.
@@ -36,7 +38,7 @@ Every package has a mutable **draft** and immutable **versions**.
 - Editing writes the draft. Saving a draft requires the `ETag` of what you last read, sent as `If-Match`. A stale tag answers `412`, a missing one `428`, so two editors cannot overwrite each other silently.
 - **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills`, `integrations` or `mcp-servers`. The version comes from the manifest or from the `version` you send in the body.
 - Versions are **semver and forward-only**: a new version must be strictly higher than every existing one. A duplicate is `409 version_exists`.
-- An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing and restoring are refused while one of its runs is in progress (`agent_in_use`).
+- An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing, restoring, deleting a version and deleting the agent are refused while one of its runs is in progress (`agent_in_use`).
 - Each version stores an **integrity hash** (SHA-256 SRI). Downloads return it in `X-Integrity`.
 - `POST .../versions/{version}/restore` copies a version back into the draft. `DELETE .../versions/{version}` removes a version permanently and moves the dist-tag to the best remaining stable version.
 
@@ -95,7 +97,7 @@ curl -X POST https://your-instance/api/packages/import-github \
 - `GET /api/packages/{scope}/{name}/{version}/download` returns one package as a ZIP. `version` can be a version, a dist-tag, a range or `draft` (authors only).
 - `GET /api/packages/{scope}/{name}/files` lists the files of a package and returns small text files inline.
 
-If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills are exempt. See [Organizations](/docs/features/organizations#organization-settings).
+If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills and system packages are exempt. See [Organizations](/docs/features/organizations#organization-settings).
 
 ## Working from a folder
 
@@ -113,4 +115,4 @@ Creating a package needs the type's `write` permission (`agents:write`, `skills:
 
 ## System packages
 
-The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and a few MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/docs/integrations/overview).
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/docs/integrations/overview).

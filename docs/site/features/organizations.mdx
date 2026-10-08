@@ -22,7 +22,7 @@ curl -X POST https://your-instance/api/orgs \
 
 A new organization gets a **default space** and a starter agent activated in it. It is also pinned to the current API version.
 
-An operator can close organization creation on an instance, so that only platform admins can create organizations and everyone else waits for an invitation (`403 org_creation_disabled`). See [Environment Variables](/docs/self-hosting/environment-variables).
+An operator can close organization creation on an instance, so that only platform admins can create organizations and everyone else waits for an invitation (`403 org_creation_disabled`). See [Environment Variables](/docs/self-hosting/environment-variables). `GET /api/profile` answers `can_create_org`, which says whether `POST /api/orgs` would accept you.
 
 ## Roles
 
@@ -84,17 +84,17 @@ curl -X POST https://your-instance/api/orgs/<org id>/leave -H "Cookie: ..."
 
 A member who leaves or is removed loses their explicit space roles and notifications in the organization, their schedules there are disabled, their API keys there are revoked, and their personal space enters a 30-day offboarding window. The last owner cannot leave (`409 last_owner`): promote someone else first or delete the organization. A JWT access token is not revocable and stays valid until it expires, but every request is checked against live membership.
 
-In the web app, **Settings > Members** manages members and invitations, and **Settings > Roles** manages custom roles.
+In the web app, **Organization settings > Users** manages members and invitations, and **Organization settings > Roles** manages custom roles.
 
 ## Organization settings
 
 `GET /api/orgs/{orgId}/settings` is readable by any member. `PATCH /api/orgs/{orgId}/settings` needs `org:settings` (owner or admin) and merges the keys you send:
 
-| Key                     | Effect                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                     |
-| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the SSO tab. Default `false`. Requires the `oidc` module.                                                               |
-| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/docs/features/packages). Skills are exempt. |
+| Key                     | Effect                                                                                                                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                                         |
+| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the **Team SSO** tab. Default `false`. Requires the `oidc` module.                                                                          |
+| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/docs/features/packages). Skills and system packages are exempt. |
 
 ## Deleting an organization
 
@@ -102,7 +102,7 @@ In the web app, **Settings > Members** manages members and invitations, and **Se
 
 ## Selecting an organization
 
-A browser session names the active organization with the `X-Org-Id` header. An API key is bound to one organization and does not need it, and a mismatching header is a `403`. `GET /api/orgs` lists the organizations of the caller.
+A browser session names the active organization with the `X-Org-Id` header. An API key is bound to one organization: the header is ignored with an API key, and only `X-Space-Id` is checked. `GET /api/orgs` lists the organizations of the caller.
 
 Each organization is also reachable as its own [MCP server](/docs/using-appstrate/mcp-clients) endpoint.
 

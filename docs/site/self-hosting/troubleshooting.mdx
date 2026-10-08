@@ -19,7 +19,7 @@ Five secrets are required and validated at boot:
 | `RUN_TOKEN_SECRET`          | At least 16 characters   |
 | `CONNECT_SESSION_SECRET`    | At least 16 characters   |
 
-The shipped Compose files also fail fast on `POSTGRES_PASSWORD` (and `POSTGRES_USER`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` in the root file). See [Docker Compose](/docs/self-hosting/docker-compose#set-up) for a generator.
+The shipped Compose files also fail fast on `POSTGRES_PASSWORD`, on `MINIO_ROOT_PASSWORD` in the files that run MinIO (the root file, the Tier 3 template and `examples/self-hosting/docker-compose.yml`), and on `POSTGRES_USER` and `MINIO_ROOT_USER` in the root file. See [Docker Compose](/docs/self-hosting/docker-compose#set-up) for a generator.
 
 Other cross-field checks that stop the boot:
 
@@ -88,7 +88,7 @@ Each `/16` base then yields about 256 networks. Appstrate also reclaims orphaned
 
 ## 400 on API calls: missing organization or space
 
-Requests that belong to an organization need an `X-Org-Id` header, and space-scoped routes (agents, runs, schedules, end-users, API keys, packages, integrations, files and uploads) also need `X-Space-Id`. Without it you get `400`. An API key carries its own organization and space, so it needs neither header. A header that contradicts the key's pinned value returns `403`.
+Requests that belong to an organization need an `X-Org-Id` header, and space-scoped routes (agents, runs, schedules, end-users, API keys, notifications, packages, integrations, files and uploads) also need `X-Space-Id`. Without it you get `400`. An API key carries its own organization and space, so it needs neither header. With an API key, `X-Org-Id` is ignored (the key is bound to its organization) and only `X-Space-Id` is checked: a value that contradicts the key's space returns `403`.
 
 ## Sign-in and first-owner problems
 
@@ -117,7 +117,7 @@ Register the same redirect URI at the provider (Google, GitHub or an OIDC client
 
 ## Uploads and live streams misbehave behind a proxy
 
-- **`413` that Appstrate never logs.** The proxy's body limit is lower than your upload. Raise it to at least 100 MB (nginx: `client_max_body_size 100m`).
+- **`413` that Appstrate never logs.** The proxy's body limit is lower than your upload. Raise it to at least 100 MiB (nginx: `client_max_body_size 100m`).
 - **Chat or run logs arrive in one batch at the end.** The proxy buffers or compresses `text/event-stream`. Disable that for the Appstrate location.
 - **Everyone is rate-limited together.** `TRUST_PROXY` is not set to your proxy depth, so every caller shares the proxy's IP. See [Rate Limits](/docs/self-hosting/rate-limits).
 

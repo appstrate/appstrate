@@ -87,7 +87,7 @@ Registering your own client uses `POST /api/integrations/{scope}/{name}/auths/{a
 
 ## Connecting an account
 
-Connecting is **agent-driven**: it happens from the agent's screens (the connection section of an agent, or the prompt shown when a run cannot start), not from a standalone provider form. That is what lets the platform ask only for the OAuth scopes the agent's tools need.
+Connecting is mostly **agent-driven**: it happens from the agent's screens (the connection section of an agent, or the prompt shown when a run cannot start). That is what lets the platform ask only for the OAuth scopes the agent's tools need. The **Connections** tab of an integration's page also has a connect button, and lists the accounts already connected.
 
 There are two ways in, both needing the `integrations:connect` permission.
 
@@ -108,7 +108,7 @@ Scopes are inferred, not typed in by hand. An integration lists the scopes the p
 
 ## Declaring integrations in an agent
 
-An agent manifest splits the version from the configuration:
+An agent manifest splits the version from the configuration. Excerpt of the agent manifest:
 
 ```json
 {
@@ -141,7 +141,7 @@ A run binds a set of one to ten connections per integration. The platform resolv
 5. A **soft organization default** (`enforce: false`).
 6. The **fallback**: the caller's single own connection on an auth that serves the selected tools.
 
-A connection is private to its owner until the owner shares it with the organization (`shared_with_org: true` on `PATCH /api/integrations/{scope}/{name}/connections/{connectionId}`). A shared connection is never picked implicitly: it has to be named by a pin, a default or an override. An admin pin or an enforced default can bind a shared connection only, so an admin cannot take over a member's private account. When the platform cannot decide, the run request fails with `409 missing_integration_connection`, listing for each integration the reason (`not_connected`, `needs_reconnection`, `insufficient_scopes`, `must_choose_connection`, ...) and the candidates. Check an agent beforehand with `GET /api/agents/{scope}/{name}/connection-readiness`.
+A connection is private to its owner until the owner shares it with the space it lives in (`shared_with_org: true` on `PATCH /api/integrations/{scope}/{name}/connections/{connectionId}`). A shared connection is never picked implicitly: it has to be named by a pin, a default or an override. An admin pin or an enforced default can bind a shared connection only, so an admin cannot take over a member's private account. When the platform cannot decide, the run request fails with `409 missing_integration_connection`, listing for each integration the reason (`not_connected`, `needs_reconnection`, `insufficient_scopes`, `must_choose_connection`, ...) and the candidates. Check an agent beforehand with `GET /api/agents/{scope}/{name}/connection-readiness`.
 
 For headless use, create an [end-user](/docs/features/end-users) and connect accounts to it; runs launched with the `Appstrate-User` header act as that end-user, and the fallback layer binds the end-user's own connection.
 

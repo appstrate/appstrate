@@ -11,7 +11,7 @@ A run starts with a fresh sandbox, so anything the agent should remember must be
 | **Checkpoint**     | `pin("checkpoint", content)` | Injected as the **Checkpoint** section  | Where the last run stopped: cursors, processed ids |
 | **Archive memory** | `note(content)`              | Only on demand, through `recall_memory` | Facts and discoveries worth keeping                |
 
-To use them, add the tools to the agent manifest:
+To use them, add the tools to `runtime_tools`. Excerpt of the agent manifest:
 
 ```json
 { "runtime_tools": ["output", "note", "pin"] }
@@ -42,21 +42,21 @@ A run reads its own private rows plus the shared ones. Memory is also partitione
 
 ## Inspecting and deleting memory
 
-In the web app, the agent page has a memory tab that lists slots and memories, with their scope and the run that wrote them. Through the API:
+In the web app, the agent page has a memory tab that lists slots and memories, with their scope and the run that wrote them. Through the API, with your own credential (an API key cannot carry the `persistence` permissions, so it cannot read or delete memory):
 
 ```bash
 # Pinned slots and archive memories visible to you
 curl "https://your-instance/api/agents/@acme/support-triage/persistence?kind=memory" \
-  -H "Authorization: Bearer apst_your_key"
+  -H "Cookie: ..." -H "X-Org-Id: <org id>" -H "X-Space-Id: spc_..."
 ```
 
 | Method and route                                              | Purpose                                                                                                                                     | Permission           |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `GET /api/agents/{scope}/{name}/persistence`                  | List slots and memories. Filters: `kind` (`pinned`, `memory`), `actor_type` and `actor_id` (admin only), `runId`.                           | `persistence:read`   |
+| `GET /api/agents/{scope}/{name}/persistence`                  | List slots and memories. Filters: `kind` (`pinned`, `memory`), `actor_type` and `actor_id` (callers holding `persistence:delete`), `runId`. | `persistence:read`   |
 | `DELETE /api/agents/{scope}/{name}/persistence`               | Delete memories, and the checkpoint when `actor_type` and `actor_id` select one scope. Returns `memories_deleted` and `checkpoint_deleted`. | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/memories/{id}` | Delete one memory.                                                                                                                          | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}`   | Delete one pinned slot.                                                                                                                     | `persistence:delete` |
 
-Without admin rights you see your own scope plus shared rows. An admin inspecting an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/docs/features/roles-and-permissions).
+Without `persistence:delete` you see your own scope plus shared rows. A caller holding it (the `admin` and `builder` space roles) who inspects an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/docs/features/roles-and-permissions).
 
 There is no endpoint that writes memory directly. Memory only changes when an agent run calls the tools, or when someone deletes it. It lives in the platform database.

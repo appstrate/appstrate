@@ -34,7 +34,7 @@ Only `cron_expression` is required. The body is closed: an unknown field is a `4
 | Field                                                                  | Meaning                                                                                                                                                                           |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`                                                                 | Label.                                                                                                                                                                            |
-| `cron_expression`                                                      | Five-field cron (minute, hour, day of month, month, day of week). Validated at write time (`400 invalid_cron_expression`).                                                        |
+| `cron_expression`                                                      | Five-field cron (minute, hour, day of month, month, day of week); an optional leading seconds field is also accepted. Validated at write time (`400 invalid_cron_expression`).    |
 | `timezone`                                                             | IANA zone, default `UTC`. An unknown zone is refused (`400 invalid_timezone`).                                                                                                    |
 | `input`                                                                | Frozen on the schedule and replayed at every tick. Validated against the agent's input schema, merged on top of the stored values of the space. Naming a locked field is refused. |
 | `version_override`                                                     | Which agent definition to run: `published` (default, the latest published version), a version spec, or `draft` (needs write access to the agent when you write the schedule).     |
@@ -88,4 +88,4 @@ Permissions: `schedules:read`, `schedules:write`, `schedules:delete`. The `build
 
 A schedule never pins a version unless you set `version_override`. By default each tick runs the latest published version, so publishing a new version changes what the next tick executes.
 
-The scheduling worker processes up to 10 ticks concurrently and 30 per minute per instance, a backstop against runaway schedules.
+The scheduling worker processes up to 10 ticks concurrently per instance. With Redis, ticks are also capped at 30 per minute across all instances, a backstop against runaway schedules. The in-process queue used without Redis has no per-minute cap.

@@ -78,18 +78,20 @@ curl -X PATCH https://your-instance/api/packages/skills/@acme/ticket-tone \
   -H "Content-Type: application/json" \
   -d '{ "content": "..." }'
 
-# Publish a version from the draft
+# Publish a version from the draft (creating the skill already published 1.0.0)
 curl -X POST https://your-instance/api/packages/skills/@acme/ticket-tone/versions \
-  -H "Authorization: Bearer apst_your_key"
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "version": "1.0.1" }'
 ```
 
-An update body can also carry `operations`, an ordered list of file edits applied atomically with the manifest. Limits: 1 MiB per written file, 50 MB and 10,000 entries for the whole package.
+An update body can also carry `operations`, an ordered list of file edits applied atomically with the manifest. Limits: 1 MiB per written file, 50 MiB and 10,000 entries for the whole package.
 
 Versions are semver, forward-only and immutable. Importing an archive (`POST /api/packages/import`) creates the draft and a version at once. See [Packages](/docs/features/packages) for versions, dist-tags, import and export.
 
 ## Using a skill in an agent
 
-Skills are attached in the agent manifest and nowhere else:
+Skills are attached in the agent manifest and nowhere else. Excerpt of the agent manifest:
 
 ```json
 {
@@ -111,9 +113,9 @@ The [chat](/docs/using-appstrate/chat) assistant also uses the skills of the spa
 | ---------------- | -------------------------------------------------------------------------------------------- |
 | `auto` (default) | The space's skills are listed and the model loads the ones that fit.                         |
 | `manual`         | The skills you chose (up to 5) are injected, and the model may still find others on request. |
-| `strict`         | Only the skills you chose are injected.                                                      |
+| `strict`         | Only the skills you chose (up to 5) are injected.                                            |
 
-A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced.
+A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced. A space enforces at most 3 skills, and their `SKILL.md` files may total at most 64,000 characters, a budget the skills chosen in a conversation share.
 
 ## Who can see and use a skill
 

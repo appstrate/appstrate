@@ -44,8 +44,8 @@ Run the same command again and you get the same `201` and the same end-user, wit
 - **Scope**: a key is scoped to the organization and the space of the request. Two spaces can use the same key without colliding.
 - **Same key, different request**: `422` with `code: "idempotency_conflict"`. The method, the URL, the query, or the body differs from the first use. Do not retry; use a new key, or send the original request.
 - **Same key, still running**: `409` with `code: "idempotency_in_progress"`. Wait and retry the same request.
-- **Failures are not stored**. If the first attempt ends in an error or a `5xx`, the key is released, and a retry with the same key runs the operation again. Only a response that completed is replayed.
-- **Large responses** (over 1 MiB) are not stored, and the key is released.
+- **Some failures are not stored**. If the first attempt throws an error or ends in a `5xx`, the key is released, and a retry with the same key runs the operation again. A `2xx` or a `4xx` response returned by the operation is stored and replayed.
+- **Large responses** (a body over about 1 MiB, 1,048,576 characters) are not stored, and the key is released.
 - **Permissions are checked first**, on every request, replays included. A replay is never served to a caller who would be refused on a fresh request, and a replayed run response is shaped for what the current caller may see.
 
 ```json

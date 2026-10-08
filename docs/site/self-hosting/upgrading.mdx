@@ -7,7 +7,7 @@ An upgrade is more than an image swap. Migrations run at boot and cannot be roll
 
 ## 1. Check what you run and what is supported
 
-The running version is `APPSTRATE_VERSION` in your install directory's `.env`, and it is shown in the dashboard footer and on `/health`. Image tags are the release version without a leading `v`, for example `1.0.0-beta.65`.
+On the Docker tiers, the running version is `APPSTRATE_VERSION` in your install directory's `.env` (a Tier 0 `.env` has none). It is also shown at the bottom of the Organization settings and Preferences sidebars, and on `/health`. Image tags are the release version without a leading `v`, for example `1.0.0-beta.65`.
 
 Security fixes cover the last 12 releases or 6 months. An upgrade from outside that window is not supported: reinstall instead of upgrading in place. See [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md).
 
@@ -64,11 +64,14 @@ appstrate self-update
 appstrate install --dir ~/appstrate
 ```
 
-Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To pin a version, set `APPSTRATE_VERSION` on the `bash` side of the pipe. It is a release tag here, so it keeps the `v` prefix that image tags and the `.env` value drop:
+Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To move to a specific version, install that CLI first, then re-run the installer, which pins the images to the CLI's version. `APPSTRATE_VERSION` is a release tag on the `bash` side of the pipe, so it keeps the `v` prefix, and `APPSTRATE_NO_LAUNCH=1` stops the script once the CLI is installed:
 
 ```bash
-curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=v1.0.0-beta.65 bash -s -- --yes
+curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=v1.0.0-beta.65 APPSTRATE_NO_LAUNCH=1 bash
+appstrate install --dir ~/appstrate
 ```
+
+Keep `APPSTRATE_NO_LAUNCH=1`. Without it, an unattended run of the script (`--yes`, `CI=true` or no terminal) goes on to `appstrate install` with the same variable, and the `v` ends up in the image tag, which does not exist.
 
 If you installed the CLI through Bun, use `bun update -g appstrate` instead of `self-update`. The upgrade matrix between install channels is in [the CLI upgrade notes](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
 

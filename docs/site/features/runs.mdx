@@ -38,7 +38,7 @@ curl -X POST https://your-instance/api/agents/@acme/support-triage/run \
   -d '{ "input": { "max_tickets": 10 } }'
 ```
 
-The call is fire-and-forget: it answers `201` with the created run resource (the same shape as `GET /api/runs/{id}`, `status: "pending"`) and execution continues in the background. The route is rate-limited to 20 requests per minute and honours `Idempotency-Key`.
+The call is fire-and-forget: it answers `201` with the created run resource (the same shape as `GET /api/runs/{id}`, with `status` usually `pending` or already `running`) and execution continues in the background. The route is rate-limited to 20 requests per minute and honours `Idempotency-Key`.
 
 The body is closed (an unknown field is a `400`) and every field is optional:
 
@@ -56,7 +56,7 @@ Query parameter `version` chooses the agent definition: `published` (default, th
 
 Headers worth knowing: `X-Space-Id` (browser sessions), `Appstrate-User` ([impersonation](/docs/features/end-users)), `Appstrate-Version` ([API versioning](/docs/api)), and `X-Appstrate-Connect-Offers: 1`, which asks a `409 missing_integration_connection` to carry a ready-to-open connect link for each missing integration.
 
-Launch failures that create **no run**: `404 agent_not_active_in_space`, `404 no_published_version`, `422 dependency_unresolved`, `422 bundle_invalid`, `409 missing_integration_connection`, `402` when a billing module refuses usage, `413` when input files exceed their caps.
+Launch failures that create **no run**: `400 model_not_configured` or `400 model_credential_missing` when no usable model is configured, `404 agent_not_active_in_space`, `404 no_published_version`, `422 dependency_unresolved`, `422 bundle_invalid`, `409 missing_integration_connection`, `402` when a billing module refuses usage, `413` when input files exceed their caps.
 
 ### Waiting for the result
 
@@ -138,6 +138,8 @@ Both accept bearer authentication only. A cookie session is refused with `403`. 
 | `mistral-conversations` | `/api/llm-proxy/mistral-conversations/v1/chat/completions` | `https://your-instance/api/llm-proxy/mistral-conversations` |
 
 The request body is the vendor's, with one change: `model` is the id of a **model preset** of the organization (the `id` that `GET /api/models` and `appstrate models list` print), not a vendor model name. The platform resolves the preset, puts the real model id and the provider key in, forwards the call and relays the answer, streamed or not. Each call is metered in the usage ledger. A preset whose protocol does not match the route you called is a `400`, and so is a preset that comes from an OAuth subscription, which the proxy never serves. Send the key as `Authorization: Bearer`: the proxy does not read `x-api-key`, so a vendor SDK that sends that header by default (the Anthropic SDK does) needs the bearer header added. With a user access token instead of an API key, also send `X-Org-Id`. The optional `X-Run-Id` header attributes the call to a run so its cost rolls up into that run; for a user token it must be a run that user launched. `appstrate models list --proxy-only` lists the presets these four routes can serve.
+
+When the operator turns on the response cache (`LLM_PROXY_CACHE_MODE=simple`, off by default), a non-streaming `2xx` answer can be replayed from a cache private to the organization and the preset. The `Cache-Status` header then reads `appstrate-llm-proxy; hit` for a replayed answer, or `appstrate-llm-proxy; fwd=uri-miss; stored` when the upstream was called and its answer stored.
 
 ```bash
 curl https://your-instance/api/llm-proxy/anthropic-messages/v1/messages \

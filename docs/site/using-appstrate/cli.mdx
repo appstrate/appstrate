@@ -17,7 +17,7 @@ Global flags work on every command: `-p, --profile <name>` selects a profile, `-
 curl -fsSL https://get.appstrate.dev | bash
 ```
 
-Downloads the signed binary for macOS or Linux (x64 and arm64) into `~/.local/bin`, verifies it, and then guides you through `appstrate install`. To install only the CLI and skip the guided install, pipe into `APPSTRATE_NO_LAUNCH=1 bash`. On Windows, run it inside WSL2. Update with `appstrate self-update`.
+Downloads the signed binary for macOS or Linux (x64 and arm64) into `~/.local/bin`, and verifies it. In an interactive terminal it then stops and tells you to run `appstrate install`. Unattended (`bash -s -- --yes`, `CI=true`, or stdout not a terminal), it runs `appstrate install --yes` itself. To install only the CLI in every case, pipe into `APPSTRATE_NO_LAUNCH=1 bash`. On Windows, run it inside WSL2. Update with `appstrate self-update`.
 
 </Tab>
 
@@ -119,17 +119,17 @@ appstrate login --instance http://localhost:3000
 appstrate login --profile prod --instance https://app.example.com
 ```
 
-| Flag                     | Description                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| `--instance <url>`       | Instance base URL                                                                         |
-| `-p`, `--profile <name>` | Profile to store the session under (default `default`)                                    |
-| `--org <id-or-slug>`     | Pin this organization after login                                                         |
-| `--create-org <name>`    | Create an organization and pin it. A default space and a `hello-world` agent come with it |
-| `--no-org`               | Do not pin an organization                                                                |
-| `--space <id>`           | Pin this space after the organization                                                     |
-| `--create-space <name>`  | Create a space and pin it                                                                 |
-| `--no-space`             | Do not pin a space                                                                        |
-| `--device-name <name>`   | Label shown in the dashboard's list of devices (default: the hostname)                    |
+| Flag                     | Description                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `--instance <url>`       | Instance base URL                                                                           |
+| `-p`, `--profile <name>` | Profile to store the session under (default: the active profile, see [Profiles](#profiles)) |
+| `--org <id-or-slug>`     | Pin this organization after login                                                           |
+| `--create-org <name>`    | Create an organization and pin it. A default space and a `hello-world` agent come with it   |
+| `--no-org`               | Do not pin an organization                                                                  |
+| `--space <id>`           | Pin this space after the organization                                                       |
+| `--create-space <name>`  | Create a space and pin it                                                                   |
+| `--no-space`             | Do not pin a space                                                                          |
+| `--device-name <name>`   | Label shown in the dashboard's list of devices (default: the hostname)                      |
 
 The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
 
@@ -176,12 +176,13 @@ An authenticated, curl-compatible call to the instance's REST API. The CLI adds 
 ```bash
 appstrate api GET /api/agents
 appstrate api /api/agents                                        # method inferred
+appstrate api GET /api/runs -q limit=5 -q user=me                # query parameters
 echo '{"input":{"query":"hi"}}' | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
 appstrate api POST /api/x -d @body.json
 appstrate api POST /api/x -F 'file=@pkg.zip'
 ```
 
-Most curl flags behave as in curl: `-H`, `-d`, `-F`, `-G`, `-i`, `-I`, `-o`, `-s`, `-f` and `--fail-with-body`, `-v` (the token stays redacted), `-w`, `--retry`, `--max-time`, `-L`. Three differences are deliberate. There is no `-u`, because you never handle the token. A URL on another origin than the instance (your profile's, or `APPSTRATE_INSTANCE` with an API key) is refused. Cookie-jar files are refused. The curl-aligned exit codes (22 and 25 for HTTP errors, 28 for timeouts, and so on) are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-api).
+Most curl flags behave as in curl: `-H`, `-d`, `-F`, `-G`, `-i`, `-I`, `-o`, `-s`, `-f` and `--fail-with-body`, `-v` (the token stays redacted), `-w`, `--retry`, `--max-time`, `-L`. `-q, --query 'k=v'` (repeatable) adds a query parameter, unlike curl's `-q`. Three differences are deliberate. There is no `-u`, because you never handle the token. A URL on another origin than the instance (your profile's, or `APPSTRATE_INSTANCE` with an API key) is refused. Cookie-jar files are refused. The curl-aligned exit codes (22 and 25 for HTTP errors, 28 for timeouts, and so on) are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-api).
 
 An agent is addressed by its package id, in the URL `/api/agents/@scope/name/run`. The launch call returns `201` with the run resource and does not stream. Follow the run with `GET /api/runs/{id}`, or use `appstrate run`.
 
@@ -194,7 +195,7 @@ Explores the instance's OpenAPI 3.1 schema without printing all of it. The schem
 ```bash
 appstrate openapi list --tag runs
 appstrate openapi list --search "create run" --json
-appstrate openapi show createRun                  # by operationId
+appstrate openapi show runAgent                   # by operationId
 appstrate openapi show GET /api/runs --json       # fully dereferenced
 appstrate openapi export -o schema.json
 ```
@@ -218,11 +219,11 @@ appstrate run ./triage-1.2.0.afps-bundle --integrations local --creds-file ./cre
 - A **package id** runs on the instance by default (a **platform run**), exactly like the dashboard's Run button, and the CLI follows the run's logs and final status. `--remote` asks for this explicitly. Add `--local` to download the bundle and run it in-process instead (a **remote run**).
 - A **`.afps` or `.afps-bundle` path** runs locally, with your shell, filesystem and environment. A path cannot be combined with `--remote`.
 
-Pass parameters with `--input <json>` or `--input-file <path>`. A platform run sends them as is and the instance validates them. Other useful flags: `--no-inherit` (ignore the space's stored run configuration), `--proxy <id>`, `--json` (events as JSON lines), `--output <path>` (write the final result), `-v` and `-q` (more or less tool output).
+Pass parameters with `--input <json>` or `--input-file <path>`. A platform run sends them as is and the instance validates them. Other useful flags: `--no-inherit` (a remote run ignores the space's stored run configuration; a platform run ignores the flag), `--proxy <id>`, `--json` (events as JSON lines), `--output <path>` (write the final result), `-v` and `-q` (more or less tool output).
 
 A platform run outlives the CLI. In an interactive terminal, Ctrl-C cancels the run on the instance. In a script (`--json`, or no TTY on stdin), a signal detaches instead and the run keeps going, which you can force either way with `--cancel-on-exit` or `--no-cancel-on-exit`. A run that needs an integration without a healthy connection is refused with `409 missing_integration_connection`: connect it from the dashboard first.
 
-Flags that only make sense in one mode are refused in the other, with a message that names them. The environment variables, the flags of a remote run and a CI example are in [Headless and CI runs](#headless-and-ci-runs).
+Most flags that only make sense in one mode are refused in the other, with a message that names them. The environment variables, the flags of a remote run and a CI example are in [Headless and CI runs](#headless-and-ci-runs).
 
 </Accordion>
 
@@ -243,7 +244,7 @@ appstrate packages push my-skill            # the folder into the draft, nobody 
 appstrate packages publish my-skill         # the draft becomes a version every space resolves
 ```
 
-`pull` accepts a version (`my-skill@1.2.0`) to fetch a published version read-only. `push` refuses to overwrite a draft that changed elsewhere since you pulled it (`--force` replaces it). `publish` bumps the patch version by default (`--bump minor` or `major`). `push --create` creates a package that does not exist yet and publishes its first version. Only someone who can write in the package's home space can push or publish.
+`pull` accepts a version (`my-skill@1.2.0`) to fetch a published version read-only. `push` refuses to overwrite a draft that changed elsewhere since you pulled it (`--force` replaces it). `publish` cuts the draft's own version when it is ahead of the latest published one (or nothing is published yet). When the draft still carries the published version, it bumps the patch (`--bump minor` or `major`). `push --create` creates a package that does not exist yet and publishes its first version. Only someone who can write in the package's home space can push or publish.
 
 </Accordion>
 
@@ -290,7 +291,7 @@ Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update
 | `APPSTRATE_SPACE_ID` | Id of the space (`spc_...`). Not needed for a platform run. A remote run with remote integrations (the default, see below) requires it, and the command stops without it.           |
 | `APPSTRATE_ORG_ID`   | Organization id. Not needed for a platform run. Required by `--model-source preset`, which refuses to start without it.                                                             |
 
-With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile: a key is pinned to one organization and one space, and a header that disagrees with the key is answered with `403`. Leave both unset for a platform run, and when you set them, set the ones the key is pinned to. An empty value counts as unset. Only the instance falls back to the profile. If you upgrade the CLI and a job used to rely on the profile's space, it now needs `APPSTRATE_SPACE_ID`, or stops with the message `No space id for a local run`.
+With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile: a key is pinned to one organization and one space. `X-Org-Id` is ignored with an API key (the key is bound to its organization); only `X-Space-Id` is checked, and one that disagrees with the key is answered with `403`. Leave both unset for a platform run, and when you set them, set the ones the key is pinned to. An empty value counts as unset. Only the instance falls back to the profile. If you upgrade the CLI and a job used to rely on the profile's space, it now needs `APPSTRATE_SPACE_ID`, or stops with the message `No space id for a local run`.
 
 The key needs a few scopes, depending on what you run:
 
@@ -314,7 +315,7 @@ export APPSTRATE_INSTANCE=https://appstrate.example.com   # optional when a prof
 appstrate api GET /api/agents
 ```
 
-- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable. An empty `--api-key` is refused, and so is a key that contains whitespace or non-ASCII characters.
+- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable. An empty `--api-key` is refused. Leading and trailing whitespace is trimmed, and a key that still contains whitespace, a line break or a non-ASCII character is refused.
 - The instance is `APPSTRATE_INSTANCE`, else the profile's. With neither, the command stops.
 - No `X-Org-Id` or `X-Space-Id` is sent: a key is pinned to one organization and one space, and those apply. Your own `-H` headers still pass through.
 - **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If that variable is already set for `appstrate run`, `api` in the same shell stops using your login: another principal, no org or space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to your profile.
@@ -416,14 +417,13 @@ Profiles live in `~/.config/appstrate/config.toml` (or under `$XDG_CONFIG_HOME`)
 
 ## Troubleshooting
 
-| Message                                       | Fix                                                                                                                           |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `your session may have been revoked`          | Run `appstrate login` again                                                                                                   |
-| `Space context required`                      | No space is pinned. Run `appstrate space switch`                                                                              |
-| `Space '<id>' not found in this organization` | The pinned space belongs to another organization. Run `appstrate space switch`                                                |
-| `pins the retired key "applicationId"`        | The profile predates the rename of applications to spaces. Delete that line from `config.toml`, then `appstrate space switch` |
-| `Docker is required for this tier`            | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                                           |
-| `No space id for a local run`                 | An API key run on your host needs `APPSTRATE_SPACE_ID`, the space the key is pinned to. A platform run does not               |
+| Message                                       | Fix                                                                                                             |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `your session may have been revoked`          | Run `appstrate login` again                                                                                     |
+| `Space context required`                      | No space is pinned. Run `appstrate space switch`                                                                |
+| `Space '<id>' not found in this organization` | The pinned space belongs to another organization. Run `appstrate space switch`                                  |
+| `Docker is required for this tier`            | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                             |
+| `No space id for a local run`                 | An API key run on your host needs `APPSTRATE_SPACE_ID`, the space the key is pinned to. A platform run does not |
 
 More entries are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#troubleshooting).
 

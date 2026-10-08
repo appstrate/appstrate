@@ -66,7 +66,7 @@ An agent lists the integrations it needs and which of their tools it may use. Th
 
 A connection is one authenticated account on an integration, owned by the person who connected it. A member can share a connection with the other users of a space. Credentials are encrypted at rest and handed to the sidecar for the run, never to the agent: the agent calls a tool, the sidecar adds the credential and relays the request.
 
-A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from **Preferences → My connections** or from the integration's page, and the [chat](/docs/using-appstrate/chat) can offer a connect link when it needs one.
+A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from the agent's Connections tab or from the integration's page, and manage them under **Preferences → My connections**, and the [chat](/docs/using-appstrate/chat) can offer a connect link when it needs one.
 
 Deep-dive: [Integrations](/docs/integrations/catalog).
 
@@ -83,7 +83,7 @@ A run starts from the dashboard, the chat, a [schedule](/docs/features/schedulin
 
 Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend, opt-in, gives each run its own microVM.
 
-Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced in US dollars from the model's rate card. A model without a known price is recorded at a cost of 0.
+Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced in US dollars from the model's rate card. A model without a known price leaves the run marked `unpriced` (`cost_pricing_status`): its `cost` is `null`, which means not priced rather than free, and the dashboard does not show an amount for it.
 
 Deep-dive: [Features / Runs](/docs/features/runs) and [Features / Sandbox and Sidecar](/docs/features/sandbox-and-sidecar).
 

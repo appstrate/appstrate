@@ -91,7 +91,7 @@ Some also return `total` or `limit`. The style depends on the resource, and the 
 | Cursor   | `limit`, `startingAfter` (and `endingBefore` for end-users) | `/api/end-users`, `/api/files`, `/api/notifications`, `/api/webhooks/{id}/deliveries`, `/api/chat/sessions` |
 | Sequence | `since`, `limit`                                            | `/api/runs/{id}/logs`                                                                                       |
 
-`limit` defaults to 20 on most lists (50 for an agent's runs, 100 for integrations, 1000 for run logs) and is capped at 100 (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.
+`limit` defaults to 20 on most lists (50 for an agent's runs, 100 for integrations and chat sessions, 1000 for run logs) and is capped at 100 (1000 for run logs). Out-of-range values on most lists fall back to the default instead of failing.
 
 When another page follows, the response carries an RFC 8288 `Link` header with `rel="next"`, and `rel="prev"`, `first`, `last` where they apply. A generic client can follow `next` until it disappears, whatever the body shape. Cursor values are resource ids: pass the `id` of the last item you received.
 
@@ -120,6 +120,8 @@ Authentication cannot use headers, because `EventSource` cannot send them:
 
 - **API key**: `?token=apst_...`. The organization and space come from the key.
 - **Session cookie**: send the cookie, plus `?orgId=...&spaceId=...`.
+
+On the agent stream, encode the package id as one path segment: `@acme/email-daily-digest` becomes `%40acme%2Femail-daily-digest`.
 
 ```bash
 curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"

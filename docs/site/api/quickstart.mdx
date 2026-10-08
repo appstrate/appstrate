@@ -20,7 +20,7 @@ export APPSTRATE_URL=http://localhost:3000
 
 ### Create an API key
 
-In the dashboard, open **Space Settings**, then **API Keys**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, the `credential-proxy:call` and `llm-proxy:call` proxy scopes included when you hold them, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
+In the dashboard, open **Organization settings**, then **API Keys** under **Space**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, the `credential-proxy:call` and `llm-proxy:call` proxy scopes included when you hold them, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
 export APPSTRATE_KEY=apst_your_key_here
@@ -82,7 +82,7 @@ curl -X POST "$APPSTRATE_URL/api/runs/inline" \
   }'
 ```
 
-The answer is `201 Created` with the run resource. The run executes in the background:
+The answer is `201 Created` with the run resource, in status `pending` or already `running`. The run executes in the background:
 
 ```json
 {
@@ -143,7 +143,7 @@ Server-Sent Events push status changes, log entries, and cost updates as they ha
 curl -N "$APPSTRATE_URL/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
 ```
 
-You receive `run_update`, `run_log`, and `run_metric` events, plus a `ping` every 30 seconds. The stream starts with the run's current status but does not replay past log lines. See [Realtime streams](/docs/api#realtime-streams).
+You receive `run_update`, `run_log`, and `run_metric` events, plus a `ping` on connect and after every 30 seconds without another event. The stream starts with the run's current status but does not replay past log lines. See [Realtime streams](/docs/api#realtime-streams).
 
 </Step>
 

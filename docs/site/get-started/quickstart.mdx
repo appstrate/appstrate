@@ -45,6 +45,8 @@ You can skip the model step and add one later under **Organization settings → 
 
 ### Run your first agent
 
+The `hello-world` agent starts as a draft, with no published version. The webapp's **Run** button and the CLI's `@draft` run that draft, because you can edit the agent. The chat and a coding agent run the latest published version by default, and the `/appstrate:run-hello-world` command only appears once one exists: for those, open the agent first and choose **Create version** in its actions menu.
+
 <Tabs items={['Webapp', 'Chat', 'CLI', 'Coding agent']}>
 
 <Tab value="Webapp">
@@ -67,7 +69,7 @@ Open **Chat** in the sidebar, pick a model, and ask for what you want, for examp
 ```bash
 appstrate login --instance http://localhost:3000   # approve the code in your browser
 appstrate api GET /api/agents                      # each agent has an id like @acme/hello-world
-appstrate run @acme/hello-world                    # launch it and follow the logs
+appstrate run @acme/hello-world@draft              # launch the draft and follow the logs
 ```
 
 `appstrate login` pins your organization and its default space on the profile, so later commands need no extra flags. Replace `@acme` with your organization's slug. See [CLI](/docs/using-appstrate/cli).

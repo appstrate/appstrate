@@ -17,7 +17,7 @@ This downloads the `appstrate` CLI binary for your OS and architecture, verifies
 
 Then it depends on where you run it:
 
-- **In an interactive terminal**, the script stops after installing the CLI and tells you to run `appstrate install`. That command asks for the tier and the install directory and, on Docker tiers, for an optional bootstrap email and the public URL.
+- **In an interactive terminal**, the script stops after installing the CLI and tells you to run `appstrate install`. That command asks for the tier and the install directory, for another port only when the default one is taken, and, on Docker tiers, for an optional bootstrap email, the public URL and the agent execution backend (Docker, or Firecracker on a KVM host).
 - **Unattended** (you pass `--yes`, `CI=true` is set, or stdout is not a terminal), it goes on to run `appstrate install --yes` with the defaults below.
 
 ```bash

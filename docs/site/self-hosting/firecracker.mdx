@@ -43,7 +43,7 @@ On a Docker tier (1 to 3, never tier 0), the installer can set up both sides:
 appstrate install --run-adapter firecracker
 ```
 
-It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`), `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` to the platform's `.env`. Two topologies:
+It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`), `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` to the platform's `.env`, plus `APPSTRATE_RUNNER_SOCKET_DIR` (the runner socket's directory) on the same host, and `FIRECRACKER_RUNNER_TLS_REQUIRED=0` when you accept a plaintext `http://` runner URL on a remote host. Two topologies:
 
 - **Same host.** The installer detects the host's LAN IPv4 (override it with `--host-ip`), points the platform at the runner socket, brings the platform up, then runs `sudo appstrate runner install` for you. A non-interactive run prints that command instead, because it cannot ask for a password. A failed runner install is a warning, not a rollback: the platform stays installed.
 - **Remote KVM host.** Pass `--runner-url https://<kvm-host>:3100 --runner-token <token>`. The installer writes the platform side and prints the command to run on the KVM host.

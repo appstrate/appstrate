@@ -71,7 +71,7 @@ Every delivery is a JSON event envelope:
 
 - `timestamp` is when the event occurred, RFC 3339. It is not the signing time: that is the `webhook-timestamp` header.
 - `data.object` carries the run `id`, `packageId`, `status` (the suffix of the event type, such as `success` or `started`), and on terminal events `duration` in milliseconds. A failed run carries `error`. A successful run carries `result` in `full` mode. A run launched inline (without a cataloged agent) carries `package: { "ephemeral": true }`.
-- A payload is capped at **256 KB**. If it would exceed that, `result` is removed and `resultTruncated: true` is set; if it still exceeds it, `input` is removed too and `inputTruncated: true` is set. Fetch the run through the API for the full data.
+- The run object is capped at **256 KiB** of serialized JSON. If it would exceed that, `result` is removed and `resultTruncated: true` is set; if it still exceeds it, `input` is removed too and `inputTruncated: true` is set. Fetch the run through the API for the full data.
 
 ## Verify the signature
 
