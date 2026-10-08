@@ -70,6 +70,15 @@ export interface ConnectionPickerOptions {
   version?: string;
 }
 
+/**
+ * What the picker takes from outside React. `openPopup` defaults to the hosted
+ * connect popup; tests pass one honouring its contract (resolves `true` once
+ * the integration caches were refetched), since the real one needs a browser.
+ */
+export interface ConnectionPickerDeps {
+  openPopup?: ReturnType<typeof useHostedConnectPopup>["openPopup"];
+}
+
 export type ConnectionPicker = NonNullable<ReturnType<typeof useConnectionPicker>>;
 
 /**
@@ -77,16 +86,19 @@ export type ConnectionPicker = NonNullable<ReturnType<typeof useConnectionPicker
  * verdict, the uncommitted draft, the pin/override write and the connect
  * orchestration. `null` until the verdict has loaded.
  */
-export function useConnectionPicker({
-  integrationId,
-  agentPackageId,
-  manifest,
-  authStatuses,
-  agentTools,
-  agentScopes,
-  persistence,
-  version,
-}: ConnectionPickerOptions) {
+export function useConnectionPicker(
+  {
+    integrationId,
+    agentPackageId,
+    manifest,
+    authStatuses,
+    agentTools,
+    agentScopes,
+    persistence,
+    version,
+  }: ConnectionPickerOptions,
+  deps: ConnectionPickerDeps = {},
+) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: resolution, isPending } = useIntegrationAgentResolution(
     integrationId,
@@ -99,7 +111,9 @@ export function useConnectionPicker({
   const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
-  const { openPopup, isPending: oauthPending } = useHostedConnectPopup();
+  const hostedPopup = useHostedConnectPopup();
+  const openPopup = deps.openPopup ?? hostedPopup.openPopup;
+  const oauthPending = hostedPopup.isPending;
   const qc = useQueryClient();
   // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
@@ -263,6 +277,15 @@ export function useConnectionPicker({
     setOpen(true);
   };
 
+  // A settled popup has already refetched the integration caches.
+  const upgradeScopes = (conn: IntegrationCandidate) =>
+    openPopup({
+      packageId: integrationId,
+      authKey: conn.auth_key,
+      scopes: conn.missing_scopes,
+      connectionId: conn.id,
+    });
+
   const triggerLabel =
     unavailableIds.length > 0
       ? setLabel(storedIds, unavailableIds)
@@ -325,9 +348,9 @@ export function useConnectionPicker({
     setOpen,
     onOpenChange,
     oauthPending,
-    openPopup,
     persist,
     toggle,
     triggerConnect,
+    upgradeScopes,
   };
 }

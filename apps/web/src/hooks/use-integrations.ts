@@ -227,13 +227,19 @@ export function useIntegrationAgentResolution(
   return useQuery({
     ...options,
     enabled: options.enabled && !!integrationId,
-    select: (data) =>
-      data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null,
+    select: (data) => resolutionOf(data, integrationId),
   });
 }
 
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
+
+/** One integration's verdict out of the bulk readiness payload. */
+function resolutionOf(data: AgentConnectionReadiness, integrationId: string | undefined) {
+  return (
+    data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
+  );
+}
 
 /**
  * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
@@ -251,10 +257,7 @@ export function useReadIntegrationResolution(
   return () => {
     const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
     if (state?.status === "error") throw state.error;
-    return (
-      state?.data?.integrations.find((i) => i.integration_package_id === integrationId)
-        ?.resolution ?? null
-    );
+    return state?.data ? resolutionOf(state.data, integrationId) : null;
   };
 }
 

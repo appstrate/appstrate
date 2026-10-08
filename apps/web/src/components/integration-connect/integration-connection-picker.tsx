@@ -52,6 +52,7 @@ export function IntegrationConnectionPicker({
   const {
     runBlocking,
     candidateIds,
+    overrideMode,
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
@@ -67,17 +68,22 @@ export function IntegrationConnectionPicker({
     deadConns,
     underScopedConns,
     setLabel,
+    persist,
   } = picker;
 
+  // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
   if (emptyPickerPrompt === "reconfigure") {
     return <ReconfigurePicker integrationId={integrationId} />;
   }
 
+  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
   if (lockedConnectionIds.length > 0) {
     return (
       <LockedPicker
         integrationId={integrationId}
-        persistence={persistence}
+        overrideMode={overrideMode}
+        explicitIds={explicitIds}
+        onClear={() => void persist([])}
         lockedConnectionIds={lockedConnectionIds}
         lockedBy={lockedBy}
         candidateIds={candidateIds}
@@ -87,12 +93,17 @@ export function IntegrationConnectionPicker({
     );
   }
 
+  // Blocked for this member AND nothing to pick → dead end. Show a
+  // disabled, explanatory button instead of an empty dropdown.
   // Unless a stored set is left to clear: the menu's reset item is the way out.
   if (!canAddConnection && !hasCandidates && explicitIds.length === 0) {
     return <BlockedPicker integrationId={integrationId} canConnect={canConnect} />;
   }
 
-  // Unless a stored set is left to clear, as above.
+  // No existing connection AND no auth the actor can connect on (every
+  // oauth2 auth lacks an admin-registered OAuth client) → point at the
+  // admin setup instead of an empty dropdown that would only 403 — unless a
+  // stored set is left to clear, as above.
   if (!hasCandidates && authKeys.length === 0 && explicitIds.length === 0) {
     return (
       <NoClientPicker
@@ -130,12 +141,7 @@ export function IntegrationConnectionPicker({
       {/* Under-scoped → blocked server-side. The owner can upgrade in place;
           a foreign owner can only be flagged. */}
       {underScopedConns.map((conn) => (
-        <UnderScopedWarning
-          key={conn.id}
-          integrationId={integrationId}
-          conn={conn}
-          picker={picker}
-        />
+        <UnderScopedWarning key={conn.id} conn={conn} picker={picker} />
       ))}
     </div>
   );

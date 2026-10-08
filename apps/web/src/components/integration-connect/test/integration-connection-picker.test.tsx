@@ -8,7 +8,8 @@
  * selection. Plus how the picker reads the connection a connect popup created.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
+import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { $api, type components } from "../../../api/client.ts";
 import { ApiError } from "../../../api/errors.ts";
@@ -17,10 +18,15 @@ import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
 import {
   invalidateIntegrationQueries,
-  useReadIntegrationResolution,
   type IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
+import {
+  useConnectionPicker,
+  type ConnectionPicker,
+  type ConnectionPickerDeps,
+  type ConnectionPickerPersistence,
+} from "../use-connection-picker.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -341,77 +347,134 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
   });
 });
 
-describe("useReadIntegrationResolution — the verdict after a connect popup", () => {
+describe("useConnectionPicker — triggerConnect after the connect popup", () => {
   const ADDED = "44444444-4444-4444-8444-444444444444";
   type Readiness = ReturnType<typeof readiness>;
-  type Reader = ReturnType<typeof useReadIntegrationResolution>;
+  type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
+
+  const before = async () => readiness(resolution({}));
+  const withAdded = async () =>
+    readiness(
+      resolution({
+        candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")],
+      }),
+    );
 
   /** The readiness query mounted as the picker holds it: active, each fetch answered in turn. */
   async function mountReadiness(qc: QueryClient, answers: Array<() => Promise<Readiness>>) {
     let asked = 0;
-    const observer = new QueryObserver(qc, {
+    const options = {
       queryKey: READINESS_KEY,
       queryFn: () => answers[asked++]!(),
       retry: false,
-    });
+    };
+    const observer = new QueryObserver(qc, options);
     const unsubscribe = observer.subscribe(() => {});
     await new Promise((resolve) => setTimeout(resolve, 0));
-    return { asked: () => asked, unsubscribe };
+    // A query refetches with the options of the observer set up last; rendering
+    // the picker sets up its own, bound to the real client.
+    const rebind = () => observer.setOptions(options);
+    return { asked: () => asked, rebind, unsubscribe };
   }
 
-  function Probe({ onReader }: { onReader: (read: Reader) => void }) {
-    onReader(useReadIntegrationResolution(INTEGRATION, AGENT));
+  function Probe({
+    persistence,
+    openPopup,
+    onPicker,
+  }: {
+    persistence: ConnectionPickerPersistence;
+    openPopup: OpenPopup;
+    onPicker: (picker: ConnectionPicker | null) => void;
+  }) {
+    onPicker(
+      useConnectionPicker(
+        {
+          integrationId: INTEGRATION,
+          agentPackageId: AGENT,
+          manifest: MANIFEST,
+          authStatuses: [],
+          agentTools: undefined,
+          agentScopes: undefined,
+          persistence,
+        },
+        { openPopup },
+      ),
+    );
     return null;
   }
 
-  function captureReader(qc: QueryClient): Reader {
-    const readers: Reader[] = [];
-    render(<Probe onReader={(read) => readers.push(read)} />, { queryClient: qc });
-    return readers[0]!;
+  /** An empty override, so a created connection is written straight through `onChange`. */
+  async function setup(
+    answers: Array<() => Promise<Readiness>>,
+    popup: (qc: QueryClient) => OpenPopup,
+  ) {
+    const qc = new QueryClient();
+    const mounted = await mountReadiness(qc, answers);
+    const picked: string[][] = [];
+    const pickers: Array<ConnectionPicker | null> = [];
+    render(
+      <Probe
+        persistence={{ mode: "override", value: [], onChange: (ids) => picked.push(ids) }}
+        openPopup={popup(qc)}
+        onPicker={(p) => pickers.push(p)}
+      />,
+      { queryClient: qc },
+    );
+    mounted.rebind();
+    const picker = pickers[0];
+    if (!picker) throw new Error("the readiness verdict should be loaded");
+    return { mounted, picked, picker };
   }
 
-  it("reads the created connection off the one refetch the popup awaited", async () => {
-    const qc = new QueryClient();
-    const mounted = await mountReadiness(qc, [
-      async () => readiness(resolution({})),
-      async () =>
-        readiness(
-          resolution({
-            candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")],
-          }),
-        ),
-    ]);
-    const read = captureReader(qc);
-    expect(read()?.candidates.map((c) => c.id)).not.toContain(ADDED);
+  /** The real popup's contract: `true` once the integration caches were refetched. */
+  const settles =
+    (qc: QueryClient): OpenPopup =>
+    async () => {
+      await invalidateIntegrationQueries(qc);
+      return true;
+    };
 
-    // What `openPopup` awaits before it resolves.
-    await invalidateIntegrationQueries(qc);
-
-    expect(read()?.candidates.map((c) => c.id)).toContain(ADDED);
-    // The mount, then the popup's refetch: reading asks nothing more.
+  it("writes the created connection, read off the one refetch the popup awaited", async () => {
+    const { mounted, picked, picker } = await setup([before, withAdded], settles);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[ADDED]]);
+    // The mount, then the popup's refetch: reading after it asks nothing more.
     expect(mounted.asked()).toBe(2);
     mounted.unsubscribe();
   });
 
-  it("throws a failed refetch instead of passing the stale verdict off as unchanged", async () => {
-    const qc = new QueryClient();
-    const failure = new ApiError("internal_error", "boom", 500);
-    const mounted = await mountReadiness(qc, [
-      async () => readiness(resolution({})),
-      () => Promise.reject(failure),
-    ]);
-    const read = captureReader(qc);
-
-    // The popup's await never rejects: the failure is only in the query state.
-    await expect(invalidateIntegrationQueries(qc)).resolves.toBeUndefined();
-
-    let thrown: unknown;
+  it("toasts a failed refetch instead of rejecting or passing the stale verdict off", async () => {
+    const toasted = spyOn(toast, "error").mockImplementation(() => 0);
     try {
-      read();
-    } catch (err) {
-      thrown = err;
+      const failure = new ApiError("internal_error", "boom", 500);
+      const { mounted, picked, picker } = await setup(
+        [before, () => Promise.reject(failure)],
+        settles,
+      );
+      await expect(picker.triggerConnect("primary")).resolves.toBeUndefined();
+      expect(toasted).toHaveBeenCalledTimes(1);
+      expect(picked).toEqual([]);
+      mounted.unsubscribe();
+    } finally {
+      toasted.mockRestore();
     }
-    expect(thrown).toBe(failure);
-    mounted.unsubscribe();
+  });
+
+  it("reads nothing when the popup did not settle", async () => {
+    const toasted = spyOn(toast, "error").mockImplementation(() => 0);
+    try {
+      const { mounted, picked, picker } = await setup([before], (qc) => async () => {
+        // A refetch landed meanwhile (window focus): the cache already holds a new row.
+        qc.setQueryData(READINESS_KEY, await withAdded());
+        return false;
+      });
+      await picker.triggerConnect("primary");
+      expect(picked).toEqual([]);
+      expect(toasted).not.toHaveBeenCalled();
+      expect(mounted.asked()).toBe(1);
+      mounted.unsubscribe();
+    } finally {
+      toasted.mockRestore();
+    }
   });
 });

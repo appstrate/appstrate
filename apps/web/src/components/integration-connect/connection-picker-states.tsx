@@ -12,7 +12,7 @@ import { unavailableConnectionIds } from "../../lib/connection-set";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { ClearChoiceButton } from "./clear-choice-button";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
-import type { ConnectionPicker, ConnectionPickerPersistence } from "./use-connection-picker";
+import type { ConnectionPicker } from "./use-connection-picker";
 
 export const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
 
@@ -38,7 +38,7 @@ export function LoadingPicker({ integrationId }: { integrationId: string }) {
   );
 }
 
-/** Nothing to pick or connect: the agent's configuration must change, whatever the lock. */
+/** A disabled button saying the agent's configuration must change. */
 export function ReconfigurePicker({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   return (
@@ -60,13 +60,15 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 }
 
 /**
- * An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
- * A stored override within its set narrows it, so that subset is what binds; one reaching
- * outside it is refused (`override_outranked`) and offered its only fix, being cleared.
+ * The locked set, read-only. A stored override within it narrows it, so that subset is what
+ * binds; one reaching outside it is refused (`override_outranked`) and offered its only fix,
+ * being cleared.
  */
 export function LockedPicker({
   integrationId,
-  persistence,
+  overrideMode,
+  explicitIds,
+  onClear,
   lockedConnectionIds,
   lockedBy,
   candidateIds,
@@ -74,7 +76,9 @@ export function LockedPicker({
   setLabel,
 }: {
   integrationId: string;
-  persistence: ConnectionPickerPersistence;
+  overrideMode: boolean;
+  explicitIds: string[];
+  onClear: () => void;
   lockedConnectionIds: string[];
   lockedBy: ConnectionPicker["lockedBy"];
   candidateIds: string[];
@@ -82,8 +86,7 @@ export function LockedPicker({
   setLabel: ConnectionPicker["setLabel"];
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const overrideMode = persistence.mode === "override";
-  const storedOverride = overrideMode ? persistence.value : [];
+  const storedOverride = overrideMode ? explicitIds : [];
   const outranked = storedOverride.some((id) => !lockedConnectionIds.includes(id));
   const bindingIds = storedOverride.length > 0 && !outranked ? storedOverride : lockedConnectionIds;
   const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
@@ -108,10 +111,7 @@ export function LockedPicker({
         </Badge>
       </Button>
       {overrideMode && outranked && (
-        <ClearChoiceButton
-          onClick={() => persistence.onChange([])}
-          testId={`member-pick-clear-${integrationId}`}
-        />
+        <ClearChoiceButton onClick={onClear} testId={`member-pick-clear-${integrationId}`} />
       )}
       {lockedUnavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>
@@ -124,10 +124,7 @@ export function LockedPicker({
   );
 }
 
-/**
- * Blocked for this member AND nothing to pick → dead end. Show a
- * disabled, explanatory button instead of an empty dropdown.
- */
+/** A disabled button naming what blocks adding a connection: the admin's policy or the role. */
 export function BlockedPicker({
   integrationId,
   canConnect,
@@ -158,11 +155,7 @@ export function BlockedPicker({
   );
 }
 
-/**
- * No existing connection AND no auth the actor can connect on (every
- * oauth2 auth lacks an admin-registered OAuth client) → point at the
- * admin setup instead of an empty dropdown that would only 403.
- */
+/** A hint pointing at the integration's OAuth client setup, linked when reachable. */
 export function NoClientPicker({
   integrationId,
   integrationPath,
@@ -200,16 +193,14 @@ export function NoClientPicker({
  * a foreign owner can only be flagged.
  */
 export function UnderScopedWarning({
-  integrationId,
   conn,
   picker,
 }: {
-  integrationId: string;
   conn: IntegrationCandidate;
   picker: ConnectionPicker;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { canConnect, auths, ownerLabel, oauthPending, openPopup } = picker;
+  const { canConnect, auths, ownerLabel, oauthPending, upgradeScopes } = picker;
   return (
     <div
       className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
@@ -233,15 +224,7 @@ export function UnderScopedWarning({
           <Button
             size="sm"
             disabled={oauthPending}
-            // A settled popup has already refetched the integration caches.
-            onClick={() =>
-              void openPopup({
-                packageId: integrationId,
-                authKey: conn.auth_key,
-                scopes: conn.missing_scopes,
-                connectionId: conn.id,
-              })
-            }
+            onClick={() => void upgradeScopes(conn)}
             data-testid={`member-pick-upgrade-${conn.id}`}
           >
             <RefreshCw className="mr-1 size-3" />
