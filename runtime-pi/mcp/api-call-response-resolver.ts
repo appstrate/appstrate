@@ -9,10 +9,7 @@
  *      on `_meta["dev.appstrate/upstream"]`, but `callToolResultToPi` keeps
  *      only `content` — so without this the agent never sees the status
  *      code and can't branch on 200/404/409/… Here we read it back and put
- *      it where the agent can act on it. A call the sidecar refused or failed
- *      itself (status 0) also carries its failure code on
- *      `_meta["dev.appstrate/api-call-error"]`, rendered beside the status
- *      (`[api_call status=0 error=blocked_target]`).
+ *      it where the agent can act on it, with the sidecar's code at status 0.
  *
  *      The status (and that code) is ALL that survives. `_meta` carries allowlisted
  *      response headers too, and this shaper reads them and drops them:
@@ -52,6 +49,7 @@ import { mkdir, lstat, realpath, open } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
+import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import { spillResourcesToWorkspace, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { readApiCallErrorCode, readUpstreamMeta } from "./upstream-meta.ts";
 
@@ -201,7 +199,7 @@ export async function shapeApiCallResponse(
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
   const status = safeStatus(result);
-  const error = readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0]);
+  const code = readApiCallErrorCode(result as Parameters<typeof readApiCallErrorCode>[0]);
 
   if (opts.toFile) {
     const bytes = await extractBodyBytes(result, opts.readResource);
@@ -212,7 +210,7 @@ export async function shapeApiCallResponse(
       path: opts.toFile,
       size: bytes.byteLength,
       ...(status !== null ? { status } : {}),
-      ...(error !== null ? { error } : {}),
+      ...(code !== null ? { code } : {}),
     };
     // Descriptor rides twice, per the MCP spec recommendation: as
     // `structuredContent` (machine-readable, matches the tool's
@@ -244,10 +242,7 @@ export async function shapeApiCallResponse(
   return {
     ...spilled,
     content: [
-      {
-        type: "text",
-        text: `[api_call status=${status}${error !== null ? ` error=${error}` : ""}]`,
-      },
+      { type: "text", text: apiCallStatusLine(status, code ?? undefined) },
       ...spilled.content,
     ],
   };

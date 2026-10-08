@@ -133,11 +133,8 @@ import {
 import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
- * `_meta` payload attached to every `api_call` pre-flight error
- * (no upstream contact). Surfacing `status: 0` lets the runtime
- * distinguish "no upstream contact" from "upstream returned 5xx" via
- * the status code rather than the absence of `_meta` — the runtime
- * parser now requires `_meta` on every CallToolResult.
+ * `_meta` of an `api_call` the sidecar answered itself: `status: 0` tells the runtime no
+ * upstream response reached it, as opposed to "upstream returned 5xx".
  */
 const API_CALL_PREFLIGHT_META: Record<string, unknown> = {
   [UPSTREAM_META_KEY]: buildPreflightUpstreamMeta(),
@@ -1042,12 +1039,8 @@ function buildSidecarTools(options: MountMcpOptions): {
         return {
           content: [{ type: "text", text: `${ctx.label}: ${result.error}` }],
           isError: true,
-          // Pre-flight failure (cred fetch, URL allowlist, etc): no
-          // upstream contact, but the runtime parser requires `_meta`
-          // on every CallToolResult — surface `status: 0` so the agent
-          // can distinguish "no upstream contact" from "upstream
-          // returned 5xx" via the status code. A coded failure adds its
-          // code under its own key; the upstream status stays 0.
+          // The sidecar answered (refusal, or timeout / unreachable / refused hop after sending):
+          // the parser requires `_meta` on every result — `status: 0`, plus any shared code.
           _meta: result.code
             ? {
                 ...API_CALL_PREFLIGHT_META,

@@ -69,11 +69,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   return { status: obj.status, headers };
 }
 
-/**
- * The sidecar's own failure code under {@link API_CALL_ERROR_META_KEY},
- * or `null`. Absent on every call the sidecar did not refuse or fail
- * itself, so absence and a malformed value both read as "no code".
- */
+/** The code under {@link API_CALL_ERROR_META_KEY}; `null` if absent or malformed. */
 export function readApiCallErrorCode(result: CallToolResult): string | null {
   const raw = (result._meta as Record<string, unknown> | undefined)?.[API_CALL_ERROR_META_KEY];
   const code = (raw as { code?: unknown } | null | undefined)?.code;

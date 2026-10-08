@@ -42,6 +42,7 @@ import {
   cookieScope,
   credentialUrlPolicy,
   fetchApiCall,
+  PREPARE_REFUSAL_CODE,
   prepareApiCallRequest,
   redactionFields,
   redactCredentialHost,
@@ -121,7 +122,7 @@ interface ApiCallSuccess {
 
 interface ApiCallFailure {
   ok: false;
-  /** The shared failure code, when the failure has one (refused target, engine failure). */
+  /** Absent on a failure before the call is judged (bad integration id, credential fetch). */
   code?: ApiCallFailureCode;
   error: string;
 }
@@ -275,7 +276,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) return { ok: false, error: prepared.refusal.message };
+  if (!prepared.ok) {
+    return {
+      ok: false,
+      code: PREPARE_REFUSAL_CODE[prepared.refusal.kind],
+      error: prepared.refusal.message,
+    };
+  }
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
@@ -524,31 +531,26 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
  */
 function wrapRequestError(err: unknown, integrationId: string, host: string): ApiCallFailure {
   const failure = classifyApiCallFailure(err);
-  return {
-    ok: false,
-    code: failure.code,
-    error: requestErrorMessage(failure, integrationId, host),
-  };
-}
-
-function requestErrorMessage(
-  failure: ReturnType<typeof classifyApiCallFailure>,
-  integrationId: string,
-  host: string,
-): string {
+  let error: string;
   switch (failure.kind) {
     case "not_authorized":
     case "ssrf":
-      return failure.redirect
+      error = failure.redirect
         ? failure.message
         : `Integration "${integrationId}": ${failure.message}`;
+      break;
     case "unresolvable":
-      return `Integration "${integrationId}": ${failure.message}`;
+      error = `Integration "${integrationId}": ${failure.message}`;
+      break;
     case "invalid_header":
-      return `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`;
+      error = `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`;
+      break;
     case "timeout":
-      return `Upstream timeout: ${host} did not answer in time`;
+      error = `Upstream timeout: ${host} did not answer in time`;
+      break;
     case "transport":
-      return `Upstream request failed${failure.errno ? `: ${failure.errno}` : ""} (${host})`;
+      error = `Upstream request failed${failure.systemCode ? `: ${failure.systemCode}` : ""} (${host})`;
+      break;
   }
+  return { ok: false, code: failure.code, error };
 }

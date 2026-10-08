@@ -316,6 +316,7 @@ export {
 // duplicating constants.
 export {
   API_CALL_ERROR_META_KEY,
+  apiCallStatusLine,
   UPSTREAM_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
   type ApiCallErrorMeta,

@@ -453,7 +453,6 @@ describe("POST /mcp — api_call response body survives (no outputSchema / no st
     expect(result._meta?.["dev.appstrate/api-call-error"]).toBeUndefined();
   });
 
-  // The upstream status stays 0: a proxy refusal must not read as the API answering 403.
   it("carries a refused call's code apart from an upstream status of 0", async () => {
     const fetchFn = mock(async () => new Response("unreachable"));
     const app = await makeResourcesApp({ fetchFn: fetchFn as unknown as typeof fetch });

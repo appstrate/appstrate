@@ -89,7 +89,7 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     const out = await shapeApiCallResponse(result, baseOpts(workspace, "e.json"));
     const descriptor = JSON.parse((out.content[0] as { text: string }).text);
     expect(descriptor.status).toBe(404);
-    expect(descriptor.error).toBeUndefined();
+    expect(descriptor.code).toBeUndefined();
     expect(out.isError).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe("shapeApiCallResponse — responseMode.toFile", () => {
     const result = failed([{ type: "text", text: "refused" }], "unauthorized_target");
     const out = await shapeApiCallResponse(result, baseOpts(workspace, "e.json"));
     const descriptor = JSON.parse((out.content[0] as { text: string }).text);
-    expect(descriptor).toMatchObject({ status: 0, error: "unauthorized_target" });
+    expect(descriptor).toMatchObject({ status: 0, code: "unauthorized_target" });
     expect(out.isError).toBe(true);
   });
 });
@@ -117,7 +117,7 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     const result = failed([{ type: "text", text: "blocked" }], "blocked_target");
     const out = await shapeApiCallResponse(result, baseOpts(workspace));
     expect((out.content[0] as { text: string }).text).toBe(
-      "[api_call status=0 error=blocked_target]",
+      "[api_call status=0 code=blocked_target]",
     );
     expect((out.content[1] as { text: string }).text).toBe("blocked");
   });

@@ -72,7 +72,7 @@ describe("executeApiCall — structured failures", () => {
     expect(fetchCredentials).not.toHaveBeenCalled();
   });
 
-  it("refuses unresolved target placeholders, with no shared code", async () => {
+  it("refuses unresolved target placeholders as unresolved_placeholder", async () => {
     const result = await executeApiCall(
       {
         integrationId: "gmail",
@@ -86,6 +86,7 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
+      code: "unresolved_placeholder",
       error: "Unresolved placeholders in target: {{missing}}",
     });
   });
@@ -104,7 +105,7 @@ describe("executeApiCall — structured failures", () => {
       makeDeps({
         fetchFn: fetchFn as unknown as typeof fetch,
         declaredUris: [],
-        // An injected credential and no allowlist: alone, the URL policy's 403.
+        // An injected credential and no allowlist: alone, the URL policy's refusal.
         fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
           credentials: { access_token: "tok-123" },
           authorizedUris: null,
@@ -117,6 +118,7 @@ describe("executeApiCall — structured failures", () => {
     );
     expect(result).toEqual({
       ok: false,
+      code: "unresolved_placeholder",
       error: 'Unresolved placeholders in header "X-Other": {{nope}}',
     });
     expect(fetchFn).not.toHaveBeenCalled();
@@ -888,8 +890,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(fetchFn).toHaveBeenCalledTimes(11);
   });
 
-  // The platform proxy's codes (afps-runtime's `API_CALL_FAILURE_STATUS`), one row per engine
-  // failure kind plus a URL-policy refusal.
+  // One row per engine failure kind, plus URL-policy refusals; the message names the layer.
   const throwing = (thrown: unknown) =>
     mock(async () => {
       throw thrown;
@@ -916,11 +917,26 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
   });
   it.each<[string, string, Partial<ApiCallDeps>, ApiCallFailureCode, string]>([
     [
-      "a target off the allowlist",
+      "a target off the allowlist (engine hop gate)",
       "https://other.example.com/v1",
       {},
       "unauthorized_target",
       'Integration "demo": URL not in authorized_uris allowlist',
+    ],
+    [
+      "an integration with no allowlist (URL policy)",
+      "https://other.example.com/v1",
+      {
+        fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+          credentials: { api_key: "k" },
+          authorizedUris: null,
+          allowAllUris: false,
+          credentialFieldName: "api_key",
+        })),
+        declaredUris: [],
+      },
+      "unauthorized_target",
+      "declares no authorized_uris and not allow_all_uris",
     ],
     [
       "a target resolving into a blocked range",
@@ -2794,11 +2810,10 @@ describe("executeApiCall — a header value that is no HTTP field value", () => 
     });
   }
 
-  it("refuses a caller's own invalid header value, with no shared code", async () => {
+  it("refuses a caller's own invalid header value as invalid_request", async () => {
     const { result, fetchFn } = callWith("ok", { "X-Note": "a\nb" });
     const out = await result;
-    expect(out.ok).toBe(false);
-    if (!out.ok) expect(out.code).toBeUndefined();
+    expect(out).toMatchObject({ ok: false, code: "invalid_request" });
     expect(fetchFn).not.toHaveBeenCalled();
   });
 

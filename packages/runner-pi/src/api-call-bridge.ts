@@ -14,6 +14,8 @@
  */
 import { Type, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
+import { apiCallStatusLine } from "@appstrate/mcp-transport";
 import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
@@ -178,6 +180,7 @@ function makeApiCallExtension(
             timestamp: Date.now(),
           });
         } catch (err) {
+          const code = err instanceof ApiCallFailureError ? err.code : undefined;
           opts.emitEvent({
             type: "api_call.failed",
             runId: opts.runId,
@@ -185,8 +188,15 @@ function makeApiCallExtension(
             toolCallId,
             durationMs: Date.now() - startedAt,
             error: err instanceof Error ? err.message : String(err),
+            ...(code ? { code } : {}),
             timestamp: Date.now(),
           });
+          // Pi hands the model a thrown error's message: lead it with the sidecar's status line.
+          if (code) {
+            throw new Error(`${apiCallStatusLine(0, code)} ${(err as Error).message}`, {
+              cause: err,
+            });
+          }
           throw err;
         }
         // Outside the try: a tool-level `isError` result throws here (Pi's
