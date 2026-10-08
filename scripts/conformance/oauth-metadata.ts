@@ -32,6 +32,8 @@ import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { Finding, Severity } from "./types.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
+import { renderForConformance } from "./variables.ts";
+import { remoteUrl } from "./remote-parity.ts";
 
 const CHECK = "oauth-metadata";
 
@@ -45,6 +47,7 @@ interface AsMetadata {
   token_endpoint?: unknown;
   userinfo_endpoint?: unknown;
   token_endpoint_auth_methods_supported?: unknown;
+  registration_endpoint?: unknown;
 }
 
 interface OAuthAuth {
@@ -225,6 +228,16 @@ export function compareAuth(
         severity: "info",
         message: `${where}: token_endpoint_auth_method '${declaredMethod}' is supported`,
       });
+    } else if (declaredMethod === "none" && str(metadata.registration_endpoint)) {
+      // A public client this platform registers itself (RFC 7591): the registration response,
+      // not this list, fixes its method (§3.2.1), and a confidential answer is refused at
+      // connect. GitLab omits `none` here yet registers public PKCE clients.
+      findings.push({
+        packageId,
+        check: CHECK,
+        severity: "warn",
+        message: `${where}: token_endpoint_auth_methods_supported [${supported.join(", ")}] omits 'none'; the client is registered dynamically, so its registration response decides — verify with a live connect`,
+      });
     } else {
       findings.push({
         packageId,
@@ -277,13 +290,43 @@ export function compareAuth(
   return findings;
 }
 
+/**
+ * The auth as one connection sees it (AFPS §7.3, §7.12): a templated `issuer` rendered; with a
+ * templated `source.remote.url` and no `issuer`, the authorization server is the rendered URL's
+ * origin — the only one the spec lets such a server name — so that origin is the issuer probed.
+ */
+function authForConformance(
+  entry: SystemPackageEntry,
+  auth: OAuthAuth,
+): OAuthAuth | { skip: string } {
+  const issuer = str(auth.issuer);
+  if (issuer) {
+    const rendered = renderForConformance(entry, issuer);
+    return "skip" in rendered ? rendered : { ...auth, issuer: rendered.url };
+  }
+  const remote = remoteUrl(entry.manifest);
+  if (!remote || !remote.includes("{$variable.")) return auth;
+  const rendered = renderForConformance(entry, remote);
+  return "skip" in rendered ? rendered : { ...auth, issuer: new URL(rendered.url).origin };
+}
+
 /** Run the metadata check for every `oauth2` auth on one package. */
 export async function checkOAuthMetadata(entry: SystemPackageEntry): Promise<Finding[]> {
   const auths = oauthAuths(entry.manifest);
   if (auths.length === 0) return [];
 
   const findings: Finding[] = [];
-  for (const [authKey, auth] of auths) {
+  for (const [authKey, declaredAuth] of auths) {
+    const auth = authForConformance(entry, declaredAuth);
+    if ("skip" in auth) {
+      findings.push({
+        packageId: entry.packageId,
+        check: CHECK,
+        severity: "warn",
+        message: `auth '${authKey}': ${auth.skip}`,
+      });
+      continue;
+    }
     const found = await fetchMetadata(metadataCandidates(auth), str(auth.issuer));
     if (!found) {
       findings.push({

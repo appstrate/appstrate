@@ -31,6 +31,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { summarize, exitCode, formatReport } from "./report.ts";
+import {
+  conformanceVariables,
+  renderForConformance,
+  __resetConformanceVariables,
+} from "./variables.ts";
 import type { Finding } from "./types.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 
@@ -1226,5 +1231,73 @@ describe("refresh-strategy", () => {
     expect(findings.length).toBe(UNVERIFIED.size);
     expect(findings.every((f) => f.severity === "fail")).toBe(true);
     expect(findings[0]!.message).toContain("stale UNVERIFIED entry");
+  });
+});
+
+describe("connection variables (AFPS §7.12)", () => {
+  const templated = (defaultUrl?: string) =>
+    entry({
+      packageId: "@appstrate/forge",
+      manifest: {
+        variables: {
+          schema: {
+            type: "object",
+            properties: {
+              base_url: { type: "string", ...(defaultUrl ? { default: defaultUrl } : {}) },
+            },
+            required: ["base_url"],
+          },
+        },
+      },
+    });
+
+  afterEach(() => {
+    delete process.env.CONFORMANCE_VARIABLES;
+    __resetConformanceVariables();
+  });
+
+  it("renders a template with the variable's default", () => {
+    expect(
+      renderForConformance(templated("https://forge.example.com"), "{$variable.base_url}/mcp"),
+    ).toEqual({
+      url: "https://forge.example.com/mcp",
+    });
+  });
+
+  it("lets CONFORMANCE_VARIABLES override the default", () => {
+    process.env.CONFORMANCE_VARIABLES = JSON.stringify({
+      "@appstrate/forge": { base_url: "https://git.corp.example" },
+    });
+    expect(conformanceVariables(templated("https://forge.example.com"))).toEqual({
+      base_url: "https://git.corp.example",
+    });
+  });
+
+  it("skips, naming the variable, when it has no value", () => {
+    const rendered = renderForConformance(templated(), "{$variable.base_url}/mcp");
+    expect("skip" in rendered && rendered.skip).toContain("base_url");
+  });
+
+  it("returns a literal URL unchanged", () => {
+    expect(renderForConformance(templated(), "https://mcp.example.com/mcp")).toEqual({
+      url: "https://mcp.example.com/mcp",
+    });
+  });
+});
+
+describe("oauth-metadata — dynamically registered public client", () => {
+  it("warns rather than fails when the AS omits 'none' but registers clients", () => {
+    const findings = compareAuth(
+      "@test/pkg",
+      "oauth",
+      { type: "oauth2", token_endpoint_auth_method: "none" },
+      {
+        token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+        registration_endpoint: "https://auth.example.com/oauth/register",
+      },
+      "https://auth.example.com/.well-known/oauth-authorization-server",
+      "issuer",
+    );
+    expect(findings.map((f) => f.severity)).toEqual(["warn"]);
   });
 });

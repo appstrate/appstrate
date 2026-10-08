@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "GitLab",
   "icon": "logos:gitlab-icon",
-  "description": "GitLab integration backed by GitLab's own MCP server ({instance}/api/v4/mcp), for GitLab.com and for any self-managed or Dedicated instance: the instance URL is a connection variable, so one package serves every instance and each connection reaches only its own. The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …`. Authorization is chosen per connection, against the instance the user named: RFC 9728 protected-resource discovery on the rendered MCP URL, whose advertised authorization server must be the instance URL itself (`issuer: {$variable.base_url}`, so an instance served under a path prefix works too), RFC 8414 metadata, RFC 7591 Dynamic Client Registration as a public client (`token_endpoint_auth_method: none`) and RFC 7636 PKCE (S256), one client per instance and space. No OAuth application is created by hand — and none can be: an instance whose administrator turned dynamic client registration off cannot be connected. The single `mcp` scope covers every tool; GitLab issues a refresh token with every authorization code. MCP access must be allowed for the top-level group on GitLab.com, or for the instance on self-managed. The server returns its default toolsets (core, merge_requests, work_items, repository, ci, duo_agent_platform); the opt-in wikis and code_security toolsets are not requested. The tool set grows with each GitLab release and differs between instances, so the catalogue below is GitLab 19.5's and `allow_undeclared_tools` lets an agent take whatever its instance advertises.",
+  "description": "GitLab integration backed by GitLab's own MCP server ({instance}/api/v4/mcp), for GitLab.com and for any self-managed or Dedicated instance: the instance URL is a connection variable, so one package serves every instance and each connection reaches only its own. The sidecar opens a Streamable HTTP MCP client and injects the actor's OAuth2 access token as `Authorization: Bearer …`. Authorization is chosen per connection, against the instance the user named: RFC 9728 protected-resource discovery on the rendered MCP URL, whose advertised authorization server must be the instance URL itself (`issuer: {$variable.base_url}`, so an instance served under a path prefix works too), RFC 8414 metadata, RFC 7591 Dynamic Client Registration as a public client (`token_endpoint_auth_method: none`) and RFC 7636 PKCE (S256), one client per instance and space. No OAuth application is created by hand — and none can be: an instance whose administrator turned dynamic client registration off cannot be connected. The single `mcp` scope covers every tool; GitLab issues a refresh token with every authorization code. MCP access must be allowed for the top-level group on GitLab.com, or for the instance on self-managed. The server returns its default toolsets (core, merge_requests, work_items, repository, ci, duo_agent_platform); the opt-in wikis and code_security toolsets are not requested. The tool set grows with each GitLab release and differs between instances, so the catalogue below is the set common to GitLab.com and a 19.x self-managed instance (tools that need a newer release or a Duo licence are left out) and `allow_undeclared_tools` lets an agent take whatever its instance advertises.",
   "keywords": ["developer-tools", "git", "ci"],
   "license": "Apache-2.0",
   "source": {
@@ -70,9 +70,7 @@
     "accept_merge_request": {},
     "add_branch": {},
     "add_commit": {},
-    "create_issue": {},
     "fork_repository": {},
-    "get_artifact_file": {},
     "get_commit": {},
     "get_duo_session": {},
     "get_issue": {},
@@ -92,11 +90,9 @@
     "get_user": {},
     "get_work_item": {},
     "get_work_item_types": {},
-    "get_workitem_notes": {},
     "link_work_items": {},
     "list_branches": {},
     "list_commits": {},
-    "list_duo_agents_and_flows": {},
     "list_duo_sessions": {},
     "list_groups": {},
     "list_merge_requests": {},
@@ -115,9 +111,7 @@
     "save_work_item": {},
     "search": {},
     "search_labels": {},
-    "semantic_search": {},
-    "send_duo_session_input": {},
-    "start_duo_session": {}
+    "semantic_search": {}
   },
   "_meta": {
     "dev.appstrate/package": {
