@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
+  hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
+  DCR remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`,
+  `mcpemails`): `streamable-http` against `https://mcp.expo.dev/mcp`, DCR as a
+  public client with PKCE (S256) under the single `mcp:access` scope. Its 38
+  tools come from the live server's `tools/list` (Expo's documentation lags
+  it). A read-only agent selects only `build_list`/`_info`/`_logs`,
+  `workflow_list`/`_info`/`_logs`/`_validate`, `workflow_create` (returns
+  YAML), `testflight_crashes`/`_feedback`, `playstore_crashes`, the store
+  reviews, the seven `observe_*` EAS Observe reads, `sandbox_list`,
+  `sandbox_wait` (polls status) and the two documentation tools; the rest
+  change state: builds, workflow runs, cancellations, store submissions and
+  review replies, `learn` memory, `usage_budget_create`, and sandboxes
+  (`sandbox_create` is billable, `sandbox_exec`, `sandbox_write_stdin`,
+  `sandbox_stop`). Expo's local capabilities act on a member's own dev server
+  and are not declared, so the sidecar filters them out. Expo has no userinfo
+  endpoint: unless the token response names the account, connections to
+  different Expo accounts share one account key and a reconnect is unchecked.
+
 ## [1.0.0-beta.66] - 2026-10-08
 
 ### Operators
