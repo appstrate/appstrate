@@ -19,7 +19,7 @@ import { connect, createServer, type AddressInfo, type Server, type Socket } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { EgressPolicy } from "@appstrate/afps-runtime/resolvers";
+import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
 import { socketPeer } from "../helpers.ts";
 

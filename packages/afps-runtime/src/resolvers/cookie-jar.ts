@@ -3,7 +3,7 @@
 
 // Sticky-cookie jar of both credential proxies; rules: SIDECAR.md "Sticky-cookie jar scoping".
 
-import { hostLiterallyAllowlisted } from "./http-call-core.ts";
+import { hostLiterallyAllowlisted } from "@appstrate/afps-shared/authorized-uris";
 
 /** One stored cookie: `name=value` (attributes stripped) and its RFC 6265 §5.3 expiry
  *  (epoch ms; absent = session cookie, kept for the jar's lifetime). */

@@ -9,7 +9,7 @@
  */
 
 import { SQL } from "bun";
-import { renderAuthorizedUris } from "@appstrate/afps-shared/credential-template";
+import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 
 /** `@appstrate/ssh` 1.0.1's `auths.primary.authorized_uris`. */
