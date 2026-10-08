@@ -79,7 +79,7 @@ export interface TestContext {
 // and immediate.
 
 const SESSION_COOKIE_NAME = "better-auth.session_token";
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // matches auth.ts session.expiresIn
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // matches auth.ts session.expiresIn
 
 const textEncoder = new TextEncoder();
 let signingKey: CryptoKey | null = null;
@@ -173,6 +173,14 @@ export async function createTestUser(
   ]);
 
   return { id: userId, email, name, cookie: await signSessionCookie(token) };
+}
+
+/** Backdate the user's sessions to 25h old: past `updateAge`, so the next read refreshes them. */
+export async function ageSessionPastUpdateAge(userId: string): Promise<void> {
+  await db
+    .update(sessionTable)
+    .set({ expiresAt: new Date(Date.now() + SESSION_TTL_MS - 25 * 60 * 60 * 1000) })
+    .where(eq(sessionTable.userId, userId));
 }
 
 /**

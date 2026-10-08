@@ -28,17 +28,11 @@
  * The cookie carries NO authority: it is purely display state + a loop guard.
  * Forging it at worst shows a banner (and suppresses one restart bounce) — it
  * grants no access, pins no realm, and is never trusted for any security
- * decision. We still HMAC-sign it (with `BETTER_AUTH_SECRET`) so a malformed /
+ * decision. We still sign it under the auth keyring so a malformed /
  * tampered value is cleanly rejected rather than parsed, but unlike the
  * pending-client cookie there is nothing to protect, so we skip the
  * production insecure-`Secure`-flag warning: an unencrypted notice cookie
  * leaks nothing worth warning about.
- *
- * The email is embedded in the payload, which (because emails contain dots)
- * we serialize as JSON and base64url-encode BEFORE signing. The cookie value
- * is `<base64urlPayload>.<exp>.<sig>` — base64url and the `<kid>$<hmac>` sig
- * contain no dots, so splitting on `.` still yields exactly 3 parts (same
- * 3-part shape as `pending-client-cookie.ts`).
  *
  * Scoped to `Path=/api/oauth` — the only routes that issue and read it.
  */
@@ -46,13 +40,15 @@
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { Context } from "hono";
 import { getEnv } from "@appstrate/env";
-import { signAuthHmac, verifyAuthHmac } from "../../../lib/auth-secrets.ts";
+import { signKeyringToken, verifyKeyringToken } from "@appstrate/afps-shared/signed-token";
+import { authKeyring } from "../../../lib/auth-secrets.ts";
 import type { AppEnv } from "../../../types/index.ts";
 
 const COOKIE_NAME = "oidc_login_notice";
 const COOKIE_PATH = "/api/oauth";
 const COOKIE_MAX_AGE = 60; // 60 seconds — the authorize→login round-trip is
 // sub-second; 60s absorbs slow redirects without leaving a stale banner.
+const LOGIN_NOTICE_TOKEN_DOMAIN = "oidc-login-notice.v1.";
 
 /**
  * The known, closed set of notice payloads this cookie can carry.
@@ -114,11 +110,7 @@ export function readAndClearLoginNoticeCookie(c: Context<AppEnv>): LoginNotice |
 
 // ─── Internals ────────────────────────────────────────────────────────────────
 
-/**
- * Build the signed cookie value: `<base64urlPayload>.<exp>.<sig>` where
- * `sig = signAuthHmac(`${base64urlPayload}.${exp}`)`. Exported for unit tests
- * that need to construct raw values (e.g. an expired `exp`).
- */
+/** Build the signed cookie value. Exported for tests. */
 export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
   const exp = Math.floor(Date.now() / 1000) + COOKIE_MAX_AGE;
   // Cookie-size guard: drop an abnormally long `state` rather than store it.
@@ -133,42 +125,23 @@ export function buildSignedLoginNoticeValue(notice: LoginNotice): string {
     notice.email !== undefined && notice.email.length <= MAX_EMAIL_LENGTH
       ? notice.email
       : undefined;
-  const json = JSON.stringify({
+  const payload = {
     code: notice.code,
+    exp,
     ...(email !== undefined ? { email } : {}),
     ...(state !== undefined ? { state } : {}),
-  });
-  const encoded = Buffer.from(json, "utf8").toString("base64url");
-  const signed = `${encoded}.${exp}`;
-  const sig = signAuthHmac(signed);
-  return `${signed}.${sig}`;
+  };
+  return signKeyringToken(LOGIN_NOTICE_TOKEN_DOMAIN, payload, authKeyring());
 }
 
 function parseAndVerify(raw: string): LoginNotice | null {
-  // Format: `<base64urlPayload>.<exp>.<sig>`. base64url contains no dot and
-  // the `<kid>$<hmac>` sig contains no dot, so a well-formed value splits into
-  // exactly 3 parts.
-  const parts = raw.split(".");
-  if (parts.length !== 3) return null;
-  const [encoded, expStr, sig] = parts as [string, string, string];
-  if (!verifyAuthHmac(`${encoded}.${expStr}`, sig)) return null;
-  const exp = Number.parseInt(expStr, 10);
-  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-
-  // Defensive decode + parse — a bad payload yields null, never a throw.
-  let decoded: string;
-  try {
-    decoded = Buffer.from(encoded, "base64url").toString("utf8");
-  } catch {
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-  return narrowNotice(parsed);
+  const payload = verifyKeyringToken<{ exp?: unknown }>(
+    LOGIN_NOTICE_TOKEN_DOMAIN,
+    raw,
+    authKeyring(),
+  );
+  if (typeof payload?.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
+  return narrowNotice(payload);
 }
 
 /**

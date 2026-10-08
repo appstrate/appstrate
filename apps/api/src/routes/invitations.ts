@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { getAuth } from "@appstrate/db/auth";
 import { ApiError, gone } from "../lib/errors.ts";
 import {
   getInvitationByToken,
@@ -17,6 +16,7 @@ import { applySpaceAssignments } from "../services/space-assignments.ts";
 import { recordAudit } from "../services/audit.ts";
 import { auditSpaceAssignments } from "../lib/space-role-assignment.ts";
 import { getClientIpFromRequest } from "../lib/client-ip.ts";
+import { getSessionForwardingCookies } from "../lib/auth-cookies.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { listedOrgPermissions } from "../lib/permissions.ts";
 
@@ -89,9 +89,7 @@ router.post("/:token/accept", async (c) => {
   assertInvitationExists(invitation);
   assertInvitationUsable(invitation);
 
-  const session = await getAuth()
-    .api.getSession({ headers: c.req.raw.headers })
-    .catch(() => null);
+  const session = await getSessionForwardingCookies(c).catch(() => null);
 
   if (!session?.user) {
     throw new ApiError({

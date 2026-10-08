@@ -29,7 +29,7 @@ import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
-import { clearStaleAuthCookies } from "./auth-cookies.ts";
+import { appendSetCookies, clearStaleAuthCookies, readSessionWithCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
@@ -287,7 +287,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     }
 
     // Fallback: cookie session
-    const session = await getAuth().api.getSession({ headers: c.req.raw.headers });
+    const { session, setCookies } = await readSessionWithCookies(c);
     if (!session?.user) {
       // Bury the stale BA cookie before bouncing the request. Without this,
       // a cookie left behind by a redeploy (rotated `BETTER_AUTH_SECRET`,
@@ -340,7 +340,12 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       if (userRow) c.set("sessionRealm", userRow.realm);
     }
 
-    return next();
+    // After `next()`, so the cookie also lands on a hand-built response.
+    try {
+      await next();
+    } finally {
+      appendSetCookies(c, setCookies);
+    }
   });
 
   // Auth-conditional header policy (see AUTH_CONDITIONAL_HEADERS). A known

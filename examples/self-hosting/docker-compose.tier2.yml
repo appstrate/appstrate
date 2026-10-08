@@ -201,13 +201,6 @@ services:
       - SIDECAR_INLINE_TOOL_OUTPUT_TOKENS
       - SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS
       - SIDECAR_API_CALL_CONCURRENCY
-      # ── Defensive workaround for better-auth 1.6+ namespace clash ──
-      # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
-      # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes
-      # boot on a non-CSV value. Empty string is falsy for better-auth and
-      # treated as `{}` by `@appstrate/env`. Set this in `.env` only when
-      # rotating the kid map; see env docstring in `packages/env/src/index.ts`.
-      - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-}
       # ── Passthroughs ─────────────────────────────────────────────
       # Defaults live in `packages/env/src/index.ts`. Unset host env
       # falls back to the Zod schema's single source of truth.
@@ -246,7 +239,7 @@ services:
       # One-shot token the installer writes to `.env`; the first owner redeems it
       # at /claim. Empty/unset = no pending token (normal signup flow).
       - AUTH_BOOTSTRAP_TOKEN
-      - BETTER_AUTH_ACTIVE_KID
+      - BETTER_AUTH_SECRETS
       - CONNECTION_ENCRYPTION_KEY_ID
       - CONNECTION_ENCRYPTION_KEYS
       - AFPS_TRUST_ROOT

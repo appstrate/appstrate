@@ -24,7 +24,7 @@ import { db } from "@appstrate/db/client";
 import { verification } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../../test/helpers/auth.ts";
-import { signAuthHmac } from "../../../../../lib/auth-secrets.ts";
+import { headersWithAuthoritativePendingClient } from "../../../services/pending-client-cookie.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
 import { oidcRealmResolver } from "../../../services/oidc-realm-resolver.ts";
 import {
@@ -34,12 +34,9 @@ import {
 } from "../../../services/oauth-transaction-binding.ts";
 import { oidcBeforeSignupGuard } from "../../../auth/signup-guard.ts";
 
-/** Signed pending-client cookie, mirroring `services/pending-client-cookie.ts`. */
+/** A valid signed pending-client cookie for `clientId`. */
 function pendingClientCookie(clientId: string): string {
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  const payload = `${clientId}.${exp}`;
-  const sig = signAuthHmac(payload);
-  return `oidc_pending_client=${payload}.${sig}`;
+  return headersWithAuthoritativePendingClient(new Headers(), clientId).get("cookie")!;
 }
 
 function verifyLegCtx(token: string, cookie?: string) {

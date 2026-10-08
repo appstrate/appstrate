@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **`BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>[,…]` format;
+  a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
+  (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
+  secret that was active. Rotation procedure: `docs/ENV.md`.
+
 ### Changed
 
 - **BREAKING (API): `POST /api/runs/remote` no longer answers
@@ -31,6 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   credential; it is now dropped and the call falls back to the credential.
   On deploy, in-flight platform proxy sessions lose their upstream cookies
   once.
+- **A JWT can still be signed after an auth-secret rotation** (#1769): CLI
+  token issuance and OIDC tokens no longer fail once the secret changes.
+- **A session stays alive while it is used** instead of expiring 7 days after
+  sign-in.
 
 ## [1.0.0-beta.65] - 2026-10-07
 

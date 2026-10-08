@@ -140,63 +140,37 @@ export const envSchema = z
     // PGlite data directory (used when DATABASE_URL is absent)
     PGLITE_DATA_DIR: z.string().default("./data/pglite"),
     BETTER_AUTH_SECRET: z.string().min(1, "BETTER_AUTH_SECRET is required"),
-    /**
-     * Active key id for the auth-secret map. Cookies and HMACs WE sign
-     * (e.g. `pending-client-cookie.ts`) include this kid so verifiers can
-     * pick the right secret from `BETTER_AUTH_SECRETS` during rotation.
-     */
-    BETTER_AUTH_ACTIVE_KID: z
-      .string()
-      .default("k1")
-      .refine((v) => /^[A-Za-z0-9_-]{1,32}$/.test(v), {
-        message: "BETTER_AUTH_ACTIVE_KID must match /^[A-Za-z0-9_-]{1,32}$/",
-      }),
-    /**
-     * JSON map of `{ kid: secret }` enumerating every secret a verifier
-     * should accept. Empty object (default) means "use BETTER_AUTH_SECRET
-     * under BETTER_AUTH_ACTIVE_KID" — fully backward compatible.
-     *
-     * Rotation pattern (online, no forced sign-out for cookies WE sign):
-     *   1. Add the new secret to BETTER_AUTH_SECRETS under a fresh kid.
-     *   2. Flip BETTER_AUTH_ACTIVE_KID to the fresh kid + restart.
-     *   3. Wait out the longest cookie TTL (10 min for pending-client).
-     *   4. Drop the old kid from BETTER_AUTH_SECRETS + restart.
-     *
-     * The Better Auth session cookie is signed with the active secret only;
-     * Better Auth itself does not (yet) accept a verification list, so
-     * rotating the session cookie still requires re-login.
-     */
+    /** Auth secret keyring `<version>:<secret>[,…]`, current first; see docs/ENV.md. */
     BETTER_AUTH_SECRETS: z
       .string()
-      .default("{}")
-      .transform((s, ctx) => {
-        // Empty string == unset (compose `${VAR:-}` defaults to ""); fall back
-        // to "{}" so the JSON parse below succeeds.
-        const raw = s === "" ? "{}" : s;
-        try {
-          const parsed = JSON.parse(raw) as unknown;
-          // ── Namespace-collision scrub ─────────────────────────────────────
-          // better-auth 1.6+ ships its own `BETTER_AUTH_SECRETS` env var with
-          // a different format (CSV `v1:secret,v2:secret`). It is read
-          // unconditionally inside `betterAuth()` regardless of whether we
-          // pass an explicit `secret:` option, so a non-CSV value (incl. our
-          // JSON `{}` default) crashes boot with `BetterAuthError: Invalid
-          // BETTER_AUTH_SECRETS entry`. We never want better-auth's own
-          // multi-secret rotation feature — `auth.ts` always passes `secret`
-          // explicitly via `env.BETTER_AUTH_SECRETS[…] ?? BETTER_AUTH_SECRET`
-          // — so unconditionally remove the raw env so better-auth falls back
-          // to its legacy single-secret path.
-          delete process.env.BETTER_AUTH_SECRETS;
-          return parsed;
-        } catch {
-          ctx.addIssue({
-            code: "custom",
-            message: "BETTER_AUTH_SECRETS must be valid JSON",
-          });
-          return z.NEVER;
+      .optional()
+      .transform((raw, ctx) => {
+        if (raw === undefined) return undefined;
+        const secrets: { version: number; value: string }[] = [];
+        const seen = new Set<number>();
+        for (const [i, entry] of raw.split(",").entries()) {
+          const match = /^(\d+):(.+)$/s.exec(entry.trim());
+          const value = match?.[2]?.trim();
+          const version = Number(match?.[1]);
+          if (!match || !value || !Number.isSafeInteger(version)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `BETTER_AUTH_SECRETS entry #${i + 1} must be "<version>:<secret>" (version a non-negative safe integer, secret non-empty)`,
+            });
+            return z.NEVER;
+          }
+          if (seen.has(version)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `BETTER_AUTH_SECRETS has duplicate version ${version}`,
+            });
+            return z.NEVER;
+          }
+          seen.add(version);
+          secrets.push({ version, value });
         }
-      })
-      .pipe(z.record(z.string(), z.string())),
+        return secrets;
+      }),
     // Dedicated HMAC secret for FS upload-sink tokens. Separate from
     // BETTER_AUTH_SECRET so the two can be rotated independently and a
     // compromise of one does not affect the other.
