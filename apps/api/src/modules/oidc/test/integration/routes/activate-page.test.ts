@@ -105,6 +105,31 @@ describe("GET /activate", () => {
     expect(html).toContain(`${userCode.slice(0, 4)}-${userCode.slice(4)}`);
   });
 
+  it("re-issues the session cookie beside its CSRF cookie when the session is past updateAge", async () => {
+    const cookie = await signUpPlatformUser();
+    const { userCode } = await requestDeviceCode();
+    // Issued 25h ago: older than `updateAge`, so `getSession` refreshes it.
+    const [signedUp] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, "activate-test@example.com"));
+    await db
+      .update(sessionTable)
+      .set({ expiresAt: new Date(Date.now() + 7 * 24 * 3600_000 - 25 * 3600_000) })
+      .where(eq(sessionTable.userId, signedUp!.id));
+
+    const res = await app.request(`/activate?user_code=${userCode}`, {
+      headers: { Cookie: cookie },
+    });
+
+    expect(res.status).toBe(200);
+    const setCookies = res.headers.getSetCookie();
+    const sessionCookies = setCookies.filter((c) => c.startsWith("better-auth.session_token="));
+    expect(sessionCookies).toHaveLength(1);
+    expect(sessionCookies[0]).toContain("Max-Age=604800");
+    expect(setCookies.some((c) => c.startsWith("oidc_csrf="))).toBe(true);
+  });
+
   it("rejects a malformed user_code with the entry form + error", async () => {
     const cookie = await signUpPlatformUser();
     const res = await app.request("/activate?user_code=SHORT", {
