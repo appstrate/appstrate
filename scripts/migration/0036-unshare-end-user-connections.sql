@@ -24,13 +24,15 @@
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql
 --
 -- then deploy and reopen. If `0080` refuses the boot anyway (a share after the pre-flight), stop
--- the app, run this file, redeploy. Rows: UNMEASURED.
+-- the app, run this file, redeploy. Rows: UNMEASURED — measured on the production database
+-- before the release.
 --
 -- In ONE transaction, each "after" count reading 0:
 -- 1. ADMIN PINS (`user_id IS NULL`) and 2. ORG DEFAULTS — every end user's connection id leaves the
 --    set, the rest kept in order; a row left empty is deleted first (`cardinality BETWEEN 1 AND
 --    10`), as an admin's `DELETE` would. Matched on the owner, shared or not: the release refuses
---    any end user's connection there. Before the unshare, which these sets would block.
+--    any end user's connection there. Before the unshare, as the service's `connection_pinned`
+--    guard would require.
 -- 3. UNSHARE — every end user's shared connection, listed (id, space, end user) so the operator
 --    can tell the integrator.
 -- What an admin does by hand. Member pins and other actors' schedule overrides naming one are left

@@ -38,7 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same 409 with one `remote_binds_one_connection` item per integration
   (`field: integrations.<id>`). A client matching on the `agent_not_ready`
   code breaks; no known consumer reads it (the CLI prints the status and body).
-- **BREAKING (minor): an end user's connection cannot be shared** (#1775):
+- **BREAKING (API): an end user's connection cannot be shared** (#1775):
   `shared_with_org: true` on one answers
   `409 end_user_connection_not_shareable`. Deleting an end user can no longer
   leave an admin pin or an org default naming a deleted connection.

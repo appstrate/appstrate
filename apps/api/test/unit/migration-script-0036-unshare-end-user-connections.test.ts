@@ -220,12 +220,14 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
       { id: ERIN_DEFAULT_ALONE, shared_with_org: false },
       { id: ERIN_UNSHARED_PINNED, shared_with_org: false },
     ]);
-    const schedules = await pg.query<{ id: string; enabled: boolean }>(
-      "SELECT id, enabled FROM package_schedules ORDER BY id",
-    );
+    const schedules = await pg.query<{
+      id: string;
+      enabled: boolean;
+      connection_overrides: Record<string, string[]>;
+    }>("SELECT id, enabled, connection_overrides FROM package_schedules ORDER BY id");
     expect(schedules.rows).toEqual([
-      { id: "sch_0036_alice", enabled: true },
-      { id: "sch_0036_erin", enabled: true },
+      { id: "sch_0036_alice", enabled: true, connection_overrides: { [GMAIL]: [ERIN_SHARED] } },
+      { id: "sch_0036_erin", enabled: true, connection_overrides: { [GMAIL]: [ERIN_SHARED] } },
     ]);
   });
 

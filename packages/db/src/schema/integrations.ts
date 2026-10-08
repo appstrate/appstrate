@@ -125,8 +125,7 @@ export const integrationConnections = pgTable(
     // bind this connection by an explicit pick (member pin, launch
     // override, admin pin, org default); the resolver's fallback never
     // binds it (see integration-connection-resolver). Off by default
-    // — sharing is explicit consent, never silent. See the
-    // `integration_connections_end_user_not_shared` CHECK.
+    // — sharing is explicit consent, never silent.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

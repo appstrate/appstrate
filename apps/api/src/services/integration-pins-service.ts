@@ -360,10 +360,10 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
- * here: shared rows only (see the `integration_connections_end_user_not_shared` CHECK), plus
- * `allowOwnedBy`'s own for a member pin. Every refusal — unknown id, another space or
- * integration, a row neither shared nor the caller's own — is the SAME 404 naming the first
- * refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
+ * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. Every refusal — unknown
+ * id, another space or integration, a row neither shared nor the caller's own — is the SAME 404
+ * naming the first refused id, so a pin write cannot tell a colleague's private uuid from a
+ * made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -471,10 +471,9 @@ interface UpdateConnectionMetadataInput {
  * may edit, but only the owner may share (sharing is consent).
  *
  * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, sharedWithOrg=true per
- * `assertConnectionShareable`, and a label
- * another connection of the (space, integration) holds (409
- * `connection_label_taken`, raised by the unique index). A rename takes the
- * insert's label lock, so it cannot land between an insert's pick and its write.
+ * `assertConnectionShareable`, and a label another connection of the (space, integration)
+ * holds (409 `connection_label_taken`, raised by the unique index). A rename takes the insert's
+ * label lock, so it cannot land between an insert's pick and its write.
  */
 export async function updateConnectionMetadata(
   connectionId: string,
@@ -505,8 +504,8 @@ export async function updateConnectionMetadata(
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
-      // Re-checked here: the owner may have lost the space since the route checked, and the
-      // unshare that loss ran could not see this share yet.
+      // The share's one gate (`assertConnectionShareable`): an end user's connection, and an
+      // owning member who lost the space since the route ran.
       if (input.sharedWithOrg === true) {
         await assertConnectionShareable(tx, connectionId);
       }
