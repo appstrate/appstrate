@@ -45,7 +45,7 @@ import {
   getProfile,
 } from "../lib/config.ts";
 import { deleteTokens, saveTokens } from "../lib/keyring.ts";
-import { withCredentialsLockForUser } from "../lib/api.ts";
+import { withCredentialsLock } from "../lib/api.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
@@ -274,11 +274,8 @@ async function runLogin(
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
-  // Both writes under one hold of the credentials lock, so a refresh in flight
-  // elsewhere sees neither or both: it cannot write the old session over this
-  // one. A refused save writes nothing; a failed profile write takes the new
-  // pair back out, so it never sits beside the previous profile.
-  await withCredentialsLockForUser(async () => {
+  // One hold of the lock for both writes; a failed profile write takes the pair back out.
+  await withCredentialsLock(async () => {
     await saveTokens(profileName, tokens);
     try {
       await setProfile(profileName, {
@@ -295,7 +292,7 @@ async function runLogin(
       await deleteTokens(profileName).catch(() => {});
       throw err;
     }
-  }, io);
+  });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
   // persisted so `listOrgs` / `createOrg` (both authenticated) work.

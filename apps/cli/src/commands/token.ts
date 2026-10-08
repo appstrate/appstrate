@@ -24,6 +24,7 @@ import { loadTokens } from "../lib/keyring.ts";
 import { decodeJwtPayload } from "../lib/jwt-identity.ts";
 import { formatError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { loginFix, profileMissing, remedyLine } from "../lib/remedy.ts";
 
 interface TokenOptions {
   profile?: string;
@@ -41,9 +42,7 @@ export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_I
   const profile = config.profiles[profileName];
 
   if (!profile) {
-    io.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
+    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
     io.exit(1);
     return;
   }
@@ -51,9 +50,9 @@ export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_I
   try {
     const stored = await loadTokens(profileName);
     if (!stored) {
-      io.stderr.write(
-        `No tokens stored for profile "${profileName}". Run: appstrate login --profile ${profileName}\n`,
-      );
+      const problem = `No tokens stored for profile "${profileName}"`;
+      const fix = loginFix(problem, profileName, profile.instance);
+      io.stderr.write(`${remedyLine(fix)}\n`);
       io.exit(1);
       return;
     }

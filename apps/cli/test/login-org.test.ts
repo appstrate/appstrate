@@ -50,7 +50,7 @@ let fetchCalls: FetchCall[];
 
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
+import { credentialsLockHeld } from "./helpers/credentials-lock.ts";
 
 /**
  * Build a JWT with `sub` + `email` claims so `decodeAccessTokenIdentity`
@@ -295,40 +295,6 @@ describe("login credentials write", () => {
 
       expect(await loadTokens("default")).toBeNull();
     });
-  });
-
-  it("saves the approved pair anyway, with a warning, when the lock stays held past its wait", async () => {
-    // The clock jumps only once the device code is redeemed: started earlier,
-    // it would expire the device code before the poll.
-    const clock: { stop?: () => void } = {};
-    installDefaultResponders({
-      cliToken: () => {
-        clock.stop ??= jumpClock();
-        return Response.json({
-          access_token: makeJwt(),
-          refresh_token: "rt-approved",
-          token_type: "Bearer",
-          expires_in: 900,
-          refresh_expires_in: 30 * 24 * 60 * 60,
-          scope: "cli",
-        });
-      },
-    });
-    const release = await holdCredentialsLock();
-
-    const { io, stderr } = createMemoryIO();
-    try {
-      await loginCommand(
-        { profile: "default", instance: "https://app.example.com", noOrg: true },
-        io,
-      );
-    } finally {
-      clock.stop?.();
-      await release();
-    }
-
-    expect((await loadTokens("default"))?.refreshToken).toBe("rt-approved");
-    expect(stderr()).toContain("waited 30 s for the credentials lock; proceeding without it");
   });
 });
 

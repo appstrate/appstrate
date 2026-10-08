@@ -13,7 +13,14 @@
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { agentCapabilities, reaches } from "@appstrate/core/permissions";
 import { resolveActiveProfile, syncSpaceIds, type Profile } from "../lib/config.ts";
-import { ApiError, AuthError } from "../lib/api.ts";
+import { ApiError } from "../lib/api.ts";
+import {
+  ActionableError,
+  profileMissing,
+  remedyLine,
+  switchFix,
+  type Actionable,
+} from "../lib/remedy.ts";
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
@@ -24,16 +31,7 @@ import {
   type AgentLaunchView,
 } from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
-import {
-  clearNotice,
-  loginFix,
-  setupNotice,
-  switchFix,
-  syncProblemNotice,
-  writeNotice,
-  type Actionable,
-  type SessionNotice,
-} from "../lib/skills-sync/notice.ts";
+import { renderNotice, type NoticeKind } from "../lib/skills-sync/notice.ts";
 import {
   assignSlugs,
   diffTarget,
@@ -54,6 +52,7 @@ import {
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";
 import {
+  clearNotice,
   getNoticePath,
   readSyncState,
   syncContext,
@@ -63,6 +62,7 @@ import {
   writeSyncState,
   type ManagedSkill,
   type SyncState,
+  writeNotice,
 } from "../lib/skills-sync/state.ts";
 import {
   pluginFixedFiles,
@@ -92,18 +92,15 @@ interface LineSink {
   write(chunk: string): void;
 }
 
-/**
- * `notice`: what the next Claude Code session start says about it, for a
- * problem only the user can fix (`notice.ts`). A per-skill failure never has one.
- * `run` carries a failure's, `note` a warning's; {@link updateNotice} picks which stands.
- */
 interface Report {
   /** Per-skill failure: information under `--print-path`, exit 1 otherwise. */
   skill(message: string): void;
   /** Whole-run failure: the plugin on disk is not what the server describes. */
-  run(message: string, notice?: SessionNotice): void;
+  run(problem: string | Actionable): void;
   /** Worth telling the user, not worth an exit code. */
-  note(message: string, notice?: SessionNotice): void;
+  note(problem: string | Actionable): void;
+  /** Not connected yet, on a fresh plugin. */
+  setup(fix: Actionable): void;
 }
 
 export async function codeSyncCommand(
@@ -138,44 +135,35 @@ export async function codeSyncCommand(
   // Two grades, because `--print-path` treats them differently.
   let skillFailures = 0;
   let runFailures = 0;
-  // For `updateNotice`; within a grade, the last one reported wins.
   const notices: Notices = {};
+  const say = (problem: string | Actionable, kind: NoticeKind): void => {
+    io.stderr.write(`${typeof problem === "string" ? problem : remedyLine(problem)}\n`);
+    if (typeof problem !== "string") notices[kind] = problem;
+  };
   const report: Report = {
     skill: (message) => {
       skillFailures += 1;
       io.stderr.write(`${message}\n`);
     },
-    run: (message, notice) => {
+    run: (problem) => {
       runFailures += 1;
-      io.stderr.write(`${message}\n`);
-      notices.failure = notice ?? notices.failure;
+      say(problem, "failed");
     },
-    note: (message, notice) => {
-      io.stderr.write(`${message}\n`);
-      notices.warning = notice ?? notices.warning;
-    },
+    note: (problem) => say(problem, "warned"),
+    setup: (fix) => say(fix, "setup"),
   };
-  // Whether `claude-plugin` ended the run as the server describes it: the
-  // `--print-path` verdict, and which of the run's notices stands.
+  // The `--print-path` verdict, and which notice stands.
   let pluginOk = false;
-  // Resolved under the lock with everything else; an `AuthError` notice names it.
-  let activeProfile: ActiveProfile | undefined;
   const fail = (err: unknown): void => {
     pluginOk = false;
-    report.run(
-      formatError(err),
-      err instanceof AuthError && activeProfile
-        ? syncProblemNotice(signedOut(activeProfile), { stale: true })
-        : undefined,
-    );
+    report.run(fixOf(err) ?? formatError(err));
   };
 
   const sync = async (): Promise<void> => {
     const { profileName, profile } = await resolveActiveProfile(opts.profile);
-    activeProfile = { name: profileName, instance: profile?.instance };
     const gap = connectionGap(profileName, profile);
     if (gap && !printPath) {
-      reportGap(gap, report);
+      report.run(gap);
       return;
     }
     const { state, corrupt } = await readSyncState();
@@ -275,8 +263,7 @@ export async function codeSyncCommand(
         } catch (err) {
           fail(err);
         }
-        // Under the lock, like the plugin it speaks for: a queued run's verdict
-        // must not be overwritten by an older one.
+        // Under the lock, so an older run's verdict cannot land last.
         if (targets.includes("claude-plugin") && !opts.dryRun) {
           await updateNotice(notices, pluginOk, io.stderr);
         }
@@ -292,48 +279,21 @@ export async function codeSyncCommand(
   if (failed) io.exit(1);
 }
 
-/** The stderr form of an {@link Actionable}. */
-function remedyLine({ problem, remedy }: Actionable): string {
-  return `${problem}. Run: ${remedy}`;
+/** An error that carries a fix is the run's problem, never one package's. */
+function fixOf(err: unknown): Actionable | undefined {
+  return err instanceof ActionableError ? err.fix : undefined;
 }
 
-interface ActiveProfile {
-  name: string;
-  instance?: string;
-}
+type Notices = Partial<Record<NoticeKind, Actionable>>;
 
-/** Whatever an `AuthError` says went wrong with the session, logging in again fixes it. */
-function signedOut({ name, instance }: ActiveProfile): Actionable {
-  return loginFix(
-    `The CLI login for profile "${name}" is missing or no longer valid`,
-    name,
-    instance,
-  );
-}
-
-interface Notices {
-  failure?: SessionNotice;
-  warning?: SessionNotice;
-}
-
-/**
- * A plugin sync that went through states its warning, or clears the notice —
- * skipped skills included, so a broken artifact cannot pin an old notice
- * forever. A warning from a run that then failed is dropped: it would claim a
- * sync that never happened. A failed run speaks only through an actionable
- * failure; anything else — offline, a 5xx — leaves the file alone: a transient
- * failure heals on its own and must not speak at every offline session, and an
- * older notice stays true until a run proves otherwise. Best effort: it never
- * changes the exit code or the plugin.
- */
-async function updateNotice(
-  { failure, warning }: Notices,
-  pluginOk: boolean,
-  sink: LineSink,
-): Promise<void> {
+// A sync that went through states its setup or warning notice, else clears it; a failed
+// one writes only an actionable failure, so an offline run or a 5xx leaves it alone.
+async function updateNotice(notices: Notices, pluginOk: boolean, sink: LineSink): Promise<void> {
+  const order: readonly NoticeKind[] = pluginOk ? ["setup", "warned"] : ["failed"];
+  const kind = order.find((k) => notices[k]);
   try {
-    if (pluginOk) await (warning ? writeNotice(warning) : clearNotice());
-    else if (failure) await writeNotice(failure);
+    if (kind) await writeNotice(renderNotice(notices[kind]!, kind));
+    else if (pluginOk) await clearNotice();
   } catch (err) {
     sink.write(`Could not update ${getNoticePath()}: ${formatError(err)}\n`);
   }
@@ -341,15 +301,10 @@ async function updateNotice(
 
 /** What still separates this profile from a syncable space, if anything. */
 function connectionGap(profileName: string, profile: Profile | undefined): Actionable | null {
-  if (!profile) return loginFix(`Profile "${profileName}" not configured`, profileName);
+  if (!profile) return profileMissing(profileName);
   if (!profile.orgId) return switchFix("No organization pinned", "org", profileName);
   if (!profile.spaceId) return switchFix("No space pinned", "space", profileName);
   return null;
-}
-
-/** A gap outside the setup case: the run fails, and the next session is told why. */
-function reportGap(gap: Actionable, report: Report): void {
-  report.run(remedyLine(gap), syncProblemNotice(gap, { stale: true }));
 }
 
 /**
@@ -366,10 +321,10 @@ async function bootstrapPlugin(
   // Connected syncs record a target even with no skills. Setup never records
   // one: a lost profile must preserve an empty plugin's working MCP server too.
   if (state.targets["claude-plugin"]?.root === targetRoot("claude-plugin")) {
-    reportGap(gap, report);
+    report.run(gap);
     return false;
   }
-  report.note(remedyLine(gap), setupNotice(gap));
+  report.setup(gap);
   try {
     await writeSetupPlugin(targetRoot("claude-plugin"), setupPluginFiles(gap));
     return true;
@@ -449,8 +404,7 @@ async function resolveAll(
   for (const entry of resolutions) {
     const { packageId, kind } = entry.job;
     if ("error" in entry) {
-      // A lost session is the run's problem, not this package's: it fails the run.
-      if (entry.error instanceof AuthError) throw entry.error;
+      if (fixOf(entry.error)) throw entry.error;
       // A refused draft is refused again next run: it goes, like a failed render.
       if (!isDraftRefusal(entry.error)) unresolved.set(packageId, kind);
       report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
@@ -599,8 +553,7 @@ async function fetchTrees(
   const decoder = new TextDecoder();
   for (const result of results) {
     if ("error" in result) {
-      // A lost session is the run's problem, not this skill's: it fails the run.
-      if (result.error instanceof AuthError) throw result.error;
+      if (fixOf(result.error)) throw result.error;
       report.skill(`Failed ${result.entry.packageId}: ${formatError(result.error)}`);
       continue;
     }
@@ -780,12 +733,13 @@ async function reachableSpaces(
     return await listSpaces(profileName);
   } catch (err) {
     if (!(err instanceof ApiError) || err.status !== 403) throw err;
-    const revoked = switchFix(
-      `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
-      "org",
-      profileName,
+    report.note(
+      switchFix(
+        `Organization "${profile.orgId}" no longer grants this profile access to its spaces (403) — removing every skill and agent command synced from it`,
+        "org",
+        profileName,
+      ),
     );
-    report.note(remedyLine(revoked), syncProblemNotice(revoked, { stale: false }));
     return null;
   }
 }
@@ -808,13 +762,11 @@ async function selectSources(
     // Typed just now, so it gets immediate feedback rather than a silent drop —
     // the same rule `selectedSpaces` applies to an unusable space.
     if (explicit)
-      throw new Error(
-        remedyLine(
-          switchFix(
-            "Cannot select spaces: this organization no longer grants this profile access to them",
-            "org",
-            profileName,
-          ),
+      throw new ActionableError(
+        switchFix(
+          "Cannot select spaces: this organization no longer grants this profile access to them",
+          "org",
+          profileName,
         ),
       );
     // Otherwise the revocation stands on its own: no space supplies skills any
@@ -828,12 +780,13 @@ async function selectSources(
   // the header either way — so membership, not presence in the list, is the test.
   const pinned = spaces.find((space) => space.id === profile.spaceId);
   if (profile.spaceId && (!pinned || pinned.access === "none")) {
-    const deadPin = switchFix(
-      `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
-      "space",
-      profileName,
+    report.note(
+      switchFix(
+        `Pinned space "${profile.spaceId}" is not accessible in the active organization — the plugin's MCP server will be refused`,
+        "space",
+        profileName,
+      ),
     );
-    report.note(remedyLine(deadPin), syncProblemNotice(deadPin, { stale: false }));
   }
   const skillSpaces = selectedSpaces(profileName, profile, spaces, explicit, report);
   if (!withAgents || pinned?.access !== "member") return { skillSpaces };

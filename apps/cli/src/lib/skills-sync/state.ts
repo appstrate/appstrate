@@ -7,11 +7,12 @@
  */
 
 import { isValidSkillName } from "@appstrate/afps-shared/companion-files";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import { normalizeInstance } from "../instance-url.ts";
 import { getDataDir, type Profile } from "../config.ts";
+import type { SessionNotice } from "./notice.ts";
 
 /**
  * BUMP whenever PER-SKILL materialized output changes: the server-side digests
@@ -92,17 +93,17 @@ export interface SyncState {
   targets: Record<string, TargetState>;
 }
 
-export function getStatePath(): string {
-  return join(getDataDir(), "skills-sync", "state.json");
+function syncDir(): string {
+  return join(getDataDir(), "skills-sync");
 }
 
-/**
- * The session notice (`notice.ts`) sits beside the ledger, outside the tree for
- * the same reason. Its path is here so `targets.ts` can name it in the plugin's
- * hook without importing `notice.ts`, which imports `targets.ts`.
- */
+export function getStatePath(): string {
+  return join(syncDir(), "state.json");
+}
+
+/** What the plugin's hook prints; outside the tree for the same reason as the ledger. */
 export function getNoticePath(): string {
-  return join(getDataDir(), "skills-sync", "notice.json");
+  return join(syncDir(), "notice.json");
 }
 
 function emptySyncState(): SyncState {
@@ -177,10 +178,21 @@ export async function readSyncState(): Promise<{ state: SyncState; corrupt: bool
 
 /** Atomic: a half-written ledger would validate as "we own nothing". */
 export async function writeSyncState(state: SyncState): Promise<void> {
-  await mkdir(join(getDataDir(), "skills-sync"), { recursive: true, mode: 0o700 });
-  await writeFileAtomic(getStatePath(), `${JSON.stringify(sortState(state), null, 2)}\n`, {
-    mode: 0o600,
-  });
+  await writeSyncFile(getStatePath(), `${JSON.stringify(sortState(state), null, 2)}\n`);
+}
+
+/** Atomic too: the hook may read it while it is replaced. */
+export async function writeNotice(notice: SessionNotice): Promise<void> {
+  await writeSyncFile(getNoticePath(), `${JSON.stringify(notice)}\n`);
+}
+
+export async function clearNotice(): Promise<void> {
+  await rm(getNoticePath(), { force: true });
+}
+
+async function writeSyncFile(path: string, text: string): Promise<void> {
+  await mkdir(syncDir(), { recursive: true, mode: 0o700 });
+  await writeFileAtomic(path, text, { mode: 0o600 });
 }
 
 function sortState(state: SyncState): SyncState {

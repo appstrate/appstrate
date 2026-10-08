@@ -12,9 +12,6 @@
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
  *
- * Both go through `refreshAccessToken`, which serializes rotations within
- * the process and across processes (the refresh token is single-use).
- *
  * Inject `X-Org-Id` + `X-Space-Id` when the profile is pinned to a
  * specific organization / space — matches the dashboard SPA's
  * header contract (`apps/web/src/lib/api.ts`) so routes that use
@@ -25,13 +22,13 @@
 import { join } from "node:path";
 import { loadTokens, saveTokens, deleteTokens, type Tokens } from "./keyring.ts";
 import { getConfigDir, getProfile, resolveActiveProfileOrNull, type Profile } from "./config.ts";
-import { FileLockBusyError, withFileLock } from "./file-lock.ts";
-import { DEFAULT_IO, type CommandIO } from "./io.ts";
+import { withFileLock } from "./file-lock.ts";
+import { classifyNetworkErrorKind } from "./http-classify.ts";
 import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
 import { CLI_CLIENT_ID } from "./cli-client.ts";
-import { shellArg } from "./shell.ts";
+import { ActionableError, loginFix, loginRemedy, type Actionable } from "./remedy.ts";
 
 /**
  * Refresh the access token proactively when it has this long or less
@@ -42,52 +39,18 @@ import { shellArg } from "./shell.ts";
  */
 const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
 
-/**
- * The two bounds of the credentials lock, set together. A refresh holds the
- * lock for one request, aborted at `REFRESH_REQUEST_TIMEOUT_MS`, plus a local
- * read and write, so a lone stalled holder cannot block waiters indefinitely.
- * A waiter's wait counts from its own start, so it can still give up
- * (`FileLockBusyError`, stored credentials untouched) behind several holders
- * in turn, or behind one no timeout ends: a stopped or suspended process, or
- * one blocked on a macOS keychain prompt nobody has answered.
- */
+// Bounds the one request a refresh holds the credentials lock for. Accepted cost:
+// a rotation the server commits after the deadline leaves a redeemed token behind.
 const REFRESH_REQUEST_TIMEOUT_MS = 20_000;
-// The timeout's cost, accepted: a server that commits the rotation but answers
-// after it leaves the client holding the redeemed token, and the next refresh
-// replays it, which revokes the family. Without it, one stalled request would
-// hold the lock, and every other process, for as long as it hangs; a token
-// endpoint slower than 20 s is an anomaly to report, not a case to wait out.
 const CREDENTIALS_LOCK_TIMEOUT_MS = REFRESH_REQUEST_TIMEOUT_MS + 10_000;
-
-/**
- * Below the lock's 500 ms default: the critical section is one HTTP call, and
- * every process that lost the race waits on it before its own command runs.
- */
 const CREDENTIALS_LOCK_POLL_MS = 100;
 
-/**
- * One lock for every profile: a profile name never has to become a path, and
- * refreshes of two profiles at once are rare enough to queue. In the config
- * dir, beside `credentials.json`, because it guards credentials.
- */
+/** One lock for every profile, beside `credentials.json`. */
 export function getCredentialsLockPath(): string {
   return join(getConfigDir(), "credentials.lock");
 }
 
-/**
- * Run `body` holding the lock every credential writer shares across
- * processes: refresh (read → rotate → save), login's save, logout's delete.
- * Without it a refresh that read the pair before a login or a logout would
- * write over the new login, or resurrect what logout deleted.
- *
- * Never nest it: `flock(2)` is per open file description, so a second
- * acquisition inside `body`, even in the same process, waits on the first
- * until it times out.
- *
- * Where the lock is unavailable (no working `flock`, or a lock file that
- * cannot be opened) it fails open silently: the user cannot act on a warning
- * about refreshes they never asked for.
- */
+/** Held by every credential writer (refresh, login, logout). Never nest it; fails open silently. */
 export function withCredentialsLock<T>(body: () => Promise<T>): Promise<T> {
   return withFileLock(getCredentialsLockPath(), "credential update", body, {
     timeoutMs: CREDENTIALS_LOCK_TIMEOUT_MS,
@@ -96,40 +59,7 @@ export function withCredentialsLock<T>(body: () => Promise<T>): Promise<T> {
   });
 }
 
-/**
- * {@link withCredentialsLock} for a write the user asked for: login's save,
- * logout's delete. Past the lock's wait the write runs anyway, after one
- * warning: discarding tokens the server just issued, or keeping tokens
- * after a logout, costs more than the race the lock guards. A refresh, which
- * nobody asked for, keeps failing instead.
- */
-export async function withCredentialsLockForUser<T>(
-  body: () => Promise<T>,
-  io: CommandIO = DEFAULT_IO,
-): Promise<T> {
-  try {
-    return await withCredentialsLock(body);
-  } catch (err) {
-    if (!(err instanceof FileLockBusyError)) throw err;
-    io.stderr.write(
-      `warning: waited ${CREDENTIALS_LOCK_TIMEOUT_MS / 1000} s for the credentials lock; proceeding without it.\n`,
-    );
-    return body();
-  }
-}
-
-/**
- * Per-profile in-flight refresh dedup, in front of the cross-process lock.
- *
- * When a CLI invocation issues parallel API calls (batch operations,
- * SSE + REST, stream + poll), each call independently resolves the
- * access token and can independently react to a 401. Sharing a single
- * `Promise<string>` per profile collapses all concurrent refreshes for
- * that profile into one lock acquisition and at most one server
- * round-trip: every caller observes the same rotated access token. The
- * entry is cleared in `.finally()` so the next bona-fide rotation
- * (15 min later) starts fresh.
- */
+/** Parallel calls of one process share a profile's refresh: one lock hold, one round-trip. */
 const inFlightRefresh = new Map<string, Promise<string>>();
 
 function dedupRefresh(profileName: string, fn: () => Promise<string>): Promise<string> {
@@ -173,37 +103,26 @@ export function problemFields(body: unknown): { code?: string; detail?: string }
   };
 }
 
-export class AuthError extends Error {
-  constructor(message: string) {
-    super(message);
+export class AuthError extends ActionableError {
+  constructor(cause: string | Actionable) {
+    super(cause);
     this.name = "AuthError";
   }
 }
 
-/**
- * The login every re-login message names, runnable as printed without a TTY,
- * by a script or by Claude: `login` prompts for the instance unless
- * `--instance` names it.
- */
-export function loginRemedy(profileName: string, instance?: string): string {
-  return `appstrate login --profile ${shellArg(profileName)} --instance ${instance ? shellArg(instance) : "<url>"}`;
+function relogin(problem: string, profileName: string, instance?: string): AuthError {
+  return new AuthError(loginFix(problem, profileName, instance));
 }
 
 /** The 401 a refresh could not fix: the session is gone. */
 export async function sessionRevokedError(profileName: string): Promise<AuthError> {
   const instance = (await getProfile(profileName))?.instance;
-  return new AuthError(
-    `Unauthorized — your session may have been revoked. Run: ${loginRemedy(profileName, instance)}`,
-  );
+  return relogin("Unauthorized — your session may have been revoked", profileName, instance);
 }
 
 async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   const profile = await getProfile(profileName);
-  if (!profile) {
-    throw new AuthError(
-      `Profile "${profileName}" is not logged in. Run: ${loginRemedy(profileName)}`,
-    );
-  }
+  if (!profile) throw relogin(`Profile "${profileName}" is not logged in`, profileName);
   return profile;
 }
 
@@ -221,9 +140,9 @@ interface AuthContext {
  * body-stream semantics and would be broken by `apiFetchRaw`'s reactive
  * 401 retry (which replays a body that may have already been consumed).
  *
- * All the silent-refresh machinery (refresh dedup, credentials lock,
- * proactive margin, keyring scrub on invalid_grant) is reused — this is
- * purely a composer over the existing internals.
+ * All the silent-refresh machinery (per-profile mutex, proactive margin,
+ * keyring scrub on invalid_grant) is reused — this is purely a composer
+ * over the existing internals.
  */
 export async function resolveAuthContext(profileName: string): Promise<AuthContext> {
   const profile = await resolveProfileOrThrow(profileName);
@@ -289,17 +208,9 @@ export async function resolveApiKeyAuthContext(
 }
 
 function noCredentials(profileName: string, profile: Profile): AuthError {
-  return new AuthError(
-    `No credentials for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
-  );
+  return relogin(`No credentials for profile "${profileName}"`, profileName, profile.instance);
 }
 
-/**
- * Unlocked, as plain reads always were: a login to ANOTHER instance on the same
- * profile landing between the caller's profile read and this pair read sends
- * that one request's new token to the old instance — a narrow, pre-existing
- * window that only the refresh path closes.
- */
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
   const tokens = await loadTokens(profileName);
   if (!tokens) throw noCredentials(profileName, profile);
@@ -311,30 +222,12 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
   return refreshAccessToken(profileName, profile, tokens);
 }
 
-/**
- * Rotate the pair the caller read (`seen`) and return the new access token.
- *
- * A refresh token is single-use: presenting one twice trips RFC 6819
- * §5.2.2.3 reuse detection, which revokes the whole family and logs the
- * user out. Concurrent `appstrate` processes are routine — Claude Code runs
- * `code sync` in the background at every session start, beside whatever
- * else is calling the CLI — so read → refresh → save runs under a `flock(2)`
- * every process shares. Serializing the HTTP calls alone is not enough: a
- * process that read the pair before waiting would still present the stale
- * token. So the pair is re-read under the lock: nothing stored means a
- * logout landed meanwhile, and a refresh token other than `seen` means
- * another process rotated or logged in again — its access token is the
- * answer, with no call to the server.
- *
- * The profile is re-read there too: the caller sends the result to the
- * instance it read before the lock. Login writes pair and profile under this
- * lock, so this sees both or neither, and a pair from another instance is
- * never adopted, nor refreshed against this one: the run stops instead,
- * credentials intact.
- */
+// A refresh token is single-use (a replay revokes the family), so the pair is re-read
+// under the lock: gone means logged out; another refresh token means a peer's answer.
 function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
   return dedupRefresh(profileName, () =>
     withCredentialsLock(async () => {
+      // The caller sends the result to the instance it read before the lock.
       const now = await getProfile(profileName);
       if (now && normalizeInstance(now.instance) !== normalizeInstance(profile.instance)) {
         throw new Error(
@@ -363,8 +256,10 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
     // re-login.
     if (!fresh.refreshToken) {
       await deleteTokens(profileName).catch(() => {});
-      throw new AuthError(
-        `Server did not return a rotated refresh_token for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
+      throw relogin(
+        `Server did not return a rotated refresh_token for profile "${profileName}"`,
+        profileName,
+        profile.instance,
       );
     }
     const next: Tokens = {
@@ -385,21 +280,21 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
     if (err instanceof DeviceFlowError) {
       // `invalid_grant` is terminal (revoked / rotated / reused / expired).
       // Any other error code is transient — preserve the stored tokens so
-      // the next invocation can try again. So is anything that is not a
-      // `DeviceFlowError` at all: a network failure, or the request timeout.
+      // the next invocation can try again.
       if (err.code === "invalid_grant") {
         await deleteTokens(profileName).catch(() => {});
-        throw new AuthError(
-          `Session for profile "${profileName}" is no longer valid (${err.code}). Run: ${loginRemedy(profileName, profile.instance)}`,
+        throw relogin(
+          `Session for profile "${profileName}" is no longer valid (${err.code})`,
+          profileName,
+          profile.instance,
         );
       }
       throw err;
     }
-    // Bare, the abort reads "The operation timed out." with nothing to say
-    // what timed out. Not "try again": the server may have rotated anyway.
-    if ((err as { name?: unknown } | null)?.name === "TimeoutError") {
+    // Not "try again": the server may have rotated before the deadline.
+    if (classifyNetworkErrorKind(err) === "timeout") {
       throw new Error(
-        `The token refresh request for profile "${profileName}" timed out after ${REFRESH_REQUEST_TIMEOUT_MS / 1000} s; the stored credentials were kept. If the next command reports the session as revoked, run: ${loginRemedy(profileName, profile.instance)}`,
+        `The token refresh for profile "${profileName}" timed out; credentials kept. If the next command reports a revoked session, run: ${loginRemedy(profileName, profile.instance)}`,
         { cause: err },
       );
     }
@@ -470,7 +365,8 @@ export async function apiFetchRaw(
   // If a parallel caller already rotated the token between our initial
   // resolve and this 401, the keyring now holds a newer access token.
   // Retry with it first — we'd otherwise burn a refresh-token rotation
-  // for nothing.
+  // for nothing, and in edge timing could even race the mutex into
+  // unnecessary network calls.
   if (stored.accessToken !== token) {
     const retry = await doFetch(stored.accessToken);
     if (retry.status !== 401) return retry;
@@ -479,12 +375,7 @@ export async function apiFetchRaw(
   try {
     rotated = await refreshAccessToken(profileName, profile, stored);
   } catch (err) {
-    // An AuthError means the session is gone (rejected, expired, logged
-    // out meanwhile) and the credentials with it: the original 401 is the
-    // truthful answer, and `apiFetch` turns it into a re-login message.
-    // Anything else — a busy credentials lock, a timeout, a 5xx — left the
-    // credentials intact, and reporting it as a 401 would send the user to
-    // log in again for nothing.
+    // Only a lost session is a 401: a busy lock or a timeout kept the credentials.
     if (err instanceof AuthError) return res;
     throw err;
   }

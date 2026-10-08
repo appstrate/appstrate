@@ -31,6 +31,7 @@ import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
 import { listSpaces, findDefaultSpace, type Space } from "../lib/spaces.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { profileMissing, remedyLine, switchFix } from "../lib/remedy.ts";
 
 interface OrgBaseOptions {
   profile?: string;
@@ -106,13 +107,13 @@ export async function orgCurrentCommand(
   opts: OrgBaseOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
-  const { profile } = await resolveActiveProfile(opts.profile);
+  const { profileName, profile } = await resolveActiveProfile(opts.profile);
   if (!profile) {
-    io.stderr.write("Not logged in. Run: appstrate login\n");
+    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
     io.exit(1);
   }
   if (!profile.orgId) {
-    io.stderr.write("No organization pinned. Run: appstrate org switch\n");
+    io.stderr.write(`${remedyLine(switchFix("No organization pinned", "org", profileName))}\n`);
     io.exit(1);
   }
   io.stdout.write(`${profile.orgId}\n`);

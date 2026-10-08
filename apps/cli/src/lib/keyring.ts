@@ -228,17 +228,8 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
   await saveToFile(profile, tokens);
 }
 
-/**
- * Tokens are "unrecoverably expired" — read as absent — only when the
- * refresh token is past its `refreshExpiresAt`. An expired access token +
- * valid refresh token is healthy: `api.ts` silently rotates it.
- *
- * The expired pair is NOT deleted here: `loadTokens` runs outside the
- * credentials lock (and inside it, during a refresh, where the lock cannot
- * be taken again), and a delete is a read-modify-write of the whole store
- * that could roll back a pair another process just rotated. An expired
- * refresh token is inert; the next login overwrites it, a logout removes it.
- */
+// Absent once the refresh token expires (an expired access token alone is rotated).
+// Reads never delete: outside the credentials lock, a write could roll back a peer's pair.
 function isExpired(tokens: Tokens): boolean {
   return tokens.refreshExpiresAt <= Date.now();
 }
@@ -328,17 +319,8 @@ export async function deleteTokens(profile: string): Promise<void> {
 // calls in the same Node process don't clobber each other's profiles via
 // a stale-snapshot race.
 //
-// Cross-process coordination lives with the callers, not here: every
-// credential writer — refresh, login, logout — runs under
-// `withCredentialsLock` (`api.ts`, over the `flock(2)` of `file-lock.ts`),
-// because the race that matters spans a read, a network call and a write,
-// not a single file operation. This module stays lock-free so the store
-// works the same in either backend, keyring or file.
-//
-// What runs outside that lock — every read — relies on atomic renames: a
-// reader sees a whole file. Writes stay inside it (only a login or logout the
-// user asked for proceeds past the lock's wait), which is why `loadTokens`
-// reads an expired pair as absent and never deletes it.
+// Across processes, every writer holds `withCredentialsLock` (`api.ts`); reads
+// take no lock, and atomic renames give them a whole file.
 
 interface FileStore {
   [profile: string]: Tokens;
@@ -348,8 +330,7 @@ interface FileStore {
  * Serialize in-process read-modify-write cycles on the credentials file.
  * A single `Mutex` shared across every `saveToFile` / `deleteFromFile`
  * call ensures 10 concurrent `Promise.all([saveTokens(...), ...])` in
- * the same process land in the file one at a time. Across processes the
- * callers serialize their writes; see the top-of-section note.
+ * the same process land in the file one at a time; see the top-of-section note.
  */
 const fileMutex = new Mutex();
 
@@ -516,7 +497,7 @@ async function loadFromFile(profile: string): Promise<Tokens | null> {
   };
 }
 
-/** Remove a profile from the file store, whatever it holds: logout's intent. */
+/** Remove a profile from the file store, whatever it holds. */
 async function deleteFromFile(profile: string): Promise<void> {
   await withLock(async () => {
     let store: FileStore;

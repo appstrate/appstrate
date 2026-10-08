@@ -15,10 +15,8 @@
  * filesystem has no `flock` at all, and must not enter the poll loop.
  *
  * **Why an unavailable lock fails open.** Where `flock` does not work — an
- * unsupported mount, or Windows — or the lock file cannot be created or opened
- * (a read-only home whose credentials live in the OS keyring), refusing every
- * command is a larger breakage than the rare race the lock guards, so the body
- * runs and, unless the caller opts out, stderr says so.
+ * unsupported mount, or Windows — or no lock file opens, refusing every command
+ * is a larger breakage than the rare race the lock guards, so the body runs.
  *
  * flock is per open file description, so two holders inside ONE process
  * exclude each other exactly as two processes do.
@@ -28,6 +26,7 @@ import { dlopen, FFIType, read, type Pointer } from "bun:ffi";
 import { closeSync, openSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { DEFAULT_IO, type CommandIO } from "./io.ts";
 
 /** The outcome of one non-blocking attempt at the lock. */
@@ -42,10 +41,7 @@ export interface FileLockOptions {
   pollMs?: number;
   /** Where the "running unlocked" warning goes. */
   io?: CommandIO;
-  /**
-   * False where the user neither starts the locked work nor could avoid the
-   * race it guards (a token refresh): the warning is noise there.
-   */
+  /** False where the user cannot act on the warning (a token refresh). */
   warnUnlocked?: boolean;
   /** Test seam; production resolves the libc binding once per process. */
   tryLock?: TryLock;
@@ -80,8 +76,7 @@ export class FileLockBusyError extends Error {
  * Run `body` while holding the lock on `path`, released in a `finally`. `label`
  * names what the lock serializes, in the busy error and the unlocked warning.
  * Throws past `timeoutMs` while another holder keeps it; runs `body` unlocked,
- * after a warning on stderr (see `warnUnlocked`), where the platform or the
- * filesystem has no working `flock(2)` or the lock file cannot be opened.
+ * after a warning on stderr (unless `warnUnlocked` is false) where it cannot lock.
  */
 export async function withFileLock<T>(
   path: string,
@@ -106,7 +101,7 @@ export async function withFileLock<T>(
     // file nobody else can see, and two holders would run at once.
     fd = openSync(path, "a", 0o600);
   } catch (err) {
-    return runUnlocked(`no lock file: ${err instanceof Error ? err.message : String(err)}`);
+    return runUnlocked(`no lock file: ${getErrorMessage(err)}`);
   }
   try {
     const deadline = Date.now() + timeoutMs;

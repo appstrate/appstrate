@@ -24,17 +24,14 @@ import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getDataDir } from "../src/lib/config.ts";
 import { deleteTokens } from "../src/lib/keyring.ts";
 import { cleanupProfileSkills } from "../src/lib/skills-sync/cleanup.ts";
-import {
-  loginFix,
-  switchFix,
-  syncProblemNotice,
-  writeNotice,
-} from "../src/lib/skills-sync/notice.ts";
+import { loginFix, switchFix } from "../src/lib/remedy.ts";
+import { renderNotice } from "../src/lib/skills-sync/notice.ts";
 import {
   getNoticePath,
   getStatePath,
   readSyncState,
   STATE_VERSION,
+  writeNotice,
 } from "../src/lib/skills-sync/state.ts";
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { runCli } from "./helpers/isolated-process.ts";
@@ -1187,7 +1184,6 @@ describe("code sync — fresh install", () => {
     const out = await hookOutput();
     expect(out.systemMessage).toContain("appstrate login --profile nope");
     expect(out.hookSpecificOutput.additionalContext).toContain("--instance <url>");
-    expect(out.hookSpecificOutput.additionalContext).toContain("/appstrate:setup");
   });
 
   it("names the missing space pin in the setup skill", async () => {
@@ -1207,14 +1203,12 @@ describe("code sync — fresh install", () => {
 
     const skill = await readText(setupSkill());
     expect(skill).toContain("appstrate org switch <org-id-or-slug>");
-    expect(skill).toContain("appstrate org list");
     expect(skill).not.toContain("--instance");
     expect(skill).not.toContain("--org");
     const out = await hookOutput();
     expect(out.systemMessage).toContain(
       "`appstrate org switch <org-id-or-slug> --profile default`",
     );
-    expect(out.hookSpecificOutput.additionalContext).toContain("`appstrate org list`");
     expect(JSON.stringify(out)).not.toContain("--instance");
   });
 
@@ -1305,9 +1299,9 @@ describe("code sync — fresh install", () => {
 describe("code sync — session notice", () => {
   const syncPlugin = (): Promise<void> =>
     codeSyncCommand({ target: ["claude-plugin"], printPath: true }, createMemoryIO().io);
-  const older = syncProblemNotice(
+  const older = renderNotice(
     { problem: "Something older", remedy: "appstrate whoami" },
-    { stale: true },
+    "failed",
     new Date("2026-01-02T03:04:05Z"),
   );
 
@@ -1337,7 +1331,6 @@ describe("code sync — session notice", () => {
     expect(out.systemMessage).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
     const context = out.hookSpecificOutput.additionalContext;
     expect(context).toContain(login);
-    expect(context).toContain("`appstrate whoami --profile default`");
     expect(context).toContain(PLUGIN_UPDATE);
 
     await seedLoggedInProfile("default", { orgId: "org_1", spaceId: "spc_1" });
@@ -1418,7 +1411,7 @@ describe("code sync — session notice", () => {
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toBe(true);
     const out = await hookOutput();
     expect(out.systemMessage).toContain("`appstrate login --profile nope --instance <url>`");
-    expect(out.hookSpecificOutput.additionalContext).toContain("Appstrate instance URL");
+    expect(out.hookSpecificOutput.additionalContext).toContain("`<placeholder>`");
   });
 
   it("tells the next session about a pin missing in a run without --print-path", async () => {
@@ -1447,9 +1440,8 @@ describe("code sync — session notice", () => {
     const result = await cleanupProfileSkills("default");
 
     expect(result.pluginReset).toBe(true);
-    // A retry would skip the plugin, its ledger gone: the warning says so.
+    // A retry would skip the plugin, its ledger gone: no retry is suggested.
     expect(result.warnings).toEqual([expect.stringContaining(getNoticePath())]);
-    expect(result.warnings[0]).toContain("its /appstrate:setup skill carries the remedy");
     expect(result.warnings[0]).not.toContain("Retry");
     expect((await readSyncState()).state.targets["claude-plugin"]).toBeUndefined();
     expect(await readText(join(pluginRoot(), "skills", "setup", "SKILL.md"))).toContain(
@@ -1516,7 +1508,6 @@ describe("code sync — session notice", () => {
     expect(out.systemMessage).toContain('Pinned space "spc_1" is not accessible');
     // `space switch` opens a picker without a ref, and Claude's shell has no TTY.
     expect(out.systemMessage).toContain("`appstrate space switch <space-id> --profile default`");
-    expect(out.hookSpecificOutput.additionalContext).toContain("`appstrate space list`");
   });
 
   it("drops the pin warning when the same run then fails on a transient error", async () => {
@@ -1696,8 +1687,9 @@ describe("code sync — multiple spaces", () => {
       "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch <org-id-or-slug> --profile default\n",
     );
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
-    // The typed flag got its answer right here: no notice for a later session.
-    expect(await exists(getNoticePath())).toBe(false);
+    expect((await hookOutput()).systemMessage).toContain(
+      "`appstrate org switch <org-id-or-slug> --profile default`",
+    );
   });
 
   it("keeps every skill when the space listing fails for anything but a revocation", async () => {

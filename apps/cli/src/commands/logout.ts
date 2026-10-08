@@ -16,7 +16,7 @@
 import { intro, outro, formatError } from "../lib/ui.ts";
 import { readConfig, resolveProfileName, deleteProfile } from "../lib/config.ts";
 import { loadTokens, deleteTokens } from "../lib/keyring.ts";
-import { withCredentialsLockForUser } from "../lib/api.ts";
+import { withCredentialsLock } from "../lib/api.ts";
 import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
@@ -24,7 +24,7 @@ import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import { cleanupProfileSkills } from "../lib/skills-sync/cleanup.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
-import { shellArg } from "../lib/shell.ts";
+import { logoutRetry } from "../lib/remedy.ts";
 
 interface LogoutOptions {
   profile?: string;
@@ -48,13 +48,10 @@ export async function logoutCommand(
   let keyringRefusal: unknown;
   // Marked cleared once the profile is gone, keyring throw or not: the local
   // sign-out has happened, and a second attempt would only throw again.
-  // The delete waits out any refresh holding the credentials lock, in this
-  // process or another, so its trailing save cannot resurrect the tokens; a
-  // refresh still waiting finds them gone. A holder stuck past the wait does
-  // not keep the user signed in: the delete then runs anyway.
+  // Under the credentials lock, so a refresh's trailing save cannot resurrect them.
   const clearCredentials = async (): Promise<void> => {
     try {
-      await withCredentialsLockForUser(() => deleteTokens(profileName), io);
+      await withCredentialsLock(() => deleteTokens(profileName));
     } finally {
       await deleteProfile(profileName);
       credentialsCleared = true;
@@ -100,7 +97,7 @@ export async function logoutCommand(
     );
   } catch (err) {
     io.stderr.write(
-      `warning: could not complete skills cleanup (${formatError(err)}). Retry appstrate logout --profile ${shellArg(profileName)}.\n`,
+      `warning: could not complete skills cleanup (${formatError(err)}). ${logoutRetry(profileName)}\n`,
     );
   } finally {
     // A lock failure cannot keep the user signed in. An in-flight sync checks

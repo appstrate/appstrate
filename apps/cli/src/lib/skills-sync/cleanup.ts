@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { shellArg } from "../shell.ts";
-import { loginFix, setupNotice, writeNotice } from "./notice.ts";
-import { getNoticePath, readSyncState, writeSyncState } from "./state.ts";
+import { loginFix, logoutRetry } from "../remedy.ts";
+import { renderNotice } from "./notice.ts";
+import { getNoticePath, readSyncState, writeNotice, writeSyncState } from "./state.ts";
 import {
-  PLUGIN_NAME,
-  SETUP_SLUG,
   SYNC_TARGETS,
   removeManagedDir,
   setupPluginFiles,
@@ -14,10 +12,7 @@ import {
   writeSetupPlugin,
 } from "./targets.ts";
 
-/**
- * Caller holds the sync lock. Failed removals keep their ownership for a later
- * logout, so their warnings say to retry; a warning a retry cannot fix says so.
- */
+/** Caller holds the sync lock. Failed removals keep their ownership for a later logout. */
 export async function cleanupProfileSkills(
   profileName: string,
 ): Promise<{ warnings: string[]; pluginReset: boolean }> {
@@ -30,7 +25,7 @@ export async function cleanupProfileSkills(
       ],
     };
   const failures: string[] = [];
-  const retry = `Retry appstrate logout --profile ${shellArg(profileName)}.`;
+  const retry = logoutRetry(profileName);
   let pluginReset = false;
   for (const target of SYNC_TARGETS) {
     const ledger = state.targets[target];
@@ -48,13 +43,11 @@ export async function cleanupProfileSkills(
       }
       delete state.targets[target];
       pluginReset = true;
-      // Best effort, as after a sync: the setup skill already carries the remedy.
+      // Best effort: the setup skill carries the same remedy.
       try {
-        await writeNotice(setupNotice(fix));
+        await writeNotice(renderNotice(fix, "setup"));
       } catch (error) {
-        failures.push(
-          `Could not write ${getNoticePath()}: ${String(error)}; the setup plugin is in place and its /${PLUGIN_NAME}:${SETUP_SLUG} skill carries the remedy.`,
-        );
+        failures.push(`Could not update ${getNoticePath()}: ${String(error)}`);
       }
       continue;
     }

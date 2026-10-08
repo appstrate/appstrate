@@ -44,6 +44,7 @@ import {
 import { PROJECT_FILE_RELPATH } from "../lib/install/project.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { ActionableError, profileMissing, remedyLine, switchFix } from "../lib/remedy.ts";
 import { DRAFT_SELECTOR, splitPackageSpec } from "../lib/package-spec.ts";
 import { ExplainedError, formatError } from "../lib/ui.ts";
 import {
@@ -88,14 +89,12 @@ interface Session {
 async function openSession(explicit: string | undefined, io: CommandIO): Promise<Session | null> {
   const { profileName, profile } = await resolveActiveProfile(explicit);
   if (!profile) {
-    io.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
+    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
     io.exit(1);
     return null;
   }
   if (!profile.orgId) {
-    io.stderr.write("No organization pinned. Run: appstrate org switch\n");
+    io.stderr.write(`${remedyLine(switchFix("No organization pinned", "org", profileName))}\n`);
     io.exit(1);
     return null;
   }
@@ -106,8 +105,12 @@ async function orgSlug(session: Session): Promise<string> {
   if (session.slug) return session.slug;
   const org = (await listOrgs(session.profileName)).find((o) => o.id === session.profile.orgId);
   if (!org) {
-    throw new Error(
-      `Organization ${session.profile.orgId} is not one this profile belongs to. Run: appstrate org switch`,
+    throw new ActionableError(
+      switchFix(
+        `Organization ${session.profile.orgId} is not one this profile belongs to`,
+        "org",
+        session.profileName,
+      ),
     );
   }
   session.slug = org.slug;

@@ -707,12 +707,8 @@ describe("apiFetchRaw — a refresh request that never answers", () => {
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(AuthError);
-    expect((error as Error).message).toContain("token refresh request");
-    expect((error as Error).message).toContain("timed out after 20 s");
-    expect((error as Error).message).toContain("credentials were kept");
-    // Not "try again": the server may have rotated before the deadline hit.
-    expect((error as Error).message).toContain(
-      "If the next command reports the session as revoked, run: appstrate login --profile default --instance https://app.example.com",
+    expect((error as Error).message).toBe(
+      'The token refresh for profile "default" timed out; credentials kept. If the next command reports a revoked session, run: appstrate login --profile default --instance https://app.example.com',
     );
     expect(((error as Error).cause as DOMException).name).toBe("TimeoutError");
     expect((await loadTokens("default"))?.refreshToken).toBe("r");

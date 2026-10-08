@@ -21,7 +21,7 @@ import {
 import { dirname, join } from "node:path";
 import { getDataDir, homeDir } from "../config.ts";
 import { shellQuote } from "../shell.ts";
-import type { Actionable } from "./notice.ts";
+import type { Actionable } from "../remedy.ts";
 import { getNoticePath } from "./state.ts";
 
 export const SYNC_TARGETS = ["claude-plugin", "codex", "claude-user"] as const;
@@ -29,7 +29,7 @@ export type SyncTarget = (typeof SYNC_TARGETS)[number];
 
 const STAGING_DIR = ".appstrate-staging";
 
-export const PLUGIN_NAME = "appstrate";
+const PLUGIN_NAME = "appstrate";
 
 const MCP_SERVER_NAME = "appstrate";
 
@@ -72,12 +72,7 @@ const PLUGIN_FILES: Readonly<Record<string, string>> = {
 /** Re-runs the marketplace sync and reinstalls the plugin: what makes a new tree live. */
 export const PLUGIN_UPDATE_COMMAND = `claude plugin update ${PLUGIN_NAME}@appstrate`;
 
-/**
- * Every plugin, connected or setup, carries this one hook so a sync that later
- * FAILS can still speak: it prints the notice the CLI keeps outside the tree
- * (`notice.ts`), which a failed run updates while Claude Code keeps running its
- * cached copy. No network, no CLI start, and it always exits 0.
- */
+/** Every plugin's one hook: print the notice (`notice.ts`), if any; never fail. */
 function noticeHook(): string {
   const hooks = {
     hooks: {
@@ -138,15 +133,14 @@ export interface SkillTree {
   files: Record<string, Uint8Array>;
 }
 
-export const SETUP_SLUG = "setup";
+const SETUP_SLUG = "setup";
 
 /**
  * The plugin a machine gets before the CLI is connected, so the marketplace
  * install succeeds and the remedy sits where the user works: one skill that
- * says how, while `setupNotice` (`notice.ts`) says it at every session start.
- * The first connected sync replaces the whole tree.
+ * says how. The first connected sync replaces the whole tree.
  */
-export function setupPluginFiles({ problem, remedy, ask }: Actionable): Record<string, Uint8Array> {
+export function setupPluginFiles({ problem, remedy }: Actionable): Record<string, Uint8Array> {
   const skillMd = [
     "---",
     `name: ${SETUP_SLUG}`,
@@ -160,7 +154,7 @@ export function setupPluginFiles({ problem, remedy, ask }: Actionable): Record<s
     `The \`${PLUGIN_NAME}\` plugin syncs your Appstrate organization's skills into Claude Code, ` +
       `but this machine is not connected yet: ${problem}.`,
     "",
-    `1. Run this command${ask ? `, asking the user for ${ask} first` : ""}:`,
+    "1. Run this command, replacing any `<placeholder>` in it by asking the user:",
     "",
     "   ```sh",
     `   ${remedy}`,

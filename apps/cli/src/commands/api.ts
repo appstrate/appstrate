@@ -52,8 +52,8 @@ import {
   explicitApiKey,
   AuthError,
   ApiError,
-  loginRemedy,
 } from "../lib/api.ts";
+import { loginRemedy } from "../lib/remedy.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";

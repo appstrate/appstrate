@@ -21,6 +21,7 @@ import { apiFetch } from "../lib/api.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { profileMissing, remedyLine } from "../lib/remedy.ts";
 
 interface WhoamiOptions {
   profile?: string;
@@ -50,9 +51,7 @@ export async function whoamiCommand(
   const profile = config.profiles[profileName];
 
   if (!profile) {
-    io.stderr.write(
-      `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
-    );
+    io.stderr.write(`${remedyLine(profileMissing(profileName))}\n`);
     io.exit(1);
   }
 

@@ -313,13 +313,8 @@ export async function pollDeviceFlow(
  * single-use — a second exchange of the same plaintext triggers the
  * server-side reuse-detection sweep that revokes the whole family).
  *
- * A non-2xx response throws as `endpointError` says; `invalid_grant` (refresh
- * token expired, revoked, or already rotated) means the CLI must clear local
- * credentials and prompt `appstrate login`.
- *
- * `signal` bounds the whole exchange, body included; an abort rejects with
- * the signal's reason (a `TimeoutError` for `AbortSignal.timeout`), never a
- * `DeviceFlowError`, so it reads as transient.
+ * A non-2xx throws via `endpointError`; `invalid_grant` means the stored session
+ * is gone. `signal` bounds the exchange, body included.
  */
 export async function refreshCliTokens(
   instance: string,
@@ -364,8 +359,8 @@ export async function refreshCliTokens(
  * Server-side revocation of a refresh-token family. Called on
  * `appstrate logout` before local credential cleanup.
  *
- * Contract: throws on a network error or any non-2xx response (see
- * `endpointError`). Callers that want best-effort revocation (e.g.
+ * Contract: throws on a network error or any non-2xx response. Callers that
+ * want best-effort revocation (e.g.
  * `logout.ts`) MUST wrap the call in try/catch and proceed with local
  * cleanup on failure — revocation state is advisory from the client's
  * perspective, but surfacing the error at the call site lets the
@@ -396,13 +391,7 @@ export async function revokeCliRefreshToken(
   if (!res.ok) throw await endpointError(res, "Revocation endpoint");
 }
 
-/**
- * A non-2xx answer from an OAuth endpoint: its OAuth error body as a
- * `DeviceFlowError`, or, with no OAuth `error` code in it (a proxy's 502
- * page, say), a plain `Error` naming the status, and the `error_description`
- * when there is one. That one says nothing about the grant, so it must never
- * read as an OAuth verdict like `invalid_request`.
- */
+/** An OAuth error body as a `DeviceFlowError`; anything else (a proxy's 502) as a plain `Error`. */
 async function endpointError(res: Response, endpoint: string): Promise<Error> {
   const err = await parseErrorBody(res);
   if (typeof err.error !== "string") {
@@ -418,7 +407,7 @@ async function parseErrorBody(res: Response): Promise<RawErrorBody> {
     if (parsed && typeof parsed === "object") return parsed;
     return {};
   } catch (err) {
-    // An abort while reading is the caller's deadline, not an unreadable body.
+    // The caller's deadline, not an unreadable body.
     const name = (err as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") throw err;
     return {};
