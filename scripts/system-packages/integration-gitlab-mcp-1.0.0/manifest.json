@@ -24,7 +24,7 @@
           "format": "uri",
           "pattern": "^https?://",
           "title": "URL de l'instance GitLab",
-          "description": "Racine de votre instance, sans chemin (ex. https://gitlab.example.com) ; gardez https://gitlab.com pour GitLab.com. L'accès au serveur MCP doit y être autorisé : par le groupe de premier niveau sur GitLab.com, par un administrateur sur une instance auto-hébergée, qui doit aussi laisser activé l'enregistrement dynamique des clients OAuth.",
+          "description": "Adresse de votre instance, sans /api/v4 (ex. https://gitlab.example.com, ou https://example.com/gitlab si elle est servie sous un chemin) ; gardez https://gitlab.com pour GitLab.com. L'accès au serveur MCP doit y être autorisé : par le groupe de premier niveau sur GitLab.com, par un administrateur sur une instance auto-hébergée, qui doit aussi laisser activé l'enregistrement dynamique des clients OAuth.",
           "default": "https://gitlab.com"
         }
       },
