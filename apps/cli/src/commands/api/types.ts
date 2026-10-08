@@ -141,6 +141,14 @@ export interface ApiCommandOptions {
    * for logging use this.
    */
   failWithBody?: boolean;
+  /**
+   * `--batch <file>`: send every request of a JSON Lines file (`-` = stdin) from this one
+   * process, over kept-alive connections, and write one JSON line per response. `path`
+   * is unused. See `api/batch.ts`.
+   */
+  batch?: string;
+  /** `--parallel <n>`: requests in flight at once in `--batch` mode (default 5). */
+  parallel?: number;
 }
 
 /**

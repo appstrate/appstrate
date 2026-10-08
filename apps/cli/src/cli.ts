@@ -700,7 +700,7 @@ modelsGroup
   });
 
 program
-  .command("api <target> [extra]")
+  .command("api [target] [extra]")
   .description(
     "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Space-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
@@ -710,7 +710,8 @@ program
       "  appstrate api GET /api/x             # explicit method + path\n" +
       "  appstrate api /api/x                 # method inferred (GET / POST / PUT)\n" +
       "  appstrate api https://instance/api/x # absolute URL, must match the instance\n" +
-      "  appstrate api POST /api/x -d @body   # body via -d / --data-raw / --data-binary / -F",
+      "  appstrate api POST /api/x -d @body   # body via -d / --data-raw / --data-binary / -F\n" +
+      "  appstrate api --batch reqs.jsonl -o out.jsonl  # many requests from one process",
   )
   .option("-H, --header <kv>", "Request header 'Name: value' (repeatable)", collect, [])
   .option(
@@ -842,6 +843,17 @@ program
       return n;
     },
   )
+  .option(
+    "--batch <file>",
+    'Send every request of a JSON Lines file (- = stdin) from this one process, --parallel at a time. Each line: {"id"?, "method"?, "path", "headers"?, "body"?}. Writes one JSON line per response, in input order: {"id", "status", "headers", "body", "body_encoding"} or {"id", "error"}. Use --retry to wait out 429s.',
+  )
+  .option("--parallel <n>", "Requests in flight at once with --batch (default 5).", (v) => {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new InvalidArgumentError(`expected a positive integer, got "${v}"`);
+    }
+    return n;
+  })
   .option("--max-time <sec>", "Abort the request after N seconds (curl exit code 28)", (v) => {
     const n = parseFloat(v);
     if (!Number.isFinite(n) || n <= 0) {
@@ -852,7 +864,7 @@ program
     }
     return n;
   })
-  .action(async (target: string, extra: string | undefined, opts) => {
+  .action(async (target: string | undefined, extra: string | undefined, opts) => {
     // Resolve `<target> [extra]` → {method, path}. Two shapes:
     //   api POST /x   → arg1=HTTP method, arg2=path (curl -X style)
     //   api /x        → method inferred (GET/POST/PUT per flags + body)
@@ -862,7 +874,14 @@ program
     // to GET the word "fetchh".
     let method: string | undefined;
     let path: string;
-    if (extra !== undefined) {
+    if (typeof opts.batch === "string") {
+      if (target !== undefined) {
+        throw new InvalidArgumentError("--batch takes its requests from the file, not a target");
+      }
+      path = "";
+    } else if (target === undefined) {
+      throw new InvalidArgumentError("missing target (a path like /api/x, or --batch <file>)");
+    } else if (extra !== undefined) {
       if (!isHttpMethod(target)) {
         throw new InvalidArgumentError(
           `expected HTTP method as first argument, got "${target}" (did you mean GET/POST/PUT/…?)`,
@@ -922,6 +941,8 @@ program
       insecure: opts.insecure === true,
       maxTime:
         typeof opts.maxTime === "number" && !Number.isNaN(opts.maxTime) ? opts.maxTime : undefined,
+      batch: typeof opts.batch === "string" ? opts.batch : undefined,
+      parallel: typeof opts.parallel === "number" ? opts.parallel : undefined,
     });
   });
 

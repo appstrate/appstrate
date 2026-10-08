@@ -45,17 +45,11 @@
  * detours into 100-line helpers.
  */
 
-import { readConfig, resolveProfileName } from "../lib/config.ts";
-import {
-  resolveAuthContext,
-  resolveApiKeyAuthContext,
-  explicitApiKey,
-  AuthError,
-  ApiError,
-} from "../lib/api.ts";
 import { loginRemedy } from "../lib/remedy.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
+import { resolveApiAuth } from "./api/auth.ts";
+import { apiBatchCommand } from "./api/batch.ts";
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
 import { buildHeaders } from "./api/headers.ts";
 import { pickMethod } from "./api/method.ts";
@@ -81,6 +75,8 @@ export async function apiCommand(
   opts: ApiCommandOptions,
   io: ApiCommandIO = DEFAULT_IO,
 ): Promise<void> {
+  if (opts.batch !== undefined) return apiBatchCommand(opts, io);
+
   // Error output gate: curl `-s` silences errors; `-sS` restores
   // them. A bare (no-flag) invocation always prints errors. This
   // helper is applied to every error-class stderr write in the
@@ -152,23 +148,12 @@ export async function apiCommand(
 
   // 1. Resolve the credential: explicit API key (`profileName` stays
   //    undefined), else auth profile + fresh access token.
-  let profileName: string | undefined;
-  let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
-  try {
-    const apiKey = explicitApiKey(opts.apiKey);
-    if (apiKey) {
-      auth = await resolveApiKeyAuthContext(apiKey, opts.profile);
-    } else {
-      profileName = resolveProfileName(opts.profile, await readConfig());
-      auth = await resolveAuthContext(profileName);
-    }
-  } catch (err) {
-    if (err instanceof AuthError || err instanceof ApiError) {
-      writeError(`${err.message}\n`);
-      return exit(1);
-    }
-    throw err;
+  const resolved = await resolveApiAuth(opts);
+  if ("error" in resolved) {
+    writeError(`${resolved.error}\n`);
+    return exit(1);
   }
+  const { auth, profileName } = resolved;
 
   const hasUrlencode = Array.isArray(opts.dataUrlencode) && opts.dataUrlencode.length > 0;
 

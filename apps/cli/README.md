@@ -691,6 +691,20 @@ appstrate api GET /api/agents
 - **Only `api` and `run` read the key.** `appstrate openapi` and the other commands still use the profile, so with `APPSTRATE_INSTANCE` set they may describe a different instance than the one `api` calls.
 - **The key is visible to whatever launches the command.** "The agent never sees the bearer" holds for the profile path only: an environment variable or a flag is readable by the process that sets it. Give an agent a key scoped to what it may do, not a login.
 
+#### Many requests from one process (`--batch`)
+
+Each `appstrate api` invocation starts a process (about half a second), while the request itself takes milliseconds. A script that needs dozens of calls sends them in one invocation instead:
+
+```sh
+appstrate api --batch requests.jsonl --parallel 5 --retry 3 -o responses.jsonl
+```
+
+- **Input:** a JSON Lines file (`-` reads stdin), one request per line: `{"id"?, "method"?, "path", "headers"?, "body"?}`. `path` is any path or same-origin URL `appstrate api` accepts; `body` is a string (serialize JSON yourself). `method` defaults to `POST` with a body, `GET` without; `id` defaults to the line number.
+- **Output:** one JSON line per request, in input order: `{"id", "status", "headers", "body", "body_encoding"}` (`body_encoding` is `utf8`, or `base64` for a body that is not valid UTF-8), or `{"id", "error"}` for a request that got no response.
+- **Each request** carries the same credential, `X-Org-Id` / `X-Space-Id` and `-H` headers as a single call (its own `headers` win), runs through the same retry loop, and at most `--parallel` (default 5) are in flight. With `--retry`, a `429` waits out the server's `Retry-After`, so a batch above the rate limit slows down instead of failing.
+- **Validated first:** an invalid line, a duplicate `id`, or a URL off the instance's origin refuses the whole batch (exit 2) before anything is sent. Single-request flags (`-d`, `-F`, `-q`, `-G`, `-X`, `-i`, `-I`, `-w`, `-T`, `--connect-timeout`) are refused with `--batch`.
+- **Exit code:** 0 when every request got a response, whatever its status; 1 when one did not (its line says why); with `-f` / `--fail-with-body`, 22 if a response is a 4xx and 25 if one is a 5xx. Bodies are written in every case.
+
 #### curl → appstrate api mapping
 
 Every row below is a direct drop-in: an agent can replace `curl` with `appstrate api` and strip the hostname. All flags work identically.
