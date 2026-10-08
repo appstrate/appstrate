@@ -4,7 +4,6 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { ApiError } from "@appstrate/core/api-errors";
 import {
-  authUrlTemplates,
   resolveConnectionVariables,
   type ConnectionVariablesDeps,
 } from "../../src/services/connect/connection-variables.ts";
@@ -146,9 +145,13 @@ describe("resolveConnectionVariables (AFPS §7.12)", () => {
       resolveConnectionVariables(tenantManifest, tenantAuth, { tenant: "a.b-" }, allowAll),
     );
     expect(errors).toEqual([{ field: "variables.tenant", code: "unrenderable_variable" }]);
+    // No URL template chooses this auth's upstream: nothing is egress-checked.
+    const egressed: string[] = [];
+    const deps = { isEgressAllowed: async (url: string) => (egressed.push(url), true) };
     expect(
-      await resolveConnectionVariables(tenantManifest, tenantAuth, { tenant: "Acme" }, allowAll),
+      await resolveConnectionVariables(tenantManifest, tenantAuth, { tenant: "Acme" }, deps),
     ).toEqual({ tenant: "Acme" });
+    expect(egressed).toEqual([]);
   });
 
   it("checks the real egress guard by default (a link-local URL is refused)", async () => {
@@ -156,15 +159,5 @@ describe("resolveConnectionVariables (AFPS §7.12)", () => {
       resolveConnectionVariables(forgeManifest, oauthAuth, { base_url: "https://169.254.169.254" }),
     );
     expect(errors).toContainEqual({ field: "variables.base_url", code: "egress_blocked" });
-  });
-});
-
-describe("authUrlTemplates", () => {
-  it("lists the templated URLs choosing an auth's upstream", () => {
-    expect(authUrlTemplates(forgeManifest, oauthAuth)).toEqual([
-      "{$variable.base_url}/api/v4/mcp",
-      "{$variable.base_url}",
-    ]);
-    expect(authUrlTemplates(tenantManifest, tenantAuth)).toEqual([]);
   });
 });

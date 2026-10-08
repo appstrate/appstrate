@@ -121,7 +121,7 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
       opts.authType,
       parsed.outputs,
       opts.deliveryHttp as AfpsHttpDelivery,
-      opts.variables ?? {},
+      opts.variables,
     );
     if (plan) {
       opts.source.setSessionOutputs(

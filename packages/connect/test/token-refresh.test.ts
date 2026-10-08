@@ -258,7 +258,7 @@ describe("performRefreshTokenExchange — failure classification", () => {
 
   it("attaches the parse failure as the cause of a non-JSON 2xx body", async () => {
     // Delete-to-fail: without `{ cause }` the thrown error says only
-    // "<label> returned non-JSON response". `response.json()` already consumed
+    // "<label> returned non-JSON response". The read already consumed
     // the stream at that point, so the `body` field built for this cannot be
     // filled in and the SyntaxError is the only description of what came back.
     const err = await captureError(
@@ -274,6 +274,14 @@ describe("performRefreshTokenExchange — failure classification", () => {
     expect((err as RefreshError).message).toContain("non-JSON");
     expect((err as RefreshError).cause).toBeInstanceOf(SyntaxError);
     expect((err as RefreshError).status).toBe(200);
+  });
+
+  it("refuses a 2xx body past the token-response cap without parsing it", async () => {
+    const huge = JSON.stringify({ access_token: "x", padding: "a".repeat(600 * 1024) });
+    const err = await captureError(responding(() => new Response(huge, { status: 200 })));
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("transient");
+    expect((err as RefreshError).cause).toBeInstanceOf(RangeError);
   });
 });
 

@@ -437,11 +437,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
   ): ApiCallFn {
     // Matching uses the list rendered for this connection; the SSRF pin and cookie
     // siblings use the declared one, so a connection-supplied host is never trusted.
-    const authorizedUris = renderAuthorizedUris(
-      meta.authorizedUris,
-      entry.fields,
-      entry.variables ?? {},
-    );
+    const authorizedUris = renderAuthorizedUris(meta.authorizedUris, entry.fields, entry.variables);
     return async (req, ctx) => {
       const fields = entry.fields;
 
@@ -626,7 +622,7 @@ function resolveLocalDeliveryPlan(
   }
 
   // 2. Manifest `delivery.http` plan (auth-type defaults).
-  return resolveHttpDelivery(meta.authType, fields, meta.http, entry.variables ?? {});
+  return resolveHttpDelivery(meta.authType, fields, meta.http, entry.variables);
 }
 
 function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPlan): string | null {

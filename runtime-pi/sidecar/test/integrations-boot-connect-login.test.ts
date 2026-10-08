@@ -142,6 +142,7 @@ function spec(overrides?: Partial<IntegrationSpawnSpec>): IntegrationSpawnSpec {
       authType: "custom",
       authorizedUris: ["https://saas.example.com/**"],
       deliveryHttp: DELIVERY_HTTP,
+      variables: {},
       inputs: { identifiant: "user1", mot_de_passe: "s3cr3t" },
     },
     ...overrides,

@@ -996,6 +996,7 @@
   "integration.connect.variables.oauthSubtitle": "Indiquez le serveur auquel vous connecter. Vous serez ensuite redirigé vers sa page d'autorisation.",
   "integration.connect.variables.continue": "Continuer",
   "integration.connect.variables.required": "Ce champ est obligatoire.",
+  "integration.connect.variables.locked": "Cette connexion reste liée à cette instance. Pour vous connecter à une autre instance, ajoutez une nouvelle connexion.",
   "integration.connect.handoffPanel.title": "Connexion créée — une étape reste de votre côté",
   "integration.connect.handoffPanel.body": "Les identifiants dont cette connexion a besoin ont été générés et scellés dans le trousseau : ils ne sont pas affichés ici et ne peuvent pas être relus. Ce qui reste se fait sur la machine que cette connexion vise.",
   "integration.connect.handoffPanel.deferredHint": "à garder pour plus tard",

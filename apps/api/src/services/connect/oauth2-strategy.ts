@@ -38,8 +38,8 @@ import { resolveConnectionVariables } from "./connection-variables.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
+  assertEndpointsMatchMetadata,
   assertRequiredIdentityClaims,
-  endpointContradictingMetadata,
   ensureIntegrationOAuthClient,
   extractIdentity,
   getIntegrationConnectionCredentialFields,
@@ -127,7 +127,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       manifest,
       auth,
       redirectUri,
-      variables,
+      variables ?? {},
     );
     // Client selection (multi-client) — full precedence lives in
     // `resolveConnectClient`. New connections always use the default (the
@@ -147,18 +147,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
-    // AFPS §7.3 client binding, on a remote source: the client is presented only to the
-    // endpoints of its server's validated metadata, never to a declared endpoint it contradicts.
+    // AFPS §7.3 client binding on a remote source, a manually registered client included.
     if (getRemoteSource(manifest) && !perConnection && issuer) {
-      const contradicted = endpointContradictingMetadata(
+      assertEndpointsMatchMetadata(
+        ctx.integrationId,
+        ctx.authKey,
         auth,
         await resolveOAuthEndpoints({ issuer }),
       );
-      if (contradicted) {
-        throw invalidRequest(
-          `Integration '${ctx.integrationId}' auth '${ctx.authKey}' declares a ${contradicted} that the metadata of its authorization server (${issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
-        );
-      }
     }
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,

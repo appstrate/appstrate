@@ -112,12 +112,18 @@ export function renderUrlTemplate(
   return host === null ? null : `https://${host}${parsed.path}`;
 }
 
-/** The variables to blame when {@link renderUrlTemplate} renders `null`; `[]` when it renders. */
+export const EXPECTED_URL_VALUE =
+  "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
+export const EXPECTED_HOST_VALUE =
+  "a host name: '.'-separated labels of 1 to 63 letters, digits and '-', none starting or ending with '-'";
+
+/** The variables to blame when {@link renderUrlTemplate} renders `null`, with the form each must take. */
 export function unrenderableUrlTemplateVariables(
   template: string,
   variables: Readonly<Record<string, string>>,
-): string[] {
+): { name: string; expected: string }[] {
   if (renderUrlTemplate(template, variables) !== null) return [];
   const parsed = parseUrlTemplate(template);
-  return parsed ? [parsed.name] : variableRefs(template);
+  const expected = parsed?.form === "host" ? EXPECTED_HOST_VALUE : EXPECTED_URL_VALUE;
+  return (parsed ? [parsed.name] : variableRefs(template)).map((name) => ({ name, expected }));
 }

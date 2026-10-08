@@ -340,6 +340,30 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(fetchCalls).toBe(0);
   });
 
+  it("never follows a same-origin redirect off the authorized URIs with the credential", async () => {
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" } },
+      ["https://mcp.example.com/mcp/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    const fetched: string[] = [];
+    await withGlobalFetch(
+      (async (input: string) => {
+        fetched.push(new URL(input).pathname);
+        return new Response(null, { status: 307, headers: { location: "/admin" } });
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+          /outside the authorized URIs/,
+        );
+      },
+    );
+    expect(fetched).toEqual(["/mcp/v1"]);
+  });
+
   // A reconnect to another upstream mid-run: the refreshed snapshot carries that upstream's
   // credential and URIs, while the transport still targets the server rendered at spawn.
   it("refuses the retry when the refreshed credential is for another upstream", async () => {

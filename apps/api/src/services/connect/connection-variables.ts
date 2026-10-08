@@ -25,20 +25,13 @@ import {
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 
-export type ConnectionVariables = Record<string, string>;
+/** A connection's variables (AFPS §7.12) as the run-time renderers substitute them. */
+export type ConnectionVariables = Readonly<Record<string, string>>;
 
 const TITLE = "Invalid Connection Variable";
 
-const EXPECTED_URL =
-  "an absolute https:// URL without userinfo, query string, fragment or '*' (http:// only for a host the operator trusts)";
-const EXPECTED_HOST =
-  "a host name: '.'-separated labels of 1 to 63 letters, digits and '-', none starting or ending with '-'";
-
-/**
- * The URL templates choosing the upstream of a connection made with `auth`: the integration's
- * `source.remote.url` and the auth's oauth2 `issuer` — those that reference a variable.
- */
-export function authUrlTemplates(
+/** The URL templates choosing the upstream of a connection made with `auth`. */
+function authUrlTemplates(
   manifest: IntegrationManifest,
   auth: Pick<AfpsManifestAuth, "type" | "issuer">,
 ): string[] {
@@ -47,15 +40,17 @@ export function authUrlTemplates(
   );
 }
 
-/** Injectable for tests: the egress decision for a rendered URL (DNS-resolving by default). */
+/** Egress decision for a user-chosen URL (§8.7: no author trust); DNS-resolving. */
+export async function isUserUrlReachable(url: string): Promise<boolean> {
+  return (await checkEgressUrl(url, { requireHttpsForUntrustedHost: true })).ok;
+}
+
+/** Injectable for tests: the egress decision for a rendered URL. */
 export interface ConnectionVariablesDeps {
   isEgressAllowed: (url: string) => Promise<boolean>;
 }
 
-const defaultDeps: ConnectionVariablesDeps = {
-  isEgressAllowed: async (url) =>
-    (await checkEgressUrl(url, { requireHttpsForUntrustedHost: true })).ok,
-};
+const defaultDeps: ConnectionVariablesDeps = { isEgressAllowed: isUserUrlReachable };
 
 /**
  * Validate the variables submitted for a connection of `auth` and return the values to persist —
@@ -84,7 +79,7 @@ export async function resolveConnectionVariables(
       },
     ]);
   }
-  const values: ConnectionVariables = { ...submitted };
+  const values: Record<string, string> = { ...submitted };
   const declared = new Set(Object.keys(schema.properties ?? {}));
   const errors: ValidationFieldError[] = Object.keys(values)
     .filter((name) => !declared.has(name))
@@ -106,10 +101,10 @@ export async function resolveConnectionVariables(
     const [blamed] = unrenderableUrlTemplateVariables(template, values);
     if (blamed !== undefined) {
       errors.push({
-        field: `variables.${blamed}`,
+        field: `variables.${blamed.name}`,
         code: "unrenderable_variable",
         title: TITLE,
-        message: `must be ${template.startsWith("{$variable.") ? EXPECTED_URL : EXPECTED_HOST}`,
+        message: `must be ${blamed.expected}`,
       });
       continue;
     }

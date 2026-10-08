@@ -72,13 +72,8 @@ export interface OAuthEndpointResolution {
    * MCP). `undefined` when the document omits the field.
    */
   grantTypesSupported?: string[];
-  /**
-   * The `issuer` member of the document that passed the §7.3 equality check, verbatim. It
-   * identifies the authorization server a client is bound to and an RFC 9207 `iss` is compared
-   * with; `undefined` when no document was validated.
-   */
+  /** The validated document's `issuer`, verbatim: what a client is bound to, `iss` compared with. */
   issuer?: string;
-  /** RFC 9207 §3 `authorization_response_iss_parameter_supported` of the validated document. */
   authorizationResponseIssParameterSupported?: boolean;
 }
 
@@ -103,19 +98,22 @@ function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
+/** AFPS §7.12: two URL identifiers are equal once every trailing `/` is stripped. */
+export function sameUrlIdentifier(a: string, b: string): boolean {
+  return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+}
+
 /**
- * AFPS §7.3 line 803 / RFC 8414 §3.3 — whether a discovery document may be
- * trusted as describing `configuredIssuer`.
- *
- * A MISSING `issuer` member fails just like a mismatched one: RFC 8414 §3.2
- * makes the member REQUIRED, and without it nothing ties the document to the
- * authorization server that was asked about. Shared with the conformance
- * harness so the rule that gates the runtime is the same rule that gates the
- * offline check.
+ * AFPS §7.3 / RFC 8414 §3.3 — whether a discovery document describes `configuredIssuer`. A missing
+ * `issuer` fails like a mismatched one (RFC 8414 §3.2 requires it). Shared with the conformance
+ * harness.
  */
 export function discoveryIssuerMatches(docIssuer: unknown, configuredIssuer: string): boolean {
-  if (typeof docIssuer !== "string" || docIssuer === "") return false;
-  return trimTrailingSlash(docIssuer) === trimTrailingSlash(configuredIssuer);
+  return (
+    typeof docIssuer === "string" &&
+    docIssuer !== "" &&
+    sameUrlIdentifier(docIssuer, configuredIssuer)
+  );
 }
 
 /**
@@ -155,10 +153,6 @@ export function buildDiscoveryProbes(issuer: string): string[] {
   return [...new Set(probes)];
 }
 
-/**
- * What discovery learned about one issuer. The endpoints are applied only where the manifest leaves
- * them undeclared.
- */
 interface DiscoveredMetadata {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
@@ -171,12 +165,9 @@ interface DiscoveredMetadata {
 }
 
 /**
- * Per-issuer discovery results (AFPS §7.3 enrichment), keyed by the issuer without its trailing
- * slash — the normalisation of the §7.3 equality check. Discovery documents rotate over weeks, so
- * an hour spares a connect burst the well-known round trips; the cap bounds a key space a
- * connection's user may grow (§7.3: the authorization server can be theirs to choose). A total
- * failure answers `undefined` and is never stored: it is typically transient, and remembering it
- * would disable enrichment — and brick refresh for an issuer-only provider — for the TTL.
+ * Per-issuer discovery results, keyed like the §7.3 equality check. The cap bounds a key space a
+ * connection's user may grow (§7.3). A total failure is never stored: typically transient, it
+ * would otherwise brick refresh of an issuer-only provider for the TTL.
  */
 const discoveryCache = createCache<DiscoveredMetadata>({
   name: "oauth-discovery",
@@ -205,7 +196,7 @@ export async function resolveOAuthEndpoints(
       tokenEndpoint: input.tokenEndpoint,
     };
   }
-  const configuredIssuer = trimTrailingSlash(issuer);
+  const configuredIssuer = issuer.replace(/\/+$/, "");
   const discovered = await discoveryCache.get(configuredIssuer, () =>
     discover(issuer, configuredIssuer, input.fetchImpl),
   );
@@ -230,8 +221,7 @@ async function discover(
   for (const url of buildDiscoveryProbes(issuer)) {
     const doc = await fetchDiscoveryDocument(url, fetchImpl);
     if (!doc) continue;
-    // AFPS §7.3: the document's `issuer` must equal the configured one before any field of it is
-    // trusted; a mismatch moves on to the next probe.
+    // AFPS §7.3: no field is trusted from a document of another issuer.
     if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) continue;
     found.issuer ??= doc.issuer as string;
     if (typeof doc.authorization_response_iss_parameter_supported === "boolean") {
@@ -247,8 +237,6 @@ async function discover(
     // OIDC Discovery 1.0 / RFC 7591 §3 — well-formed URLs only.
     found.userinfoEndpoint ??= urlString(doc.userinfo_endpoint);
     found.registrationEndpoint ??= urlString(doc.registration_endpoint);
-    // RFC 8414 §2 — drives the refresh_token grant asked of auto-DCR and the connect-time
-    // refresh-token guard.
     found.grantTypesSupported ??= stringArray(doc.grant_types_supported);
     if (
       found.authorizationEndpoint &&

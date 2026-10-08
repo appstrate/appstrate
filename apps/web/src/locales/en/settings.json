@@ -996,6 +996,7 @@
   "integration.connect.variables.oauthSubtitle": "Enter the server to connect to. You will then be redirected to its authorization page.",
   "integration.connect.variables.continue": "Continue",
   "integration.connect.variables.required": "This field is required.",
+  "integration.connect.variables.locked": "This connection stays bound to this instance. To connect to another instance, add a new connection.",
   "integration.connect.handoffPanel.title": "Connection created — one step left on your side",
   "integration.connect.handoffPanel.body": "The credentials this connection needs were generated and sealed in the keyring: they are not shown here and cannot be read back. What remains has to be done on the machine this connection points at.",
   "integration.connect.handoffPanel.deferredHint": "keep this for later",

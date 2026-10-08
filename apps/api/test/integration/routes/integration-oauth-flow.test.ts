@@ -201,12 +201,7 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
     row,
   );
   expect(context).not.toBeNull();
-  await forceRefreshIntegrationConnection(
-    { ...row, variables: {} },
-    INTEGRATION,
-    AUTH_KEY,
-    context!,
-  );
+  await forceRefreshIntegrationConnection(row, INTEGRATION, AUTH_KEY, context!);
 }
 
 /** The single connection row, or null. */

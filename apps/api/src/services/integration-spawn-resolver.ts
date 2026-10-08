@@ -57,8 +57,8 @@ import {
   displayAccountId,
   isIntegrationActive,
   loadAccessibleConnectionById,
-  type ConnectionVariables,
 } from "./integration-connections.ts";
+import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,
   resolveMcpServerForSpawn,
@@ -752,7 +752,6 @@ async function resolveDeliveries(
   }
 
   const { variables } = row;
-  const hasVariables = Object.keys(variables).length > 0;
 
   // ─── connect.tool + run_at:"run-start" — store-the-secret acquisition ───
   // The injectable outputs plane is empty at rest: only the login secret was
@@ -840,7 +839,7 @@ async function resolveDeliveries(
         authType: auth.type,
         authorizedUris: [...authorizedUris],
         deliveryHttp: httpDecl0,
-        ...(hasVariables ? { variables: { ...variables } } : {}),
+        variables: { ...variables },
         inputs,
         ...(connectMeta.reauth_on ? { reauthOn: [...connectMeta.reauth_on] } : {}),
       },

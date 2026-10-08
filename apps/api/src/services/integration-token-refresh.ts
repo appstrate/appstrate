@@ -34,13 +34,10 @@ import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import {
-  connectionVariablesOf,
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
   resolveIntegrationClientById,
-  sameConnectionVariables,
-  type ConnectionVariables,
 } from "./integration-connections.ts";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
@@ -89,16 +86,14 @@ class UnrefreshableConnectionError extends Error {
 
 /**
  * A connection as its caller read it. The refresh context was built from its upstream (`clientRef`,
- * `oauthResource`) and the caller renders the result with its `variables`, so the refresh runs only
- * while the row, re-read under the lock, still names that upstream — a reconnect in between fails
- * it transient, and the caller's next read sees the new connection whole.
+ * `oauthResource`; a reconnect cannot move its variables to another instance, AFPS §7.12), so the
+ * refresh runs only while the row, re-read under the lock, still names that upstream.
  */
 export interface RefreshTarget {
   id: string;
   credentialsEncrypted: string;
   clientRef: string | null;
   oauthResource: string | null;
-  variables: ConnectionVariables;
 }
 
 /**
@@ -147,12 +142,8 @@ export async function forceRefreshIntegrationConnection(
   // the refresh_token even if the access token is near expiry).
   let freshCiphertext = credentialsEncrypted;
   // Callers that read different upstreams of the row never share a flight's result.
-  const upstream = [
-    connection.clientRef,
-    connection.oauthResource,
-    Object.entries(connection.variables).sort(),
-  ];
-  return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${JSON.stringify(upstream)}`, {
+  const upstream = JSON.stringify([connection.clientRef, connection.oauthResource]);
+  return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${upstream}`, {
     lockKey: `intg-refresh:${connectionId}`,
     lockLabel: "intg-refresh",
     force: options.force ?? true,
@@ -163,12 +154,15 @@ export async function forceRefreshIntegrationConnection(
           expiresAt: integrationConnections.expiresAt,
           clientRef: integrationConnections.clientRef,
           oauthResource: integrationConnections.oauthResource,
-          variables: integrationConnections.variables,
         })
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
-      if (!row || !sameUpstream(row, connection)) {
+      if (
+        !row ||
+        row.clientRef !== connection.clientRef ||
+        row.oauthResource !== connection.oauthResource
+      ) {
         throw new RefreshError(
           `Integration connection '${connectionId}' was reconnected or removed while its refresh waited (transient)`,
           "transient",
@@ -197,17 +191,6 @@ export async function forceRefreshIntegrationConnection(
         refreshContext,
       ),
   });
-}
-
-function sameUpstream(
-  row: { clientRef: string | null; oauthResource: string | null; variables: unknown },
-  connection: RefreshTarget,
-): boolean {
-  return (
-    row.clientRef === connection.clientRef &&
-    row.oauthResource === connection.oauthResource &&
-    sameConnectionVariables(connectionVariablesOf(row.variables), connection.variables)
-  );
 }
 
 async function doRefresh(
@@ -329,8 +312,7 @@ async function doRefresh(
   // only when the IdP authoritatively echoed a `scope` field; otherwise it is
   // omitted so persistCredentialBundle leaves the high-water-mark untouched.
   // accountId/identityClaims are likewise omitted → never clobbered by refresh.
-  // A compare-and-set on the credential refreshed: a row reconnected (or flagged)
-  // during the exchange keeps what it holds, and this token is never handed out.
+  // Compare-and-set: a row reconnected (or flagged) meanwhile keeps what it holds.
   const written = await persistCredentialBundle(
     { kind: "update-by-id", connectionId, expect: { clientRef, credentialsEncrypted } },
     {
@@ -447,20 +429,9 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  connection: {
-    /**
-     * The minting client pinned on the connection
-     * (`integration_connections.client_ref`): a flat client id — the env id of a
-     * system client or the `integration_oauth_clients.id` of a custom client.
-     * Resolves WHICH client's credentials refresh the tokens — the same one that
-     * minted them. `null` only for non-oauth2 connections, which never reach this
-     * function (guarded below).
-     */
-    clientRef: string | null;
-    /** The RFC 8707 `resource` the token was requested for, sent again on refresh. */
-    oauthResource: string | null;
-  },
-  /** Discovery seam for tests; production uses the cached RFC 8414 resolver. */
+  /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
+  connection: { clientRef: string | null; oauthResource: string | null },
+  /** Seam for tests. */
   discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
@@ -482,16 +453,9 @@ export async function buildIntegrationOAuthRefreshContext(
           manifestAuthMethod,
         );
 
-  // AFPS §7.3: refresh POSTs to `token_endpoint` of the authorization server the
-  // connection was acquired from. A client bound to a server chosen per
-  // connection names it (`integration_oauth_clients.issuer`), and only that
-  // server's validated metadata is used — never a manifest endpoint. Otherwise
-  // the manifest's fixed server: when it declares only an `issuer`
-  // (Drive/OneDrive and other issuer-only providers), resolve the endpoint with
-  // the SAME OIDC/RFC-8414 discovery the authorize flow uses (cached
-  // per-issuer). Without this, issuer-only connections connect fine but can
-  // NEVER refresh — they die when the access token expires (~1h). A templated
-  // manifest issuer names no server by itself.
+  // AFPS §7.3: refresh POSTs to the token endpoint of the server the connection was acquired from —
+  // the one its client is bound to (metadata only), else the manifest's, discovered from an
+  // issuer-only declaration (Drive/OneDrive). A templated issuer names no server by itself.
   const boundIssuer = client?.issuer;
   const issuer = boundIssuer ?? (isVariableTemplate(afpsAuth.issuer) ? undefined : afpsAuth.issuer);
   const { tokenEndpoint } = await discover({
@@ -522,9 +486,8 @@ export async function buildIntegrationOAuthRefreshContext(
     return null;
   }
 
-  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint passes the egress
-  // controls connect applied, re-checked because its metadata may have changed since. An
-  // unresolvable host is a blip; any other refusal leaves the connection unrefreshable.
+  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint is re-checked
+  // (its metadata may have changed). An unresolvable host is a blip; any other refusal is terminal.
   if (boundIssuer !== undefined) {
     const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
     if (!egress.ok) {

@@ -35,10 +35,7 @@ export const INTEGRATION_TAGGED_CALLBACK_PATH = new RegExp(
   `^${INTEGRATION_CALLBACK_PATH}/[A-Za-z0-9_-]{${AUTHORIZATION_SERVER_TAG_LENGTH}}$`,
 );
 
-/**
- * Each authorization server chosen per connection (AFPS §7.3) gets its own redirect URI, so a
- * response is accepted only where its server was told to send it (RFC 9700 §4.4).
- */
+/** A redirect URI per server chosen per connection (AFPS §7.3, RFC 9700 §4.4). */
 export function authorizationServerTag(issuer: string): string {
   return new Bun.CryptoHasher("sha256")
     .update(issuer)

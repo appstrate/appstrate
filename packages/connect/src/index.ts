@@ -92,6 +92,7 @@ export {
   resolveOAuthEndpoints,
   buildDiscoveryProbes,
   discoveryIssuerMatches,
+  sameUrlIdentifier,
 } from "./oauth-discovery.ts";
 
 // OAuth2 user-facing connect flow for integration auths (used by the

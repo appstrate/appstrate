@@ -120,9 +120,8 @@ interface InitiateIntegrationOAuthInput {
    * Absent on fresh connects.
    */
   connectionId?: string;
-  /** Per-authorization-server redirect tag (`/callback/<tag>`), carried for the callback check. */
+  /** Carried to the callback: see {@link OAuthStateRecord}. */
   redirectTag?: string;
-  /** Connection variables (AFPS §7.12) carried to the callback, which persists them. */
   variables?: Record<string, string>;
   /**
    * Optional discovery hook injection (testing seam). Production callers omit
@@ -279,27 +278,21 @@ export interface IntegrationOAuthCallbackResult {
    * token refresh resolves the same client credentials.
    */
   clientRef: string;
-  /** The validated issuer the request was sent to, when known (from the signed state). */
   issuer?: string;
-  /** RFC 8707 `resource` sent on the authorize and token requests; refresh sends it again. */
+  /** RFC 8707 `resource` of the authorize and token requests; refresh sends it again. */
   resource?: string;
-  /** Connection variables carried from initiate. */
   variables?: Record<string, string>;
 }
 
-/** What the authorization response itself says about where it came from. */
+/** Where an authorization response arrived (`null` = `/callback`) and its RFC 9207 `iss`. */
 export interface IntegrationAuthorizationResponse {
-  /** RFC 9207 `iss` parameter, when the response carried one. */
   iss?: string;
-  /** The per-authorization-server tag of the redirect URI the response arrived at; `null` = `/callback`. */
   redirectTag: string | null;
 }
 
 /**
- * RFC 9700 §4.4 mix-up defence (AFPS §7.3 *Client binding*): the response must have arrived at
- * the redirect URI of the server the request was sent to, carry that server's `iss` whenever it
- * carries one (RFC 9207 §2.4, simple string comparison), and carry it at all when the server
- * advertised it does.
+ * RFC 9700 §4.4 mix-up defence (AFPS §7.3): the response arrived at the redirect URI of the server
+ * the request went to, and carries that server's `iss` when it carries one or the server says so.
  */
 function mixUpRefusal(
   integration: NonNullable<OAuthStateRecord["integration"]>,
@@ -379,8 +372,7 @@ export async function handleIntegrationOAuthCallback(
       sentinel,
     );
   }
-  // AFPS §7.3 client binding: a client registered with one authorization server is never
-  // presented to another.
+  // AFPS §7.3 client binding: a client is never presented to another server.
   if (client.issuer !== undefined && client.issuer !== integration.issuer) {
     await store.delete(state);
     throw new OAuthCallbackError(

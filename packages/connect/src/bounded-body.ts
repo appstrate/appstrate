@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Metadata and registration documents are a few KiB. The hosts serving them may be chosen by the
- * user who creates a connection (AFPS §7.12, §8.7), so their bodies are read under a cap and a
- * larger one is refused, not parsed.
- */
+// The hosts serving OAuth documents may be chosen by the user who creates a connection (AFPS §7.12,
+// §8.7): their bodies are read under a cap, a larger one refused, not parsed.
 export const MAX_METADATA_BODY_BYTES = 64 * 1024;
+/** Token responses carry an `id_token`, which may hold many claims. */
+export const MAX_TOKEN_BODY_BYTES = 512 * 1024;
 
 /**
- * The body as text once read under `maxBytes`, or `null` once it crosses — the stream cancelled on
- * the spot. The budget is spent on the (already decoded) stream, so neither a lying
- * `content-length` nor a compressed bomb gets past it.
+ * The body as text, or `null` once it crosses `maxBytes` (the stream cancelled). Counted on the
+ * decoded stream: neither a lying `content-length` nor a compressed bomb gets past it.
  */
 export async function readTextUnder(
   res: Response,
@@ -45,4 +43,11 @@ export async function readJsonUnder(
   } catch {
     return null;
   }
+}
+
+/** {@link readTextUnder} parsed as JSON; throws past the cap or (a `SyntaxError`) on non-JSON. */
+export async function parseJsonUnder(res: Response, maxBytes: number): Promise<unknown> {
+  const text = await readTextUnder(res, maxBytes);
+  if (text === null) throw new RangeError(`response body exceeds ${maxBytes} bytes`);
+  return JSON.parse(text);
 }

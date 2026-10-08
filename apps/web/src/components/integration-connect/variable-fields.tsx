@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useTranslation } from "react-i18next";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import type { VariableField } from "./connection-variables-schema";
@@ -11,11 +12,25 @@ interface VariableFieldsProps {
   onChange: (name: string, value: string) => void;
   /** Per-variable refusal, already a sentence, shown under its input. */
   errors: Record<string, string>;
+  /** A reconnect: the connection stays bound to its instance (AFPS §7.12). */
+  readOnly?: boolean;
 }
 
-export function VariableFields({ fields, values, onChange, errors }: VariableFieldsProps) {
+export function VariableFields({
+  fields,
+  values,
+  onChange,
+  errors,
+  readOnly = false,
+}: VariableFieldsProps) {
+  const { t } = useTranslation("settings");
   return (
     <>
+      {readOnly && fields.length > 0 && (
+        <p className="text-muted-foreground text-xs" data-testid="variables-locked-hint">
+          {t("integration.connect.variables.locked")}
+        </p>
+      )}
       {fields.map((field) => {
         const id = `variable-${field.name}`;
         const error = errors[field.name];
@@ -35,6 +50,7 @@ export function VariableFields({ fields, values, onChange, errors }: VariableFie
               type="text"
               inputMode={field.format === "uri" ? "url" : undefined}
               required
+              readOnly={readOnly}
               value={values[field.name] ?? ""}
               onChange={(e) => onChange(field.name, e.target.value)}
               placeholder={field.placeholder}

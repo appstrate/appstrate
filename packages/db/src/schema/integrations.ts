@@ -252,8 +252,7 @@ export const integrationOauthClients = pgTable(
     // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
     // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
-    // Server an auto-provisioned client was registered with when chosen per connection (AFPS
-    // §7.3); NULL = the manifest's fixed server.
+    // Server chosen per connection an auto-provisioned client is bound to (AFPS §7.3); NULL = fixed.
     issuer: text("issuer"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

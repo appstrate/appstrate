@@ -22,8 +22,9 @@ return a `root` with each field.
 - **`./connection-variables`** (AFPS §7.12): `VARIABLE_REF`, `variableRefs`,
   `isVariableTemplate`, `parseUrlTemplate`, `HOST_LABEL`, `renderUrlVariable` /
   `renderHostVariable` (one variable under its form's value rule), and
-  `renderUrlTemplate` / `unrenderableUrlTemplateVariables`, which render a
-  URL-valued field (`source.remote.url`, an oauth2 `issuer`) for one connection. URL form: the value is an absolute `http`/`https` URL with a host
+  `renderUrlTemplate` / `unrenderableUrlTemplateVariables` (each blamed
+  variable with the form it must take, `EXPECTED_URL_VALUE` / `EXPECTED_HOST_VALUE`),
+  which render a URL-valued field (`source.remote.url`, an oauth2 `issuer`) for one connection. URL form: the value is an absolute `http`/`https` URL with a host
   and no userinfo, query, fragment or `*`; it renders as its serialization, or
   as its origin and path, every trailing `/` removed, then the template's path.
   Host form: `.`-separated labels of 1 to 63 letters, digits and `-`, none

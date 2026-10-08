@@ -24,6 +24,8 @@
  */
 
 import {
+  EXPECTED_HOST_VALUE,
+  EXPECTED_URL_VALUE,
   HOST_LABEL,
   renderHostVariable,
   renderUrlVariable,
@@ -280,10 +282,6 @@ function renderUrlValue(value: unknown, allowQuery: boolean): string | null {
 const EXPECTED_AUTHORITY = "a host name or port (letters, digits, '.' and '-' only)";
 const EXPECTED_URL =
   "an absolute http:// or https:// URL without userinfo, fragment ('#'), empty '?' or '*'";
-const EXPECTED_URL_NO_QUERY =
-  "an absolute http:// or https:// URL without userinfo, query string, fragment or '*'";
-const EXPECTED_HOST_LABELS =
-  "a host name: '.'-separated labels of 1 to 63 letters, digits and '-', none starting or ending with '-'";
 
 /** A field that keeps its `authorized_uris` entry from rendering, and the form it must take. */
 export interface UnrenderableUriField {
@@ -305,14 +303,14 @@ function renderVariableEntry(
   if (urlForm) {
     const uri = renderUrlVariable(variables, urlForm.field, urlForm.suffix);
     return uri === null
-      ? { root: "variable", field: urlForm.field, expected: EXPECTED_URL_NO_QUERY }
+      ? { root: "variable", field: urlForm.field, expected: EXPECTED_URL_VALUE }
       : { uri };
   }
   const entry = VARIABLE_AUTHORITY_ENTRY.exec(pattern);
   const host = entry && renderHostVariable(variables, entry[2]!, entry[3]!);
   if (!entry || host === null) {
     const field = entry?.[2] ?? variableRefs(pattern)[0]!;
-    return { root: "variable", field, expected: EXPECTED_HOST_LABELS };
+    return { root: "variable", field, expected: EXPECTED_HOST_VALUE };
   }
   return { uri: entry[1]! + host + entry[4]! };
 }
@@ -333,7 +331,7 @@ function renderPattern(
       return {
         root: "credential",
         field: urlForm.field,
-        expected: bare ? EXPECTED_URL : EXPECTED_URL_NO_QUERY,
+        expected: bare ? EXPECTED_URL : EXPECTED_URL_VALUE,
       };
     }
     // A suffix brings its own `/`; a bare entry keeps the value's exact path (`…/hook/`).

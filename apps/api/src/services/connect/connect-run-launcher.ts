@@ -315,6 +315,7 @@ export async function buildConnectLoginSpec(
       authType: auth.type,
       authorizedUris: [...authorizedUris],
       deliveryHttp,
+      variables: {},
       // The sidecar's MITM substitutes `{{name}}` placeholders only on strings —
       // JSON-stringify non-string credential values so they round-trip cleanly.
       inputs: stringifyInputs(execution.inputs),

@@ -58,6 +58,7 @@ import {
   registerDynamicClient,
   DynamicClientRegistrationError,
   OAUTH_STATE_TTL_SECONDS,
+  sameUrlIdentifier,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import {
@@ -65,11 +66,7 @@ import {
   renderUrlTemplate,
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
-import {
-  checkEgressUrl,
-  egressGuardedFetch,
-  isBlockedEgressUrl,
-} from "../lib/egress-host-guard.ts";
+import { egressGuardedFetch, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -107,7 +104,6 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import {
-  authorizationServerTag,
   integrationCallbackUrl,
   integrationCallbackUrlFor,
 } from "../lib/integration-callback-url.ts";
@@ -124,6 +120,7 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   getLocalServerRef,
   getRemoteSource,
@@ -178,7 +175,7 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   isDefault: boolean;
   /** `true` for a DCR/CIMD-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
-  /** The authorization server chosen per connection this client is bound to (AFPS §7.3); null = the manifest's. */
+  /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
   issuer: string | null;
 }
 
@@ -233,26 +230,19 @@ interface ActorConnectionRow {
    */
   clientRef: string | null;
   refreshFailureCount: number;
-  /** Read in the statement that read `credentialsEncrypted`: the upstream that credential is for. */
+  /** Read with `credentialsEncrypted`: the upstream that credential is for. */
   variables: ConnectionVariables;
-  /** RFC 8707 `resource` the token was requested for; every refresh sends it again. */
   oauthResource: string | null;
 }
 
-/** A connection's variables (AFPS §7.12) as the run-time renderers substitute them. */
-export type ConnectionVariables = Readonly<Record<string, string>>;
-
 /** Whether two connections name the same upstream: the same variables, the same values. */
-export function sameConnectionVariables(
-  a: Readonly<Record<string, string>>,
-  b: Readonly<Record<string, string>>,
-): boolean {
+function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
   const entries = Object.entries(a);
   return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
 }
 
 /** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-export function connectionVariablesOf(value: unknown): ConnectionVariables {
+function connectionVariablesOf(value: unknown): ConnectionVariables {
   const out: Record<string, string> = {};
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
@@ -890,10 +880,9 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 }
 
 /**
- * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey)` and the
- * authorization server it is bound to (`issuer`; `null` = the manifest's fixed
- * server), if any. The partial unique `idx_ioc_one_auto` guarantees at most one
- * per issuer — this is the find half of the DCR find-or-create.
+ * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any (`null`
+ * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
+ * the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
   scope: SpaceScope,
@@ -1051,9 +1040,8 @@ export async function createIntegrationOAuthClient(
   const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
-  // An auto-provisioned client of the manifest's server is the sole client for its auth →
-  // default. One bound to a server chosen per connection is selected by its issuer, never as the
-  // default (several coexist). A classic client wins the default only when none already holds it.
+  // An auto-provisioned client of the manifest's server is the default; one per issuer is selected
+  // by its issuer (several coexist). A classic client wins the default only when none holds it.
   const isDefault = autoProvisioned
     ? issuer === null
     : !(await hasTierDefault(owner, packageId, authKey));
@@ -1663,8 +1651,6 @@ export interface ResolvedOAuthConnect {
   tokenEndpoint?: string;
   /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
   resource?: string;
-  /** Redirect tag of an authorization server chosen per connection (`/callback/<tag>`). */
-  redirectTag?: string;
   /**
    * Set when auto-provisioning a client failed and `client` is null. The
    * failing step authors the complete, operator-facing reason — *including the
@@ -1707,42 +1693,21 @@ export function usesAutoProvisionedClient(
   );
 }
 
-/**
- * `fetch` wrapper that refuses SSRF-unsafe targets before every request. The
- * remote-MCP discovery chain probes manifest-, user- (a URL rendered from
- * connection variables, AFPS §8.7) and *server*-derived URLs (RFC 9728
- * well-known + the `WWW-Authenticate` challenge's `resource_metadata`, then
- * RFC 8414 metadata), so each GET must be guarded — not just the registration
- * POST.
- *
- * Delegates to {@link egressGuardedFetch}: per-hop DNS resolution + blocklist,
- * redirects followed MANUALLY (each hop re-checked), userinfo/fragment
- * stripped, non-http(s) schemes rejected — with the one exemption every other
- * egress of the same URL gets, a host the operator trusts in
- * `EGRESS_ALLOW_INTERNAL_HOSTS` (the remote MCP spawn and the OAuth token
- * exchange already honour it, so discovery against such a host must too).
- * `discoverProtectedResourceMetadata` is best-effort (swallows fetch errors →
- * returns `null`), so a blocked URL cleanly degrades to "discovery failed".
- */
-const ssrfGuardedFetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return egressGuardedFetch(url, init);
-}) as typeof fetch;
-
-/** The DCR POST: guarded like discovery, and never redirected (a 3xx bounces the registration). */
-const dcrGuardedFetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return egressGuardedFetch(url, init, { maxRedirects: 0 });
-}) as typeof fetch;
+/** Discovery and DCR URLs are manifest-, user- (AFPS §8.7) and server-derived: every hop guarded. */
+const egressFetch = (opts?: { maxRedirects: number }) =>
+  ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    egressGuardedFetch(
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      init,
+      opts,
+    )) as typeof fetch;
+const ssrfGuardedFetch = egressFetch();
+/** The DCR POST is never redirected (a 3xx bounces the registration). */
+const dcrGuardedFetch = egressFetch({ maxRedirects: 0 });
 
 /** Drop a URL that targets a blocked (loopback/RFC1918/link-local/metadata) host. */
 function safeUrl(url: string | undefined): string | undefined {
   return url && !isBlockedEgressUrl(url) ? url : undefined;
-}
-
-/** AFPS §7.12: two URLs are equal when identical after stripping any trailing `/`. */
-function sameUrlIdentifier(a: string, b: string): boolean {
-  return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 }
 
 function sameOrigin(a: string, b: string): boolean {
@@ -1754,30 +1719,30 @@ function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * A manifest-declared endpoint that the validated metadata of the auth's
- * authorization server contradicts (AFPS §7.3 *Client binding*): a client of
- * that server is never presented to another endpoint. `null` when none does.
+ * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
+ * the auth's authorization server contradicts — its client is presented to that server only.
  */
-export function endpointContradictingMetadata(
+export function assertEndpointsMatchMetadata(
+  packageId: string,
+  authKey: string,
   auth: Pick<AfpsManifestAuth, "authorization_endpoint" | "token_endpoint">,
   metadata: { issuer?: string; authorizationEndpoint?: string; tokenEndpoint?: string },
-): string | null {
-  if (metadata.issuer === undefined) return null;
-  if (
-    auth.authorization_endpoint !== undefined &&
-    metadata.authorizationEndpoint !== undefined &&
-    auth.authorization_endpoint !== metadata.authorizationEndpoint
-  ) {
-    return "authorization_endpoint";
+): void {
+  if (metadata.issuer === undefined) return;
+  const contradicted = (
+    [
+      ["authorization_endpoint", auth.authorization_endpoint, metadata.authorizationEndpoint],
+      ["token_endpoint", auth.token_endpoint, metadata.tokenEndpoint],
+    ] as const
+  ).find(
+    ([, declared, validated]) =>
+      declared !== undefined && validated !== undefined && declared !== validated,
+  )?.[0];
+  if (contradicted) {
+    throw invalidRequest(
+      `Integration '${packageId}' auth '${authKey}' declares a ${contradicted} that the metadata of its authorization server (${metadata.issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
+    );
   }
-  if (
-    auth.token_endpoint !== undefined &&
-    metadata.tokenEndpoint !== undefined &&
-    auth.token_endpoint !== metadata.tokenEndpoint
-  ) {
-    return "token_endpoint";
-  }
-  return null;
 }
 
 /**
@@ -1792,13 +1757,9 @@ export function endpointContradictingMetadata(
  *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
  *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
  *
- * An auth whose authorization server is chosen per connection (AFPS §7.3) is
- * resolved by {@link ensurePerConnectionOAuthClient} from `variables` instead.
- *
- * Best-effort on the fixed-server path: any discovery/registration failure
- * returns the existing client (or none) with a `provisioningFailure`, letting
- * the caller surface it. Classic (non-auto) auths early-return with the
- * existing lookup.
+ * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
+ * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
+ * Classic (non-auto) auths early-return with the existing lookup.
  */
 export async function ensureIntegrationOAuthClient(
   scope: SpaceScope,
@@ -1807,7 +1768,7 @@ export async function ensureIntegrationOAuthClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   redirectUri: string,
-  variables: Readonly<Record<string, string>> | null = null,
+  variables: ConnectionVariables = {},
 ): Promise<ResolvedOAuthConnect> {
   if (hasPerConnectionAuthServer(manifest, auth)) {
     return ensurePerConnectionOAuthClient(scope, packageId, authKey, manifest, auth, variables);
@@ -1860,11 +1821,9 @@ export async function ensureIntegrationOAuthClient(
     issuer = undefined;
   }
 
-  // Endpoints come from the validated metadata of the issuer (RFC 8414): the
-  // client registered there is presented to its endpoints only (AFPS §7.3).
-  // A manifest endpoint stands in only when no metadata was validated.
+  // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
   const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
-  const contradicted = endpointContradictingMetadata(auth, discovered);
+  assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
   const endpoints = {
     ...discovered,
     authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
@@ -1884,11 +1843,6 @@ export async function ensureIntegrationOAuthClient(
     ...(safeUrl(endpoints.tokenEndpoint) ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
     ...(resource ? { resource } : {}),
   };
-  if (contradicted) {
-    throw invalidRequest(
-      `Integration '${packageId}' auth '${authKey}' declares a ${contradicted} that the metadata of its authorization server (${discovered.issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
-    );
-  }
 
   // Client already registered — nothing to mint; just return discovered config.
   if (existing) return resolved;
@@ -1903,27 +1857,18 @@ export async function ensureIntegrationOAuthClient(
 }
 
 /**
- * The OAuth connect config of an auth whose authorization server is chosen per
- * connection (AFPS §7.3): an `issuer` URL template, or any oauth2 auth of an
- * integration whose `source.remote.url` is one. Every URL here is rendered from
- * the user's variables or learned from a response to one, so it is
- * user-supplied (§8.6, §8.7): egress-checked like any user-supplied URL, never
- * trusted as an author-declared host.
+ * The OAuth connect config of an auth whose authorization server is chosen per connection (AFPS
+ * §7.3). Every URL here is rendered from the user's variables or learned from a response to one,
+ * so it is egress-checked, never trusted as author-declared (§8.6, §8.7):
  *
- *   - remote source: protected-resource metadata of the rendered URL (RFC 9728,
- *     identity-checked); its first authorization server MUST equal the rendered
- *     `issuer` when the auth declares one, else share the rendered URL's
- *     origin — the user's server may not name another provider's server and
- *     harvest a token minted there. Its `resource` is sent (RFC 8707).
- *   - non-remote source: the rendered `issuer`; no resource is sent.
- *   - endpoints only from RFC 8414 discovery of that server (issuer-checked),
- *     identified from then on by its metadata's `issuer`.
- *   - the client is a public DCR client of that issuer, found or registered per
- *     (space, integration, auth, issuer), with a redirect URI of its own
- *     (`<callback>/<tag>`). A manual client is refused for such an auth.
+ *   - remote source: RFC 9728 metadata of the rendered URL; the advertised server must equal the
+ *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
+ *     `resource` is sent (RFC 8707).
+ *   - otherwise the rendered `issuer`, no resource.
+ *   - endpoints from that server's RFC 8414 metadata only; a public DCR client per issuer with a
+ *     redirect URI of its own (`<callback>/<tag>`).
  *
- * A failure the user's choice of server explains is a 400 on the variable that
- * chose it, so the hosted form can show it beside the field.
+ * A failure the user's choice explains is a 400 on the variable that chose it.
  */
 async function ensurePerConnectionOAuthClient(
   scope: SpaceScope,
@@ -1931,14 +1876,13 @@ async function ensurePerConnectionOAuthClient(
   authKey: string,
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
-  variables: Readonly<Record<string, string>> | null,
+  variables: ConnectionVariables,
 ): Promise<ResolvedOAuthConnect> {
   if (auth.token_endpoint_auth_method !== "none") {
     throw invalidRequest(
       `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically as a public client (RFC 7591): the auth must declare token_endpoint_auth_method 'none'.`,
     );
   }
-  const values = variables ?? {};
   const remoteTemplate = getRemoteSource(manifest)?.url;
   // The template the user's server is chosen by: the remote URL when it is one, else the issuer.
   const chooser = isVariableTemplate(remoteTemplate) ? remoteTemplate : auth.issuer!;
@@ -1948,12 +1892,10 @@ async function ensurePerConnectionOAuthClient(
       { field: `variables.${name}`, code, title: "Invalid Connection Variable", message },
     ]);
   };
-  const remote = remoteTemplate === undefined ? null : renderRemoteSource(manifest, values);
+  // Both render: the caller's `resolveConnectionVariables` refused any value that would not.
+  const remote = renderRemoteSource(manifest, variables);
   const declaredIssuer =
-    auth.issuer === undefined ? undefined : renderUrlTemplate(auth.issuer, values);
-  if ((remoteTemplate !== undefined && remote === null) || declaredIssuer === null) {
-    throw refuse("unrenderable_variable", "does not render a URL");
-  }
+    auth.issuer === undefined ? undefined : renderUrlTemplate(auth.issuer, variables)!;
 
   let candidate: string;
   let resource: string | undefined;
@@ -1968,8 +1910,6 @@ async function ensurePerConnectionOAuthClient(
         `the server at ${remote.url} publishes no OAuth protected-resource metadata for it (RFC 9728)`,
       );
     }
-    // The first advertised server the user's choice names: the rendered issuer when the auth
-    // declares one, else one on the rendered URL's origin. Never another provider's server.
     const named = md.authorizationServers.find((advertised) =>
       declaredIssuer === undefined
         ? sameOrigin(advertised, remote.url)
@@ -1991,15 +1931,10 @@ async function ensurePerConnectionOAuthClient(
     candidate = declaredIssuer!;
   }
 
-  const egressRefusal = async (url: string): Promise<string | null> => {
-    const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
-    return egress.ok ? null : url;
-  };
-  const blockedIssuer = await egressRefusal(candidate);
-  if (blockedIssuer) {
+  if (!(await isUserUrlReachable(candidate))) {
     throw refuse(
       "egress_blocked",
-      `names the authorization server ${blockedIssuer}, which this platform does not reach`,
+      `names the authorization server ${candidate}, which this platform does not reach`,
     );
   }
   const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
@@ -2014,11 +1949,10 @@ async function ensurePerConnectionOAuthClient(
     endpoints.tokenEndpoint,
     ...(endpoints.registrationEndpoint ? [endpoints.registrationEndpoint] : []),
   ]) {
-    const blocked = await egressRefusal(url);
-    if (blocked) {
+    if (!(await isUserUrlReachable(url))) {
       throw refuse(
         "egress_blocked",
-        `the authorization server ${candidate} advertises the endpoint ${blocked}, which this platform does not reach`,
+        `the authorization server ${candidate} advertises the endpoint ${url}, which this platform does not reach`,
       );
     }
   }
@@ -2032,7 +1966,6 @@ async function ensurePerConnectionOAuthClient(
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
-    redirectTag: authorizationServerTag(issuer),
   };
   if (existing) return resolved;
   await pruneUnusedPerConnectionClients(scope, packageId, authKey);
@@ -2046,10 +1979,8 @@ async function ensurePerConnectionOAuthClient(
 }
 
 /**
- * Delete the clients of servers chosen per connection, for this (space, integration, auth), that
- * no connection was minted by: whoever can open a connect flow chooses the server, so only the
- * clients in use may outlive it. A client younger than an OAuth state may still be awaiting its
- * callback and is kept.
+ * Delete the per-connection-server clients of this auth that minted no connection: whoever opens a
+ * connect flow chooses the server. One younger than an OAuth state may still await its callback.
  */
 async function pruneUnusedPerConnectionClients(
   scope: SpaceScope,
@@ -2073,10 +2004,8 @@ async function pruneUnusedPerConnectionClients(
 }
 
 /**
- * Register a public client with RFC 7591 Dynamic Client Registration and store
- * it as the auth's auto-provisioned client — of the manifest's fixed server
- * (`issuer: null`), or of the server `issuer` chosen per connection. Every
- * failure comes back as `resolved.provisioningFailure`, authored here.
+ * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer` (`null` =
+ * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
  */
 async function registerAutoProvisionedClient(
   scope: SpaceScope,
@@ -2120,10 +2049,7 @@ async function registerAutoProvisionedClient(
   // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
   // it. This LITERAL check (no DNS) exists to surface the friendly
   // provisioningFailure below for obviously-internal targets; the authoritative
-  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS
-  // resolution + blocklist, `maxRedirects: 0`), so a public hostname rebinding
-  // to an internal address is refused at connect time even though it passes
-  // this literal check.
+  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
   if (isBlockedEgressUrl(registrationEndpoint)) {
     logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
       packageId,
@@ -2249,12 +2175,12 @@ async function registerAutoProvisionedClient(
       );
     } catch (insertErr) {
       // Concurrent auto-DCR: a parallel Connect for the same (space, package,
-      // authKey, issuer) registered its client between our `racedClient`
-      // re-check above and this insert. The partial unique `idx_ioc_one_auto`
-      // rejects the second auto-provisioned row (Postgres 23505) — catch it and
-      // re-select the winner instead of surfacing a 500. Our own upstream
-      // registration is abandoned (harmless: an unused DCR client), the
-      // connection proceeds on the winning client.
+      // authKey, issuer) registered its client between our `racedClient` re-check above
+      // and this insert. The partial unique `idx_ioc_one_auto` rejects the
+      // second auto-provisioned row (Postgres 23505) — catch it and re-select
+      // the winner instead of surfacing a 500. Our own upstream registration is
+      // abandoned (harmless: an unused DCR client), the connection proceeds on
+      // the winning client.
       if (
         insertErr instanceof Error &&
         "code" in insertErr &&
@@ -2604,12 +2530,8 @@ interface StoreConnectionInput {
    * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
    */
   clientRef?: string | null;
-  /**
-   * The connection variables (AFPS §7.12) the credential was acquired for; absent or `null` when
-   * the integration declares none. Always written: an acquisition replaces them.
-   */
+  /** See {@link PersistCredentialInput}. */
   variables?: Record<string, string> | null;
-  /** RFC 8707 `resource` the oauth2 token was requested for; absent when none was sent. */
   oauthResource?: string;
 }
 
@@ -2692,16 +2614,9 @@ interface PersistCredentialInput {
    * non-oauth2 writes → persists NULL.
    */
   clientRef?: string | null;
-  /**
-   * Connection variables (AFPS §7.12), written in the same statement as the credential they were
-   * acquired with — a connection never pairs a credential with the variables of another upstream.
-   * INSERT: absent → NULL. UPDATE: written when provided; the refresh write-back omits it.
-   */
+  /** AFPS §7.12, written with the credential they were acquired with; the refresh omits it. */
   variables?: Record<string, string> | null;
-  /**
-   * RFC 8707 `resource` the oauth2 token was requested for (AFPS §8.6). Every acquisition writes
-   * it, absent → NULL (a non-oauth2 credential has none); the refresh write-back leaves it.
-   */
+  /** RFC 8707 `resource` of the oauth2 token: every acquisition writes it, the refresh leaves it. */
   oauthResource?: string;
 }
 
@@ -2871,8 +2786,7 @@ export async function persistCredentialBundle(
     // data-integrity and access surprise. Only enforced between two real
     // identities; "default" (identity-less) never blocks an upgrade.
     //
-    // The variables (AFPS §7.12) name the upstream instance the account lives on, so another
-    // instance is another identity, under the same rule: enforced between two recorded values.
+    // The variables (AFPS §7.12) name the instance the account lives on: same rule.
     //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
@@ -3618,10 +3532,7 @@ export function serializeIntegrationConnection(
   };
 }
 
-/**
- * The connection variables (AFPS §7.12) of one connection, `null` when it has none or is gone.
- * Keyed by id alone: the caller has established the actor owns the connection.
- */
+/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
 export async function getIntegrationConnectionVariables(
   connectionId: string,
 ): Promise<Record<string, string> | null> {

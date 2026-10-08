@@ -510,18 +510,21 @@ export async function connectRemoteHttpIntegration(
         // stray `Request` is normalised to its URL for the type.
         const target: string | URL =
           typeof input === "string" || input instanceof URL ? input : input.url;
+        // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
+        // hop that still carries it (same origin as the first; another origin strips it).
+        let validateHop: ((url: URL) => void) | undefined;
         if (injection.kind === "inject") {
-          // AFPS §8.6: the credential goes only to the URIs rendered for the connection it belongs
-          // to. The server URL was rendered at spawn; a reconnect to another upstream swaps in a
-          // credential (and URIs) for that one, which this server must never receive.
           const authorizedUris =
             snapshot.auths.find((a) => a.authKey === authKey)?.authorizedUris ?? [];
-          const url = String(target);
-          if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url))) {
-            throw new Error(
-              `integration ${spec.integrationId}: ${url} is outside the authorized URIs of its connection; the credential is not sent`,
-            );
-          }
+          const origin = new URL(String(target)).origin;
+          validateHop = (url) => {
+            if (url.origin !== origin) return;
+            if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
+              throw new Error(
+                `integration ${spec.integrationId}: ${url.href} is outside the authorized URIs of its connection; the credential is not sent`,
+              );
+            }
+          };
           headers.set(injection.header.name, injection.header.value);
         }
         const sensitiveHeaderName =
@@ -546,6 +549,7 @@ export async function connectRemoteHttpIntegration(
             // declare it, or a hostile server 302ing cross-origin would carry
             // the credential to another origin.
             ...(sensitiveHeaderName ? { sensitiveHeaders: [sensitiveHeaderName] } : {}),
+            ...(validateHop ? { validateHop } : {}),
             ...(deps.resolveHost ? { resolve: deps.resolveHost } : {}),
           },
         );
@@ -632,7 +636,7 @@ export async function runConnectLoginHook(
     authType: cl.authType,
     authorizedUris: cl.authorizedUris,
     deliveryHttp: cl.deliveryHttp,
-    ...(cl.variables ? { variables: cl.variables } : {}),
+    variables: cl.variables,
   };
   await runConnectLogin(loginOpts);
   logger.info("integration connect-login session minted", {
@@ -1970,7 +1974,7 @@ export async function runConnectOnce(
       authType: cl.authType,
       authorizedUris: cl.authorizedUris,
       deliveryHttp: cl.deliveryHttp,
-      ...(cl.variables ? { variables: cl.variables } : {}),
+      variables: cl.variables,
     });
 
     logger.info("connect-run captured session", {

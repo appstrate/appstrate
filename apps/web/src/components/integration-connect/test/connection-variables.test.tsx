@@ -94,13 +94,18 @@ describe("initialVariableValues", () => {
 });
 
 describe("VariableFields", () => {
-  const html = (values: Record<string, string>, errors: Record<string, string> = {}) =>
+  const html = (
+    values: Record<string, string>,
+    errors: Record<string, string> = {},
+    readOnly?: boolean,
+  ) =>
     render(
       <VariableFields
         fields={variableFields(SCHEMA)}
         values={values}
         onChange={noop}
         errors={errors}
+        readOnly={readOnly}
       />,
     );
 
@@ -125,6 +130,19 @@ describe("VariableFields", () => {
     expect(baseUrl).toContain('aria-invalid="true"');
     expect(baseUrl).toContain("variable-base_url-error");
     expect(markup).not.toContain('data-testid="variable-error-group"');
+  });
+
+  it("is editable on a fresh connect, with no hint", () => {
+    const markup = html(initialVariableValues(ctx()));
+    expect(inputTag(markup, "base_url")).not.toContain("readOnly");
+    expect(markup).not.toContain('data-testid="variables-locked-hint"');
+  });
+
+  it("keeps a reconnect on its instance: read-only inputs and a hint to add a connection", () => {
+    const markup = html({ base_url: "https://git.example.com", group: "ops" }, {}, true);
+    expect(inputTag(markup, "base_url")).toContain("readOnly");
+    expect(inputTag(markup, "group")).toContain("readOnly");
+    expect(markup).toContain("ajoutez une nouvelle connexion");
   });
 });
 

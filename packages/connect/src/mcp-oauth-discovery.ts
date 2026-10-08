@@ -20,13 +20,9 @@
  *   discoverProtectedResourceMetadata → resolveOAuthEndpoints(issuer) →
  *   registerDynamicClient → persist.
  *
- * Resolution order (MCP authorization, RFC 9728 §3 and §5): the caller's explicit
- * `resourceMetadataUrl`, then the `resource_metadata` of a `WWW-Authenticate` challenge to an
- * unauthenticated request, then the path-inserted well-known location, then the root one. A
- * document is used only when its `resource` is identical (modulo a trailing `/`) to the resource
- * identifier its location was derived from (§3.3): the resource URL for an explicit URL, a
- * challenge or the path-inserted location, its origin for the root location. Any other document is
- * skipped, not fatal: the next location is tried.
+ * Resolution order (RFC 9728 §3, §5): explicit `resourceMetadataUrl`, the `WWW-Authenticate`
+ * challenge, the path-inserted well-known location, the root one. A document is used only when its
+ * `resource` equals the identifier its location was derived from (§3.3); else the next is tried.
  *
  * Best-effort throughout: any network/parse/validation failure falls through
  * to the next strategy and ultimately returns `null` (the caller then surfaces
@@ -35,6 +31,7 @@
 
 import { guardedFetch } from "@appstrate/core/ssrf";
 import { readJsonUnder } from "./bounded-body.ts";
+import { sameUrlIdentifier } from "./oauth-discovery.ts";
 
 /** Validated subset of an RFC 9728 protected-resource metadata document. */
 export interface ProtectedResourceMetadata {
@@ -76,20 +73,6 @@ function isHttpUrl(raw: string): boolean {
   }
 }
 
-/**
- * RFC 9728 §3.3: a metadata document describes the resource identifier its location was derived
- * from, and nothing else. Identical strings once every trailing `/` is stripped (AFPS §7.12's
- * comparison rule); a document for another resource on the same origin must not bind the token's
- * audience.
- */
-function resourceIdentifierMatches(resource: string, identifier: string): boolean {
-  return stripTrailingSlashes(resource) === stripTrailingSlashes(identifier);
-}
-
-function stripTrailingSlashes(url: string): string {
-  return url.replace(/\/+$/, "");
-}
-
 /** Strip a single trailing slash so well-known suffixes join cleanly. */
 function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
@@ -101,12 +84,7 @@ interface MetadataLocation {
   resource: string;
 }
 
-/**
- * RFC 9728 §3 well-known locations for a resource URL, path-inserted first:
- *   `https://host/mcp` → `https://host/.well-known/oauth-protected-resource/mcp` (resource
- *   `https://host/mcp`), then `https://host/.well-known/oauth-protected-resource` (resource
- *   `https://host`). One location for a path-less URL.
- */
+/** RFC 9728 §3 well-known locations, path-inserted (resource = the URL) then root (its origin). */
 export function buildProtectedResourceProbes(resourceServerUrl: string): MetadataLocation[] {
   try {
     const u = new URL(resourceServerUrl);
@@ -211,16 +189,14 @@ export async function discoverProtectedResourceMetadata(
     resource: string,
   ): Promise<ProtectedResourceMetadata | null> => {
     const md = await fetchResourceMetadata(metadataUrl, fetchImpl);
-    return md && resourceIdentifierMatches(md.resource, resource) ? md : null;
+    return md && sameUrlIdentifier(md.resource, resource) ? md : null;
   };
 
-  // 1. Explicit metadata URL (a challenge the caller already holds).
   if (input.resourceMetadataUrl) {
     const md = await fetchAt(input.resourceMetadataUrl, input.resourceServerUrl);
     if (md) return md;
   }
 
-  // 2. The `resource_metadata` challenge of an unauthenticated request (RFC 9728 §5.1).
   try {
     const res = await fetchImpl(input.resourceServerUrl, {
       method: "GET",
@@ -234,10 +210,9 @@ export async function discoverProtectedResourceMetadata(
       if (md) return md;
     }
   } catch {
-    // Best-effort — fall through to the well-known locations.
+    // Best-effort.
   }
 
-  // 3. RFC 9728 §3 well-known locations, path-inserted then root.
   for (const location of buildProtectedResourceProbes(input.resourceServerUrl)) {
     const md = await fetchAt(location.metadataUrl, location.resource);
     if (md) return md;

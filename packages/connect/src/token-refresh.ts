@@ -11,6 +11,7 @@ import {
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { oauthEgressFetch } from "./oauth-egress.ts";
+import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 
 export interface RefreshContext {
   /**
@@ -149,7 +150,7 @@ export async function performRefreshTokenExchange(
   }
 
   if (!response.ok) {
-    const text = await response.text();
+    const text = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
     const classification = parseTokenErrorResponse(response.status, text);
     // Mirror OAuthCallbackError: the raw IdP body lives on the typed
     // `body` field, the message carries only the classification summary
@@ -169,9 +170,9 @@ export async function performRefreshTokenExchange(
 
   let raw: Record<string, unknown>;
   try {
-    raw = (await response.json()) as Record<string, unknown>;
+    raw = (await parseJsonUnder(response, MAX_TOKEN_BODY_BYTES)) as Record<string, unknown>;
   } catch (err) {
-    // Same as the exchange path: `json()` consumed the stream, so the
+    // Same as the exchange path: the read consumed the stream, so the
     // SyntaxError is the only surviving description of what came back.
     throw new RefreshError(
       `${opts.label} returned non-JSON response`,

@@ -15,6 +15,7 @@
 
 import { OAuthCallbackError } from "./oauth.ts";
 import { oauthEgressFetch } from "./oauth-egress.ts";
+import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 import {
   buildTokenBody,
   buildTokenHeaders,
@@ -142,7 +143,7 @@ export async function exchangeAuthorizationCode(
   }
 
   if (!response.ok) {
-    const body = await response.text();
+    const body = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
     const classification = parseTokenErrorResponse(response.status, body);
     // Don't concatenate the raw IdP body into the error message — some
     // IdPs echo the rejected `code` back in 400 bodies, so a generic
@@ -177,10 +178,10 @@ export async function exchangeAuthorizationCode(
 
   let raw: Record<string, unknown>;
   try {
-    raw = (await response.json()) as Record<string, unknown>;
+    raw = (await parseJsonUnder(response, MAX_TOKEN_BODY_BYTES)) as Record<string, unknown>;
   } catch (err) {
-    // `response.json()` already consumed the stream, so `body` (the parameter
-    // built for exactly this) cannot be filled in here — the SyntaxError is
+    // The read already consumed the stream, so `body` (the parameter
+    // built for exactly this) cannot be filled in here — the SyntaxError (or the size refusal) is
     // the only remaining evidence of WHAT the provider sent. An empty 200 and
     // an HTML interstitial are the same sentence without it. `status` is
     // passed for the same reason; the four `undefined`s are the positional

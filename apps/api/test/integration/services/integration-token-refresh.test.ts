@@ -377,9 +377,8 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     expect(row!.needsReconnection).toBe(false);
   });
 
-  // AFPS §7.12: a reconnect may move the connection to another upstream. A refresh decided on
-  // the row as read before must neither spend the new credential at the old server nor hand
-  // back a token for the old one.
+  // A reconnect through another client (another authorization server) while a refresh waited:
+  // the refresh must neither spend the new credential at the old server nor hand back its token.
   it("refuses a refresh once the connection was reconnected elsewhere, without an exchange", async () => {
     const connId = await seedConnection(["read"]);
     const target = await readTarget(connId);
@@ -388,7 +387,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     });
     await db
       .update(integrationConnections)
-      .set({ credentialsEncrypted: reconnected, variables: { base_url: "https://other.example" } })
+      .set({ credentialsEncrypted: reconnected, clientRef: "other-client" })
       .where(eq(integrationConnections.id, connId));
     token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
 
@@ -465,7 +464,7 @@ async function readTarget(connId: string): Promise<RefreshTarget> {
     })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connId));
-  return { ...row!, variables: {} };
+  return row!;
 }
 
 async function fetchEncrypted(connId: string): Promise<string | null> {

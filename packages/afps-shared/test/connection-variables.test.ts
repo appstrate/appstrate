@@ -7,6 +7,8 @@ import {
   parseUrlTemplate,
   renderUrlTemplate,
   unrenderableUrlTemplateVariables,
+  EXPECTED_HOST_VALUE,
+  EXPECTED_URL_VALUE,
   variableRefs,
 } from "../src/connection-variables.ts";
 
@@ -211,12 +213,12 @@ describe("unrenderableUrlTemplateVariables", () => {
     expect(unrenderableUrlTemplateVariables("https://example.com/mcp", {})).toEqual([]);
   });
 
-  it("names the variable whose value the template refuses", () => {
+  it("names the variable whose value the template refuses, and the form it must take", () => {
     expect(
       unrenderableUrlTemplateVariables("{$variable.base_url}/mcp", { base_url: "nope" }),
-    ).toEqual(["base_url"]);
+    ).toEqual([{ name: "base_url", expected: EXPECTED_URL_VALUE }]);
     expect(unrenderableUrlTemplateVariables("https://{$variable.t}.example.com", {})).toEqual([
-      "t",
+      { name: "t", expected: EXPECTED_HOST_VALUE },
     ]);
   });
 
@@ -225,7 +227,7 @@ describe("unrenderableUrlTemplateVariables", () => {
       unrenderableUrlTemplateVariables("{$variable.a}/{$variable.b}", {
         a: "https://a.example.com",
         b: "x",
-      }),
+      }).map(({ name }) => name),
     ).toEqual(["a", "b"]);
   });
 });

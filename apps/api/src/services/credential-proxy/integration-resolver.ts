@@ -39,10 +39,10 @@ import {
   selectAccessibleConnection,
   recordUnrefreshableRejection,
   upstreamRejectionStreak,
-  type ConnectionVariables,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
   type ResolvedIntegrationVersion,

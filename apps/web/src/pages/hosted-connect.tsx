@@ -115,6 +115,7 @@ export function HostedConnectPage() {
   const fields = context?.variables ? variableFields(context.variables.schema) : [];
   const variableLabels = Object.fromEntries(fields.map((f) => [f.name, f.title ?? f.name]));
   const isOAuth = context?.auth.type === "oauth2";
+  const variablesLocked = Object.keys(context?.variables?.values ?? {}).length > 0;
 
   const changeVariable = (name: string, value: string) => {
     setVariableValues((prev) => ({ ...prev, [name]: value }));
@@ -267,6 +268,7 @@ export function HostedConnectPage() {
                 values={variableValues}
                 onChange={changeVariable}
                 errors={variableErrors}
+                readOnly={variablesLocked}
               />
               {/* oauth2: the credential comes from the authorization server, not this form. */}
               {!isOAuth && (

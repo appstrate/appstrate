@@ -12525,6 +12525,7 @@ export interface operations {
             };
             /** @description No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
             /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. */
             502: {
                 headers: {
@@ -12929,6 +12930,7 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     initiateIntegrationConnect: {
