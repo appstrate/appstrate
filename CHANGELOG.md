@@ -27,6 +27,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint: unless the token response names the account, connections to
   different Expo accounts share one account key and a reconnect is unchecked.
 
+### Fixed
+
+- **`appstrate api` no longer cuts a response piped into a slower reader**
+  (#1824). Piped into `jq` or a script's `capture_output`, the body stopped at
+  the pipe capacity (64 KiB on macOS) because the CLI exited with bytes still
+  queued; `-o <file>` was unaffected. The CLI now exits only once stdout and
+  stderr have taken everything, the `-w` line included, and so does the
+  failure report of `appstrate code sync`. A reader that stops reading now
+  makes the CLI wait, as curl does, instead of losing the tail.
+
 ## [1.0.0-beta.66] - 2026-10-08
 
 ### Operators
