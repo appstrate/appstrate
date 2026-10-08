@@ -76,7 +76,7 @@ import {
   type PackageFiles,
 } from "../lib/packages.ts";
 import { SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
-import { shellQuote } from "../lib/skills-sync/targets.ts";
+import { shellQuote } from "../lib/shell.ts";
 
 interface Session {
   profileName: string;

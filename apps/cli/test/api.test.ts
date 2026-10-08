@@ -28,6 +28,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   saveTokens,
   loadTokens,
@@ -37,7 +39,7 @@ import {
 import { FileLockBusyError } from "../src/lib/file-lock.ts";
 // Imported directly for the one test that needs a profile with NO stored
 // tokens — the shared seed always writes a pair.
-import { setProfile } from "../src/lib/config.ts";
+import { getConfigDir, setProfile } from "../src/lib/config.ts";
 import {
   apiFetchRaw,
   explicitApiKey,
@@ -585,6 +587,31 @@ describe("apiFetchRaw — another writer landed first (issue #1806)", () => {
     expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
   });
 
+  it("a pair saved for another instance is not adopted: the run stops, credentials intact", async () => {
+    await seedProfile("default", {
+      access: "expired",
+      accessExpiresIn: -60_000,
+      refresh: "stale-refresh",
+    });
+    // `login --profile default --instance <other>` landing in the window:
+    // adopting its token would send the other instance's bearer here.
+    const configPath = join(getConfigDir(), "config.toml");
+    changeAfterRead(1, () => {
+      peerRotates();
+      const config = readFileSync(configPath, "utf-8");
+      writeFileSync(configPath, config.replace("https://app.example.com", "https://other.example"));
+    });
+    installFetch(async () => jsonResponse(200, { ok: true }));
+
+    const error = await settle(apiFetchRaw("default", "/api/data"));
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(AuthError);
+    expect((error as Error).message).toContain("changed instance during this command");
+    expect(fetchCalls).toHaveLength(0);
+    expect((await loadTokens("default"))?.refreshToken).toBe("peer-refresh");
+  });
+
   it("a logout that landed meanwhile stays a logout: no redemption, nothing saved back", async () => {
     await seedProfile("default", {
       access: "expired",
@@ -657,7 +684,7 @@ describe("apiFetchRaw — credentials lock held by another process", () => {
 });
 
 describe("apiFetchRaw — a refresh request that never answers", () => {
-  it("gets a deadline; its timeout says so, keeps the credentials and is no 401", async () => {
+  it("is sent with an abort signal; its timeout says so, keeps the credentials and is no 401", async () => {
     await seedProfile("default", {
       access: "access-1",
       accessExpiresIn: 5 * 60 * 1000,
@@ -682,6 +709,10 @@ describe("apiFetchRaw — a refresh request that never answers", () => {
     expect((error as Error).message).toContain("token refresh request");
     expect((error as Error).message).toContain("timed out after 20 s");
     expect((error as Error).message).toContain("credentials were kept");
+    // Not "try again": the server may have rotated before the deadline hit.
+    expect((error as Error).message).toContain(
+      "If the next command reports the session as revoked, run: appstrate login --profile default --instance https://app.example.com",
+    );
     expect(((error as Error).cause as DOMException).name).toBe("TimeoutError");
     expect((await loadTokens("default"))?.refreshToken).toBe("r");
     // The lock went with it: the next refresh is not left waiting.

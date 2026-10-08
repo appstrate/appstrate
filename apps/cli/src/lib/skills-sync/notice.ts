@@ -14,9 +14,11 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import writeFileAtomic from "write-file-atomic";
+import { loginRemedy } from "../api.ts";
 import { getDataDir } from "../config.ts";
+import { shellArg } from "../shell.ts";
 import { getNoticePath } from "./state.ts";
-import { PLUGIN_NAME, PLUGIN_UPDATE_COMMAND, SETUP_SLUG, shellArg } from "./targets.ts";
+import { PLUGIN_NAME, PLUGIN_UPDATE_COMMAND, SETUP_SLUG } from "./targets.ts";
 
 /** Claude Code's `SessionStart` hook output: one line for the user, context for the model. */
 export interface SessionNotice {
@@ -40,13 +42,12 @@ export interface Actionable {
 const INSTANCE_QUESTION =
   "their Appstrate instance URL (`https://app.appstrate.com` for the hosted service)";
 
-/** `login` prompts for the instance unless `--instance` names it. */
+/** The re-login the API errors name, plus how to tell it is already done. */
 export function loginFix(problem: string, profileName: string, instance?: string): Actionable {
-  const profile = shellArg(profileName);
   return {
     problem,
-    remedy: `appstrate login --profile ${profile} --instance ${instance ? shellArg(instance) : "<url>"}`,
-    check: `appstrate whoami --profile ${profile}`,
+    remedy: loginRemedy(profileName, instance),
+    check: `appstrate whoami --profile ${shellArg(profileName)}`,
     ...(instance ? {} : { ask: INSTANCE_QUESTION }),
   };
 }

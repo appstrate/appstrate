@@ -1209,6 +1209,7 @@ describe("code sync — fresh install", () => {
     expect(skill).toContain("appstrate org switch <org-id-or-slug>");
     expect(skill).toContain("appstrate org list");
     expect(skill).not.toContain("--instance");
+    expect(skill).not.toContain("--org");
     const out = await hookOutput();
     expect(out.systemMessage).toContain(
       "`appstrate org switch <org-id-or-slug> --profile default`",
@@ -1323,7 +1324,10 @@ describe("code sync — session notice", () => {
     ).rejects.toBeInstanceOf(ExitError);
 
     expect(stdout()).toBe("");
-    expect(stderr()).toContain("Run: appstrate login --profile default");
+    // The same TTY-free login the notice offers.
+    expect(stderr()).toBe(
+      'No credentials for profile "default". Run: appstrate login --profile default --instance https://app.example.com\n',
+    );
     expect(await snapshot(pluginRoot())).toEqual(before);
     const out = await hookOutput();
     // `login` prompts for the instance unless it is named, and Claude's shell has no TTY.
@@ -1399,6 +1403,10 @@ describe("code sync — session notice", () => {
     );
     expect(switchFix("x", "space", "$(touch pwned)").remedy).toBe(
       "appstrate space switch <space-id> --profile '$(touch pwned)'",
+    );
+    // zsh expands a leading `=word` to a command's path.
+    expect(switchFix("x", "org", "=ls").remedy).toBe(
+      "appstrate org switch <org-id-or-slug> --profile '=ls'",
     );
   });
 

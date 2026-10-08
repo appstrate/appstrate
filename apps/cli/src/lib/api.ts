@@ -31,6 +31,7 @@ import { normalizeInstance } from "./instance-url.ts";
 import { CLI_USER_AGENT } from "./version.ts";
 import { refreshCliTokens, DeviceFlowError } from "./device-flow.ts";
 import { CLI_CLIENT_ID } from "./cli-client.ts";
+import { shellArg } from "./shell.ts";
 
 /**
  * Refresh the access token proactively when it has this long or less
@@ -51,6 +52,11 @@ const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
  * prompt nobody has answered.
  */
 const REFRESH_REQUEST_TIMEOUT_MS = 20_000;
+// The timeout's cost, accepted: a server that commits the rotation but answers
+// after it leaves the client holding the redeemed token, and the next refresh
+// replays it, which revokes the family. Without it, one stalled request would
+// hold the lock, and every other process, for as long as it hangs; a token
+// endpoint slower than 20 s is an anomaly to report, not a case to wait out.
 const CREDENTIALS_LOCK_TIMEOUT_MS = REFRESH_REQUEST_TIMEOUT_MS + 10_000;
 
 /**
@@ -78,8 +84,9 @@ export function getCredentialsLockPath(): string {
  * acquisition inside `body`, even in the same process, waits on the first
  * until it times out.
  *
- * Where `flock` is unavailable it fails open silently: the user cannot act on
- * a warning about refreshes they never asked for.
+ * Where the lock is unavailable (no working `flock`, or a lock file that
+ * cannot be opened) it fails open silently: the user cannot act on a warning
+ * about refreshes they never asked for.
  */
 export function withCredentialsLock<T>(body: () => Promise<T>): Promise<T> {
   return withFileLock(getCredentialsLockPath(), "credential update", body, {
@@ -173,11 +180,28 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * The login every re-login message names, runnable as printed without a TTY,
+ * by a script or by Claude: `login` prompts for the instance unless
+ * `--instance` names it.
+ */
+export function loginRemedy(profileName: string, instance?: string): string {
+  return `appstrate login --profile ${shellArg(profileName)} --instance ${instance ? shellArg(instance) : "<url>"}`;
+}
+
+/** The 401 a refresh could not fix: the session is gone. */
+export async function sessionRevokedError(profileName: string): Promise<AuthError> {
+  const instance = (await getProfile(profileName))?.instance;
+  return new AuthError(
+    `Unauthorized — your session may have been revoked. Run: ${loginRemedy(profileName, instance)}`,
+  );
+}
+
 async function resolveProfileOrThrow(profileName: string): Promise<Profile> {
   const profile = await getProfile(profileName);
   if (!profile) {
     throw new AuthError(
-      `Profile "${profileName}" is not logged in. Run: appstrate login --profile ${profileName}`,
+      `Profile "${profileName}" is not logged in. Run: ${loginRemedy(profileName)}`,
     );
   }
   return profile;
@@ -264,15 +288,15 @@ export async function resolveApiKeyAuthContext(
   }
 }
 
-function noCredentials(profileName: string): AuthError {
+function noCredentials(profileName: string, profile: Profile): AuthError {
   return new AuthError(
-    `No credentials for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
+    `No credentials for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
   );
 }
 
 async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
   const tokens = await loadTokens(profileName);
-  if (!tokens) throw noCredentials(profileName);
+  if (!tokens) throw noCredentials(profileName, profile);
   const now = Date.now();
   const needsRefresh = tokens.expiresAt - now <= ACCESS_TOKEN_REFRESH_MARGIN_MS;
   if (!needsRefresh) {
@@ -295,12 +319,23 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
  * logout landed meanwhile, and a refresh token other than `seen` means
  * another process rotated or logged in again — its access token is the
  * answer, with no call to the server.
+ *
+ * The profile is re-read there too: the caller sends the token to the instance
+ * it read before the lock, so a login that moved the profile to another
+ * instance meanwhile must not have its token adopted — that would hand one
+ * instance's bearer to the other. The run stops instead, credentials intact.
  */
 function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
   return dedupRefresh(profileName, () =>
     withCredentialsLock(async () => {
+      const now = await getProfile(profileName);
+      if (now && now.instance !== profile.instance) {
+        throw new Error(
+          `Profile "${profileName}" changed instance during this command (now ${now.instance}); run it again.`,
+        );
+      }
       const current = await loadTokens(profileName);
-      if (!current) throw noCredentials(profileName);
+      if (!current) throw noCredentials(profileName, profile);
       if (current.refreshToken !== seen.refreshToken) return current.accessToken;
       return doRefresh(profileName, profile, current);
     }),
@@ -311,7 +346,7 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
   if (tokens.refreshExpiresAt <= Date.now()) {
     await deleteTokens(profileName).catch(() => {});
     throw new AuthError(
-      `Refresh token expired for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
+      `Refresh token expired for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
     );
   }
   try {
@@ -328,7 +363,7 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
     if (!fresh.refreshToken) {
       await deleteTokens(profileName).catch(() => {});
       throw new AuthError(
-        `Server did not return a rotated refresh_token for profile "${profileName}". Run: appstrate login --profile ${profileName}`,
+        `Server did not return a rotated refresh_token for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
       );
     }
     const next: Tokens = {
@@ -354,16 +389,16 @@ async function doRefresh(profileName: string, profile: Profile, tokens: Tokens):
       if (err.code === "invalid_grant") {
         await deleteTokens(profileName).catch(() => {});
         throw new AuthError(
-          `Session for profile "${profileName}" is no longer valid (${err.code}). Run: appstrate login --profile ${profileName}`,
+          `Session for profile "${profileName}" is no longer valid (${err.code}). Run: ${loginRemedy(profileName, profile.instance)}`,
         );
       }
       throw err;
     }
     // Bare, the abort reads "The operation timed out." with nothing to say
-    // what timed out, or that the session survived it.
+    // what timed out. Not "try again": the server may have rotated anyway.
     if ((err as { name?: unknown } | null)?.name === "TimeoutError") {
       throw new Error(
-        `The token refresh request for profile "${profileName}" timed out after ${REFRESH_REQUEST_TIMEOUT_MS / 1000} s; the stored credentials were kept. Try again.`,
+        `The token refresh request for profile "${profileName}" timed out after ${REFRESH_REQUEST_TIMEOUT_MS / 1000} s; the stored credentials were kept. If the next command reports the session as revoked, run: ${loginRemedy(profileName, profile.instance)}`,
         { cause: err },
       );
     }
@@ -476,11 +511,7 @@ export async function apiFetchWithHeaders<T>(
 ): Promise<{ body: T; headers: Headers }> {
   const res = await apiFetchRaw(profileName, path, init);
 
-  if (res.status === 401) {
-    throw new AuthError(
-      `Unauthorized — your session may have been revoked. Run: appstrate login --profile ${profileName}`,
-    );
-  }
+  if (res.status === 401) throw await sessionRevokedError(profileName);
   if (!res.ok) {
     let body: unknown;
     try {
