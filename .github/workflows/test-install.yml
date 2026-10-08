@@ -362,10 +362,12 @@ jobs:
           # actually exec'd it at the tail of the trust chain. Echoes all
           # argv so we can also assert the `--yes` contract (#199): the
           # bootstrap MUST pass --yes to sidestep the Bun macOS setRawMode
-          # regression in the compiled binary.
+          # regression in the compiled binary. Also reports whether it
+          # inherited APPSTRATE_VERSION, which the bootstrap must withhold (#1788).
           cat > "$ROOT/release/appstrate-linux-x64" <<'CLI'
           #!/usr/bin/env bash
           echo "FAKE_CLI_RAN subcommand=$1 argv=$*"
+          echo "FAKE_CLI_ENV APPSTRATE_VERSION=${APPSTRATE_VERSION-<unset>}"
           exit 0
           CLI
           chmod +x "$ROOT/release/appstrate-linux-x64"
@@ -494,9 +496,13 @@ jobs:
           # `curl|bash -s -- --yes` triggers the legacy all-in-one path.
           # The CLI MUST receive --yes so the Bun setRawMode regression
           # (#199) is sidestepped by construction (no clack prompt fires).
+          # APPSTRATE_VERSION is the documented pin, a release tag with its `v`:
+          # the CLI would write it to `.env` as a Docker image tag, which has
+          # none, so it must not reach the CLI (#1788).
           echo "::group::--yes (legacy auto-install)"
           set +e
           YES_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-yes" \
+            APPSTRATE_VERSION=v1.0.0-dry \
             APPSTRATE_FORCE_DUAL=1 \
             bash /tmp/bootstrap.sh --yes 2>&1)
           rc=$?
@@ -508,6 +514,8 @@ jobs:
             || { echo "::error::bootstrap did not exec the CLI under --yes"; exit 1; }
           echo "$YES_OUT" | grep -qE "FAKE_CLI_RAN .* argv=install --yes" \
             || { echo "::error::bootstrap did not forward --yes to the CLI (regression for #199)"; exit 1; }
+          echo "$YES_OUT" | grep -qF "FAKE_CLI_ENV APPSTRATE_VERSION=<unset>" \
+            || { echo "::error::bootstrap leaked APPSTRATE_VERSION into appstrate install (regression for #1788)"; exit 1; }
           test -x "$GITHUB_WORKSPACE/bin-yes/appstrate"
           echo "::endgroup::"
           echo "✓ --yes path OK"
@@ -516,7 +524,9 @@ jobs:
           # Users who want the interactive `appstrate install` flow (once
           # the Bun macOS setRawMode regression is fixed upstream) opt out
           # of the auto-launch via this env var. Assert the binary lands
-          # on PATH but the fake CLI is NOT exec'd.
+          # on PATH but the fake CLI is NOT exec'd. The pin is written without
+          # its `v`, as `.env` and image tags show it: the release is still the
+          # `v`-tagged one (#1788).
           echo "::group::APPSTRATE_NO_LAUNCH=1"
           set +e
           # APPSTRATE_FORCE_DUAL=1: scenario 1 left $GITHUB_WORKSPACE/bin
@@ -525,6 +535,7 @@ jobs:
           # install chain, NOT the dual-install logic — opt out so the
           # state from scenario 1 doesn't leak.
           NOLAUNCH_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-nolaunch" \
+            APPSTRATE_VERSION=1.0.0-dry \
             APPSTRATE_NO_LAUNCH=1 \
             APPSTRATE_FORCE_DUAL=1 \
             bash /tmp/bootstrap.sh 2>&1)
@@ -537,6 +548,8 @@ jobs:
             || { echo "::error::APPSTRATE_NO_LAUNCH=1 did not drop the binary"; exit 1; }
           echo "$NOLAUNCH_OUT" | grep -q "APPSTRATE_NO_LAUNCH=1" \
             || { echo "::error::APPSTRATE_NO_LAUNCH=1 did not emit the skip banner"; exit 1; }
+          echo "$NOLAUNCH_OUT" | grep -qF "Downloading Appstrate CLI (linux/x64, v1.0.0-dry)" \
+            || { echo "::error::a pin without its v did not resolve to the v-tagged release (#1788)"; exit 1; }
           echo "$NOLAUNCH_OUT" | grep -q "FAKE_CLI_RAN" \
             && { echo "::error::APPSTRATE_NO_LAUNCH=1 still exec'd the CLI"; exit 1; }
           # grep -q exit code 1 means no match — guard asserted.
@@ -820,6 +833,22 @@ jobs:
             || { echo "::error::bootstrap-runner did not hand off to \`appstrate runner install\`"; exit 1; }
           echo "::endgroup::"
           echo "✓ runner latest path OK"
+
+          # ── Scenario 7e': bootstrap-runner.sh takes a pin without its `v` ─
+          echo "::group::runner: pin without v"
+          set +e
+          RUNNER_PIN_OUT=$(APPSTRATE_BIN_DIR="$RUNNER_TEMP/bin-runner-pin" \
+            APPSTRATE_VERSION=1.0.0-dry \
+            bash /tmp/bootstrap-runner.sh --platform-url http://127.0.0.1:3000 --token dry 2>&1)
+          rc=$?
+          set -e
+          echo "$RUNNER_PIN_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap-runner exited $rc on a pin without v"; exit 1; }
+          echo "$RUNNER_PIN_OUT" | grep -qF "Downloading Appstrate CLI (linux/x64, v1.0.0-dry)" \
+            || { echo "::error::runner pin without v did not resolve to the v-tagged release (#1788)"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ runner pin without v OK"
 
           # ── Scenario 7f: runner + tampered channel manifest ────────────
           echo "::group::runner: tampered channel manifest"

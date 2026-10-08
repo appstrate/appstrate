@@ -25,15 +25,14 @@ import { mintSinkCredentials, type SinkCredentials } from "../lib/mint-sink-cred
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { extractRunAgentDenorm, freezeRunSpawnDependencies } from "./run-pipeline.ts";
-import { resolveRunConnectionsOrError } from "./integration-connection-resolver.ts";
 import {
-  type IntegrationManifestCache,
-  type ResolvedIntegrationVersionMap,
-} from "./integration-service.ts";
-import { ApiError } from "../lib/errors.ts";
+  missingIntegrationConnection,
+  resolveRunConnectionsOrError,
+} from "./integration-connection-resolver.ts";
+import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
-import { runPreflightGates, type PreflightGateError } from "./run-preflight-gates.ts";
+import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,20 +75,10 @@ interface CreateRunInput {
   manifestCache?: IntegrationManifestCache;
 }
 
-type CreateRunResult =
-  | {
-      ok: true;
-      runId: string;
-      /**
-       * Always present on the success arm — the remote origin cannot create a
-       * run without minting them, so the caller has no absent case to handle.
-       */
-      sinkCredentials: SinkCredentials;
-    }
-  | {
-      ok: false;
-      error: PreflightGateError;
-    };
+interface CreateRunResult {
+  runId: string;
+  sinkCredentials: SinkCredentials;
+}
 
 // ---------------------------------------------------------------------------
 // Public entry point — preflight, mint sink, insert row, no execution
@@ -98,7 +87,9 @@ type CreateRunResult =
 /**
  * Create a remote run: run the preflight gates, mint sink
  * credentials, insert the `runs` row in `pending`, and return — the CLI
- * executes on its own host and posts signed events back.
+ * executes on its own host and posts signed events back. Every refusal is
+ * thrown as an `ApiError`, the same envelopes `runPipeline` throws, and no
+ * row is inserted.
  */
 export async function createRun(input: CreateRunInput): Promise<CreateRunResult> {
   const {
@@ -120,13 +111,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // `launchOverrides`, and neither can: `CreateRemoteRunBodySchema` is
   // `.strict()` and declares no `connection_overrides` field, so a remote run
   // carries no per-run connection picks at all (a platform-run feature).
-  //
-  // Both call sites let the original `ApiError` escape to the route, which
-  // preserves the 409 `missing_integration_connection` envelope (with its
-  // `errors[]` list driving the dashboard's MissingConnections modal). This
-  // function reports failures as a flat `{ code, message, status }` result
-  // instead, so re-running readiness here would have to collapse that
-  // structured payload into a 400 `agent_not_ready`.
+  // Running it again here would repeat that work; the connection cascade
+  // below still re-resolves, which catches a change in between.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
@@ -155,7 +141,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     credentialSource: null,
     executionPlane: "remote",
   });
-  if (!gates.ok) return { ok: false, error: gates.error };
+  if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
   // --- Freeze integration manifest versions (#686, remote-path mirror of
@@ -166,30 +152,20 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     run silently served the mutable draft and never failed loud on an
   //     unsatisfiable pin. A shared `manifestCache` dedupes the cascade reads.
   const manifestCache: IntegrationManifestCache = input.manifestCache ?? new Map();
-  let resolvedIntegrationVersions: ResolvedIntegrationVersionMap;
-  try {
-    resolvedIntegrationVersions = await freezeRunSpawnDependencies({
-      agent,
-      orgId,
-      dependencyOverrides: input.dependencyOverrides ?? null,
-      manifestCache,
-    });
-  } catch (err) {
-    // Remote callers get a flat error they can surface verbatim. Preserve the
-    // ApiError's code/status (invalid_request 400 / dependency_unresolved 422).
-    if (err instanceof ApiError) {
-      return { ok: false, error: { code: err.code, message: err.message, status: err.status } };
-    }
-    throw err;
-  }
+  const resolvedIntegrationVersions = await freezeRunSpawnDependencies({
+    agent,
+    orgId,
+    dependencyOverrides: input.dependencyOverrides ?? null,
+    manifestCache,
+  });
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
   //     run-pipeline). `launchOverrides` is null here and in the readiness pass
   //     the route already ran — the remote body accepts no per-run connection
   //     picks — so the two resolve the same cascade. A failure at this point is
   //     therefore a between-readiness-and-now race (connection deleted, new
-  //     admin pin), and the runner gets a flat `agent_not_ready` it can
-  //     surface verbatim.
+  //     admin pin), and it answers the same 409 `missing_integration_connection`
+  //     the readiness check does.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({
@@ -202,37 +178,25 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       // what the spawn will use).
       manifestCache,
     });
-    if (!outcome.ok) {
-      // Remote runners get a flat `agent_not_ready` they can surface verbatim
-      // — no structured `errors[]` channel on the result shape. Preserve the
-      // historical code/status; the human-readable detail is the first error.
-      return {
-        ok: false,
-        error: {
-          code: "agent_not_ready",
-          message: outcome.error.message,
-          status: outcome.error.status,
-        },
-      };
-    }
+    if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
     // The remote api_call tool takes no argument addressing a set member.
     const multi = Object.entries(resolvedConnections ?? {})
       .filter(([, set]) => set.length > 1)
       .map(([integrationId]) => integrationId);
     if (multi.length > 0) {
-      return {
-        ok: false,
-        error: {
-          code: "agent_not_ready",
+      throw missingIntegrationConnection(
+        multi.map((integrationId) => ({
+          field: `integrations.${integrationId}`,
+          code: "remote_binds_one_connection",
+          title: "Remote Run Binds One Connection",
           message:
             `Remote runs bind one connection per integration, but this run's connection choice binds ` +
-            `several to ${multi.map((id) => `'${id}'`).join(", ")} — the remote runner's api_call tool ` +
-            `cannot say which one to use. Pick one with a member pin (a set an admin pin or an enforced ` +
-            `org default imposes is narrowed by an admin), or run the agent on the platform.`,
-          status: 409,
-        },
-      };
+            `several to '${integrationId}' — the remote runner's api_call tool cannot say which one ` +
+            `to use. Pick one with a member pin (a set an admin pin or an enforced org default ` +
+            `imposes is narrowed by an admin), or run the agent on the platform.`,
+        })),
+      );
     }
   }
 
@@ -299,5 +263,5 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // (and never again when it happened). `persistEventAndAdvance` emits
   // `onRunStatusChange` for remote-origin runs at the real transition.
 
-  return { ok: true, runId, sinkCredentials: credentials };
+  return { runId, sinkCredentials: credentials };
 }

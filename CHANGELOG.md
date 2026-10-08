@@ -13,8 +13,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
   secret that was active. Rotation procedure: `docs/ENV.md`.
 
+### Changed
+
+- **BREAKING (API): `POST /api/runs/remote` no longer answers
+  `409 agent_not_ready`** (#1783). A connection cascade that changed between
+  the readiness check and the run's creation answers
+  `409 missing_integration_connection` with its `errors[]`, like the readiness
+  check. A cascade binding several connections to one integration answers the
+  same 409 with one `remote_binds_one_connection` item per integration
+  (`field: integrations.<id>`). A client matching on the `agent_not_ready`
+  code breaks; no known consumer reads it (the CLI prints the status and body).
+
 ### Fixed
 
+- **A `400 validation_failed` response reports a missing body field with
+  `errors[].code: "required"`** (#1790), as documented, instead of
+  `invalid_type`, `invalid_value` or `invalid_union`. The dashboard now shows
+  its "field is required" message for it. A missing coerced numeric field,
+  such as `size` on `POST /api/uploads`, still reports `invalid_type`.
+- **A cookie is no longer sent once its `Max-Age` or `Expires` has passed**
+  (#1778). The sidecar and the platform credential proxy kept sending a
+  cookie set with a positive `Max-Age` or a future `Expires` after it
+  expired, so a short-lived cookie could keep masking the connection's
+  credential; it is now dropped and the call falls back to the credential.
+  On deploy, in-flight platform proxy sessions lose their upstream cookies
+  once.
 - **A JWT can still be signed after an auth-secret rotation** (#1769): CLI
   token issuance and OIDC tokens no longer fail once the secret changes.
 - **A session stays alive while it is used** instead of expiring 7 days after

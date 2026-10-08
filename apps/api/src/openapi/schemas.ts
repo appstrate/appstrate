@@ -151,7 +151,7 @@ export const schemas = {
       field: { type: "string" },
       code: {
         type: "string",
-        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it. On any other validation item, the validator's own code.`,
+        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code.`,
       },
       message: { type: "string" },
       title: {
