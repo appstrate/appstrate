@@ -16,7 +16,11 @@ import { db } from "@appstrate/db/client";
 import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
-import { createTestContext } from "../../../../../../test/helpers/auth.ts";
+import {
+  ageSessionPastUpdateAge,
+  createTestContext,
+  SESSION_TTL_MS,
+} from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
 import oidcModule from "../../../index.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
@@ -108,15 +112,11 @@ describe("GET /activate", () => {
   it("re-issues the session cookie beside its CSRF cookie when the session is past updateAge", async () => {
     const cookie = await signUpPlatformUser();
     const { userCode } = await requestDeviceCode();
-    // Issued 25h ago: older than `updateAge`, so `getSession` refreshes it.
     const [signedUp] = await db
       .select({ id: userTable.id })
       .from(userTable)
       .where(eq(userTable.email, "activate-test@example.com"));
-    await db
-      .update(sessionTable)
-      .set({ expiresAt: new Date(Date.now() + 7 * 24 * 3600_000 - 25 * 3600_000) })
-      .where(eq(sessionTable.userId, signedUp!.id));
+    await ageSessionPastUpdateAge(signedUp!.id);
 
     const res = await app.request(`/activate?user_code=${userCode}`, {
       headers: { Cookie: cookie },
@@ -126,7 +126,7 @@ describe("GET /activate", () => {
     const setCookies = res.headers.getSetCookie();
     const sessionCookies = setCookies.filter((c) => c.startsWith("better-auth.session_token="));
     expect(sessionCookies).toHaveLength(1);
-    expect(sessionCookies[0]).toContain("Max-Age=604800");
+    expect(sessionCookies[0]).toContain(`Max-Age=${SESSION_TTL_MS / 1000}`);
     expect(setCookies.some((c) => c.startsWith("oidc_csrf="))).toBe(true);
   });
 

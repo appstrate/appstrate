@@ -17,7 +17,13 @@ import type { AppstrateModule } from "@appstrate/core/module";
 import { session as sessionTable } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { authHeaders, createTestContext, createTestUser } from "../../helpers/auth.ts";
+import {
+  ageSessionPastUpdateAge,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  SESSION_TTL_MS,
+} from "../../helpers/auth.ts";
 
 const app = getTestApp();
 
@@ -36,8 +42,7 @@ const probeModule: AppstrateModule = {
 };
 const probeApp = getTestApp({ modules: [probeModule] });
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60; // auth.ts session.expiresIn
+const MAX_AGE = `Max-Age=${SESSION_TTL_MS / 1000}`;
 
 function sessionTokenCookies(res: Response): string[] {
   return res.headers.getSetCookie().filter((c) => c.startsWith("better-auth.session_token="));
@@ -49,14 +54,6 @@ async function sessionExpiresAt(userId: string): Promise<Date> {
     .from(sessionTable)
     .where(eq(sessionTable.userId, userId));
   return row!.expiresAt;
-}
-
-/** Age the user's session row past `updateAge`: issued 25h ago. */
-async function ageSessionPastUpdateAge(userId: string): Promise<void> {
-  await db
-    .update(sessionTable)
-    .set({ expiresAt: new Date(Date.now() + 7 * DAY_MS - 25 * 60 * 60 * 1000) })
-    .where(eq(sessionTable.userId, userId));
 }
 
 describe("session refresh — Set-Cookie forwarding", () => {
@@ -74,7 +71,7 @@ describe("session refresh — Set-Cookie forwarding", () => {
     expect(res.status).toBe(200);
     const cookies = sessionTokenCookies(res);
     expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toContain(`Max-Age=${EXPIRES_IN_SECONDS}`);
+    expect(cookies[0]).toContain(MAX_AGE);
     const after = await sessionExpiresAt(user.id);
     expect(after.getTime()).toBeGreaterThan(before.getTime() + 60 * 60 * 1000);
   });
@@ -98,7 +95,7 @@ describe("session refresh — Set-Cookie forwarding", () => {
     expect(res.headers.getSetCookie()).toContain(PROBE_COOKIE);
     const cookies = sessionTokenCookies(res);
     expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toContain(`Max-Age=${EXPIRES_IN_SECONDS}`);
+    expect(cookies[0]).toContain(MAX_AGE);
   });
 
   it("re-issues the session cookie when a route behind the pipeline throws", async () => {
@@ -112,7 +109,7 @@ describe("session refresh — Set-Cookie forwarding", () => {
     expect(res.headers.get("content-type")).toContain("application/problem+json");
     const cookies = sessionTokenCookies(res);
     expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toContain(`Max-Age=${EXPIRES_IN_SECONDS}`);
+    expect(cookies[0]).toContain(MAX_AGE);
   });
 
   it("forwards the refreshed cookie on an error response from a pipeline-exempt route", async () => {
@@ -127,6 +124,6 @@ describe("session refresh — Set-Cookie forwarding", () => {
     expect(res.status).toBe(401);
     const cookies = sessionTokenCookies(res);
     expect(cookies).toHaveLength(1);
-    expect(cookies[0]).toContain(`Max-Age=${EXPIRES_IN_SECONDS}`);
+    expect(cookies[0]).toContain(MAX_AGE);
   });
 });

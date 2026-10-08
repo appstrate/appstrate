@@ -34,7 +34,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
-import { getSessionForwardingCookies } from "../../lib/auth-cookies.ts";
+import { appendSetCookies, getSessionForwardingCookies } from "../../lib/auth-cookies.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
@@ -379,20 +379,17 @@ function forwardOAuthSessionCookies(
   authResponse: Response,
   isFirstParty: boolean,
 ): number {
-  const getSetCookie = (authResponse.headers as unknown as { getSetCookie?: () => string[] })
-    .getSetCookie;
-  const setCookies =
-    typeof getSetCookie === "function" ? getSetCookie.call(authResponse.headers) : [];
-  for (const raw of setCookies) {
-    if (isFirstParty) {
-      c.header("set-cookie", raw, { append: true });
-    } else {
-      const patched = raw.includes("Max-Age=")
-        ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`)
-        : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`;
-      c.header("set-cookie", patched, { append: true });
-    }
-  }
+  const setCookies = authResponse.headers.getSetCookie();
+  appendSetCookies(
+    c,
+    isFirstParty
+      ? setCookies
+      : setCookies.map((raw) =>
+          raw.includes("Max-Age=")
+            ? raw.replace(/Max-Age=\d+/gi, `Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`)
+            : `${raw}; Max-Age=${OAUTH_SESSION_MAX_AGE_SECONDS}`,
+        ),
+  );
   return setCookies.length;
 }
 
