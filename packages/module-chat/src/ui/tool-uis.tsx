@@ -36,6 +36,7 @@ import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
+import { ToolApprovalGate } from "./tool-approval-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
@@ -313,63 +314,78 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
 >({
   toolName: "invoke_operation",
   render: (props) => {
-    const { args, result } = props;
-    const opId = args?.operation_id ?? "";
-    const phase = deriveToolPhase(props);
-
-    // Connect kickoff → the interactive connect card, mounted from the FIRST
-    // frame (before the result carries the connect/auth url) so the generic row
-    // never swaps into the card mid-stream — a swap changes the block's height
-    // and makes the transcript jump. On failure the card shows the error in
-    // place (same geometry). Only the anomalous success-without-offer shape
-    // falls through to the generic row.
-    if (opId === INITIATE_CONNECT_OP) {
-      // One card: the route behind this operation mints a single `connect_url`.
-      const offer = extractAuthOffers(result)[0];
-      if (offer || phase !== "success") {
-        return (
-          <OAuthConnectCard
-            authUrl={offer?.authUrl}
-            state={offer?.state}
-            // The session route returns no `packageId`; the call's own path
-            // param is the integration this card connects.
-            packageId={args?.path_params?.packageId}
-            toolCallId={props.toolCallId}
-            errorText={
-              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
-            }
-          />
-        );
-      }
-    }
-
-    // Run launch (runAgent / runInline) → rich in-chat run progress, mounted for
-    // the tool call's whole life (launch, stream, terminal, and launch failure —
-    // the error renders inside the panel). Never falls back to the generic card:
-    // a component swap would change the block's height mid-stream.
-    if (isRunLaunchOp(opId)) {
-      return <RunLaunchCard {...props} />;
-    }
-
-    const rule = OP_RULES.find((r) => r.re.test(opId)) ?? {
-      Icon: ZapIcon,
-      labelKey: "tool.op.other",
-    };
+    const opId = props.args?.operation_id ?? "";
     return (
-      <ToolCallCard
-        phase={phase}
-        Icon={rule.Icon}
-        labelKey={rule.labelKey}
-        idText={opId}
-        args={args}
-        result={result}
-        isError={props.isError}
-        toolCallId={props.toolCallId}
-        timing={props.timing}
-      />
+      <ToolApprovalGate part={props} labelKey={opRule(opId).labelKey}>
+        {renderInvokeOperation(props)}
+      </ToolApprovalGate>
     );
   },
 });
+
+function opRule(opId: string): { Icon: LucideIcon; labelKey: string } {
+  return OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, labelKey: "tool.op.other" };
+}
+
+function renderInvokeOperation(
+  props: ToolCallMessagePartProps<
+    { operation_id?: string; path_params?: { packageId?: string } } & Record<string, unknown>,
+    unknown
+  >,
+): React.ReactNode {
+  const { args, result } = props;
+  const opId = args?.operation_id ?? "";
+  const phase = deriveToolPhase(props);
+  const rule = opRule(opId);
+
+  // Connect kickoff → the interactive connect card, mounted from the FIRST
+  // frame (before the result carries the connect/auth url) so the generic row
+  // never swaps into the card mid-stream — a swap changes the block's height
+  // and makes the transcript jump. On failure the card shows the error in
+  // place (same geometry). Only the anomalous success-without-offer shape
+  // falls through to the generic row.
+  if (opId === INITIATE_CONNECT_OP) {
+    // One card: the route behind this operation mints a single `connect_url`.
+    const offer = extractAuthOffers(result)[0];
+    if (offer || phase !== "success") {
+      return (
+        <OAuthConnectCard
+          authUrl={offer?.authUrl}
+          state={offer?.state}
+          // The session route returns no `packageId`; the call's own path
+          // param is the integration this card connects.
+          packageId={args?.path_params?.packageId}
+          toolCallId={props.toolCallId}
+          errorText={
+            phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
+          }
+        />
+      );
+    }
+  }
+
+  // Run launch (runAgent / runInline) → rich in-chat run progress, mounted for
+  // the tool call's whole life (launch, stream, terminal, and launch failure —
+  // the error renders inside the panel). Never falls back to the generic card:
+  // a component swap would change the block's height mid-stream.
+  if (isRunLaunchOp(opId)) {
+    return <RunLaunchCard {...props} />;
+  }
+
+  return (
+    <ToolCallCard
+      phase={phase}
+      Icon={rule.Icon}
+      labelKey={rule.labelKey}
+      idText={opId}
+      args={args}
+      result={result}
+      isError={props.isError}
+      toolCallId={props.toolCallId}
+      timing={props.timing}
+    />
+  );
+}
 
 function stringArg(args: Record<string, unknown> | undefined, key: string): string | undefined {
   const v = args?.[key];
@@ -426,17 +442,19 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
   render: (props: AnyToolProps) => (
-    <>
-      <RunLaunchCard {...props} />
-      {extractAuthOffers(props.result).map((offer) => (
-        <OAuthConnectCard
-          key={offer.authUrl}
-          authUrl={offer.authUrl}
-          state={offer.state}
-          packageId={offer.packageId}
-          toolCallId={props.toolCallId}
-        />
-      ))}
-    </>
+    <ToolApprovalGate part={props} labelKey="tool.op.launch">
+      <>
+        <RunLaunchCard {...props} />
+        {extractAuthOffers(props.result).map((offer) => (
+          <OAuthConnectCard
+            key={offer.authUrl}
+            authUrl={offer.authUrl}
+            state={offer.state}
+            packageId={offer.packageId}
+            toolCallId={props.toolCallId}
+          />
+        ))}
+      </>
+    </ToolApprovalGate>
   ),
 });

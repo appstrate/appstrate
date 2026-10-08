@@ -152,6 +152,8 @@ export const chatStreamSchema = z
     generation: modelGenerationSettingsSchema.optional(),
     /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
     agent_authoring: z.boolean().optional(),
+    /** The composer's approval mode: ask before a writing tool call; absent = on. */
+    tool_approval: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
@@ -689,6 +691,7 @@ export async function handleChatStream(
         messages,
         system,
         generation: generationSettings,
+        toolApproval: body.tool_approval !== false,
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,

@@ -1091,6 +1091,26 @@ export interface paths {
         patch: operations["renameChatSession"];
         trace?: never;
     };
+    "/api/chat/sessions/{id}/approvals/{approvalId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer a chat tool approval
+         * @description Allows or refuses a writing tool call the session's in-flight turn is holding (the `approvalId` of its `tool-approval-request` stream part). A refusal blocks the call and its reason is handed to the model. Signed-in sessions only: API keys and other bearer tokens are refused, so a model cannot approve its own call. The turn refuses on its own if no answer arrives before it ends.
+         */
+        post: operations["respondToChatToolApproval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat/sessions/{id}/read": {
         parameters: {
             query?: never;
@@ -10318,6 +10338,8 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them. */
                     agent_authoring?: boolean;
+                    /** @description Holds every writing tool call this turn for the user's answer (see `respondToChatToolApproval`); absent = on. Off, writes run straight away, still within the caller's own grants. */
+                    tool_approval?: boolean;
                     /**
                      * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
                      * @enum {string}
@@ -10597,6 +10619,44 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    respondToChatToolApproval: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                id: string;
+                approvalId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    approved: boolean;
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Answer recorded; the turn resumes */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
+            429: components["responses"]["RateLimited"];
         };
     };
     markChatSessionRead: {

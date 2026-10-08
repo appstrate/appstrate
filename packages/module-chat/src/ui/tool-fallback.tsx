@@ -10,16 +10,19 @@ import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { WrenchIcon } from "lucide-react";
 import { ToolCallCard } from "./tool-uis.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
+import { ToolApprovalGate } from "./tool-approval-card.tsx";
 
 export const ToolFallback: ToolCallMessagePartComponent = (props) => (
-  <ToolCallCard
-    phase={deriveToolPhase(props)}
-    Icon={WrenchIcon}
-    label={props.toolName}
-    args={props.args}
-    result={props.result}
-    isError={props.isError}
-    toolCallId={props.toolCallId}
-    timing={props.timing}
-  />
+  <ToolApprovalGate part={props} label={props.toolName}>
+    <ToolCallCard
+      phase={deriveToolPhase(props)}
+      Icon={WrenchIcon}
+      label={props.toolName}
+      args={props.args}
+      result={props.result}
+      isError={props.isError}
+      toolCallId={props.toolCallId}
+      timing={props.timing}
+    />
+  </ToolApprovalGate>
 );
