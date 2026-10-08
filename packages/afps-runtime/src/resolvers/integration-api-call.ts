@@ -482,6 +482,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         : null;
 
       const policy = credentialUrlPolicy({
+        target,
         templates,
         fields,
         allowAllUris: meta.allowAllUris,
@@ -492,7 +493,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       if (policy.refuse) {
         throw apiCallFailure(
           URL_POLICY_REFUSAL_CODE[policy.refuse],
-          urlPolicyRefusalMessage(policy.refuse, meta.name),
+          urlPolicyRefusalMessage(policy.refuse, meta.name, templateHost(req.target)),
           meta,
           req.target,
         );

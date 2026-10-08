@@ -902,6 +902,21 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
     );
   });
 
+  it("refuses a wildcard right under a public suffix, keeps one under a registrable domain", () => {
+    const authorized_uris = [
+      "https://*.zendesk.com/**",
+      "https://*.co.uk/**",
+      "https://*.example.co.uk/**",
+      "https://*.github.io/**",
+      "https://*.someone.github.io/**",
+      "https://{$credential.shop_domain}/**",
+    ];
+    expect(paths({ type: "api_key", authorized_uris })).toEqual([
+      "auths.primary.authorized_uris.1",
+      "auths.primary.authorized_uris.3",
+    ]);
+  });
+
   it("leaves an auth the proxy injects nothing for to the call-time guard", () => {
     for (const delivery of [undefined, { http: { name: "" } }]) {
       expect(

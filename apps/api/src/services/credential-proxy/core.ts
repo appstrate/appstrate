@@ -230,6 +230,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
+    target,
     templates,
     fields,
     allowAllUris: resolved.allowAllUris,
@@ -240,7 +241,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (policy.refuse) {
     throw new ProxyCallError(
       URL_POLICY_REFUSAL_CODE[policy.refuse],
-      urlPolicyRefusalMessage(policy.refuse, input.integrationId),
+      urlPolicyRefusalMessage(policy.refuse, input.integrationId, templateHost(input.target)),
     );
   }
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.

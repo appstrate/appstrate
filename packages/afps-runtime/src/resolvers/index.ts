@@ -59,6 +59,8 @@ export { prepareApiCallRequest, type PreparedApiCallRequest } from "./api-call-r
 
 // The pre-send URL policy shared by the three `api_call` paths.
 export {
+  beyondBoundReason,
+  credentialStaysWithinBound,
   credentialUrlPolicy,
   redactionFields,
   urlPolicyRefusalMessage,

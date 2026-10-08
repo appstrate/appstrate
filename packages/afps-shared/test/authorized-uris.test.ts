@@ -11,6 +11,8 @@ import {
   parseUrlFormPattern,
   renderAuthorizedUris,
   unrenderableAuthorizedUriFields,
+  wildcardHostLiteral,
+  wildcardMatchStaysWithinBound,
 } from "../src/authorized-uris.ts";
 
 describe("renderAuthorizedUris", () => {
@@ -293,6 +295,67 @@ describe("isHostUnboundedUriPattern", () => {
     }
   });
 
+  describe("a wildcard host, judged with the Public Suffix List", () => {
+    it.each([
+      ["under a .com registrable domain", "https://*.zendesk.com/**"],
+      ["deeper under a registrable domain", "https://*.api.crm4.dynamics.com/**"],
+      ["under a registrable domain below a multi-label suffix", "https://*.example.co.uk/**"],
+      ["under a registrable domain below a private suffix", "https://*.someone.github.io/**"],
+      ["under an exception rule of a list wildcard", "https://*.www.ck/**"],
+      ["in the middle of the host", "https://api.*.example.com/**"],
+      ["as a double star under a registrable domain", "https://**.example.com/**"],
+      ["inside the leftmost label", "https://api-*.example.com/**"],
+      ["with a port", "https://*.example.com:8443/**"],
+      ["with a globbed port", "https://*.example.com:*/**"],
+      ["in uppercase", "HTTPS://*.EXAMPLE.CO.UK/**"],
+      ["with a trailing dot", "https://*.example.co.uk./**"],
+      ["under a punycode registrable domain", "https://*.xn--80ak6aa92e.com/**"],
+      ["under an unlisted top-level domain", "https://*.example.internal/**"],
+      [
+        "above a host rendered from the connection",
+        "https://*.{$credential.tenant}.example.com/**",
+      ],
+    ])("is bounded %s", (_, pattern) => {
+      expect(isHostUnboundedUriPattern(pattern)).toBe(false);
+    });
+
+    it.each([
+      ["right under an ICANN multi-label suffix", "https://*.co.uk/**"],
+      ["right under a private suffix", "https://*.github.io/**"],
+      ["right under another private suffix", "https://*.vercel.app/**"],
+      ["right under a private API suffix", "https://*.googleapis.com/**"],
+      ["right under a private hosting suffix", "https://*.supabase.co/**"],
+      ["right under a private workers suffix", "https://*.workers.dev/**"],
+      ["right under a private suffix, with a port", "https://*.github.io:443/**"],
+      ["right under a suffix, with a trailing dot", "https://*.co.uk./**"],
+      ["right under a suffix, in uppercase", "https://*.CO.UK/**"],
+      ["where the wildcard reaches the registrable label", "https://*example.co.uk/**"],
+      ["in the middle, above a public suffix only", "https://api.*.co.uk/**"],
+      ["under a suffix whose children a list wildcard makes public", "https://*.kawasaki.jp/**"],
+      ["right under a list wildcard rule", "https://*.foo.ck/**"],
+      ["under a punycode top-level domain", "https://*.xn--fiqs8s/**"],
+      ["right under a punycode multi-label suffix", "https://*.xn--55qx5d.cn/**"],
+      ["under a single-label name", "https://*.localhost/**"],
+      ["under an unlisted top-level domain alone", "https://*.internal/**"],
+      ["above a host rendered from the connection alone", "https://*.{$credential.domain}/**"],
+    ])("is unbounded %s", (_, pattern) => {
+      expect(isHostUnboundedUriPattern(pattern)).toBe(true);
+    });
+
+    it("keeps a literal host bounded, a public suffix or a single label included", () => {
+      for (const pattern of [
+        "https://github.io/**",
+        "https://co.uk/**",
+        "https://localhost/**",
+        "https://localhost:8080/**",
+        "https://{$credential.shop_domain}/**",
+        "https://{$credential.sub}.github.io/**",
+      ]) {
+        expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+      }
+    });
+  });
+
   it("is true for a malformed entry, whose authority WHATWG would rewrite", () => {
     for (const pattern of [
       "https://%2A%2A\\**",
@@ -310,6 +373,51 @@ describe("isHostUnboundedUriPattern", () => {
     ]) {
       expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
     }
+  });
+});
+
+describe("wildcardHostLiteral", () => {
+  it("is the labels right of the host's last wildcard, null without one", () => {
+    expect(wildcardHostLiteral("https://*.api.crm4.dynamics.com/**")).toBe("api.crm4.dynamics.com");
+    expect(wildcardHostLiteral("HTTPS://api.*.Example.COM./**")).toBe("example.com");
+    expect(wildcardHostLiteral("https://*/**")).toBe("");
+    for (const pattern of ["https://api.example.com/**", "{$credential.site_url}/**", "**"]) {
+      expect([pattern, wildcardHostLiteral(pattern)]).toEqual([pattern, null]);
+    }
+  });
+});
+
+describe("wildcardMatchStaysWithinBound", () => {
+  it.each([
+    ["https://*.amazonaws.com/**", "sts.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "dynamodb.eu-west-1.amazonaws.com"],
+    ["https://*.zendesk.com/**", "acme.zendesk.com"],
+    ["https://*.salesforce.com/**", "acme.my.salesforce.com"],
+    ["https://*.my.salesforce.com/**", "acme.my.salesforce.com"],
+    ["https://*.api.crm4.dynamics.com/**", "org.api.crm4.dynamics.com"],
+    ["https://*.example.co.uk/**", "a.b.example.co.uk"],
+    ["https://*.example.com/**", "A.Example.COM."],
+    ["https://api.example.com/**", "api.example.com"],
+    ["https://{$credential.shop_domain}/**", "store.myshopify.com"],
+    ["{$credential.site_url}/**", "someone.github.io"],
+  ])("keeps %s → %s within its bound", (pattern, host) => {
+    expect(wildcardMatchStaysWithinBound(pattern, host)).toBe(true);
+  });
+
+  it.each([
+    ["https://*.amazonaws.com/**", "bucket.s3.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "sqs.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "bedrock-runtime.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "x.execute-api.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "s3.amazonaws.com"],
+    ["https://*.co.uk/**", "a.co.uk"],
+    ["https://*.kawasaki.jp/**", "x.foo.kawasaki.jp"],
+    ["https://*.example.com/**", "45.33.0.1"],
+    ["https://*.example.com/**", "[::1]"],
+    ["https://*/**", "example.com"],
+    ["https://**/**", "example.com"],
+  ])("takes %s → %s past its bound", (pattern, host) => {
+    expect(wildcardMatchStaysWithinBound(pattern, host)).toBe(false);
   });
 });
 
@@ -718,9 +826,15 @@ describe("matchesAuthorizedUriSpec", () => {
       "https://45.33.0.1/steal",
       "https://0x2d210001/steal",
       "https://8.168.1.1/steal",
+      "https://another-site.github.io/x",
+      "https://another-site.co.uk/x",
     ];
     for (const pattern of [
       "https://*.example.com/**",
+      "https://*.someone.github.io/**",
+      "https://*.example.co.uk/**",
+      "https://*.github.io/**",
+      "https://*.co.uk/**",
       "https://api.example.com:*/**",
       "https://*.example.com./**",
       "HTTPS://*.EXAMPLE.com:443/**",
@@ -743,6 +857,8 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec("https://[::**/**", targets[2]!)).toBe(true);
     expect(matchesAuthorizedUriSpec("https://*.0.1/**", "https://0x2d210001/steal")).toBe(true);
     expect(matchesAuthorizedUriSpec("https://*.168.1.1/**", "https://8.168.1.1/steal")).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.github.io/**", targets[6]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.co.uk/**", targets[7]!)).toBe(true);
   });
 });
 

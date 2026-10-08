@@ -239,7 +239,7 @@ export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifes
       found.push({
         authKey,
         path: ["auths", authKey, "authorized_uris", index],
-        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**, https://*.example.com/**) or use "{$credential.<field>}/**"`,
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**), keep a wildcard under a registrable domain (https://*.example.com/**, not https://*.github.io/**), or render the host from the connection (https://{$credential.<field>}/**, "{$credential.<field>}/**")`,
       });
     });
   }

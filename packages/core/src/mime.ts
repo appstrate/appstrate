@@ -3,7 +3,7 @@
 
 /**
  * MIME classification primitives — re-exported from the shared
- * zero-dependency `@appstrate/afps-shared` package. The `@appstrate/core/mime`
+ * zero-internal-dependency `@appstrate/afps-shared` package. The `@appstrate/core/mime`
  * public surface is preserved verbatim (`normalizeMime`,
  * `TEXT_SHAPED_MEDIA_TYPES`, `isTextShapedMime`, `isTextShapedContentType`).
  *

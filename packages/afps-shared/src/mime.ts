@@ -5,7 +5,7 @@
  * MIME classification primitives — the ONE place that answers "is this media
  * type a text payload or an opaque binary container?".
  *
- * Lives in the zero-dependency shared package because the question is asked at
+ * Lives in the zero-internal-dependency shared package because the question is asked at
  * four layers that cannot import each other:
  *
  *  - **Platform API** (`apps/api/src/services/mime-policy.ts`) — sniff
