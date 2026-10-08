@@ -3,11 +3,13 @@
 /**
  * `connections_used` holds one entry per BOUND connection, so the panel cannot
  * key a card on `integration_package_id` — two entries would collide. This pins the
- * grouping, and the orders it must not disturb.
+ * grouping, the orders it must not disturb, and the rows of the integrations the
+ * run started without.
  */
 
 import { describe, it, expect } from "bun:test";
-import { groupByIntegration, type ConnectionUsed } from "../run-connections";
+import type { EnrichedRun } from "@appstrate/shared-types";
+import { groupByIntegration, unboundIntegrationIds, type ConnectionUsed } from "../run-connections";
 
 const used = (
   integration_package_id: string,
@@ -41,5 +43,40 @@ describe("groupByIntegration", () => {
 
   it("returns nothing for an empty snapshot", () => {
     expect(groupByIntegration([])).toEqual([]);
+  });
+});
+
+describe("groupByIntegration — integrations the run started without", () => {
+  it("lists each after the bound ones, with no connection", () => {
+    const rows = [used("@o/gmail", "work")];
+    expect(groupByIntegration(rows, ["@o/slack", "@o/notion"])).toEqual([
+      ["@o/gmail", rows],
+      ["@o/slack", []],
+      ["@o/notion", []],
+    ]);
+  });
+
+  it("lists them alone when nothing was bound", () => {
+    expect(groupByIntegration([], ["@o/slack"])).toEqual([["@o/slack", []]]);
+  });
+
+  it("never turns a bound integration into an unbound row", () => {
+    const rows = [used("@o/gmail", "work")];
+    expect(groupByIntegration(rows, ["@o/gmail"])).toEqual([["@o/gmail", rows]]);
+  });
+});
+
+describe("unboundIntegrationIds", () => {
+  const run = (over: Record<string, unknown>) => ({ ...over }) as unknown as EnrichedRun;
+
+  it("reads the run's unbound integrations", () => {
+    expect(unboundIntegrationIds(run({ integrations_unbound: ["@o/slack"] }))).toEqual([
+      "@o/slack",
+    ]);
+  });
+
+  it("is empty when the run carries none", () => {
+    expect(unboundIntegrationIds(run({ integrations_unbound: null }))).toEqual([]);
+    expect(unboundIntegrationIds(run({}))).toEqual([]);
   });
 });

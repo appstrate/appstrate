@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Table,
@@ -25,7 +26,9 @@ import { ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
- * write. With an org default in place, these are per-agent EXCEPTIONS.
+ * write. With an org default in place, these are per-agent EXCEPTIONS. An empty set pins
+ * "no connection": the agent runs without the integration — refused by the server for an
+ * agent that requires it.
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -37,6 +40,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
 
   const [newAgent, setNewAgent] = useState("");
   const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
+  const [newPinNone, setNewPinNone] = useState(false);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
@@ -44,19 +48,20 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
-  const canAddPin = !!newAgent && newConnectionIds.length > 0;
+  const canAddPin = !!newAgent && (newPinNone || newConnectionIds.length > 0);
 
   const onSubmitNewPin = () => {
     if (!canAddPin) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_ids: newConnectionIds },
+        body: { connection_ids: newPinNone ? [] : newConnectionIds },
       },
       {
         onSuccess: () => {
           setNewAgent("");
           setNewConnectionIds([]);
+          setNewPinNone(false);
         },
       },
     );
@@ -106,6 +111,11 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
                     {agentDisplayName(p.agent_package_id)}
                   </TableCell>
                   <TableCell className="px-3 py-2">
+                    {p.connection_ids.length === 0 && (
+                      <span className="text-muted-foreground">
+                        {t("agents:detail.integrationMemberPicker.none")}
+                      </span>
+                    )}
                     {p.connection_ids.map((id, i) => {
                       const c = pinnableConnections.find((x) => x.id === id);
                       return (
@@ -183,12 +193,18 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnections")}
             </Label>
-            <ConnectionSetChecklist
-              connections={pinnableConnections}
-              value={newConnectionIds}
-              onChange={setNewConnectionIds}
-              idPrefix="pin-add-connection"
-            />
+            <label className="mb-1 flex items-center gap-2 text-xs" data-testid="pin-add-none">
+              <Checkbox checked={newPinNone} onCheckedChange={(v) => setNewPinNone(v === true)} />
+              {t("integration.admin.pinManagement.none")}
+            </label>
+            {!newPinNone && (
+              <ConnectionSetChecklist
+                connections={pinnableConnections}
+                value={newConnectionIds}
+                onChange={setNewConnectionIds}
+                idPrefix="pin-add-connection"
+              />
+            )}
           </div>
           <Button
             size="sm"

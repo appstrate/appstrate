@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { client, type paths } from "../api/client";
+import { client, type components, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -14,6 +14,9 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
 import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
+import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
+
+type LaunchWarnings = components["schemas"]["LaunchWarnings"];
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -102,6 +105,7 @@ type UpdateScheduleBody =
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async (data: {
       name?: string;
@@ -114,7 +118,7 @@ export function useCreateSchedule(packageId: string) {
       version_override?: string | null;
       connection_overrides?: Record<string, string[]> | null;
       actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto> => {
+    }): Promise<ScheduleWireDto & LaunchWarnings> => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
@@ -123,12 +127,16 @@ export function useCreateSchedule(packageId: string) {
       });
       return created!;
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: (created) => {
+      invalidateSchedules(qc);
+      toastWarnings("schedule", packageId, created.warnings);
+    },
   });
 }
 
 export function useUpdateSchedule() {
   const qc = useQueryClient();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async ({
       id,
@@ -146,7 +154,7 @@ export function useUpdateSchedule() {
       version_override?: string | null;
       connection_overrides?: Record<string, string[]> | null;
       actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto> => {
+    }): Promise<ScheduleWireDto & LaunchWarnings> => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         // Spec body types `input` as a bare object.
@@ -154,7 +162,10 @@ export function useUpdateSchedule() {
       });
       return updated!;
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: (updated) => {
+      invalidateSchedules(qc);
+      toastWarnings("schedule", updated.packageId, updated.warnings);
+    },
   });
 }
 

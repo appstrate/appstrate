@@ -4,13 +4,30 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 
 export type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
 
-/** Several snapshot entries can share an `integration_package_id`; the resolver's orders are kept. */
-export function groupByIntegration(used: ConnectionUsed[]): [string, ConnectionUsed[]][] {
+/**
+ * One row per integration: the connections it bound — several entries can share an
+ * `integration_package_id`, the resolver's orders are kept — then, with none, each declared
+ * integration the run started without (`unboundIds`).
+ */
+export function groupByIntegration(
+  used: ConnectionUsed[],
+  unboundIds: readonly string[] = [],
+): [string, ConnectionUsed[]][] {
   const groups = new Map<string, ConnectionUsed[]>();
   for (const c of used) {
     const bucket = groups.get(c.integration_package_id);
     if (bucket) bucket.push(c);
     else groups.set(c.integration_package_id, [c]);
   }
+  for (const id of unboundIds) if (!groups.has(id)) groups.set(id, []);
   return [...groups.entries()];
+}
+
+/**
+ * The declared integrations the run bound to no connection — its snapshot's `[]` entries, which
+ * `connections_used` (one entry per bound connection) cannot carry.
+ */
+export function unboundIntegrationIds(run: EnrichedRun): string[] {
+  const ids: unknown = (run as { integrations_unbound?: unknown }).integrations_unbound;
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
 }

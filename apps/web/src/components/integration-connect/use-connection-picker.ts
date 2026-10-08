@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import {
   invalidateIntegrationQueries,
   useIntegrationAgentResolution,
-  useIntegrationRunBlocking,
+  useIntegrationReadinessEntry,
   useReadIntegrationResolution,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
@@ -26,6 +26,7 @@ import {
 import {
   canApplyConnectionSet,
   checkedConnectionIds,
+  type ConnectionSet,
   displayedConnectionIds,
   placeCreatedConnection,
   toggleCapped,
@@ -42,7 +43,10 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `pin`      — writes a member `integration_pin` (agent page), the
  *                 agent-wide default for this member across every run.
  *  - `override` — controlled form value (schedule editor, per-run modal);
- *                 nothing is persisted until the form is. Empty = inherit.
+ *                 nothing is persisted until the form is. `null` = inherit.
+ *
+ * In both, `[]` is "no connection": offered only for an integration the agent does not
+ * require, it wins the cascade and the run starts without the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
@@ -52,7 +56,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
  */
 export type ConnectionPickerPersistence =
   | { mode: "pin" }
-  | { mode: "override"; value: string[]; onChange: (connectionIds: string[]) => void };
+  | { mode: "override"; value: ConnectionSet; onChange: (connectionIds: ConnectionSet) => void };
 
 export interface ConnectionPickerOptions {
   integrationId: string;
@@ -105,9 +109,11 @@ export function useConnectionPicker(
     agentPackageId,
     version,
   );
-  // Authoritative run-blocking flag for this integration (run semantics) — same
-  // bulk query as the launch badge, selected per-integration.
-  const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
+  // Run semantics (`run_blocking`) and the agent's `required` flag — same bulk query as the
+  // launch badge, selected per-integration.
+  const { data: entry } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
+  const runBlocking = entry?.run_blocking ?? false;
+  const required = entry?.required ?? false;
   const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
@@ -167,7 +173,8 @@ export function useConnectionPicker(
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const pickedNone = explicitIds?.length === 0;
   const boundIds = displayedConnectionIds({
     overrideMode,
     explicitIds,
@@ -175,8 +182,8 @@ export function useConnectionPicker(
   });
   // The set in play, named whole: the actor's own pick, else (pin mode) a soft
   // space default — a member of either that is no candidate blocks the run.
-  const fromDefault = !overrideMode && explicitIds.length === 0 && softDefaultIds.length > 0;
-  const storedIds = fromDefault ? softDefaultIds : explicitIds;
+  const fromDefault = !overrideMode && explicitIds === null && softDefaultIds.length > 0;
+  const storedIds = fromDefault ? softDefaultIds : (explicitIds ?? []);
   const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
   const dirty = draft !== null;
   const checkedIds = checkedConnectionIds({
@@ -201,12 +208,12 @@ export function useConnectionPicker(
   const busy = upsertPin.isPending || deletePin.isPending;
   const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !busy;
 
-  // An empty set clears the pick. False = refused; the mutation already toasted why.
-  const persist = async (connectionIds: string[]): Promise<boolean> => {
+  // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
+  const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
     if (overrideMode) persistence.onChange(connectionIds);
     else {
       try {
-        if (connectionIds.length > 0) {
+        if (connectionIds !== null) {
           await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
         } else {
           await deletePin.mutateAsync({ agentPackageId, integrationId });
@@ -285,6 +292,7 @@ export function useConnectionPicker(
   return {
     // Verdict
     runBlocking,
+    required,
     candidates,
     candidateIds,
     resolvedConnectionIds,
@@ -304,6 +312,9 @@ export function useConnectionPicker(
     hasCandidates,
     // Sets
     explicitIds,
+    pickedNone,
+    // "No connection" is a choice only where the run may start without the integration.
+    canPickNone: !required,
     fromDefault,
     storedIds,
     unavailableIds,

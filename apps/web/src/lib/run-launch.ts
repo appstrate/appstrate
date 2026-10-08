@@ -90,9 +90,10 @@ const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_un
  * recovery modal's picks. Everything else the user chose rides along — the
  * input typed in the run modal above all (#1539). The launch's own pick for an
  * integration is dropped only when the 409 refuses that pick itself
- * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
- * of it). Under any other code — a connection to repair, above all — the pick
- * is kept: dropping it could let the retry bind another account.
+ * (`OWN_PICK_REFUSALS`, `auth_serves_no_selected_tool` naming a connection
+ * of it, or `required_integration_unbound` over its "no connection"). Under any
+ * other code — a connection to repair, above all — the pick is kept: dropping it
+ * could let the retry bind another account.
  */
 export function retryLaunch(
   launch: RunLaunch,
@@ -107,7 +108,8 @@ export function retryLaunch(
         OWN_PICK_REFUSALS.has(e.code) ||
         (e.code === "auth_serves_no_selected_tool" &&
           e.connection_id !== undefined &&
-          (own[id] ?? []).includes(e.connection_id));
+          (own[id] ?? []).includes(e.connection_id)) ||
+        (e.code === "required_integration_unbound" && own[id]?.length === 0);
       return refusesPick ? [id] : [];
     }),
   );

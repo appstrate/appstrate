@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAgentConnectionReadiness } from "./use-integrations";
+import { integrationRunState } from "../components/integration-connect/integration-run-readiness";
 
 interface AgentIntegrationsReadiness {
   /** True while the readiness verdict is still loading. */
@@ -27,12 +28,16 @@ interface AgentIntegrationsReadiness {
  * the Connexions tab for a switch that lives elsewhere. Integration entries
  * carry their own `run_blocking` flag, so the count and the verdict come from
  * the same place; inactivity is said by the page's own banner.
+ *
+ * An integration the agent does not require and nothing binds is `unbound`, not blocking: the
+ * run starts without it, so it never lights the badge.
  */
 export function useAgentIntegrationsReadiness(
   agentPackageId: string | undefined,
 ): AgentIntegrationsReadiness {
   const { data, isLoading } = useAgentConnectionReadiness(agentPackageId);
-  const blockingCount = data?.integrations.filter((i) => i.run_blocking).length ?? 0;
+  const blockingCount =
+    data?.integrations.filter((i) => integrationRunState(i) === "blocked").length ?? 0;
   // `ready` stays true until data lands so the badge doesn't flash on load.
   return { loading: isLoading, blockingCount, ready: data ? blockingCount === 0 : true };
 }

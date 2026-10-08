@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Users, Check, Plus, ChevronDown, RefreshCw, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  Users,
+  Check,
+  Plus,
+  ChevronDown,
+  RefreshCw,
+  Settings,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -44,6 +53,8 @@ export function PickerMenu({
     authKeys,
     hasCandidates,
     explicitIds,
+    pickedNone,
+    canPickNone,
     storedIds,
     unavailableIds,
     checkedIds,
@@ -71,22 +82,30 @@ export function PickerMenu({
   const triggerLabel =
     unavailableIds.length > 0
       ? setLabel(storedIds, unavailableIds)
-      : displayConns.length === 1
-        ? displayConns[0]!.label
-        : displayConns.length > 1
-          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
-          : overrideMode
-            ? t("detail.integrationMemberPicker.inherit")
-            : emptyPickerPrompt === "choose"
-              ? t("detail.integrationMemberPicker.chooseLabel")
-              : t("detail.integrationMemberPicker.connectLabel");
+      : pickedNone
+        ? t("detail.integrationMemberPicker.none")
+        : displayConns.length === 1
+          ? displayConns[0]!.label
+          : displayConns.length > 1
+            ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
+            : overrideMode
+              ? t("detail.integrationMemberPicker.inherit")
+              : emptyPickerPrompt === "choose"
+                ? t("detail.integrationMemberPicker.chooseLabel")
+                : t("detail.integrationMemberPicker.connectLabel");
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
+  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set warns.
   const triggerWarn = overrideMode
     ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
-    : (runBlocking ?? false);
-  const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
+    : runBlocking;
+  const TriggerIcon = triggerWarn
+    ? AlertTriangle
+    : pickedNone
+      ? Ban
+      : displayConns.length > 0
+        ? Users
+        : Plus;
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -115,7 +134,7 @@ export function PickerMenu({
           const tl = typeLabel(c.auth_key);
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
-            explicitIds.length === 0 &&
+            explicitIds === null &&
             (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
@@ -250,10 +269,25 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
-        {explicitIds.length > 0 && (
+        {canPickNone && (
+          <DropdownMenuItem
+            disabled={busy || pickedNone}
+            onSelect={() => void persist([])}
+            data-testid={`member-pick-none-${integrationId}`}
+          >
+            <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
+            <div className="flex min-w-0 flex-col">
+              <span>{t("detail.integrationMemberPicker.none")}</span>
+              <span className="text-muted-foreground text-[0.65rem]">
+                {t("detail.integrationMemberPicker.noneHint")}
+              </span>
+            </div>
+          </DropdownMenuItem>
+        )}
+        {explicitIds !== null && (
           <DropdownMenuItem
             disabled={busy}
-            onSelect={() => void persist([])}
+            onSelect={() => void persist(null)}
             data-testid={`member-pick-reset-${integrationId}`}
           >
             <Check className="size-3.5 opacity-0" />

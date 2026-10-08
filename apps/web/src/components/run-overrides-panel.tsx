@@ -18,7 +18,7 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { withConnectionOverride } from "../lib/connection-set";
+import { withConnectionOverride, type ConnectionSet } from "../lib/connection-set";
 import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
@@ -288,7 +288,7 @@ export function RunOverridesPanel({
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, "inherit" clears the key. The pick freezes
+ * `connection_overrides` map, "no connection" writes `[]`, "inherit" clears the key. The pick freezes
  * into the schedule row on save (the launch override — below admin pins, above member pins).
  *
  * Identical UX to the agent page's connection picker — same candidate
@@ -306,7 +306,7 @@ function ScheduleConnectionOverridesSection({
   integrations: AgentIntegrationRef[];
   version?: string;
   value: Record<string, string[]>;
-  onChange: (integrationId: string, connectionIds: string[]) => void;
+  onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   return (
@@ -320,7 +320,7 @@ function ScheduleConnectionOverridesSection({
             agentPackageId={agentPackageId}
             integration={integ}
             version={version}
-            value={value[integ.id] ?? []}
+            value={value[integ.id] ?? null}
             onChange={(connIds) => onChange(integ.id, connIds)}
           />
         ))}
@@ -339,9 +339,9 @@ function IntegrationOverrideRow({
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
-  /** Currently-picked connection set; empty = inherit. */
-  value: string[];
-  onChange: (next: string[]) => void;
+  /** Currently-picked connection set; `null` = inherit, `[]` = none. */
+  value: ConnectionSet;
+  onChange: (next: ConnectionSet) => void;
 }) {
   const { data: detail } = useIntegrationDetail(integration.id);
   const displayName = detail?.manifest.display_name ?? integration.id;

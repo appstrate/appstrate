@@ -23,7 +23,7 @@ import { InfoCard } from "./run-info-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { inlineRunDisplayName } from "../lib/run-title";
-import { groupByIntegration } from "../lib/run-connections";
+import { groupByIntegration, unboundIntegrationIds } from "../lib/run-connections";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 interface RunConfigurationTabProps {
@@ -34,7 +34,7 @@ interface RunConfigurationTabProps {
 
 export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const connectionsUsed = run.connections_used ?? null;
+  const connectionRows = groupByIntegration(run.connections_used ?? [], unboundIntegrationIds(run));
   const isInline = run.package_ephemeral;
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but the agent page it would link to is gone.
@@ -81,29 +81,39 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
       </div>
 
       {/* Connexions — connections resolved for this run, denormalized at
-          kickoff so the panel survives a connection rename/deletion. */}
-      {connectionsUsed && connectionsUsed.length > 0 && (
+          kickoff so the panel survives a connection rename/deletion, and the
+          declared integrations the run started without. */}
+      {connectionRows.length > 0 && (
         <SectionCard title={t("run.infoConnections")}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {/* One card per integration, listing every connection it bound. */}
-            {groupByIntegration(connectionsUsed).map(([integrationId, bound]) => (
+            {connectionRows.map(([integrationId, bound]) => (
               <InfoCard
                 key={integrationId}
                 label={integrationId}
                 value={
-                  <span className="flex flex-col gap-1.5">
-                    {bound.map((c, i) => (
-                      <span key={`${c.label}-${i}`} className="flex flex-col">
-                        <span className="flex items-center gap-1.5">
-                          <span>{c.label}</span>
-                          <Badge variant="secondary" className="text-[0.6rem]">
-                            {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
-                          </Badge>
+                  bound.length === 0 ? (
+                    <span
+                      className="text-muted-foreground"
+                      data-testid={`run-integration-unbound-${integrationId}`}
+                    >
+                      {t("run.integrationUnbound")}
+                    </span>
+                  ) : (
+                    <span className="flex flex-col gap-1.5">
+                      {bound.map((c, i) => (
+                        <span key={`${c.label}-${i}`} className="flex flex-col">
+                          <span className="flex items-center gap-1.5">
+                            <span>{c.label}</span>
+                            <Badge variant="secondary" className="text-[0.6rem]">
+                              {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
+                            </Badge>
+                          </span>
+                          <span className="text-muted-foreground text-xs">{c.account_id}</span>
                         </span>
-                        <span className="text-muted-foreground text-xs">{c.account_id}</span>
-                      </span>
-                    ))}
-                  </span>
+                      ))}
+                    </span>
+                  )
                 }
               />
             ))}

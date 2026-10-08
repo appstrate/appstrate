@@ -92,10 +92,13 @@ describe("pendingConnectionChoices", () => {
   });
 
   it("brings it back when the pick is undone", () => {
-    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual([
-      "@acme/gmail",
-      "@acme/notion",
-    ]);
+    // Undoing a pick removes the key: back to what the refused save sent.
+    expect(ids({ "@acme/notion": ["gone"] })).toEqual(["@acme/gmail", "@acme/notion"]);
+  });
+
+  it("takes 'no connection' as an answer — `[]` is not the absent pick the save sent", () => {
+    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual(["@acme/notion"]);
+    expect(ids({ "@acme/gmail": ["c1"], "@acme/notion": [] })).toEqual([]);
   });
 });
 

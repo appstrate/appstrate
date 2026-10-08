@@ -60,17 +60,20 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
 }
 
 /**
- * The refused integrations whose current set is still the one the refused save sent. Derived,
- * so a mark clears as soon as the user picks — and comes back if they undo it.
+ * The refused integrations whose current set is still the one the refused save sent — no pick
+ * and "no connection" (`[]`) are different answers. Derived, so a mark clears as soon as the
+ * user picks — and comes back if they undo it.
  */
 export function pendingConnectionChoices(
   choices: readonly ConnectionChoice[],
   submitted: Readonly<Record<string, string[]>> | null | undefined,
   current: Readonly<Record<string, string[]>> | null | undefined,
 ): ConnectionChoice[] {
-  return choices.filter((c) =>
-    sameSet(submitted?.[c.integrationId] ?? [], current?.[c.integrationId] ?? []),
-  );
+  return choices.filter((c) => {
+    const sent = submitted?.[c.integrationId];
+    const now = current?.[c.integrationId];
+    return sent === undefined || now === undefined ? sent === now : sameSet(sent, now);
+  });
 }
 
 /** What a schedule save was sent with — what its refusal, if any, speaks for. */

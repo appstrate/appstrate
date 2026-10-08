@@ -262,11 +262,11 @@ export function useReadIntegrationResolution(
 }
 
 /**
- * Whether a given integration would block the next run (run semantics — inert
- * optional integrations are NOT blocking, inert required ones ARE). Selected
- * from the same bulk readiness query the picker uses.
+ * One declared integration's whole readiness entry — the resolution plus the run-semantics
+ * `run_blocking` flag (inert optional integrations do not block, inert required ones do) and the
+ * agent's `required` flag. Selected from the same bulk query the picker uses.
  */
-export function useIntegrationRunBlocking(
+export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
   version?: string,
@@ -276,8 +276,7 @@ export function useIntegrationRunBlocking(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_package_id === integrationId)?.run_blocking ??
-      false,
+      data.integrations.find((i) => i.integration_package_id === integrationId) ?? null,
   });
 }
 

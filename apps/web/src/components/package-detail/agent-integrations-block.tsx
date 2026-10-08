@@ -3,10 +3,11 @@
 import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
 import {
   useIntegrations,
   useIntegrationDetail,
-  useIntegrationAgentResolution,
+  useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationAuthStatus,
@@ -18,7 +19,10 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { describeResolution } from "../integration-connect/integration-run-readiness";
+import {
+  describeResolution,
+  integrationRunState,
+} from "../integration-connect/integration-run-readiness";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -45,6 +49,8 @@ interface AgentIntegrationsBlockProps {
  * agent selected tools/scopes: connection management applies even to an inert
  * integration. Whether an integration BLOCKS the run (run semantics) is the
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
+ * One the agent does not require and nothing binds is said neutrally — the run
+ * starts without it — while a required one keeps the picker's blocking warning.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (placed here and switched on). An agent can
@@ -194,7 +200,8 @@ function ManagedIntegrationCard({
   agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
+  const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
+  const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
   // R5 — reuse hint: the resolved connections are shared across every agent in
@@ -209,9 +216,25 @@ function ManagedIntegrationCard({
     resolution && describeResolution(resolution).resolved
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
+  const unbound = !!entry && integrationRunState(entry) === "unbound";
 
   return (
-    <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
+    <CardShell
+      title={displayName}
+      subtitle={packageId}
+      extraSubtitle={unbound ? t("detail.integrationUnbound") : reuseInfo}
+      badge={
+        entry?.required ? (
+          <Badge
+            variant="secondary"
+            className="text-[0.6rem]"
+            data-testid={`integration-required-${packageId}`}
+          >
+            {t("detail.integrationRequiredBadge")}
+          </Badge>
+        ) : null
+      }
+    >
       <IntegrationConnectionPicker
         integrationId={packageId}
         agentPackageId={agentPackageId}
@@ -241,6 +264,7 @@ function buildReuseInfo(
 function CardShell({
   icon,
   title,
+  badge,
   subtitle,
   extraSubtitle,
   children,
@@ -248,6 +272,8 @@ function CardShell({
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
   icon?: React.ReactNode;
   title: string;
+  /** Optional badge after the title (e.g. "Requise"). */
+  badge?: React.ReactNode;
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
   extraSubtitle?: string | null;
@@ -258,7 +284,10 @@ function CardShell({
       <div className="flex min-w-0 items-center gap-2">
         <Puzzle className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{title}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{title}</span>
+            {badge}
+          </div>
           <div className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
             {icon}
             <span className="truncate font-mono">{subtitle}</span>

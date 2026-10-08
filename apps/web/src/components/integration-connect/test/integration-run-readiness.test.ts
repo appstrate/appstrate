@@ -4,12 +4,13 @@
  * Unit tests for `describeResolution` — the one reading of the server verdict
  * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
  * recovery modal and the agent's integrations block share. This is where the
- * mapping from the resolver's codes to what the UI shows is pinned.
+ * mapping from the resolver's codes to what the UI shows is pinned — and
+ * `integrationRunState`, what a run does with each declared integration.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { describeResolution } from "../integration-run-readiness";
+import { describeResolution, integrationRunState } from "../integration-run-readiness";
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
@@ -17,8 +18,8 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     error_code: null,
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
-    admin_pinned_connection_ids: [],
-    member_pinned_connection_ids: [],
+    admin_pinned_connection_ids: null,
+    member_pinned_connection_ids: null,
     org_default_connection_ids: [],
     org_default_enforced: false,
     can_add_connection: true,
@@ -62,6 +63,18 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
       }),
     );
     expect(view.lockedConnectionIds).toEqual(["a"]);
+  });
+
+  it("an admin pin to none locks too — to nothing, over an enforced default", () => {
+    const view = describeResolution(
+      resolution({
+        admin_pinned_connection_ids: [],
+        org_default_connection_ids: ["d"],
+        org_default_enforced: true,
+      }),
+    );
+    expect(view.lockedBy).toBe("admin_pin");
+    expect(view.lockedConnectionIds).toEqual([]);
   });
 
   it("a soft org default does not lock", () => {
@@ -151,5 +164,41 @@ describe("describeResolution — empty picker prompt", () => {
     for (const [error_code, prompt] of cases) {
       expect(describeResolution(resolution({ error_code })).emptyPickerPrompt).toBe(prompt);
     }
+  });
+});
+
+describe("integrationRunState", () => {
+  const entry = (run_blocking: boolean, over: Partial<IntegrationAgentResolution>) => ({
+    run_blocking,
+    resolution: resolution(over),
+  });
+
+  it("is bound while a set binds with no error", () => {
+    expect(integrationRunState(entry(false, {}))).toBe("bound");
+  });
+
+  it("is unbound when nothing binds and nothing refuses — the run starts without it", () => {
+    // Control: the same empty verdict on a required integration is a refusal.
+    const empty = { source: null, error_code: null, resolved_connection_ids: [] };
+    expect(integrationRunState(entry(false, empty))).toBe("unbound");
+    expect(integrationRunState(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
+      "unbound",
+    );
+    expect(
+      integrationRunState(entry(true, { ...empty, error_code: "required_integration_unbound" })),
+    ).toBe("blocked");
+  });
+
+  it("is blocked whenever the server says the run is refused over it", () => {
+    expect(integrationRunState(entry(true, { error_code: "not_connected" }))).toBe("blocked");
+    expect(integrationRunState(entry(true, { resolved_connection_ids: [] }))).toBe("blocked");
+  });
+
+  it("is unbound for an inert integration's error too: it does not block, nothing binds", () => {
+    expect(
+      integrationRunState(
+        entry(false, { error_code: "must_choose_connection", resolved_connection_ids: [] }),
+      ),
+    ).toBe("unbound");
   });
 });

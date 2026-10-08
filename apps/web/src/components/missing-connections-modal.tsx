@@ -12,7 +12,7 @@ import { describeResolution } from "./integration-connect/integration-run-readin
 import { useIntegrationDetail, useIntegrationAgentResolution } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import { integrationIdOfField, type MissingIntegrationFieldError } from "../lib/connection-choice";
-import { withConnectionPick } from "../lib/connection-set";
+import { withConnectionPick, type ConnectionSet } from "../lib/connection-set";
 import { refusalMessage } from "../lib/mutation-error";
 
 /** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
@@ -66,18 +66,19 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // A must_choose row waits for a pick; the others re-run freely (a fresh 409 reopens this).
+  // A must_choose row waits for a pick — "no connection" is one, where offered; the others
+  // re-run freely (a fresh 409 reopens this).
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
-  const allMustChosen = mustChooseIds.every((id) => (picks[id]?.length ?? 0) > 0);
+  const allMustChosen = mustChooseIds.every((id) => picks[id] !== undefined);
 
   const hasActionable = integrationErrors.some((e) => !isStructuralCode(e.code));
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // An empty pick drops the key: the re-run falls back to the cascade.
-  const setPick = (integrationId: string, connectionIds: string[]) =>
+  // A cleared pick drops the key: the re-run falls back to the cascade.
+  const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
 
   return (
@@ -116,7 +117,7 @@ export function MissingConnectionsModal({
             err={err}
             agentPackageId={agentPackageId}
             integrationEntries={integrationEntries}
-            pick={picks[integrationIdOfField(err.field)] ?? []}
+            pick={picks[integrationIdOfField(err.field)] ?? null}
             onPick={setPick}
           />
         ))}
@@ -135,9 +136,9 @@ function MissingRow({
   err: MissingIntegrationFieldError;
   agentPackageId?: string;
   integrationEntries?: AgentIntegrationEntry[];
-  /** Current per-run pick set for this integration; empty = no override. */
-  pick: string[];
-  onPick: (integrationId: string, connectionIds: string[]) => void;
+  /** Current per-run pick set for this integration; `null` = no override. */
+  pick: ConnectionSet;
+  onPick: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);

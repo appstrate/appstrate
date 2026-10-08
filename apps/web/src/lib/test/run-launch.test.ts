@@ -190,6 +190,31 @@ describe("retryLaunch", () => {
     ).toEqual(connectionOverrides);
   });
 
+  it("drops the launch's own 'no connection' for an integration the agent requires", () => {
+    const connectionOverrides = { "@acme/crm": [], "@acme/mail": [] };
+    const refused = [
+      {
+        field: "integrations.@acme/crm",
+        code: "required_integration_unbound",
+        message: "required",
+      },
+    ];
+    // Control: the same code over a pin to none (no own pick there) leaves the picks alone.
+    expect(retryLaunch({ connectionOverrides }, {}, refused).connectionOverrides).toEqual({
+      "@acme/mail": [],
+    });
+    expect(
+      retryLaunch({ connectionOverrides: { "@acme/crm": ["conn_1"] } }, {}, refused)
+        .connectionOverrides,
+    ).toEqual({ "@acme/crm": ["conn_1"] });
+  });
+
+  it("carries a recovery pick of 'no connection' as `[]`", () => {
+    expect(retryLaunch({}, { "@acme/crm": [] }, []).connectionOverrides).toEqual({
+      "@acme/crm": [],
+    });
+  });
+
   it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
     // The launcher keeps each retried launch, so the next retry starts from it.
     const first = retryLaunch(
@@ -211,6 +236,12 @@ describe("launchFromOptions", () => {
 
   it("sends only the version when nothing was set, like plain Lancer", () => {
     expect(launchFromOptions(untouched)).toEqual({ version: "draft" });
+  });
+
+  it("sends an override of 'no connection' as an empty set", () => {
+    expect(
+      launchFromOptions({ ...untouched, overrides: { connection_overrides: { "@acme/crm": [] } } }),
+    ).toEqual({ version: "draft", connectionOverrides: { "@acme/crm": [] } });
   });
 
   it("maps every set option onto its launch field", () => {

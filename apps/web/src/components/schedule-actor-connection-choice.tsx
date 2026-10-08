@@ -6,7 +6,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import type { ConnectionChoice } from "../lib/connection-choice";
-import { toggleCapped } from "../lib/connection-set";
+import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
 
 /**
@@ -15,7 +15,8 @@ import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
  * control instead — only connections the viewer reaches too, so the list can be empty: the
  * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
  * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable.
+ * read-only, each integration's clearable. Unticking the last connection clears the pick: "no
+ * connection" is chosen from the viewer's own pickers, never left behind by an untick.
  */
 export function ScheduleActorConnectionChoice({
   choices,
@@ -25,7 +26,7 @@ export function ScheduleActorConnectionChoice({
   /** What the last save was refused over — kept on screen while it is answered. */
   choices: readonly ConnectionChoice[];
   value: Readonly<Record<string, string[]>>;
-  onChange: (integrationId: string, connectionIds: string[]) => void;
+  onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const storedOnly = Object.keys(value).filter(
@@ -57,9 +58,10 @@ export function ScheduleActorConnectionChoice({
                     checked={isPicked}
                     // A dead connection fails the fire it is picked for; unticking stays open.
                     disabled={(c.needs_reconnection || atCap) && !isPicked}
-                    onCheckedChange={() =>
-                      onChange(choice.integrationId, toggleCapped(picked, c.id))
-                    }
+                    onCheckedChange={() => {
+                      const next = toggleCapped(picked, c.id);
+                      onChange(choice.integrationId, next.length > 0 ? next : null);
+                    }}
                   />
                   <Label htmlFor={id} className="font-normal">
                     {c.label}
@@ -90,7 +92,7 @@ export function ScheduleActorConnectionChoice({
             {/* No candidates travel with an unreachable pick: clearing it lets
                 the next save resolve again, and ask again if it must. */}
             {choice.candidates.length === 0 && picked.length > 0 && (
-              <ClearChoiceButton onClick={() => onChange(choice.integrationId, [])} />
+              <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
             )}
           </div>
         );
@@ -100,7 +102,7 @@ export function ScheduleActorConnectionChoice({
           key={integrationId}
           integrationId={integrationId}
           connectionIds={value[integrationId] ?? []}
-          onClear={() => onChange(integrationId, [])}
+          onClear={() => onChange(integrationId, null)}
         />
       ))}
     </div>
@@ -128,7 +130,11 @@ function StoredChoice({
       data-testid={`schedule-actor-stored-${integrationId}`}
     >
       <div className="font-mono text-xs font-medium">{integrationId}</div>
-      <p className="text-xs">{connectionIds.map(labelOf).join(" · ")}</p>
+      <p className="text-xs">
+        {connectionIds.length > 0
+          ? connectionIds.map(labelOf).join(" · ")
+          : t("detail.integrationMemberPicker.none")}
+      </p>
       <ClearChoiceButton onClick={onClear} />
     </div>
   );

@@ -21,6 +21,7 @@ import {
 import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
+import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
 // NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -52,6 +53,7 @@ export function useSaveInputSettings(packageId: string) {
 function useRunAgent(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async (params?: RunLaunch) => {
       const {
@@ -92,13 +94,14 @@ function useRunAgent(packageId: string) {
         },
       });
       // 201 + the bare created Run resource (same shape as GET /runs/:id) —
-      // the legacy `runId` alias was removed (#657).
+      // the legacy `runId` alias was removed (#657) — plus the launch's `warnings`.
       return data!;
     },
     onSuccess: (data) => {
       // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
+      toastWarnings("run", packageId, data.warnings);
     },
   });
 }
