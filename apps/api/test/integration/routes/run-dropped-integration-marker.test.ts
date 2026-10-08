@@ -93,6 +93,25 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     expect(rows[0]!.message).toContain(INTEGRATION);
   });
 
+  it("records an `unbound` marker when a non-required integration has no connection", async () => {
+    // Absence degrades: the cascade binds `[]`, the run launches, and the
+    // spawn resolver drops the integration as unbound rather than erroring.
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+
+    const res = await launch();
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const rows = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data?.reason).toBe("unbound");
+    expect(rows[0]!.message).toContain("has no connection bound to this run");
+  });
+
   it("writes no marker when every declared integration spawns", async () => {
     // The SAME launch as above, with the referenced mcp-server actually seeded:
     // the integration resolves to a real spawn spec, so the marker must stay

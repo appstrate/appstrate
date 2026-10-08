@@ -105,6 +105,13 @@ export interface PlatformPromptOptions {
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
+  /**
+   * Integrations the agent declares that this run starts without — `connection`
+   * when only that connection is missing, `reason` a short human-readable cause.
+   * Rendered so the agent reports the gap instead of inventing results.
+   */
+  unavailableIntegrations?: ReadonlyArray<{ id: string; connection?: string; reason: string }>;
+
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
   /**
@@ -316,6 +323,20 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         sections.push("");
       }
     }
+  }
+  if (opts.unavailableIntegrations && opts.unavailableIntegrations.length > 0) {
+    sections.push("## Unavailable Integrations\n");
+    sections.push(
+      "The following integrations declared by this agent are not available in this run:\n",
+    );
+    for (const entry of opts.unavailableIntegrations) {
+      const connection = entry.connection ? ` (connection '${entry.connection}')` : "";
+      sections.push(`- **${entry.id}**${connection}: ${entry.reason}`);
+    }
+    sections.push(
+      "\nNever present data or results as coming from these integrations. " +
+        "If the task needs them, report them as unavailable in this run.\n",
+    );
   }
 
   // --- User input ---

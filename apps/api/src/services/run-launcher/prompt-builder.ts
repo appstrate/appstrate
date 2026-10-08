@@ -80,19 +80,30 @@ export async function buildPlatformSystemPrompt(
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
   // at import time by `core/zip.ts`) — never re-fetched from storage.
+  // One section per integration: a multi-connection integration spawns one spec per connection.
   let integrations: PlatformPromptIntegration[] | undefined;
-  if (plan.integrations && plan.integrations.length > 0) {
-    const docs = await fetchIntegrationPromptDocs(plan.integrations.map((i) => i.integrationId));
+  const integrationIds = [...new Set(plan.integrations?.map((spec) => spec.integrationId))];
+  if (integrationIds.length > 0) {
+    const docs = await fetchIntegrationPromptDocs(integrationIds);
     const docsById = new Map(docs.map((d) => [d.packageId, d]));
-    integrations = plan.integrations.map((spec) => {
-      const found = docsById.get(spec.integrationId);
+    integrations = integrationIds.map((id) => {
+      const found = docsById.get(id);
       return {
-        id: spec.integrationId,
+        id,
         ...(found?.description ? { description: found.description } : {}),
         ...(found?.doc ? { doc: found.doc } : {}),
       };
     });
   }
+  // Absence (`unbound`) and breakage (every other reason) read differently to the agent.
+  const unavailableIntegrations = plan.droppedIntegrations?.map((entry) => ({
+    id: entry.integrationId,
+    ...(entry.connectionLabel ? { connection: entry.connectionLabel } : {}),
+    reason:
+      entry.reason === "unbound"
+        ? "no connection is bound to this run"
+        : `failed to start (${entry.reason})`,
+  }));
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
@@ -115,7 +126,8 @@ export async function buildPlatformSystemPrompt(
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,
     ...(uploads ? { uploads } : {}),
-    ...(integrations && integrations.length > 0 ? { integrations } : {}),
+    ...(integrations ? { integrations } : {}),
+    ...(unavailableIntegrations?.length ? { unavailableIntegrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),

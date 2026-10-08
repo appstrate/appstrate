@@ -349,6 +349,7 @@ export async function buildRunContext(params: {
     resources,
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
+    ...(droppedIntegrations.length > 0 ? { droppedIntegrations } : {}),
   };
 
   return {
@@ -405,15 +406,19 @@ export async function recordDroppedIntegrations(
   dropped: readonly DroppedIntegration[],
 ): Promise<void> {
   for (const entry of dropped) {
+    // `unbound` is a chosen absence, not a failure to start.
+    const cause =
+      entry.reason === "unbound"
+        ? "has no connection bound to this run"
+        : `is declared by this agent but was not started (${entry.reason})` +
+          (entry.detail ? `: ${entry.detail}` : "");
     await appendDropMarker(
       scope,
       runId,
       INTEGRATION_DROPPED_EVENT,
       `integration '${entry.integrationId}'` +
         (entry.connectionLabel ? ` (connection '${entry.connectionLabel}')` : "") +
-        ` is declared by this agent but was not started (${entry.reason})` +
-        (entry.detail ? `: ${entry.detail}` : "") +
-        " — its tools are unavailable to this run",
+        ` ${cause} — its tools are unavailable to this run`,
       {
         integrationId: entry.integrationId,
         reason: entry.reason,

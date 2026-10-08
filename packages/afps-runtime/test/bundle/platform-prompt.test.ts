@@ -269,6 +269,31 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("### API Documentation");
   });
 
+  it("lists unavailable integrations with their reason and forbids claiming results from them", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      unavailableIntegrations: [
+        { id: "@org/gmail", reason: "no connection is bound to this run" },
+        { id: "@org/drive", connection: "work", reason: "failed to start (no_delivery)" },
+      ],
+    });
+    expect(out).toContain("## Unavailable Integrations");
+    expect(out).toContain("- **@org/gmail**: no connection is bound to this run");
+    expect(out).toContain("- **@org/drive** (connection 'work'): failed to start (no_delivery)");
+    expect(out).toContain("Never present data or results as coming from these integrations.");
+    expect(out).not.toContain("## Integration: @org/gmail");
+  });
+
+  it("omits the Unavailable Integrations section when nothing is unavailable", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      unavailableIntegrations: [],
+    });
+    expect(out).not.toContain("## Unavailable Integrations");
+  });
+
   it("omits every integration section when none are passed in", () => {
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("## Integration:");

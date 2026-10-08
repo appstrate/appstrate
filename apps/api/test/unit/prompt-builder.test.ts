@@ -113,6 +113,7 @@ interface PromptContext {
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
   resources?: AppstrateRunPlan["resources"];
+  droppedIntegrations?: AppstrateRunPlan["droppedIntegrations"];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -149,6 +150,7 @@ function splitLegacy(ctx: PromptContext): {
     timeout: ctx.timeout ?? 0,
     resources: ctx.resources ?? defaultTestAgentResources(),
     files: ctx.files,
+    ...(ctx.droppedIntegrations ? { droppedIntegrations: ctx.droppedIntegrations } : {}),
   };
   return { context, plan };
 }
@@ -408,6 +410,32 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Research procedure");
     expect(prompt).not.toContain("Step 1: gather sources.");
+  });
+});
+
+// ─── Unavailable integrations ──────────────────────────────
+
+describe("buildEnrichedPrompt — unavailable integrations", () => {
+  it("names every dropped integration, telling absence apart from breakage", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        droppedIntegrations: [
+          { integrationId: "@org/gmail", reason: "unbound" },
+          { integrationId: "@org/ssh", reason: "no_delivery", connectionLabel: "db" },
+          { integrationId: "@org/drive", reason: "not_active" },
+        ],
+      }),
+    );
+    expect(prompt).toContain("## Unavailable Integrations");
+    expect(prompt).toContain("- **@org/gmail**: no connection is bound to this run");
+    expect(prompt).toContain("- **@org/ssh** (connection 'db'): failed to start (no_delivery)");
+    expect(prompt).toContain("- **@org/drive**: failed to start (not_active)");
+    expect(prompt).toContain("report them as unavailable in this run");
+  });
+
+  it("renders no such section when nothing was dropped", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext({ droppedIntegrations: [] }));
+    expect(prompt).not.toContain("## Unavailable Integrations");
   });
 });
 

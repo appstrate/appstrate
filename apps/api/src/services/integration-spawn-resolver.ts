@@ -130,6 +130,7 @@ export type IntegrationDropReason =
   | "mcp_server_not_runnable"
   | "no_delivery"
   | "bound_set_incomplete"
+  | "unbound"
   | "resolve_error";
 
 /** One declared integration the run will start WITHOUT, plus why. */
@@ -378,6 +379,10 @@ async function resolveOne(
   // come from each api_call auth. Each api_call belongs to ONE auth: a spec
   // keeps only its connection's (below).
   const wildcardSelection = isToolsWildcard(effectiveSelection);
+  const exposesTools = wildcardSelection || !!effectiveSelection?.length;
+  // `[]` is the cascade binding none on purpose: the run starts without it, and
+  // nothing past this point (server resolution, credentials) is needed.
+  if (exposesTools && boundConnections?.length === 0) return drop("unbound");
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
     (cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -549,7 +554,7 @@ async function resolveOne(
 
   if (!boundConnections?.length) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
-    if (!wildcardSelection && !effectiveSelection?.length) return { specs: [], drops: [] };
+    if (!exposesTools) return { specs: [], drops: [] };
     throw new Error(
       `integration '${integrationId}' exposes tools but the run's connection snapshot binds no connection to it`,
     );
