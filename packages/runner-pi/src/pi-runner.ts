@@ -38,7 +38,7 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
-import { addRequestUsage, DEFAULT_CONTEXT_WINDOW, type PiTokenCounts } from "./pi-model.ts";
+import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -1435,15 +1435,9 @@ export function installSessionBridge(
    * never recomputed; the bands let the platform's recompute land on the same sum.
    */
   const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
-    const request: PiTokenCounts = {
-      input: usage.input ?? 0,
-      output: usage.output ?? 0,
-      cacheRead: usage.cacheRead ?? 0,
-      cacheWrite: usage.cacheWrite ?? 0,
-    };
-    totalUsage = addRequestUsage(totalUsage, request, options.cost);
+    totalUsage = addRequestUsage(totalUsage, usage, options.cost);
     totalCost += usage.cost?.total ?? 0;
-    return { inputDelta: request.input, outputDelta: request.output };
+    return { inputDelta: usage.input ?? 0, outputDelta: usage.output ?? 0 };
   };
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,

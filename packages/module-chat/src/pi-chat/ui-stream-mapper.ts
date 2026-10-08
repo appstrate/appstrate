@@ -311,7 +311,7 @@ export class PiChatUiStreamMapper {
   private captureMessageEnd(message: unknown): void {
     const m = assistantView(message);
     if (!m) return;
-    if (m.usage) this.addUsage(m.usage);
+    if (m.usage) this.accUsage = addRequestUsage(this.accUsage, m.usage, this.cost);
     this.finishReason = mapStopReason(m.stopReason);
     // A model call that SETTLED retires the previous failure. Pi retries inside
     // one turn, so an early 503 the next call recovered from is no longer this
@@ -345,16 +345,6 @@ export class PiChatUiStreamMapper {
     if (!m?.errorMessage || m.stopReason !== "error") return;
     this.finishReason = "error";
     this.lastError = m.errorMessage;
-  }
-
-  private addUsage(u: PiUsage): void {
-    const request = {
-      input: u.input ?? 0,
-      output: u.output ?? 0,
-      cacheRead: u.cacheRead ?? 0,
-      cacheWrite: u.cacheWrite ?? 0,
-    };
-    this.accUsage = addRequestUsage(this.accUsage, request, this.cost);
   }
 
   /** Model calls completed so far in this turn (see {@link modelCalls}). */

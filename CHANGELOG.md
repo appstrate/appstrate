@@ -27,6 +27,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint: unless the token response names the account, connections to
   different Expo accounts share one account key and a reconnect is unchecked.
 
+### Changed
+
+- **A subscription run or chat turn prices each model call at its price tier**
+  (#1552). The runner's cumulative usage and a subscription chat turn's usage
+  now carry per-tier token bands (`token_usage.tiers`, documented in OpenAPI),
+  and the `runner` / chat ledger rows price each band at its tier instead of
+  the whole sum at the base rate. The agent container keeps the `MODEL_COST`
+  tiers, so its reported cost still matches the server's. A subscription
+  provider is therefore offered tiered models too: Claude Haiku 5.5 becomes
+  selectable on `claude-code`, and `verify:system-models` no longer fails on a
+  reachable subscription price tier.
+
 ### Fixed
 
 - **`appstrate api` no longer cuts a response piped into a slower reader**

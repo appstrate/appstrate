@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls, so the platform prices each call at its tier instead of the base
   rate. (#1552)
 
+### Changed
+
+- **Requires `@appstrate/afps-shared` `^0.12.1`** (was `^0.12.0`): the
+  `tiers` validation above is its `isTokenUsageTiers`. (#1552)
+
 ## [15.0.0] — 2026-10-08
 
 ### Added

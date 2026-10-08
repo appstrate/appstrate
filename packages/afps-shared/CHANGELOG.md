@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-10-08
+
 ### Added
 
 - **`TokenUsage.tiers`** (`./token-usage`) and **`TokenUsageTier`**: usage

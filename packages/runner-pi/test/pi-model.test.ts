@@ -384,6 +384,24 @@ describe("addRequestUsage + usageCostUsd", () => {
     expect(first).toEqual(snapshot);
   });
 
+  it("counts a bucket Pi's usage omits as 0", () => {
+    expect(addRequestUsage({}, { input: 150_000, output: 10 }, ONE_TIER)).toEqual({
+      input_tokens: 150_000,
+      output_tokens: 10,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      tiers: [
+        {
+          input_tokens_above: 100_000,
+          input_tokens: 150_000,
+          output_tokens: 10,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      ],
+    });
+  });
+
   it("never emits tiers for a card without any, or without a card", () => {
     const flat = { input: 1, output: 5 };
     for (const cost of [flat, null, undefined]) {

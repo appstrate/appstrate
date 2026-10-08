@@ -171,13 +171,20 @@ function addCounts(
 /**
  * `total` with one more request added: the totals, and the band of the tier
  * the request is priced at (`TokenUsage.tiers`) so {@link usageCostUsd} can
- * price the sum exactly. Inputs are not mutated.
+ * price the sum exactly. `usage` is Pi's per-message usage, an absent bucket
+ * counting 0. Inputs are not mutated.
  */
 export function addRequestUsage(
   total: TokenUsage,
-  request: PiTokenCounts,
+  usage: Partial<PiTokenCounts>,
   cost: ModelCost | null | undefined,
 ): TokenUsage {
+  const request: PiTokenCounts = {
+    input: usage.input ?? 0,
+    output: usage.output ?? 0,
+    cacheRead: usage.cacheRead ?? 0,
+    cacheWrite: usage.cacheWrite ?? 0,
+  };
   const next: TokenUsage = { ...total, ...addCounts(total, request) };
   const threshold = cost ? pricedTierThreshold(cost, request) : null;
   if (threshold === null) return next;
