@@ -25,7 +25,9 @@
  */
 
 import type { UIMessageChunk } from "ai";
-import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
+import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/core/token-usage";
+import { addRequestUsage } from "@appstrate/runner-pi/pi-model";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -61,23 +63,14 @@ interface OpenBlock {
  * rates and lets it apply the shared ledger price (Pi's `calculateCost`), so the
  * chat, proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
  * `@appstrate/core/chat-contract` and `engine.ts`'s `recordUsage` call).
- * `usage.cost` still carries pi-ai's own per-bucket figures verbatim — they are
- * informational and are never billed.
+ * `usage` is summed per model call with its tier band (`TokenUsage.tiers`), so
+ * the sum still prices exactly.
  */
 interface PiChatResultMeta {
-  usage: PiUsage;
+  usage: TokenUsage;
   finishReason: PiFinishReason;
   errorText?: string;
 }
-
-const ZERO_USAGE: PiUsage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-  cost: { ...ZERO_MODEL_COST, total: 0 },
-};
 
 function mapStopReason(stop: string | undefined): PiFinishReason {
   switch (stop) {
@@ -106,6 +99,8 @@ interface PiChatUiStreamMapperOptions {
    * is not it.
    */
   onFirstModelEvent?: () => void;
+  /** Rate card whose tiers band each model call's usage; none → no bands. */
+  cost?: ModelCost | null;
 }
 
 /**
@@ -114,9 +109,11 @@ interface PiChatUiStreamMapperOptions {
  */
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
+  private readonly cost: ModelCost | null;
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
     this.onFirstModelEvent = options.onFirstModelEvent;
+    this.cost = options.cost ?? null;
   }
 
   /**
@@ -135,7 +132,12 @@ export class PiChatUiStreamMapper {
    */
   private modelCalls = 0;
   private readonly open = new Map<number, OpenBlock>();
-  private accUsage: PiUsage = { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } };
+  private accUsage: TokenUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
   private finishReason: PiFinishReason = "stop";
   private lastError: string | undefined;
   private lastTool: string | undefined;
@@ -346,20 +348,13 @@ export class PiChatUiStreamMapper {
   }
 
   private addUsage(u: PiUsage): void {
-    this.accUsage = {
-      input: this.accUsage.input + (u.input ?? 0),
-      output: this.accUsage.output + (u.output ?? 0),
-      cacheRead: this.accUsage.cacheRead + (u.cacheRead ?? 0),
-      cacheWrite: this.accUsage.cacheWrite + (u.cacheWrite ?? 0),
-      totalTokens: this.accUsage.totalTokens + (u.totalTokens ?? 0),
-      cost: {
-        input: this.accUsage.cost.input + (u.cost?.input ?? 0),
-        output: this.accUsage.cost.output + (u.cost?.output ?? 0),
-        cacheRead: this.accUsage.cost.cacheRead + (u.cost?.cacheRead ?? 0),
-        cacheWrite: this.accUsage.cost.cacheWrite + (u.cost?.cacheWrite ?? 0),
-        total: this.accUsage.cost.total + (u.cost?.total ?? 0),
-      },
+    const request = {
+      input: u.input ?? 0,
+      output: u.output ?? 0,
+      cacheRead: u.cacheRead ?? 0,
+      cacheWrite: u.cacheWrite ?? 0,
     };
+    this.accUsage = addRequestUsage(this.accUsage, request, this.cost);
   }
 
   /** Model calls completed so far in this turn (see {@link modelCalls}). */

@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across bands, and non-negative finite counters. It previously stripped the
   field. (#1552)
 
+- **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
+  per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model
+  calls, so the platform prices each call at its tier instead of the base
+  rate. (#1552)
+
 ## [15.0.0] — 2026-10-08
 
 ### Added

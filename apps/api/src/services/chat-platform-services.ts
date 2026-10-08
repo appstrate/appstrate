@@ -22,6 +22,7 @@
 
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
+import { isTokenUsageTiers, type TokenUsage } from "@appstrate/afps-shared/token-usage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
@@ -127,7 +128,8 @@ export async function resolveChatModel(
  * (oauth2 claude-code/codex), so the row is always stamped
  * `credentialSource="org"`. Cost is derived here from the token counts + the
  * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
- * Priced at the base rate, like the runner row (RUN_COST.md).
+ * The turn sums several model calls: its tier bands (`record.tiers`) price each
+ * call at its tier; without them the turn prices at the base rate.
  *
  * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
  * turn runs on the IN-PROCESS Pi engine and never traverses `/api/llm-proxy/*`,
@@ -154,14 +156,25 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
     record.cacheWriteTokens === undefined || record.cacheWriteTokens === null
       ? null
       : Math.max(0, record.cacheWriteTokens);
-  // The four buckets as the shared helpers consume them — built once and reused
-  // for both the cost and its provenance so the two can never describe
-  // different numbers.
-  const usage = {
+  // The record crosses a module boundary: malformed bands are dropped (base
+  // rate) rather than failing a turn that already streamed.
+  let tiers = record.tiers;
+  if (tiers !== undefined && !isTokenUsageTiers(tiers)) {
+    logger.warn("chat: dropped invalid usage tiers", {
+      orgId: record.orgId,
+      presetId: record.presetId,
+    });
+    tiers = undefined;
+  }
+  // The usage as the shared helpers consume it — built once and reused for
+  // both the cost and its provenance so the two can never describe different
+  // numbers.
+  const usage: TokenUsage = {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     cache_read_input_tokens: cacheReadTokens ?? 0,
     cache_creation_input_tokens: cacheWriteTokens ?? 0,
+    ...(tiers?.length ? { tiers } : {}),
   };
   // NOT a "subscription models are free" carve-out: a subscription preset
   // (codex → openai, claude-code → anthropic) resolves its rates through

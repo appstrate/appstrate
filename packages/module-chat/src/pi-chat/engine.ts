@@ -224,6 +224,8 @@ export function runPiChat(input: PiChatInput): Response {
     onFirstModelEvent: () => {
       timings.firstModelEventMs = Date.now() - startedAt;
     },
+    // Only an inline-metered turn is priced here; the proxy prices per request.
+    cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
   });
 
   const stream = createUIMessageStream({
@@ -652,6 +654,7 @@ export function runPiChat(input: PiChatInput): Response {
         // seam the token counts + the model's catalog rates and let it compute
         // the equivalent cost with the shared formula (consistent with the
         // proxy/runner paths) rather than forwarding pi-ai's own `meta.costUsd`.
+        // The turn sums several model calls, so the tier bands ride along.
         if (modelBinding.metering.kind === "inline") {
           input.recordUsage({
             orgId: input.orgId,
@@ -660,10 +663,11 @@ export function runPiChat(input: PiChatInput): Response {
             presetId: input.presetId,
             modelId: model.id,
             apiShape: model.api as ChatUsageRecord["apiShape"],
-            inputTokens: meta.usage.input,
-            outputTokens: meta.usage.output,
-            cacheReadTokens: meta.usage.cacheRead,
-            cacheWriteTokens: meta.usage.cacheWrite,
+            inputTokens: meta.usage.input_tokens ?? 0,
+            outputTokens: meta.usage.output_tokens ?? 0,
+            cacheReadTokens: meta.usage.cache_read_input_tokens ?? 0,
+            cacheWriteTokens: meta.usage.cache_creation_input_tokens ?? 0,
+            ...(meta.usage.tiers ? { tiers: meta.usage.tiers } : {}),
             cost: modelBinding.metering.cost,
             durationMs: Date.now() - startedAt,
           });
