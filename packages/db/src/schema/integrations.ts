@@ -125,8 +125,8 @@ export const integrationConnections = pgTable(
     // bind this connection by an explicit pick (member pin, launch
     // override, admin pin, org default); the resolver's fallback never
     // binds it (see integration-connection-resolver). Off by default
-    // — sharing is explicit consent, never silent. A member's only
-    // (`integration_connections_end_user_not_shared`).
+    // — sharing is explicit consent, never silent. See the
+    // `integration_connections_end_user_not_shared` CHECK.
     sharedWithOrg: boolean("shared_with_org").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -169,7 +169,8 @@ export const integrationConnections = pgTable(
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
     ),
     // Only a member shares: an end user's connection serves that end user's runs, so it never
-    // enters another actor's set and its cascade delete strands no pin or default.
+    // enters an admin pin or an org default, and its `end_user_id` cascade strands no id in
+    // either (`assertConnectionShareable` refuses the share with 409 first).
     check(
       "integration_connections_end_user_not_shared",
       sql`NOT shared_with_org OR user_id IS NOT NULL`,

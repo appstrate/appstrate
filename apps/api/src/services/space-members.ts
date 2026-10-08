@@ -397,9 +397,8 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
 
 /**
  * The one gate of a share (`shared_with_org: true`), called in the sharing transaction before the
- * write. 409 `end_user_connection_not_shareable` for an end user's connection: it serves that end
- * user's runs only, so it never enters another actor's set and its cascade delete strands no pin.
- * 409 `connection_owner_without_access` when the owning member no longer reaches the space — the
+ * write. 409 `end_user_connection_not_shareable` for an end user's connection (see the
+ * `integration_connections_end_user_not_shared` CHECK). 409 `connection_owner_without_access` when the owning member no longer reaches the space — the
  * share-side twin of {@link unshareConnectionsOfOwnersWithoutAccess}.
  */
 export async function assertConnectionShareable(tx: Tx, connectionId: string): Promise<void> {

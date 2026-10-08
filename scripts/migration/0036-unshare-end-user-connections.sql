@@ -1,17 +1,11 @@
--- 0036 — no end user's connection stays shared with the organization, nor named by an admin pin
--- or an org default (#1775). The release refuses both (`assertConnectionShareable`,
--- `validatePinTargets`), and its drizzle `0080` adds the CHECK
--- `integration_connections_end_user_not_shared`, whose first statement refuses the batch while
--- this file has not run.
+-- 0036 — no end user's connection stays shared, nor named by an admin pin or an org default
+-- (#1775; see the `integration_connections_end_user_not_shared` CHECK). Drizzle `0080` refuses the
+-- boot while either exists, naming this file.
 --
--- Run BEFORE deploying the release that carries `0080`, with the app container stopped
--- (`docker stop`, not a Coolify stop — that takes Postgres down and prunes the images): the
--- running image still lets an end user share, so a share landing between this file and the deploy
--- would make `0080` refuse the boot. Stop → `pg_dump` → this file → deploy → reopen:
+-- Prerequisite: the database is at `0078` (beta.65 deployed) — this file reads `connection_ids`,
+-- which `0077` creates. On an older one, deploy beta.65 first.
 --
---   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql
---
--- Pre-flight, read-only, on production or a restored dump first — what each step would touch:
+-- Pre-flight, read-only, on production or a restored dump:
 --
 --   SELECT
 --     (SELECT count(*) FROM integration_connections
@@ -23,31 +17,27 @@
 --       WHERE EXISTS (SELECT 1 FROM integration_connections c
 --         WHERE c.id = ANY (d.connection_ids) AND c.end_user_id IS NOT NULL))     AS org_defaults;
 --
--- Expected: 0 / 0 / 0 — no known integrator shares an end user's connection. Rows: UNMEASURED,
--- rehearse on a restored dump first (README requirement 4).
+-- 0 / 0 / 0: nothing to run. Otherwise, before the deploy and with the app container stopped
+-- (`docker stop`, not a Coolify stop — that takes Postgres down and prunes the images; the running
+-- image still lets an end user share): `pg_dump`, then
 --
--- Three steps in ONE transaction, in this order; each "after" count must read 0:
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql
 --
--- 1. ADMIN PINS (`user_id IS NULL`) and 2. ORG DEFAULTS — every end user's connection id leaves
---    the set, the rest kept in their binding order. A row the removal would empty is deleted
---    first: `cardinality BETWEEN 1 AND 10` refuses an empty set, and a deleted pin or default is
---    what an admin's `DELETE` leaves — the cascade falls through to the next layer. Before the
---    unshare, because these are exactly the references that refuse an unshare
---    (`assertConnectionsUnpinned`). Matched on the owner alone, shared or not, since the release
---    refuses any end user's connection there.
--- 3. UNSHARE — `shared_with_org = false` on every end user's connection still shared.
+-- then deploy and reopen. If `0080` refuses the boot anyway (a share after the pre-flight), stop
+-- the app, run this file, redeploy. Rows: UNMEASURED.
 --
--- Steps 1-3 are what an admin does by hand today: clear the pin or default, then unshare. A
--- member pin or a schedule override naming such a connection is left alone, as that unshare
--- leaves it: it fails loudly (`pinned_connection_unavailable` / `override_connection_unavailable`)
--- until its owner picks again, and is never shrunk to its survivors. The counts below report
--- them (`*_kept`); an end user's own schedules naming its own connection are not counted.
+-- In ONE transaction, each "after" count reading 0:
+-- 1. ADMIN PINS (`user_id IS NULL`) and 2. ORG DEFAULTS — every end user's connection id leaves the
+--    set, the rest kept in order; a row left empty is deleted first (`cardinality BETWEEN 1 AND
+--    10`), as an admin's `DELETE` would. Matched on the owner, shared or not: the release refuses
+--    any end user's connection there. Before the unshare, which these sets would block.
+-- 3. UNSHARE — every end user's shared connection, listed (id, space, end user) so the operator
+--    can tell the integrator.
+-- What an admin does by hand. Member pins and other actors' schedule overrides naming one are left
+-- as that unshare leaves them — failing loudly until re-picked — and counted (`*_kept`). No audit
+-- row (no script here writes one); the listing names every pin and default rewritten or deleted.
 --
--- No audit row: no script here writes `audit_events`. The listing below names every pin and
--- default rewritten or deleted, with its set before.
---
--- Idempotent: every WHERE is the condition its write removes, so a second run matches nothing.
--- Rollback: none (a removed id is gone); restore the pre-run `pg_dump`.
+-- Idempotent: every WHERE is the condition its write removes. Rollback: restore the `pg_dump`.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -132,7 +122,8 @@ WHERE EXISTS (SELECT 1 FROM integration_connections c
 
 UPDATE integration_connections
 SET shared_with_org = false, updated_at = now()
-WHERE end_user_id IS NOT NULL AND shared_with_org;
+WHERE end_user_id IS NOT NULL AND shared_with_org
+RETURNING id AS unshared_connection_id, space_id, end_user_id;
 
 -- ═══ After — re-derived from the tables ═══
 

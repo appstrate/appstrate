@@ -228,8 +228,7 @@ interface SetPinInput {
  *   1. exists in the same space,
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
- *      leak the admin's identity to other members at run time) — hence a
- *      member's, never an end user's.
+ *      leak the admin's identity to other members at run time).
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -361,11 +360,10 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
- * here: shared rows only, plus `allowOwnedBy`'s own for a member pin. A shared row is a member's
- * (CHECK `integration_connections_end_user_not_shared`), so an end user's never qualifies for an
- * admin pin or an org default. Every refusal — unknown id, another space or integration, a row
- * neither shared nor the caller's own — is the SAME 404 naming the first refused id, so a pin
- * write cannot tell a colleague's private uuid from a made-up one.
+ * here: shared rows only (see the `integration_connections_end_user_not_shared` CHECK), plus
+ * `allowOwnedBy`'s own for a member pin. Every refusal — unknown id, another space or
+ * integration, a row neither shared nor the caller's own — is the SAME 404 naming the first
+ * refused id, so a pin write cannot tell a colleague's private uuid from a made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -473,7 +471,7 @@ interface UpdateConnectionMetadataInput {
  * may edit, but only the owner may share (sharing is consent).
  *
  * Refuses sharedWithOrg=false per `assertConnectionsUnpinned`, sharedWithOrg=true per
- * `assertConnectionShareable` (never an end user's connection), and a label
+ * `assertConnectionShareable`, and a label
  * another connection of the (space, integration) holds (409
  * `connection_label_taken`, raised by the unique index). A rename takes the
  * insert's label lock, so it cannot land between an insert's pick and its write.
@@ -507,8 +505,8 @@ export async function updateConnectionMetadata(
       if (input.sharedWithOrg === false) {
         await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be unshared");
       }
-      // Never an end user's connection; and the owner may have lost the space since the route
-      // checked, an unshare that loss ran could not see this share yet.
+      // Re-checked here: the owner may have lost the space since the route checked, and the
+      // unshare that loss ran could not see this share yet.
       if (input.sharedWithOrg === true) {
         await assertConnectionShareable(tx, connectionId);
       }

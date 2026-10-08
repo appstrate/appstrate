@@ -12,14 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
   (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
   secret that was active. Rotation procedure: `docs/ENV.md`.
-- **Run `scripts/migration/0036-unshare-end-user-connections.sql` before the
-  deploy, with the app container stopped** (#1775): `docker stop`, `pg_dump`,
+- **Before the deploy, run the pre-flight in the header of
+  `scripts/migration/0036-unshare-end-user-connections.sql`** (#1775). The
+  database must be at `0078` (beta.65 deployed); on an older one, deploy
+  beta.65 first. At 0 / 0 / 0 there is nothing to do. Otherwise stop the app
+  container (`docker stop`), `pg_dump`, run
   `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0036-unshare-end-user-connections.sql`,
-  deploy, reopen. It removes every end user's connection from admin pins and
-  org defaults (a set it empties is deleted), then unshares them. Skipped,
-  migration `0080` refuses the boot, naming the script, while one is shared
-  or named there. Pre-flight, expected 0 / 0 / 0:
-  `SELECT (SELECT count(*) FROM integration_connections WHERE end_user_id IS NOT NULL AND shared_with_org), (SELECT count(*) FROM integration_pins p JOIN integration_connections c ON c.id = ANY (p.connection_ids) WHERE p.user_id IS NULL AND c.end_user_id IS NOT NULL), (SELECT count(*) FROM integration_org_defaults d JOIN integration_connections c ON c.id = ANY (d.connection_ids) WHERE c.end_user_id IS NOT NULL);`
+  deploy: it removes end users' connections from admin pins and org defaults,
+  unshares them and lists them. Migration `0080` refuses the boot, naming the
+  script, while an end user's connection is shared or named by an admin pin
+  or an org default.
 
 ### Changed
 
@@ -36,12 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same 409 with one `remote_binds_one_connection` item per integration
   (`field: integrations.<id>`). A client matching on the `agent_not_ready`
   code breaks; no known consumer reads it (the CLI prints the status and body).
-- **BREAKING (minor): an end user's connection cannot be shared** (#1775).
-  `PATCH /api/integrations/{packageId}/connections/{connectionId}` with
-  `shared_with_org: true` on one answers `409 end_user_connection_not_shareable`,
-  and an admin pin or an org default naming one answers `404`. It serves that
-  end user's runs only, so deleting the end user (`DELETE /api/end-users/{id}`)
-  can no longer leave a pin or a default naming a deleted connection.
+- **BREAKING (minor): an end user's connection cannot be shared** (#1775):
+  `shared_with_org: true` on one answers
+  `409 end_user_connection_not_shareable`. Deleting an end user can no longer
+  leave an admin pin or an org default naming a deleted connection.
 
 ### Fixed
 

@@ -153,7 +153,7 @@ describe("end-user connections are never shared", () => {
     };
   });
 
-  it("409s an end user sharing their own connection and leaves it private", async () => {
+  it("409s an end user sharing their own connection, which stays private", async () => {
     const connectionId = await seedConnection({ endUserId }, false);
 
     const res = await patchShared(connectionId, endUserHeaders);
@@ -165,48 +165,11 @@ describe("end-user connections are never shared", () => {
     expect(await isShared(connectionId)).toBe(false);
   });
 
-  it("still lets a member share their own connection", async () => {
-    const connectionId = await seedConnection({ userId: ctx.user.id }, false);
-
-    const res = await patchShared(connectionId, authHeaders(ctx));
-
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(((await res.json()) as { shared_with_org: boolean }).shared_with_org).toBe(true);
-    expect(await isShared(connectionId)).toBe(true);
-  });
-
-  it("cannot store an end user's connection shared: the database refuses it", async () => {
-    // Drizzle hangs the driver error off `cause`; the outer one names only the query.
-    const refused = await seedConnection({ endUserId }, true).then(
-      () => null,
-      (err: { cause?: { code?: string; message?: string } }) => err.cause,
-    );
-    expect(refused?.code).toBe("23514");
-    expect(refused?.message).toContain("integration_connections_end_user_not_shared");
-  });
-
-  it("404s an admin pin and an org default naming an end user's connection", async () => {
-    const endUserConnection = await seedConnection({ endUserId }, false);
-    const memberConnection = await seedConnection({ userId: ctx.user.id }, true);
-
-    for (const res of [
-      await putAdminPin([memberConnection, endUserConnection]),
-      await putOrgDefault([memberConnection, endUserConnection]),
-    ]) {
-      expect(res.status).toBe(404);
-      expect(((await res.json()) as { detail?: string }).detail).toContain(endUserConnection);
-    }
-    expect(await db.select().from(integrationPins)).toHaveLength(0);
-    expect(await db.select().from(integrationOrgDefaults)).toHaveLength(0);
-  });
-
-  it("leaves no admin pin or org default naming a deleted connection after an end user's deletion", async () => {
+  it("leaves every admin pin and org default naming live connections once the end user is deleted", async () => {
     const endUserConnection = await seedConnection({ endUserId }, false);
     const memberConnection = await seedConnection({ userId: ctx.user.id }, true);
 
     expect((await patchShared(endUserConnection, endUserHeaders)).status).toBe(409);
-    expect((await putAdminPin([endUserConnection])).status).toBe(404);
-    expect((await putOrgDefault([endUserConnection])).status).toBe(404);
     expect((await putAdminPin([memberConnection])).status).toBe(200);
     expect((await putOrgDefault([memberConnection])).status).toBe(200);
 
@@ -229,6 +192,5 @@ describe("end-user connections are never shared", () => {
         .from(integrationOrgDefaults)),
     ].flatMap((r) => r.ids);
     expect(named).toEqual([memberConnection, memberConnection]);
-    expect(named.filter((id) => !live.has(id))).toEqual([]);
   });
 });

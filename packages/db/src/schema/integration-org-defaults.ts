@@ -26,9 +26,8 @@
  *
  * Same invariants as admin pins: every referenced connection MUST be
  * `shared_with_org = true` (validation in the org-defaults service — an
- * admin can't coerce a member's personal connection), hence a member's: an
- * end user's is never shared (CHECK `integration_connections_end_user_not_shared`).
- * `connection_ids` carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
+ * admin can't coerce a member's personal connection; see the
+ * `integration_connections_end_user_not_shared` CHECK). `connection_ids` carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id
  * that no longer resolves.

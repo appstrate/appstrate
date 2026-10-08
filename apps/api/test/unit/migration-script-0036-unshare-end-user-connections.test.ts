@@ -3,8 +3,8 @@
 /**
  * `scripts/migration/0036-unshare-end-user-connections.sql` on a private PGlite replayed to
  * `0079` — the schema it runs against, one migration short of `0080`, which is also the only
- * place a shared end user's connection is seedable. `0080` refuses that state first, then the
- * script runs twice, then `0080` lands on top: the script is its precondition.
+ * place a shared end user's connection is seedable. The script runs twice, then `0080` lands on
+ * top. Each branch of `0080`'s guard is proven alone, on a database holding only that state.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -25,12 +25,13 @@ const GMAIL = "@acme0036/gmail";
 const SLACK = "@acme0036/slack";
 const AGENT = "@acme0036/agent";
 const AGENT_2 = "@acme0036/agent-2";
+const AGENT_3 = "@acme0036/agent-3";
 
 const conn = (n: number) => `d0360000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 /** Alice's, shared: every set keeps it. */
 const ALICE_SHARED = conn(1);
 const ALICE_SHARED_2 = conn(2);
-/** Erin's, shared: in a two-id admin pin, a two-id default, Alice's member pin and schedule. */
+/** Erin's, shared: in a two-id admin pin, a three-id default, Alice's member pin and schedule. */
 const ERIN_SHARED = conn(3);
 /** Erin's, shared: alone in an admin pin. */
 const ERIN_PINNED_ALONE = conn(4);
@@ -38,25 +39,36 @@ const ERIN_PINNED_ALONE = conn(4);
 const ERIN_PRIVATE = conn(5);
 /** Erin's, shared: alone in an org default. */
 const ERIN_DEFAULT_ALONE = conn(6);
+/** Erin's, never shared, beside a dangling id in an admin pin. */
+const ERIN_UNSHARED_PINNED = conn(7);
+/** No connection row: an id a deleted connection left in an admin pin. */
+const DEAD = conn(99);
 
 let pg: PGlite;
-let refusalBefore: unknown;
 let afterFirstRun = "";
 let afterSecondRun = "";
-let firstRunCounts: Record<string, number> = {};
-let secondRunCounts: Record<string, number> = {};
+let firstRun: ScriptOutput;
+let secondRun: ScriptOutput;
 
-/** The one-row count lines the script prints, merged — never its listing. */
-async function runScript(script: string): Promise<Record<string, number>> {
-  const results = await pg.exec(script);
-  const counts: Record<string, number> = {};
+interface ScriptOutput {
+  counts: Record<string, number>;
+  unshared: { unshared_connection_id: string; space_id: string; end_user_id: string }[];
+}
+
+/** The one-row count lines the script prints, merged, and the connections it lists as unshared. */
+async function runScript(db: PGlite): Promise<ScriptOutput> {
+  const results = await db.exec(await Bun.file(SCRIPT).text());
+  const out: ScriptOutput = { counts: {}, unshared: [] };
   for (const { rows } of results) {
+    for (const row of rows as Record<string, unknown>[]) {
+      if ("unshared_connection_id" in row) out.unshared.push(row as never);
+    }
     if (rows.length !== 1) continue;
     for (const [key, value] of Object.entries(rows[0] as Record<string, unknown>)) {
-      if (/_(before|after|kept)$/.test(key)) counts[key] = Number(value);
+      if (/_(before|after|kept)$/.test(key)) out.counts[key] = Number(value);
     }
   }
-  return counts;
+  return out;
 }
 
 async function snapshot(): Promise<string> {
@@ -73,22 +85,28 @@ async function snapshot(): Promise<string> {
   ]);
 }
 
-async function apply0080(): Promise<void> {
+/** `0080` in one transaction; resolves to its refusal, or `null` when it applied. */
+async function apply0080(db: PGlite): Promise<Error | null> {
   const source = await Bun.file(MIGRATION_0080).text();
-  await pg.transaction(async (tx) => {
-    await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
-  });
+  try {
+    await db.transaction(async (tx) => {
+      await tx.exec(source.replaceAll("--> statement-breakpoint", ""));
+    });
+    return null;
+  } catch (error) {
+    return error as Error;
+  }
 }
 
-beforeAll(async () => {
-  pg = await journalPGlite({ through: REPLAY_THROUGH });
+const connectionRow = (n: number, integ: string, owner: "alice" | "erin", shared: boolean) =>
+  `('${conn(n)}', '${integ}', 'primary', 'acct-${n}', '${SPACE}',
+    ${owner === "alice" ? `'${ALICE}'` : "NULL"}, ${owner === "erin" ? `'${ERIN}'` : "NULL"},
+    'x', 'c${n}', ${shared})`;
 
-  const connection = (n: number, integ: string, owner: "alice" | "erin", shared: boolean) =>
-    `('${conn(n)}', '${integ}', 'primary', 'acct-${n}', '${SPACE}',
-      ${owner === "alice" ? `'${ALICE}'` : "NULL"}, ${owner === "erin" ? `'${ERIN}'` : "NULL"},
-      'x', 'c${n}', ${shared})`;
-
-  await pg.exec(`
+/** An organization with Alice, Erin, two integrations and three agents; `extra` adds rows. */
+async function freshDatabase(extra: string): Promise<PGlite> {
+  const db = await journalPGlite({ through: REPLAY_THROUGH });
+  await db.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero36', 'zero-36');
     INSERT INTO spaces (id, org_id, name, is_default) VALUES ('${SPACE}', '${ORG}', 'Default', true);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
@@ -97,21 +115,31 @@ beforeAll(async () => {
     INSERT INTO end_users (id, space_id, org_id) VALUES ('${ERIN}', '${SPACE}', '${ORG}');
     INSERT INTO packages (id, type) VALUES
       ('${GMAIL}', 'integration'), ('${SLACK}', 'integration'),
-      ('${AGENT}', 'agent'), ('${AGENT_2}', 'agent');
-    INSERT INTO integration_connections
-      (id, integration_package_id, auth_key, account_id, space_id, user_id, end_user_id,
-       credentials_encrypted, label, shared_with_org)
-    VALUES
-      ${connection(1, GMAIL, "alice", true)},
-      ${connection(2, GMAIL, "alice", true)},
-      ${connection(3, GMAIL, "erin", true)},
-      ${connection(4, GMAIL, "erin", true)},
-      ${connection(5, GMAIL, "erin", false)},
-      ${connection(6, SLACK, "erin", true)};
+      ('${AGENT}', 'agent'), ('${AGENT_2}', 'agent'), ('${AGENT_3}', 'agent');
+    ${extra}
+  `);
+  return db;
+}
+
+const CONNECTION_COLUMNS = `INSERT INTO integration_connections
+  (id, integration_package_id, auth_key, account_id, space_id, user_id, end_user_id,
+   credentials_encrypted, label, shared_with_org) VALUES`;
+
+beforeAll(async () => {
+  pg = await freshDatabase(`
+    ${CONNECTION_COLUMNS}
+      ${connectionRow(1, GMAIL, "alice", true)},
+      ${connectionRow(2, GMAIL, "alice", true)},
+      ${connectionRow(3, GMAIL, "erin", true)},
+      ${connectionRow(4, GMAIL, "erin", true)},
+      ${connectionRow(5, GMAIL, "erin", false)},
+      ${connectionRow(6, SLACK, "erin", true)},
+      ${connectionRow(7, GMAIL, "erin", false)};
     INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_ids)
     VALUES
       ('${SPACE}', '${AGENT}', '${GMAIL}', NULL, ARRAY['${ERIN_SHARED}', '${ALICE_SHARED}']::uuid[]),
       ('${SPACE}', '${AGENT_2}', '${GMAIL}', NULL, ARRAY['${ERIN_PINNED_ALONE}']::uuid[]),
+      ('${SPACE}', '${AGENT_3}', '${GMAIL}', NULL, ARRAY['${DEAD}', '${ERIN_UNSHARED_PINNED}']::uuid[]),
       ('${SPACE}', '${AGENT}', '${GMAIL}', '${ALICE}', ARRAY['${ERIN_SHARED}']::uuid[]);
     INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_ids, enforce)
     VALUES
@@ -126,15 +154,9 @@ beforeAll(async () => {
        '{"${GMAIL}": ["${ERIN_SHARED}"]}');
   `);
 
-  try {
-    await apply0080();
-  } catch (error) {
-    refusalBefore = error;
-  }
-  const script = await Bun.file(SCRIPT).text();
-  firstRunCounts = await runScript(script);
+  firstRun = await runScript(pg);
   afterFirstRun = await snapshot();
-  secondRunCounts = await runScript(script);
+  secondRun = await runScript(pg);
   afterSecondRun = await snapshot();
   // A journal replay runs past the suite's 15s per-test timeout (`--timeout`).
 }, 300_000);
@@ -144,16 +166,10 @@ afterAll(async () => {
 });
 
 describe("scripts/migration/0036 — end users' connections unshared", () => {
-  it("is what 0080 asks for: the batch refuses the state the script repairs, naming it", () => {
-    expect((refusalBefore as Error | undefined)?.message).toContain(
-      "scripts/migration/0036-unshare-end-user-connections.sql",
-    );
-  });
-
   it("prints the size of every step, and 0 on every 'after' line", () => {
-    expect(firstRunCounts).toEqual({
+    expect(firstRun.counts).toEqual({
       end_user_shared_before: 3,
-      admin_pins_before: 2,
+      admin_pins_before: 3,
       admin_pins_emptied_before: 1,
       org_defaults_before: 2,
       org_defaults_emptied_before: 1,
@@ -165,7 +181,7 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
     });
   });
 
-  it("removes an end user's connection from admin pins and org defaults, keeping the rest in order, and deletes the sets it empties", async () => {
+  it("removes an end user's connection, shared or not, from admin pins and org defaults, keeping the rest in order — a dangling id included — and deletes only the sets it empties", async () => {
     const pins = await pg.query<{ package_id: string; user_id: string | null; ids: string[] }>(
       `SELECT package_id, user_id, connection_ids::text[] AS ids FROM integration_pins
        ORDER BY package_id, user_id NULLS FIRST`,
@@ -174,6 +190,7 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
       { package_id: AGENT, user_id: null, ids: [ALICE_SHARED] },
       // Alice's member pin is left as an unshare leaves it: it fails loudly until she re-picks.
       { package_id: AGENT, user_id: ALICE, ids: [ERIN_SHARED] },
+      { package_id: AGENT_3, user_id: null, ids: [DEAD] },
     ]);
     const defaults = await pg.query<{ integration_package_id: string; ids: string[] }>(
       `SELECT integration_package_id, connection_ids::text[] AS ids FROM integration_org_defaults
@@ -184,7 +201,13 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
     ]);
   });
 
-  it("unshares every end user's connection and leaves members' shares and schedules alone", async () => {
+  it("unshares every end user's connection, lists each one, and leaves members' shares and schedules alone", async () => {
+    expect(firstRun.unshared.map((r) => r.unshared_connection_id).sort()).toEqual(
+      [ERIN_SHARED, ERIN_PINNED_ALONE, ERIN_DEFAULT_ALONE].sort(),
+    );
+    expect(new Set(firstRun.unshared.map((r) => `${r.space_id} ${r.end_user_id}`))).toEqual(
+      new Set([`${SPACE} ${ERIN}`]),
+    );
     const { rows } = await pg.query<{ id: string; shared_with_org: boolean }>(
       "SELECT id, shared_with_org FROM integration_connections ORDER BY id",
     );
@@ -195,6 +218,7 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
       { id: ERIN_PINNED_ALONE, shared_with_org: false },
       { id: ERIN_PRIVATE, shared_with_org: false },
       { id: ERIN_DEFAULT_ALONE, shared_with_org: false },
+      { id: ERIN_UNSHARED_PINNED, shared_with_org: false },
     ]);
     const schedules = await pg.query<{ id: string; enabled: boolean }>(
       "SELECT id, enabled FROM package_schedules ORDER BY id",
@@ -207,13 +231,14 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
 
   it("changes nothing on a second run, and finds nothing to do", () => {
     expect(afterSecondRun).toBe(afterFirstRun);
+    expect(secondRun.unshared).toEqual([]);
     expect(
-      Object.entries(secondRunCounts).filter(([key, n]) => n !== 0 && !key.endsWith("_kept")),
+      Object.entries(secondRun.counts).filter(([key, n]) => n !== 0 && !key.endsWith("_kept")),
     ).toEqual([]);
   });
 
   it("leaves 0080 applicable, whose CHECK then refuses a shared end user's connection", async () => {
-    await apply0080();
+    expect(await apply0080(pg)).toBeNull();
     let refusal: unknown;
     try {
       await pg.exec(
@@ -226,4 +251,38 @@ describe("scripts/migration/0036 — end users' connections unshared", () => {
       "integration_connections_end_user_not_shared",
     );
   });
+});
+
+describe("drizzle 0080 — its guard refuses each state 0036 repairs, alone", () => {
+  const cases: [string, string][] = [
+    [
+      "an end user's shared connection, named nowhere",
+      `${CONNECTION_COLUMNS} ${connectionRow(3, GMAIL, "erin", true)};`,
+    ],
+    [
+      "an admin pin naming an end user's unshared connection",
+      `${CONNECTION_COLUMNS} ${connectionRow(7, GMAIL, "erin", false)};
+       INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_ids)
+       VALUES ('${SPACE}', '${AGENT}', '${GMAIL}', NULL, ARRAY['${ERIN_UNSHARED_PINNED}']::uuid[]);`,
+    ],
+    [
+      "an org default naming an end user's unshared connection",
+      `${CONNECTION_COLUMNS} ${connectionRow(7, GMAIL, "erin", false)};
+       INSERT INTO integration_org_defaults (space_id, integration_package_id, connection_ids, enforce)
+       VALUES ('${SPACE}', '${GMAIL}', ARRAY['${ERIN_UNSHARED_PINNED}']::uuid[], false);`,
+    ],
+  ];
+
+  for (const [state, rows] of cases) {
+    it(`refuses ${state}, naming the script`, async () => {
+      const db = await freshDatabase(rows);
+      try {
+        expect((await apply0080(db))?.message).toContain(
+          "scripts/migration/0036-unshare-end-user-connections.sql",
+        );
+      } finally {
+        await db.close();
+      }
+    }, 300_000);
+  }
 });
