@@ -93,10 +93,7 @@ export async function logoutCommand(
           io.stderr.write(
             "Appstrate plugin reset. Run `claude plugin update appstrate@appstrate` and restart Claude, or start a new session with automatic plugin refresh enabled.\n",
           );
-        for (const failure of cleanup.warnings)
-          io.stderr.write(
-            `warning: ${failure}. Retry appstrate logout --profile ${profileName}.\n`,
-          );
+        for (const failure of cleanup.warnings) io.stderr.write(`warning: ${failure}\n`);
       },
       { io },
     );

@@ -476,6 +476,23 @@ describe("refreshCliTokens", () => {
     });
   });
 
+  it("throws a plain Error naming the status for a non-OAuth error page, never an OAuth verdict", async () => {
+    installFetch(
+      async () =>
+        new Response("<html>Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        }),
+    );
+    const error = await refreshCliTokens("https://app", "c", "x").then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DeviceFlowError);
+    expect((error as Error).message).toBe("Token endpoint returned HTTP 502");
+  });
+
   it("defaults scope to empty string when the server omits it", async () => {
     installFetch(async () =>
       jsonResponse(200, {

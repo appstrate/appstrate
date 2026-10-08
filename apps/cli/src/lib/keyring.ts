@@ -229,16 +229,15 @@ export async function saveTokens(profile: string, tokens: Tokens): Promise<void>
 }
 
 /**
- * Tokens are considered "unrecoverably expired" — and therefore
- * eligible for auto-scrub — only when the refresh token is past its
- * `refreshExpiresAt`. An expired access token + valid refresh token is
- * healthy: `api.ts` silently rotates it. Scrubbing on access expiry
- * alone would defeat the whole point of the refresh flow.
+ * Tokens are "unrecoverably expired" — read as absent — only when the
+ * refresh token is past its `refreshExpiresAt`. An expired access token +
+ * valid refresh token is healthy: `api.ts` silently rotates it.
  *
- * No clock-skew grace window — the server is authoritative, and a
- * leaked-but-expired refresh token should have the shortest possible
- * replay window (bounded by the 30-day TTL minus whatever time has
- * already elapsed).
+ * The expired pair is NOT deleted here: `loadTokens` runs outside the
+ * credentials lock (and inside it, during a refresh, where the lock cannot
+ * be taken again), and a delete is a read-modify-write of the whole store
+ * that could roll back a pair another process just rotated. An expired
+ * refresh token is inert; the next login overwrites it, a logout removes it.
  */
 function isExpired(tokens: Tokens): boolean {
   return tokens.refreshExpiresAt <= Date.now();
@@ -249,42 +248,7 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
     const raw = _keyringFactory(profile).getPassword();
     if (typeof raw === "string" && raw.length > 0) {
       const parsed = parseTokens(raw);
-      if (parsed && isExpired(parsed)) {
-        // Best-effort cleanup — if the keyring delete throws (broken
-        // daemon, race with another process), swallow it: the value
-        // we're returning to the caller (null) is correct regardless,
-        // and surfacing a delete error here would mask the real
-        // signal ("you need to log in again").
-        //
-        // Cross-process race mitigation: re-read the keyring entry
-        // right before deleting and only proceed if the expiresAt
-        // still matches what we just classified as expired. If a
-        // concurrent `saveTokens` from another process bumped the row
-        // to a fresh token in the gap, leave it alone — the
-        // unconditional delete would destroy a valid fresh login. The
-        // napi-rs/keyring API doesn't expose an atomic test-and-delete
-        // primitive, so this is the closest we get; if the re-read
-        // itself throws, skip the delete (prefer a stale entry over
-        // destroying a fresh one).
-        let safeToDelete = false;
-        try {
-          const reread = _keyringFactory(profile).getPassword();
-          const rereadTokens = typeof reread === "string" ? parseTokens(reread) : null;
-          if (!rereadTokens || rereadTokens.expiresAt === parsed.expiresAt) {
-            safeToDelete = true;
-          }
-        } catch {
-          /* re-read failed: leave the entry alone */
-        }
-        if (safeToDelete) {
-          try {
-            _keyringFactory(profile).deletePassword();
-          } catch {
-            /* best-effort */
-          }
-        }
-        return null;
-      }
+      if (parsed && isExpired(parsed)) return null;
       return parsed;
     }
   } catch (err) {
@@ -303,22 +267,7 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
   // Credential Manager or threw via `refuseWindowsFallback`.
   if (process.platform === "win32") return null;
   const fromFile = await loadFromFile(profile);
-  if (fromFile && isExpired(fromFile)) {
-    // Proactively scrub the expired entry from the file store. Same
-    // rationale as the keyring branch — the caller sees `null` and
-    // re-runs login; we just don't want a stale plaintext token
-    // sitting on disk indefinitely after it stopped being usable.
-    //
-    // Compare-and-swap on `expiresAt`: a concurrent `saveTokens` from
-    // another process may have bumped the row to a fresh token in the
-    // window between our read and the delete. Without the CAS, the
-    // unconditional delete would destroy a valid fresh login the user
-    // would then have to redo — a regression from the pre-scrub
-    // behavior where that concurrent save would simply have won via
-    // last-write-wins (see top-of-section doc on benign races).
-    await deleteFromFile(profile, { onlyIfExpiresAtMatches: fromFile.expiresAt });
-    return null;
-  }
+  if (fromFile && isExpired(fromFile)) return null;
   return fromFile;
 }
 
@@ -386,11 +335,10 @@ export async function deleteTokens(profile: string): Promise<void> {
 // not a single file operation. This module stays lock-free so the store
 // works the same in either backend, keyring or file.
 //
-// What runs outside that lock — every read, and the expired-entry scrub
-// `loadTokens` performs — relies on atomic renames: a reader sees a whole
-// file, and a write racing another resolves last-write-wins. That is why the
-// scrub checks again before deleting: an exact compare-and-swap in the file
-// store, a best-effort re-read in the keyring (see `deleteFromFile`).
+// What runs outside that lock — every read — relies on atomic renames: a
+// reader sees a whole file. Writes stay inside it (only a login or logout the
+// user asked for proceeds past the lock's wait), which is why `loadTokens`
+// reads an expired pair as absent and never deletes it.
 
 interface FileStore {
   [profile: string]: Tokens;
@@ -568,34 +516,8 @@ async function loadFromFile(profile: string): Promise<Tokens | null> {
   };
 }
 
-/**
- * Remove a profile from the file store. Unconditional by default
- * (used by `deleteTokens` / logout — the user's intent is to nuke
- * the row regardless of its current state).
- *
- * Compare-and-swap variant via `opts.onlyIfExpiresAtMatches`: the
- * caller passes the `expiresAt` they read a moment earlier, and the
- * delete only proceeds if the row currently stored still carries
- * that same `expiresAt`. Used by the `loadTokens` expired-token
- * scrub to avoid destroying a fresh token that another process
- * wrote into the store between our read and the delete. The
- * top-of-section doc accepts concurrent-save races as benign
- * (last-write-wins), but the unconditional scrub turns that benign
- * race into the destruction of a valid login — the CAS preserves
- * the benign semantics.
- *
- * The `loadTokens` keyring-path scrub uses the same rationale but
- * with a re-read guard instead of a proper CAS — napi-rs/keyring
- * exposes no atomic test-and-delete primitive, so that branch is
- * best-effort where this one is exact (fileMutex + in-lock re-read
- * serialize same-process racers; cross-process racers are caught
- * because we only ever delete when the stored `expiresAt` matches
- * what the caller saw).
- */
-async function deleteFromFile(
-  profile: string,
-  opts?: { onlyIfExpiresAtMatches?: number },
-): Promise<void> {
+/** Remove a profile from the file store, whatever it holds: logout's intent. */
+async function deleteFromFile(profile: string): Promise<void> {
   await withLock(async () => {
     let store: FileStore;
     try {
@@ -604,10 +526,6 @@ async function deleteFromFile(
       return;
     }
     if (!(profile in store)) return;
-    if (opts?.onlyIfExpiresAtMatches !== undefined) {
-      const current = store[profile];
-      if (!current || current.expiresAt !== opts.onlyIfExpiresAtMatches) return;
-    }
     delete store[profile];
     if (Object.keys(store).length === 0) {
       await unlink(fallbackPath()).catch(() => {});

@@ -26,8 +26,8 @@ import {
 /**
  * Tests that don't care about refresh-token mechanics use this helper
  * to fill in the mandatory refresh fields. `refreshExpiresAt` defaults
- * to ~1h in the future so `loadTokens` doesn't auto-scrub the entry.
- * Pass a past `refreshExpiresAt` to deliberately exercise the scrub.
+ * to ~1h in the future so `loadTokens` does not read the entry as expired.
+ * Pass a past `refreshExpiresAt` to deliberately exercise expiry.
  */
 function mkTokens(partial: {
   accessToken: string;
@@ -95,7 +95,7 @@ function credentialsPath(): string {
 }
 
 /** Future epoch-ms — used by tests that don't care about expiration but
- * must avoid the `loadTokens` expired-token scrub introduced in Fix 3.
+ * must not have `loadTokens` read their pair as expired.
  * One hour is comfortably longer than any individual test takes to run. */
 function futureMs(offset = 0): number {
   return Date.now() + 3_600_000 + offset;
@@ -461,13 +461,13 @@ describe("fallback file: parent dir strict-mode refusal", () => {
 });
 
 describe("loadTokens expiration handling", () => {
-  // A token row is "unrecoverably expired" — and therefore eligible for
-  // auto-scrub — only when `refreshExpiresAt` is in the past. The
-  // access token alone expiring is healthy (api.ts rotates it). We
-  // verify both the keyring and file paths scrub the dead row and that
-  // a fresh-refresh entry survives regardless of access-token state.
+  // A token row is "unrecoverably expired" — read as absent — only when
+  // `refreshExpiresAt` is in the past. The access token alone expiring is
+  // healthy (api.ts rotates it). Both stores read the dead row as absent
+  // and leave it in place: a delete outside the credentials lock could roll
+  // back a pair another process just rotated.
 
-  it("returns null for refresh-expired tokens via the keyring path and best-effort deletes", async () => {
+  it("returns null for refresh-expired tokens via the keyring path and leaves the entry", async () => {
     const past = Date.now() - 1000;
     FakeKeyring.store.set(
       "default",
@@ -476,11 +476,10 @@ describe("loadTokens expiration handling", () => {
     expect(FakeKeyring.store.has("default")).toBe(true);
 
     expect(await loadTokens("default")).toBeNull();
-    // Best-effort delete should have removed the entry from the keyring.
-    expect(FakeKeyring.store.has("default")).toBe(false);
+    expect(FakeKeyring.store.has("default")).toBe(true);
   });
 
-  it("returns null for refresh-expired tokens via the file path and scrubs the profile", async () => {
+  it("returns null for refresh-expired tokens via the file path and leaves the file", async () => {
     FakeKeyring.shouldThrow = true; // route everything to the file fallback
     const past = Date.now() - 1000;
     const expired = mkTokens({
@@ -496,12 +495,7 @@ describe("loadTokens expiration handling", () => {
     expect(JSON.parse(before)).toEqual({ default: expired });
 
     expect(await loadTokens("default")).toBeNull();
-
-    // The expired profile must be removed from the store. Since it was
-    // the only profile, the file itself should be gone (matches
-    // `deleteFromFile`'s "remove file when last profile" behavior).
-    const { access } = await import("node:fs/promises");
-    await expect(access(credentialsPath())).rejects.toBeDefined();
+    expect(JSON.parse(await readFile(credentialsPath(), "utf-8"))).toEqual({ default: expired });
   });
 
   it("returns tokens unchanged when refreshExpiresAt is in the future (keyring)", async () => {
@@ -529,205 +523,8 @@ describe("loadTokens expiration handling", () => {
   });
 });
 
-describe("loadTokens expired-scrub cross-process CAS", () => {
-  // The expired-token scrub introduced a cross-process race:
-  //   Process A: loadFromFile → reads store, sees expired row
-  //   Process B: saveTokens → writes fresh row
-  //   Process A: deleteFromFile → unconditionally removes the row
-  // Without a compare-and-swap, Process A would destroy Process B's
-  // valid fresh login. The fix makes `deleteFromFile` CAS on
-  // `expiresAt` (file path) and re-reads before deleting (keyring
-  // path, since napi-rs/keyring has no atomic test-and-delete).
-  //
-  // These tests use a wrapped keyring / a seeded file to simulate
-  // the race window in a single-process test. The file-path test
-  // exploits the fact that `deleteFromFile` takes the same
-  // `fileMutex` as `saveToFile` — we can't simulate true cross-
-  // process interleaving in one Bun process, but we CAN directly
-  // mutate the on-disk store between the load's read and the
-  // scrub's CAS re-read by wrapping `loadFromFile` externally: we
-  // write the expired row, then in the same microtask bump it to a
-  // fresh row by writing to disk AFTER `loadFromFile` returns but
-  // BEFORE `deleteFromFile` runs. The hook is to temporarily swap
-  // `writeFileStore` — but that's private. Simpler: since
-  // `deleteFromFile` re-reads the store inside the lock, we can
-  // stage the "concurrent save" by having the keyring wrapper
-  // rewrite the file on its next `getPassword` call (the keyring is
-  // checked first in `loadTokens`, so the hook fires between the
-  // keyring miss and the file-path scrub).
-
-  it("file path: does NOT scrub when a fresh save landed between read and delete", async () => {
-    // Deterministic cross-process race simulation via a keyring
-    // wrapper. `loadTokens` reads the keyring first; by stubbing
-    // `getPassword` to rewrite the file store with a fresh token
-    // as a side effect before returning null, we reproduce exactly
-    // the race: by the time the file-path load + delete runs, the
-    // on-disk row is the fresh one, not the expired one Process A
-    // originally read. Without CAS, the unconditional
-    // `deleteFromFile` would destroy the fresh token.
-    //
-    // Why this works: `loadTokens` calls `_keyringFactory().
-    // getPassword()` first. In our wrapper we (1) return null so
-    // the code falls through to the file path, (2) race a fresh
-    // save via the public `saveTokens` API. Because `saveTokens`
-    // takes the same in-process `fileMutex` as `deleteFromFile`,
-    // awaiting the save inside the stub guarantees the fresh row
-    // is on disk before `loadFromFile` runs. Then `loadFromFile`
-    // reads the fresh row — which is NOT expired — so no scrub
-    // happens, and the test reduces to "the fresh save survived".
-    //
-    // That tests `saveTokens` correctness, not the CAS per se. To
-    // actually exercise the CAS delete-skip branch, we need the
-    // file read to see EXPIRED and the delete re-read to see FRESH.
-    // We achieve that by pre-seeding an expired row BEFORE
-    // `loadTokens` reads the file, then interposing a fresh save
-    // between `loadFromFile`'s read and `deleteFromFile`'s
-    // in-lock re-read. We do this by patching `_keyringFactory`
-    // to rewrite the file AFTER the file read but BEFORE the
-    // delete — achieved by hooking the next `getPassword` call
-    // that `deleteFromFile` itself makes? It doesn't make one.
-    //
-    // Simpler: just directly exercise the CAS in `deleteFromFile`
-    // via the public `loadTokens` entry by writing the file
-    // manually between the read and the delete. We have no seam
-    // between them — but we can race two unawaited promises and
-    // rely on the in-process mutex for determinism.
-    //
-    // Race recipe: seed expired row. Start `loadTokens` without
-    // awaiting (its file read + mutex-wait happens synchronously
-    // enough that the read lands first). Start `saveTokens` with
-    // fresh tokens (will wait on the mutex). Await both. The load
-    // acquires mutex first for its delete, save acquires second.
-    // BUT `loadFromFile` does NOT hold the mutex during its read
-    // — only `deleteFromFile` takes it. So the ordering is:
-    //   1. load reads file (no mutex) → sees expired
-    //   2. save takes mutex, writes fresh
-    //   3. save releases mutex
-    //   4. load's delete takes mutex, CAS re-reads, sees fresh
-    //      expiresAt != expired expiresAt → refuses to delete
-    //
-    // This ordering is not guaranteed — microtask scheduling
-    // could let the delete race ahead of the save. But the CAS
-    // guarantees the outcome is correct in either case:
-    //   - If delete runs first: scrubs expired; save then writes
-    //     fresh. Final state: fresh row.
-    //   - If save runs first: delete CAS refuses. Final state:
-    //     fresh row.
-    // So regardless of interleaving, the fresh token must
-    // survive. Without CAS (unconditional delete), the
-    // "save-first-then-delete" ordering would DESTROY the fresh
-    // token.
-
-    FakeKeyring.shouldThrow = true; // route through the file path
-    const past = Date.now() - 1000;
-
-    // Seed the file with a refresh-expired row.
-    const expired = mkTokens({
-      accessToken: "expired",
-      expiresAt: past,
-      refreshExpiresAt: past,
-    });
-    await saveTokens("default", expired);
-    const { readFile } = await import("node:fs/promises");
-    const initial = JSON.parse(await readFile(credentialsPath(), "utf-8"));
-    expect(initial.default.expiresAt).toBe(past);
-
-    // Race: start the expired scrub and a concurrent fresh save.
-    const fresh = mkTokens({ accessToken: "fresh-concurrent", expiresAt: futureMs() });
-    const loadPromise = loadTokens("default");
-    const savePromise = saveTokens("default", fresh);
-    const [loadResult] = await Promise.all([loadPromise, savePromise]);
-
-    // load returns null either way (it saw the expired row at read time).
-    expect(loadResult).toBeNull();
-
-    // The critical assertion: the fresh save must have survived.
-    // Without CAS, "save-first-then-delete" interleaving destroys
-    // the fresh row. With CAS, any interleaving preserves it.
-    const finalRaw = await readFile(credentialsPath(), "utf-8");
-    const final = JSON.parse(finalRaw);
-    expect(final.default).toEqual(fresh);
-  });
-
-  it("file path: DOES scrub when tokens are still the expired ones", async () => {
-    FakeKeyring.shouldThrow = true; // route through the file path
-    const past = Date.now() - 1000;
-    await saveTokens(
-      "default",
-      mkTokens({ accessToken: "expired-only", expiresAt: past, refreshExpiresAt: past }),
-    );
-
-    // Sanity: file holds the expired row.
-    const { readFile, access } = await import("node:fs/promises");
-    const before = JSON.parse(await readFile(credentialsPath(), "utf-8"));
-    expect(before.default.expiresAt).toBe(past);
-
-    // No concurrent writer — CAS should succeed and scrub the row.
-    expect(await loadTokens("default")).toBeNull();
-
-    // File gone (last profile) per deleteFromFile's existing behavior.
-    await expect(access(credentialsPath())).rejects.toBeDefined();
-  });
-
-  it("keyring path: does NOT scrub when the keyring entry was rewritten between read and delete", async () => {
-    const past = Date.now() - 1000;
-
-    // Build a keyring wrapper that returns the expired token on the
-    // first `getPassword` (the classification read inside
-    // `loadTokens`) and a fresh token on the second (the re-read
-    // guard right before `deletePassword`). This simulates a
-    // concurrent process landing a fresh save in the window.
-    let getCallCount = 0;
-    let deletedCount = 0;
-    _setKeyringFactoryForTesting((_profile) => ({
-      getPassword(): string | null {
-        getCallCount++;
-        if (getCallCount === 1) {
-          return mkTokensJson({
-            accessToken: "expired",
-            expiresAt: past,
-            refreshExpiresAt: past,
-          });
-        }
-        // Re-read: a fresh token has landed.
-        return mkTokensJson({ accessToken: "fresh-from-race", expiresAt: futureMs() });
-      },
-      setPassword(_value: string): void {
-        /* unused */
-      },
-      deletePassword(): void {
-        deletedCount++;
-      },
-    }));
-
-    // loadTokens sees expired on first read, re-reads, sees the
-    // fresh token, refuses to delete. Return value is still null
-    // because the classification ran against the expired snapshot.
-    expect(await loadTokens("default")).toBeNull();
-
-    // Critical: the delete must NOT have fired (CAS refused).
-    expect(deletedCount).toBe(0);
-    // Both gets should have happened: the classification + the re-read.
-    expect(getCallCount).toBe(2);
-  });
-
-  it("keyring path: DOES scrub when the re-read still shows the same expired token", async () => {
-    const past = Date.now() - 1000;
-    FakeKeyring.store.set(
-      "default",
-      mkTokensJson({ accessToken: "still-expired", expiresAt: past, refreshExpiresAt: past }),
-    );
-
-    // Happy path for the keyring CAS: no concurrent writer, the
-    // re-read shows the same expiresAt, the delete proceeds.
-    expect(await loadTokens("default")).toBeNull();
-    expect(FakeKeyring.store.has("default")).toBe(false);
-  });
-
-  it("deleteTokens (logout) remains unconditional — wipes regardless of state", async () => {
-    // Regression guard for call-site 3: the logout path must NOT
-    // compare-and-swap. The user's intent is to nuke the tokens no
-    // matter what's in the store (fresh, expired, or anything else).
+describe("deleteTokens", () => {
+  it("wipes the pair in both stores, whatever it holds", async () => {
     await saveTokens("default", mkTokens({ accessToken: "wipe-me", expiresAt: futureMs() }));
     await deleteTokens("default");
     expect(FakeKeyring.store.has("default")).toBe(false);
@@ -786,7 +583,7 @@ describe("fallback file: tmp path O_EXCL protection", () => {
 // The CLI stores BOTH the access token and a rotating 30-day refresh
 // token. The load/save surface must:
 //   1. Round-trip both fields.
-//   2. Apply expiry-based auto-scrub to the REFRESH token's lifetime.
+//   2. Read a pair as absent once its REFRESH token has expired.
 
 describe("refresh-token persistence", () => {
   it("round-trips the full pair through the keyring", async () => {
@@ -850,10 +647,10 @@ describe("refresh-token persistence", () => {
     expect(await loadTokens("default")).toBeNull();
   });
 
-  it("does NOT scrub when only the access token is expired but the refresh token is still valid", async () => {
+  it("returns the pair when only the access token is expired but the refresh token is still valid", async () => {
     // Issue #165 key invariant: an expired access token + valid
     // refresh token is the HAPPY path for `api.ts` (it rotates via
-    // the refresh). If loadTokens scrubbed this state, silent refresh
+    // the refresh). If loadTokens dropped this state, silent refresh
     // could never run.
     const accessExp = Date.now() - 1_000; // already expired
     const refreshExp = futureMs(3_600_000);
@@ -868,7 +665,7 @@ describe("refresh-token persistence", () => {
     expect(read?.refreshToken).toBe("rt");
   });
 
-  it("scrubs when both access and refresh tokens are expired", async () => {
+  it("returns null when both access and refresh tokens are expired", async () => {
     const past = Date.now() - 1_000;
     await saveTokens("default", {
       accessToken: "expired-at",

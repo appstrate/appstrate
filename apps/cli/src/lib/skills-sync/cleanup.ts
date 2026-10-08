@@ -3,6 +3,8 @@
 import { loginFix, setupNotice, writeNotice } from "./notice.ts";
 import { getNoticePath, readSyncState, writeSyncState } from "./state.ts";
 import {
+  PLUGIN_NAME,
+  SETUP_SLUG,
   SYNC_TARGETS,
   removeManagedDir,
   setupPluginFiles,
@@ -11,7 +13,10 @@ import {
   writeSetupPlugin,
 } from "./targets.ts";
 
-/** Caller holds the sync lock. Failed removals keep their ownership for a later logout. */
+/**
+ * Caller holds the sync lock. Failed removals keep their ownership for a later
+ * logout, so their warnings say to retry; a warning a retry cannot fix says so.
+ */
 export async function cleanupProfileSkills(
   profileName: string,
 ): Promise<{ warnings: string[]; pluginReset: boolean }> {
@@ -24,6 +29,7 @@ export async function cleanupProfileSkills(
       ],
     };
   const failures: string[] = [];
+  const retry = `Retry appstrate logout --profile ${profileName}.`;
   let pluginReset = false;
   for (const target of SYNC_TARGETS) {
     const ledger = state.targets[target];
@@ -36,7 +42,7 @@ export async function cleanupProfileSkills(
       try {
         await writeSetupPlugin(ledger.root, setupPluginFiles(fix));
       } catch (error) {
-        failures.push(`Could not reset ${target}: ${String(error)}`);
+        failures.push(`Could not reset ${target}: ${String(error)}. ${retry}`);
         continue;
       }
       delete state.targets[target];
@@ -45,7 +51,9 @@ export async function cleanupProfileSkills(
       try {
         await writeNotice(setupNotice(fix));
       } catch (error) {
-        failures.push(`Could not write ${getNoticePath()}: ${String(error)}`);
+        failures.push(
+          `Could not write ${getNoticePath()}: ${String(error)}; the setup plugin is in place and its /${PLUGIN_NAME}:${SETUP_SLUG} skill carries the remedy.`,
+        );
       }
       continue;
     }
@@ -56,7 +64,7 @@ export async function cleanupProfileSkills(
         await removeManagedDir(skillDir(target, slug));
         delete ledger.managed[slug];
       } catch (error) {
-        failures.push(`Could not remove ${target}/${slug}: ${String(error)}`);
+        failures.push(`Could not remove ${target}/${slug}: ${String(error)}. ${retry}`);
       }
     }
     // A target whose removals all failed keeps its entries, so it keeps its

@@ -27,8 +27,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
-import { readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
+import { getConfigDir, readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
 import type { Space } from "../src/lib/spaces.ts";
@@ -211,6 +213,38 @@ describe("login credentials write", () => {
 
     expect(heldAtSave).toEqual([true]);
     expect((await loadTokens("default"))?.refreshToken).toBe("rt-xyz");
+  });
+
+  it("names the new instance on the profile before the new pair becomes visible", async () => {
+    // A refresher that adopts the new pair sends it to the profile's
+    // instance: it must never see that pair beside the old instance.
+    await setProfile("default", {
+      instance: "https://previous.example.com",
+      userId: "u_test",
+      email: "alice@example.com",
+    });
+    installDefaultResponders();
+    const configPath = join(getConfigDir(), "config.toml");
+    const instanceAtSave: (string | undefined)[] = [];
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword(value: string): void {
+        instanceAtSave.push(/instance = "([^"]+)"/.exec(readFileSync(configPath, "utf-8"))?.[1]);
+        keyring.store.set(profile, value);
+      },
+      getPassword(): string | null {
+        return keyring.store.get(profile) ?? null;
+      },
+      deletePassword(): void {
+        keyring.store.delete(profile);
+      },
+    }));
+
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com", noOrg: true },
+      createMemoryIO().io,
+    );
+
+    expect(instanceAtSave).toEqual(["https://app.example.com"]);
   });
 
   it("saves the approved pair anyway, with a warning, when the lock stays held past its wait", async () => {

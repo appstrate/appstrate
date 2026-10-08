@@ -929,7 +929,7 @@ The fallback activates transparently when the keyring backend is missing (common
 $XDG_CONFIG_HOME/appstrate/              (or ~/.config/appstrate/)
 ├── config.toml                          # profiles, default profile pointer
 ├── credentials.json                     # keyring fallback (only if keyring unavailable)
-└── credentials.lock                     # flock(2) target serializing login's save, logout's delete and the token refresh across processes (never removed; the expired-token scrub in `loadTokens` runs outside it under its own guard; skipped where flock(2) or the lock file is unavailable)
+└── credentials.lock                     # flock(2) target serializing login's save, logout's delete and the token refresh across processes (never removed; skipped where flock(2) or the lock file is unavailable)
 
 $XDG_DATA_HOME/appstrate/                (or ~/.local/share/appstrate/)
 ├── claude-plugin/                       # generated Claude Code plugin (`appstrate code sync`)

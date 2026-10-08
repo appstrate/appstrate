@@ -45,11 +45,11 @@ const ACCESS_TOKEN_REFRESH_MARGIN_MS = 30_000;
 /**
  * The two bounds of the credentials lock, set together. A refresh holds the
  * lock for one request, aborted at `REFRESH_REQUEST_TIMEOUT_MS`, plus a local
- * read and write; the margin over it keeps every holder that can still run
- * inside a waiter's patience. A waiter that gives up (`FileLockBusyError`,
- * stored credentials untouched) therefore faces a holder no timeout can end:
- * a stopped or suspended process, or one blocked on a macOS keychain access
- * prompt nobody has answered.
+ * read and write, so a lone stalled holder cannot block waiters indefinitely.
+ * A waiter's wait counts from its own start, so it can still give up
+ * (`FileLockBusyError`, stored credentials untouched) behind several holders
+ * in turn, or behind one no timeout ends: a stopped or suspended process, or
+ * one blocked on a macOS keychain prompt nobody has answered.
  */
 const REFRESH_REQUEST_TIMEOUT_MS = 20_000;
 // The timeout's cost, accepted: a server that commits the rotation but answers
@@ -323,7 +323,9 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
  * The profile is re-read there too: the caller sends the token to the instance
  * it read before the lock, so a login that moved the profile to another
  * instance meanwhile must not have its token adopted — that would hand one
- * instance's bearer to the other. The run stops instead, credentials intact.
+ * instance's bearer to the other. Login writes the profile before the pair,
+ * under this lock, so a new pair is never visible beside the old instance.
+ * The run stops instead, credentials intact.
  */
 function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
   return dedupRefresh(profileName, () =>

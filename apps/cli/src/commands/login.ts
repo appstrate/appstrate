@@ -260,10 +260,6 @@ async function runLogin(
     refreshToken: token.refreshToken,
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   };
-  // Under the credentials lock, so a refresh in flight elsewhere cannot write
-  // the old session over this one; it re-reads and adopts the new pair.
-  await withCredentialsLockForUser(() => saveTokens(profileName, tokens), io);
-
   // Preserve the previous `orgId` / `spaceId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call
   // happens to flake (network, server blip) would silently drop the pins
@@ -278,14 +274,23 @@ async function runLogin(
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
-  await setProfile(profileName, {
-    instance,
-    userId: identity.userId,
-    email: identity.email,
-    ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
-    ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
-    ...(sameUser && existingProfile?.syncSpaces ? { syncSpaces: existingProfile.syncSpaces } : {}),
-  });
+  // Under the credentials lock, so a refresh in flight elsewhere cannot write
+  // the old session over this one; it re-reads and adopts the new pair. The
+  // profile goes first: a refresher that sees the new pair must also see its
+  // instance, or it would send that pair to the old one.
+  await withCredentialsLockForUser(async () => {
+    await setProfile(profileName, {
+      instance,
+      userId: identity.userId,
+      email: identity.email,
+      ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
+      ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
+      ...(sameUser && existingProfile?.syncSpaces
+        ? { syncSpaces: existingProfile.syncSpaces }
+        : {}),
+    });
+    await saveTokens(profileName, tokens);
+  }, io);
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
   // persisted so `listOrgs` / `createOrg` (both authenticated) work.

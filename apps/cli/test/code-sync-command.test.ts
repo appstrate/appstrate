@@ -1362,6 +1362,8 @@ describe("code sync — session notice", () => {
     const out = await hookOutput();
     expect(out.systemMessage).toContain("`appstrate login --profile nope --instance <url>`");
     expect(out.hookSpecificOutput.additionalContext).toContain("Appstrate instance URL");
+    // A no-TTY login pins no organization when the user has several.
+    expect(out.hookSpecificOutput.additionalContext).toContain("append `--org <id-or-slug>`");
   });
 
   it("tells the next session about a pin missing in a run without --print-path", async () => {
@@ -1390,7 +1392,10 @@ describe("code sync — session notice", () => {
     const result = await cleanupProfileSkills("default");
 
     expect(result.pluginReset).toBe(true);
+    // A retry would skip the plugin, its ledger gone: the warning says so.
     expect(result.warnings).toEqual([expect.stringContaining(getNoticePath())]);
+    expect(result.warnings[0]).toContain("its /appstrate:setup skill carries the remedy");
+    expect(result.warnings[0]).not.toContain("Retry");
     expect((await readSyncState()).state.targets["claude-plugin"]).toBeUndefined();
     expect(await readText(join(pluginRoot(), "skills", "setup", "SKILL.md"))).toContain(
       "appstrate login --profile default --instance https://app.example.com",

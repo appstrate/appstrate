@@ -316,13 +316,12 @@ export async function pollDeviceFlow(
  * single-use — a second exchange of the same plaintext triggers the
  * server-side reuse-detection sweep that revokes the whole family).
  *
- * On any non-2xx response, throws `DeviceFlowError(code, description,
- * status)` — callers distinguish recoverable from terminal states:
- *   - `invalid_grant`: refresh token expired, revoked, or already
- *     rotated (replay). The CLI must clear local credentials and
- *     prompt `appstrate login`.
- *   - transient HTTP errors (network, 5xx): surfaced so the caller can
- *     decide to retry or fall through to re-auth.
+ * A non-2xx response carrying an OAuth error body throws
+ * `DeviceFlowError(code, description, status)`; `invalid_grant` (refresh
+ * token expired, revoked, or already rotated) means the CLI must clear local
+ * credentials and prompt `appstrate login`. Any other non-2xx — a proxy's 502
+ * page, say — throws a plain `Error` naming the status: it says nothing about
+ * the session, so it must not read as an OAuth verdict.
  *
  * `signal` bounds the whole exchange, body included; an abort rejects with
  * the signal's reason (a `TimeoutError` for `AbortSignal.timeout`), never a
@@ -350,7 +349,10 @@ export async function refreshCliTokens(
   });
   if (!res.ok) {
     const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
+    if (typeof err.error !== "string") {
+      throw new Error(`Token endpoint returned HTTP ${res.status}`);
+    }
+    throw new DeviceFlowError(err.error, err.error_description, res.status);
   }
   const json = (await res.json()) as {
     access_token: string;
@@ -414,7 +416,10 @@ async function parseErrorBody(res: Response): Promise<RawErrorBody> {
     const parsed = (await res.json()) as RawErrorBody;
     if (parsed && typeof parsed === "object") return parsed;
     return {};
-  } catch {
+  } catch (err) {
+    // An abort while reading is the caller's deadline, not an unreadable body.
+    const name = (err as { name?: unknown } | null)?.name;
+    if (name === "TimeoutError" || name === "AbortError") throw err;
     return {};
   }
 }
