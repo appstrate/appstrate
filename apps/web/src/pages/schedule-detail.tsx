@@ -151,18 +151,32 @@ export function ScheduleDetailPage() {
             </>
           }
         />
+        {/* Disabled by the platform, not by a person: say why in the band
+            between the header and the tabs, where the agent page says what
+            blocks it. A lost connection is repaired in the form's connection
+            choice, so the alert opens it. */}
+        {disabledReason && (
+          <Alert variant="warning" className="mb-4">
+            <Pause aria-hidden />
+            <AlertDescription className="flex items-start justify-between gap-3">
+              <span className="min-w-0">{disabledReason}</span>
+              {mayWrite && schedule.disabled_reason?.startsWith("connection_") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="-my-1.5 shrink-0"
+                  onClick={() => navigate(`/schedules/${schedule.id}/edit#connections`)}
+                >
+                  {t("schedule.chooseConnections")}
+                </Button>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
         <DetailTabsList className="mt-6 mb-3">
           <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
           {readsRuns && <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>}
         </DetailTabsList>
-
-        {/* Disabled by the platform, not by a person: say why, above both tabs. */}
-        {disabledReason && (
-          <Alert variant="warning" className="mb-3">
-            <Pause className="size-4" aria-hidden />
-            <AlertDescription>{disabledReason}</AlertDescription>
-          </Alert>
-        )}
 
         {readsRuns && (
           <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">

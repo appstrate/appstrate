@@ -1629,7 +1629,8 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       const parts = url.pathname.split("/");
       const runId = parts[parts.length - 2] ?? "";
       const run = f.runs.find((candidate) => candidate.id === runId);
-      const rows = f.runLogs.data.map((row, index) => ({
+      const journal = runId === "run_03" ? f.rqRunLogs : f.runLogs;
+      const rows = journal.data.map((row, index) => ({
         ...row,
         id: index + 1,
         runId,

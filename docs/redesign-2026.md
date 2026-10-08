@@ -1632,8 +1632,18 @@ detail/`, filled with the redesign's content (one OAuth client table, lock
 - The chat list speaks main's `threads.*` keys; deleting a conversation asks
   first; "Conversation introuvable" for a gone id.
 - Runs and schedules: a schedule's disabled reason (warning Alert + badge
-  tooltip), a run's failure cause under its tabs, Relancer disabled with its
-  reason, org-level webhooks marked.
+  tooltip), a run's failure cause, Relancer disabled with its reason,
+  org-level webhooks marked. Review (8 October): both alerts left the tabs
+  for the band between the header and the tabs, where the agent page already
+  says what blocks it (model, deactivated here, draft): they speak of the run
+  or the schedule, not of one tab. A schedule switched off over a lost
+  connection carries "Choisir les connexions", which opens its edit form on
+  the connection choice (`#connections`). The run page no longer shows the
+  unread dot on its own status: the page is the reading.
+- Every Alert is shadcn's grid alert: the icon sits on the middle of the
+  text's first line, one line or several (the old absolute icon sat 5px
+  low). An alert with a button in its row centres the button on that line
+  (`-my-1.5`), not on the block.
 - The agent header's Run button is main's single client verdict
   (`AgentRunButton`), the diagnostics badge stays as information; main's
   "no model" alert is back as an Alert under the header.

@@ -279,7 +279,8 @@ export function RunDetailPage() {
         wrapActions
         actions={
           <>
-            <Badge status={enrichedRun.status} unread={enrichedRun.unread} />
+            {/* No unread dot here: this page is the reading. */}
+            <Badge status={enrichedRun.status} />
             {enrichedRun.package_ephemeral && (
               <UIBadge variant="secondary">{t("runs.inlineBadge")}</UIBadge>
             )}
@@ -308,6 +309,20 @@ export function RunDetailPage() {
       >
         <RunHeaderSummary run={enrichedRun} />
       </PageHeader>
+
+      {/* What ended the run belongs to the run, not to one tab: a failure, a
+          timeout or a cancellation each carries its cause, in the band between
+          the header and the tabs where the agent page says what blocks it. */}
+      {isTerminal && run.status !== "success" && run.error && (
+        <Alert
+          variant={run.status === "cancelled" ? "default" : "destructive"}
+          className="mb-4"
+          data-testid="run-error-banner"
+        >
+          {run.status === "cancelled" ? <CircleSlash aria-hidden /> : <CircleAlert aria-hidden />}
+          <AlertDescription className="break-words">{run.error}</AlertDescription>
+        </Alert>
+      )}
 
       {agent && canReadAgent && (
         <RunModal
@@ -350,23 +365,6 @@ export function RunDetailPage() {
                 <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
                 <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>
               </DetailTabsList>
-
-              {/* What ended the run, above every pane: a failure, a timeout or a
-                  cancellation each carries its cause. */}
-              {isTerminal && run.status !== "success" && run.error && (
-                <Alert
-                  variant={run.status === "cancelled" ? "default" : "destructive"}
-                  className="mb-3"
-                  data-testid="run-error-banner"
-                >
-                  {run.status === "cancelled" ? (
-                    <CircleSlash className="size-4" aria-hidden />
-                  ) : (
-                    <CircleAlert className="size-4" aria-hidden />
-                  )}
-                  <AlertDescription className="break-words">{run.error}</AlertDescription>
-                </Alert>
-              )}
 
               <TabsContent
                 value="overview"

@@ -523,6 +523,7 @@
   "schedule.scheduled": "Planifié",
   "schedule.statusDisabled": "Désactivé",
   "schedule.statusActive": "Actif",
+  "schedule.chooseConnections": "Choisir les connexions",
   "schedule.disabledReason.actor_invalid": "Cette planification a été désactivée automatiquement : son acteur ne peut plus lancer d'agents dans cet espace.",
   "schedule.disabledReason.actor_left_org": "Cette planification a été désactivée automatiquement : son acteur a quitté l'organisation.",
   "schedule.disabledReason.connection_deleted": "Cette planification a été désactivée automatiquement : une connexion qu'elle utilisait a été supprimée. Choisissez à nouveau ses connexions avant de la réactiver.",

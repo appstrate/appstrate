@@ -246,7 +246,12 @@ export function ScheduleForm({
       defaultValues?.connection_overrides &&
       Object.keys(defaultValues.connection_overrides).length > 0
     );
-  const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
+  // `#connections`: the detail page's "choose connections" link, from a
+  // schedule the platform switched off over a lost connection. The choice
+  // lives in this block, so it opens (the section scrolls itself into view).
+  const [overridesOpen, setOverridesOpen] = useState(
+    () => initialOverridesNonEmpty || window.location.hash === "#connections",
+  );
 
   // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);

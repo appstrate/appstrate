@@ -2339,6 +2339,104 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
   effective_timeout_seconds: 1_800,
 };
 
+/**
+ * The failed RQ run's own journal (run_03): the login it was doing when the 2FA
+ * code expired, so its failure does not read through an accounting run's lines.
+ */
+export const rqRunLogs: Json200<"/api/runs/{id}/logs", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: 1,
+      runId: "run_03",
+      type: "system",
+      level: "info",
+      event: "run.started",
+      message: "Démarrage du conteneur d'exécution.",
+      createdAt: ago(180),
+    },
+    {
+      id: 2,
+      runId: "run_03",
+      type: "progress",
+      level: "info",
+      event: "tool.call",
+      message: "Tool: desktop_fill",
+      data: {
+        tool: "desktop_fill",
+        toolCallId: "call_desktop_fill",
+        args: { url: "clicsequr.gouv.qc.ca", fields: ["identifiant", "mot_de_passe"] },
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(180),
+    },
+    {
+      id: 3,
+      runId: "run_03",
+      type: "progress",
+      level: "info",
+      event: "tool.result",
+      message: "Tool result: desktop_fill",
+      data: {
+        tool: "desktop_fill",
+        toolCallId: "call_desktop_fill",
+        isError: false,
+        result: { submitted: true },
+        durationMs: 3_400,
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(180),
+    },
+    {
+      id: 4,
+      runId: "run_03",
+      type: "agent",
+      level: "info",
+      event: "log",
+      message: "Code 2FA demandé, attente du courriel de clicSÉQUR.",
+      createdAt: ago(180),
+    },
+    {
+      id: 5,
+      runId: "run_03",
+      type: "progress",
+      level: "info",
+      event: "tool.call",
+      message: "Tool: gmail_search",
+      data: {
+        tool: "gmail_search",
+        toolCallId: "call_gmail_search",
+        args: { query: "from:clicsequr newer_than:5m" },
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(180),
+    },
+    {
+      id: 6,
+      runId: "run_03",
+      type: "progress",
+      level: "info",
+      event: "tool.result",
+      message: "Tool result: gmail_search",
+      data: {
+        tool: "gmail_search",
+        toolCallId: "call_gmail_search",
+        isError: false,
+        result: { count: 1 },
+        durationMs: 96_000,
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(179),
+    },
+    {
+      id: 7,
+      runId: "run_03",
+      type: "agent",
+      level: "warn",
+      event: "log",
+      message: "Courriel reçu après 96 s, au-delà du délai de 90 s du formulaire.",
+      createdAt: ago(179),
+    },
+  ],
+};
+
 /** A handful of log lines, so a run detail is not an empty console. */
 export const runLogs: Json200<"/api/runs/{id}/logs", "get"> = {
   object: "list",
