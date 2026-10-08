@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Requires `@appstrate/afps-shared` `^0.11.0`** (was `^0.10.1`): the
   `authorized_uris` rules moved to its `./authorized-uris` subpath. No core
   export changes. (#1763)
+- **`findUnboundedInjectedCredentials` (`@appstrate/core/integration`)
+  refuses an `authorized_uris` wildcard that is not under a literal
+  registrable domain**, judged with the Public Suffix List (ICANN and private
+  sections), through `@appstrate/afps-shared` 0.11.0: `https://*.co.uk/**`
+  and `https://*.github.io/**` are refused, `https://*.example.com/**` and
+  `https://*.example.co.uk/**` still pass. No API change; a behaviour change:
+  a manifest that passed may be refused on its next write. (#1656)
 
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration

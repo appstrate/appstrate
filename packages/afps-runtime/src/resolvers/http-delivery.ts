@@ -20,7 +20,7 @@
 
 import { renderCredentialTemplate } from "@appstrate/afps-shared/credential-template";
 
-// The resolver config shape lives once in the zero-dep `@appstrate/afps-shared`
+// The resolver config shape lives once in the zero-internal-dependency `@appstrate/afps-shared`
 // (the canonical `delivery.http` projection target). Re-export it here so
 // consumers importing from `@appstrate/afps-runtime/resolvers` keep their path.
 export type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";

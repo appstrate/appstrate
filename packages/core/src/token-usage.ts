@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 
 /**
- * Canonical token-usage shape — the definition now lives in the zero-dep leaf
+ * Canonical token-usage shape — the definition now lives in the zero-internal-dependency leaf
  * package `@appstrate/afps-shared`. Re-exported here so the public
  * `@appstrate/core/token-usage` import path stays stable for existing consumers.
  */

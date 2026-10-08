@@ -241,7 +241,10 @@ const proxyResponses = {
       "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
       "blocked network range (`destination_ip_prohibited`); " +
       "`credential_exfiltration_refused` — the call carries a credential and the allowlist " +
-      "does not name its hosts (`http_request_denied`); `forbidden` — principal lacks " +
+      "does not name its hosts: it is empty or has an entry that leaves the host to the " +
+      "caller, or every entry matching the target reaches it through a wildcard past the " +
+      "registrable domain written under it, judged with the Public Suffix List (the message " +
+      "then names the host to list) (`http_request_denied`); `forbidden` — principal lacks " +
       "`credential-proxy:call`, session bound to a different principal, cookie session " +
       "used, or `X-Run-Id` names another actor's run.",
     headers: PROXY_STATUS_HEADER,

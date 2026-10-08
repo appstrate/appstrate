@@ -97,6 +97,13 @@ export default defineConfig({
     // if the build starts warning again.
     chunkSizeWarningLimit: 3700,
     rollupOptions: {
+      // tldts (the Public Suffix List behind `authorized_uris` checks in
+      // @appstrate/core) declares no `sideEffects`, so its ~160 kB trie rode
+      // along with every SPA import of `@appstrate/core/integration`, none of
+      // which judges a host. It is pure: let tree-shaking drop it.
+      treeshake: {
+        moduleSideEffects: [{ test: /[\\/]tldts(-core)?[\\/]/, sideEffects: false }],
+      },
       output: {
         // Stable vendor groups (rolldown `advancedChunks` — Vite 8 bundles
         // rolldown; the rollup `manualChunks` compat shim mis-places shared

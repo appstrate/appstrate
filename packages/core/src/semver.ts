@@ -3,7 +3,7 @@
 
 import semver from "semver";
 
-// The canonical 3-step resolver lives in the shared zero-dependency package
+// The canonical 3-step resolver lives in the shared zero-internal-dependency package
 // so the platform and the standalone `afps` CLI share one implementation.
 // Imported (used internally by resolveVersionFromCatalog) and re-exported to
 // preserve the `@appstrate/core/semver:resolveVersionString` public surface.

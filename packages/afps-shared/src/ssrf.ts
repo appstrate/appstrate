@@ -4,7 +4,7 @@
 /**
  * SSRF protection — blocks requests targeting private/internal networks.
  *
- * Canonical, zero-dependency source of truth. Re-exported verbatim by
+ * Canonical, zero-internal-dependency source of truth. Re-exported verbatim by
  * `@appstrate/core/ssrf` (so every existing platform consumer keeps its
  * import path) and consumed directly by the shared `api-call-engine` in
  * `@appstrate/afps-runtime` — which cannot depend on `@appstrate/core`

@@ -1237,6 +1237,37 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     expect(fetched).toBe(0); // refused before any outbound bytes
   });
 
+  it("refuses a credential to a target past its wildcard's registrable domain", async () => {
+    let fetched = 0;
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const bundle = makeBundle(root, [
+      makePackage("@acme/api", "1.0.0", "integration", {
+        "integration.json": JSON.stringify(
+          apiKeyIntegrationManifest("@acme/api", { authorizedUris: ["https://*.amazonaws.com/**"] })
+            .integration,
+        ),
+      }),
+    ]);
+    const resolver = new LocalIntegrationResolver({
+      resolveHost: async () => ["203.0.113.7"],
+      creds: { version: 1, integrations: { "@acme/api": { fields: { api_key: "secret" } } } },
+      fetch: (() => {
+        fetched += 1;
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      }) as unknown as typeof fetch,
+    });
+    const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+    const { ctx } = makeCtx();
+    const call = (target: string) => tools[0]!.execute({ method: "GET", target }, ctx);
+    await expect(call("https://sqs.us-east-1.amazonaws.com/q")).rejects.toMatchObject({
+      code: "credential_exfiltration_refused",
+      message: expect.stringContaining("list that host in authorized_uris"),
+    });
+    expect(fetched).toBe(0);
+    await call("https://sts.amazonaws.com/");
+    expect(fetched).toBe(1);
+  });
+
   it("refuses a caller header that is no HTTP field value ahead of the URL policy", async () => {
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeBundle(root, [

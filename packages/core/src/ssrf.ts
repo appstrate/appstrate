@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * SSRF protection — re-exported from the shared zero-dependency
+ * SSRF protection — re-exported from the shared zero-internal-dependency
  * `@appstrate/afps-shared` package. The `@appstrate/core/ssrf` public
  * surface is preserved verbatim (`isBlockedHost`, `isBlockedUrl`,
  * `resolveAndCheckHost`).
