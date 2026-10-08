@@ -4,12 +4,10 @@
   "collapsible": false,
   "defaultOpen": true,
   "pages": [
-    "overview",
     "how-integrations-work",
     "catalog",
     "custom-integrations",
     "llm-models",
-    "personal-agents",
-    "coding-agents"
+    "personal-agents"
   ]
 }

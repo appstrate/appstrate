@@ -46,7 +46,7 @@ Routes of the `/api/orgs/{orgId}` family carry the organization in the path inst
 
 ## Acting for an end-user
 
-Send `Appstrate-User: eu_xxx` with an API key to act as one of your own customers. The call is then attributed to the end-user, uses its connections and memory, and only sees its runs. It is refused for cookie sessions and for end-users of another space. See [End-Users](/features/end-users).
+An API key can act as one of your own customers with the `Appstrate-User` header. The rules are in [End-Users](/features/end-users#acting-on-behalf-of-an-end-user).
 
 ## Realm isolation
 

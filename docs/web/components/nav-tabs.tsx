@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 
 const TABS = [
   { title: 'Docs', url: '/get-started/introduction', section: null },
-  { title: 'API', url: '/api/introduction', section: '/api' },
+  { title: 'API', url: '/api', section: '/api' },
   { title: 'Resources', url: '/resources/architecture', section: '/resources' },
 ];
 

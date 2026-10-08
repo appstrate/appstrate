@@ -4,13 +4,11 @@
   "root": true,
   "pages": [
     "---Get Started---",
-    "introduction",
+    "index",
     "quickstart",
     "---Essentials---",
     "authentication",
-    "webhooks-guide",
     "idempotency",
-    "errors",
-    "index"
+    "errors"
   ]
 }

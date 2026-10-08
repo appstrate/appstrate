@@ -5,48 +5,15 @@ description: "How Appstrate is built: the API, the run sandbox with its sidecar,
 
 Appstrate is a TypeScript monorepo on Bun and Hono, with a React dashboard. The API validates a request, creates a run, and starts the agent in an isolated sandbox next to a **sidecar** that holds every secret. This page is an overview. Each subsystem has a design document in the repository, linked in [Go deeper](#go-deeper), and those documents are the reference when this page and the code disagree.
 
-## Monorepo layout
+## Code layout
 
-```
-appstrate/
-├── apps/
-│   ├── api/            # Hono API: routes, services, auth pipeline, OpenAPI, built-in modules
-│   ├── web/            # React 19 + Vite dashboard (also served by the API)
-│   └── cli/            # the `appstrate` binary
-├── packages/
-│   ├── core/           # shared validation, naming, semver, permissions, module contract (npm)
-│   ├── afps-shared/    # bundle, SSRF and credential helpers shared with the runtime (npm)
-│   ├── afps-runtime/   # portable AFPS bundle runner, signing, conformance, `afps` CLI
-│   ├── runner-pi/      # drives the Pi agent run and builds the container environment
-│   ├── mcp-transport/  # MCP SDK adapter used by the sidecar and the agent runtime
-│   ├── connect/        # OAuth2/PKCE, API-key credentials, credential encryption
-│   ├── db/             # Drizzle schema and migrations (PostgreSQL and PGlite), Better Auth
-│   ├── env/            # Zod-validated environment: the source of truth for configuration
-│   ├── emails/         # email templates
-│   ├── ui/             # shared React design system
-│   └── module-*/       # workspace modules: chat, claude-code, codex, observability, ee
-├── runtime-pi/         # the run container images: agent runtime, sidecar, integration runners
-└── system-packages/    # AFPS packages shipped with the platform: integrations and MCP servers
-```
+The API is in `apps/api`, the dashboard in `apps/web` and the `appstrate` CLI in `apps/cli`. Shared libraries and the workspace modules are under `packages/`, the run container images (agent runtime, sidecar, integration runners) under `runtime-pi/`, and the packages shipped with the platform under `system-packages/`. The full layout is in [AGENTS.md](https://github.com/appstrate/appstrate/blob/main/AGENTS.md).
 
 The stack is Bun, Hono, PostgreSQL 16 with Drizzle (or PGlite when no `DATABASE_URL` is set), Better Auth for sessions, and the Pi coding agent SDK (`@earendil-works/pi-coding-agent`) as the agent harness. All tenant data is isolated at the application level: every query filters by organization, and by space for space-scoped resources.
 
 ## What happens on a request
 
-The API assembles one pipeline, in this order (`apps/api/src/index.ts`):
-
-```
-request
-  → error handler (RFC 9457)  → Request-Id  → client IP  → CORS  → body limit
-  → health, OpenAPI document, /llms.txt            (no auth)
-  → shutdown gate (new writes are refused while draining)
-  → Better Auth routes (/api/auth/*)
-  → authentication: OIDC module strategies → API key (apst_) → session cookie
-  → Appstrate-User impersonation, role-preview and realm guards
-  → organization context (X-Org-Id) → permissions → space context (X-Space-Id)
-  → API version (Appstrate-Version) → Idempotency-Key guard
-  → route handler (per-route rate limit, idempotency)  → module routers
-```
+Every request goes through one middleware pipeline: error handling (RFC 9457), request id, CORS and body limit, then authentication (OIDC strategies, API key, session cookie), `Appstrate-User` impersonation, the organization and space context with their permission checks, API versioning and the idempotency guard, and finally the route handler with its own rate limit.
 
 Authorization is RBAC: fixed organization roles, plus a role per space (a preset or an organization-defined bundle). An API key is a ceiling on its creator's authority in one space. See [Authentication](/api/authentication).
 
@@ -91,35 +58,9 @@ A connection to a third-party service is an **integration**: an AFPS package tha
 
 Credentials are injected on the sidecar side, either into the tool's environment or into HTTP calls by a per-run credential-injecting proxy, and the integration's server never reads the stored secret. An agent selects which tools it uses, and the OAuth scopes requested at consent are inferred from that selection. A run binds the connections of its actor, so an end-user's run uses the end-user's connections. Full detail: [INTEGRATIONS_RUNTIME.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/INTEGRATIONS_RUNTIME.md). The AFPS format itself is covered in [AFPS specification](/resources/afps-specification).
 
-## Execution backends
+## Execution backends and modules
 
-`RUN_ADAPTER` picks where a run executes. It is a registry: modules can add backends.
-
-| Backend     | `RUN_ADAPTER`       | Isolation                                                                                | Use                                                                  |
-| ----------- | ------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Process     | `process` (default) | None: the agent is a host subprocess                                                     | Development and Tier 0 installs. Refuses `local` integration runners |
-| Docker      | `docker`            | A container per agent and sidecar, on an isolated per-run network                        | Production, Tiers 1 to 3 (their Compose files default to it)         |
-| Firecracker | `firecracker`       | One microVM per run, behind a KVM boundary, driven through the `appstrate-runner` daemon | Untrusted workloads. Opt-in `firecracker` module                     |
-
-See [Progressive infrastructure](/self-hosting/progressive-infrastructure) for tiers, and [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md) for the microVM backend and its threat model.
-
-## Modules
-
-Optional features are modules loaded at boot from the `MODULES` environment variable. A module contributes routes, permissions, OpenAPI paths, auth strategies, hooks, or an execution backend, and, for the Apache 2.0 modules, owns no database tables: they live in the core schema. Removing a module from `MODULES` leaves no routes, workers, or permissions behind, and its data stays in the database.
-
-| Module                                                     | In the default set | Provides                                                                            |
-| ---------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------- |
-| `oidc`                                                     | Yes                | OAuth 2.1 and OpenID Connect server for platform users, the CLI, and your end-users |
-| `webhooks`                                                 | Yes                | Signed run-event webhooks                                                           |
-| `mcp`                                                      | Yes                | The platform API exposed as an MCP server, one endpoint per organization            |
-| `core-providers`                                           | Yes                | Model providers (OpenAI, Anthropic, OpenAI-compatible)                              |
-| `@appstrate/module-chat`                                   | Yes                | The dashboard chat surface                                                          |
-| `firecracker`                                              | No                 | The Firecracker execution backend                                                   |
-| `@appstrate/module-codex`, `@appstrate/module-claude-code` | No                 | Run agents on a Codex or Claude Code subscription                                   |
-| `@appstrate/module-observability`                          | No                 | OpenTelemetry traces and metrics                                                    |
-| `@appstrate/module-ee`                                     | No                 | Stripe billing and credit quotas. Source-available, not Apache-2.0                  |
-
-The contract is published in `@appstrate/core`, so an external module can be installed from npm and listed in `MODULES`. The authoring guide is [`apps/api/src/modules/README.md`](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md). The default `MODULES` value is defined in `packages/env`; check [environment variables](/self-hosting/environment-variables) rather than this table for what your version ships.
+`RUN_ADAPTER` picks where a run executes (`process`, `docker`, or `firecracker` from a module), and optional features are modules loaded at boot from `MODULES`. A module contributes routes, permissions, OpenAPI paths, auth strategies, hooks or an execution backend. Removing it from `MODULES` leaves no routes, workers or permissions behind, and its data stays in the database. Both lists are in [Progressive Infrastructure](/self-hosting/progressive-infrastructure). The module contract is published in `@appstrate/core`, so an external module can be installed from npm and listed in `MODULES`; the authoring guide is [`apps/api/src/modules/README.md`](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
 
 ## Data model
 
@@ -147,4 +88,4 @@ The design documents live in [`docs/architecture/`](https://github.com/appstrate
 | [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md)                 | OpenTelemetry                                                 |
 | [SUPPLY_CHAIN.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUPPLY_CHAIN.md)                   | Supply-chain posture                                          |
 
-The code is Apache 2.0, apart from `packages/module-ee`. See [Contributing](/resources/contributing).
+To propose a change, see [Contributing](/resources/contributing).

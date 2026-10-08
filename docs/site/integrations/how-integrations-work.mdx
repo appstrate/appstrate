@@ -5,6 +5,8 @@ description: What an integration is, how an agent reaches a third-party service 
 
 An **integration** is an [AFPS](/resources/afps-specification) package of type `integration`, addressed as `@scope/name` (for example `@appstrate/gmail`). It declares how to authenticate against a third-party service, which URLs a credential may be sent to, and how the agent reaches the service. Appstrate ships [70 of them](/integrations/catalog); you can [write your own](/integrations/custom-integrations).
 
+Integrations plug third-party services into Appstrate. Models are configured separately, through [model providers](/integrations/llm-models). In the other direction, a [personal agent](/integrations/personal-agents) or a [coding agent](/using-appstrate/skill) can drive Appstrate over the REST API or MCP.
+
 This page is the overview. The runtime detail lives in the repository: [`INTEGRATIONS_RUNTIME.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/INTEGRATIONS_RUNTIME.md) and, for the wire format, the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md).
 
 ## Integration, connection, agent
@@ -113,7 +115,7 @@ List your own connections with `GET /api/me/connections` and delete one with `DE
 
 ## Scopes
 
-Scopes are inferred, not typed in by hand. An integration lists the scopes the provider offers in `scope_catalog` and maps each tool to the scopes it needs in `tools_policy.{tool}.required_scopes`. An agent declares the tools it wants, and the platform requests the union of the integration's default scopes, the scopes of the selected tools, and what the account already granted. Re-consenting never shrinks an existing grant. If a later token refresh returns a narrower grant than an installed agent needs, the connection is flagged as needing reconnection.
+Scopes are inferred, not typed in by hand. An integration lists the scopes the provider offers in `scope_catalog` and maps each tool to the scopes it needs in `tools_policy.{tool}.required_scopes`. An agent declares the tools it wants, and the platform requests the union of the integration's default scopes, the scopes of the selected tools, and what the account already granted. In the agent editor, **Advanced: pin extra scopes** lists the scopes the integration offers, for the cases the tools do not cover (an `api_call` integration has no per-tool scopes). Re-consenting never shrinks an existing grant. If a later token refresh returns a narrower grant than an installed agent needs, the connection is flagged as needing reconnection.
 
 ## Declaring integrations in an agent
 

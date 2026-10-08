@@ -3,17 +3,19 @@ title: "Tutorial: Legacy Web App Agent"
 description: Let an agent read an internal web app that has no API, only a login form and HTML pages, and run it every month.
 ---
 
+<Callout type="warn" title="Limits of the declarative login">
+
+This tutorial uses a declarative login, which has three known gaps, tracked in [issue #1818](https://github.com/appstrate/appstrate/issues/1818):
+
+- **The session is never renewed.** The password is not stored, so when the session expires, the user reconnects.
+- **Form values are not URL-encoded.** A password containing `&` or `=` breaks the login, unless the user types it encoded (`&` as `%26`).
+- **A refused login is a generic `500`.** A wrong password and a broken integration answer the same way.
+
+</Callout>
+
 ## Goal
 
-You have an internal web app with no API. It has a login form, a few HTML pages, and the data your business runs on. You will:
-
-1. Write an integration that logs in with the user's own account when they connect, and keeps only the session cookie.
-2. Check the call path with one request through the platform's credential proxy.
-3. Teach the agent the layout of the page with a skill.
-4. Build an agent that returns the sales of a period as JSON.
-5. Run it every month.
-
-You write three packages: `@acme/intranet` (an integration), `@acme/intranet-reports` (a skill) and `@acme/sales-report` (an agent). No code runs next to the credential: the model reads the HTML itself.
+You have an internal web app with no API: a login form, a few HTML pages, and the data your business runs on. You write three packages, `@acme/intranet` (an integration that logs in with the user's own account and keeps only the session cookie), `@acme/intranet-reports` (a skill that teaches the page layout) and `@acme/sales-report` (an agent that returns the sales of a period as JSON), then run the agent every month. No code runs next to the credential: the model reads the HTML itself.
 
 ## The example app
 
@@ -31,15 +33,14 @@ GET /reports/sales?from=2026-09-01&to=2026-09-30   with Cookie: SESSIONID=...
 
 ## How it works
 
-The integration declares a **declarative login** (`connect.login`). When someone connects, the platform sends one `POST /login` with the fields they typed, reads the `SESSIONID` cookie from the answer and stores only that cookie, encrypted, as the connection's credential. The password is used once and not stored.
+The integration declares a **declarative login** (`connect.login`). When someone connects, the platform sends one `POST /login` with the fields they typed, reads the `SESSIONID` cookie from the answer and stores only that cookie, encrypted, as the connection's credential. The password is used once and not stored. The login is a single request, with no cookie jar and no redirect following, so a login that first reads a CSRF token, takes several steps or needs JavaScript cannot be written this way.
 
 At run time the agent calls the integration's `api_call` tool. The run's sidecar checks the URL against the integration's `authorized_uris`, adds `Cookie: SESSIONID=...` and returns the page. The agent sees neither the password nor the cookie. See [How integrations work](/integrations/how-integrations-work) for the model behind this.
 
 ## Prerequisites
 
-- An Appstrate instance that can reach the intranet over the network (a self-hosted one when the intranet is on a private network), and an account in it ([Get Started quickstart](/get-started/quickstart)).
-- An API key of a space admin in `$APPSTRATE_KEY`. Step 5 needs the `credential-proxy:call` scope, which a key created without `scopes` already carries when its creator holds it (see [API keys](/features/api-keys)).
-- A default model for the organization, as in [Model providers](/integrations/llm-models).
+- An Appstrate instance that can reach the intranet (a self-hosted one when the intranet is on a private network), with a default model for the organization ([Model providers](/integrations/llm-models)).
+- An API key of a space admin in `$APPSTRATE_KEY` (see [API keys](/features/api-keys)).
 - `zip` and `curl`. The examples use `http://localhost:3000`, the address of a development instance.
 
 ## Steps
@@ -56,7 +57,7 @@ An internal host usually resolves to a private address, and Appstrate refuses pr
 EGRESS_ALLOW_INTERNAL_HOSTS=intranet.acme.test
 ```
 
-The same list covers the login sent at connect time, which leaves from the API process, and the calls of a run, which leave from its sidecar, so both must be able to reach the host. A listed host is trusted for every organization of the instance. Skip this step when the intranet has a public address. The rules are in [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
+The list covers both the login sent at connect time and the calls of a run. A listed host is trusted for every organization of the instance. Skip this step when the intranet has a public address. The rules are in [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
 
 </Step>
 
@@ -125,17 +126,17 @@ What each part does:
 
 - `credentials.schema` is the form the user fills in when connecting.
 - `connect.login.request` is the one request the platform sends. Each `{{name}}` is replaced by the field of the same name that the user typed.
-- `success_criteria` says what success looks like. The platform does not follow redirects on this request, and without criteria only a `2xx` counts as success, so declare the `302` the app sends. A wrong password returns `200` with the form again, and the connection is refused. A criterion is one `<expression> == <value>` comparison, with a string value in single quotes (`$response.body#/status == 'ok'`). A form the platform cannot evaluate, such as a compound condition or an unquoted string, is refused when the integration is imported or saved.
+- `success_criteria` says what success looks like. Without criteria only a `2xx` counts, so declare the `302` the app sends. A wrong password returns `200` with the form again, and the connection is refused. A criterion is one `<expression> == <value>` comparison, with a string value in single quotes (`$response.body#/status == 'ok'`).
 - `outputs` names what to keep from the answer: here the value of the `SESSIONID` cookie in `Set-Cookie`. Only the outputs are stored, and each becomes a credential field, `{$credential.session_id}`.
 - `delivery.http` says how the sidecar sends it: a `Cookie` header. `in: "header"` is the only placement implemented today, and the import refuses `in: "cookie"`.
-- `authorized_uris` lists the only URLs that may receive the cookie and the login request. It must be literal: an auth that declares `connect` cannot use a `{$credential.<field>}` template there, so the host cannot be a connection field. Write one integration per intranet host.
+- `authorized_uris` lists the only URLs that may receive the cookie and the login request. It must be literal when the auth declares `connect`, so write one integration per intranet host.
 - `_meta["dev.appstrate/api"]` gives the integration its `api_call` tool.
 
 </Step>
 
 <Step>
 
-### Import it
+### Import it and connect an account
 
 The archive is a zip with `manifest.json` at its root:
 
@@ -148,15 +149,7 @@ curl -X POST "http://localhost:3000/api/packages/import" \
 # {"packageId":"@acme/intranet","type":"integration","version":"1.0.0"}
 ```
 
-The import validates the manifest, and the integration is active in the key's space. [Custom integrations](/integrations/custom-integrations) covers the other ways to author and publish one.
-
-</Step>
-
-<Step>
-
-### Connect an account
-
-Each person connects with their own intranet account. The interactive way is the hosted form: this returns a single-use link, valid ten minutes, to open in a browser. The form shows the three fields of `credentials.schema`, and the password is typed on the platform's page only.
+The import validates the manifest, and the integration is active in the key's space. Each person then connects with their own intranet account, on the hosted form. This call returns a single-use link, valid ten minutes, to open in a browser; the password is typed on the platform's page only.
 
 ```bash
 curl -X POST "http://localhost:3000/api/integrations/@acme/intranet/auths/primary/connect/session" \
@@ -166,79 +159,7 @@ curl -X POST "http://localhost:3000/api/integrations/@acme/intranet/auths/primar
 # {"connect_url":"http://localhost:3000/api/integrations/connect/start?token=...","expiresAt":"..."}
 ```
 
-A backend that already holds the credentials can create the connection directly:
-
-```bash
-curl -X POST "http://localhost:3000/api/integrations/@acme/intranet/auths/primary/connect/fields" \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "credentials": { "zone": "north", "username": "alice", "password": "correct-horse-battery" } }'
-# {"id":"ea386420-...","integration_package_id":"@acme/intranet","auth_key":"primary",
-#  "account_id":"default","needs_reconnection":false,"label":"Connexion 1",...}
-```
-
-Either way, the platform sends the login request at once and stores the session cookie. The login answer carries no identity, so the connection gets a generic label and the account id `default`. Keep the connection `id`: you need it to reconnect later.
-
-When the intranet refuses the login, the call answers `500` with the code `internal_error`, and the API log names the reason, for example `LoginError: unexpected status 200`.
-
-</Step>
-
-<Step>
-
-### Check the call path
-
-Before involving a model, send one request through the credential proxy. It uses the same connection and the same `authorized_uris` check as a run, and injects the cookie on the platform:
-
-```bash
-curl "http://localhost:3000/api/credential-proxy/proxy" \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -H "X-Integration-Id: @acme/intranet" \
-  -H "X-Target: https://intranet.acme.test/reports/sales?from=2026-09-01&to=2026-09-30" \
-  -H "X-Session-Id: 3b241101-e2bb-4255-8caf-4136c566a962"
-```
-
-The answer is the intranet's own, with a `Proxy-Status: appstrate; received-status=200` header:
-
-```html
-<html>
-  <body>
-    <div id="menu">Home | Reports | Logout</div>
-    <h2>Sales 2026-09-01 to 2026-09-30</h2>
-    <table id="sales">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Region</th>
-          <th>Customer</th>
-          <th>Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>2026-09-02</td>
-          <td>North</td>
-          <td>Bolt & Co</td>
-          <td class="num">1200.50</td>
-        </tr>
-        <tr>
-          <td>2026-09-15</td>
-          <td>South</td>
-          <td>Maple Foods</td>
-          <td class="num">845.00</td>
-        </tr>
-        <tr>
-          <td>2026-09-28</td>
-          <td>North</td>
-          <td>Kite Labs</td>
-          <td class="num">2310.00</td>
-        </tr>
-      </tbody>
-    </table>
-  </body>
-</html>
-```
-
-A target outside `authorized_uris` is refused before it leaves the platform, with `403` and the code `unauthorized_target`. The proxy is described in [Runs](/features/runs#llm-proxy-and-credential-proxy).
+The platform sends the login request at once and stores the session cookie. The login answer carries no identity, so the connection gets a generic label. A backend that already holds the credentials can create the connection with `POST .../connect/fields` instead (see [Connecting an account](/integrations/how-integrations-work#connecting-an-account)).
 
 </Step>
 
@@ -264,20 +185,13 @@ header and never post to `/login`.
 
     GET https://intranet.acme.test/reports/sales?from=YYYY-MM-DD&to=YYYY-MM-DD
 
-The answer is an HTML page. The data is the table with `id="sales"`: one `<tr>` per sale,
-cells in this order: date, region, customer, amount (decimal point, no currency sign).
-Ignore the menu and the headings. Decode HTML entities (`&amp;` is `&`).
+The data is the table with `id="sales"`: one `<tr>` per sale, cells in this order:
+date, region, customer, amount (decimal point, no currency sign). Decode HTML entities.
 
 ## Expired session
 
-If the page contains the login form (a `<form action="/login">` with a password field)
-instead of the table, the session has expired. Do not retry and do not guess figures.
-Return `needs_reconnect: true` with no rows: a person has to reconnect the integration.
-
-## Large pages
-
-When the result says it was written to a file under `resources/`, read that file with
-your file tools, or parse it with a short `python3` script, instead of asking again.
+If the page contains the login form instead of the table, the session has expired.
+Do not retry and do not guess figures. Return `needs_reconnect: true` with no rows.
 ```
 
 And a `manifest.json` next to it:
@@ -293,16 +207,7 @@ And a `manifest.json` next to it:
 }
 ```
 
-Import it the same way:
-
-```bash
-cd intranet-reports && zip ../intranet-reports.afps manifest.json SKILL.md && cd ..
-
-curl -X POST "http://localhost:3000/api/packages/import" \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -F file=@intranet-reports.afps
-# {"packageId":"@acme/intranet-reports","type":"skill","version":"1.0.0"}
-```
+Zip both files and import the archive as in step 3.
 
 </Step>
 
@@ -320,22 +225,13 @@ Create a folder `sales-report/` with the manifest:
   "schema_version": "0.3",
   "display_name": "Sales report",
   "description": "Reads the sales table of the Acme intranet for a period and returns it as JSON.",
-  "author": "Acme",
   "timeout": 300,
   "input": {
     "schema": {
       "type": "object",
       "properties": {
-        "from": {
-          "type": "string",
-          "format": "date",
-          "description": "First day, YYYY-MM-DD. Default: first day of last month"
-        },
-        "to": {
-          "type": "string",
-          "format": "date",
-          "description": "Last day, YYYY-MM-DD. Default: last day of last month"
-        }
+        "from": { "type": "string", "format": "date", "description": "First day, YYYY-MM-DD" },
+        "to": { "type": "string", "format": "date", "description": "Last day, YYYY-MM-DD" }
       }
     }
   },
@@ -343,25 +239,11 @@ Create a folder `sales-report/` with the manifest:
     "schema": {
       "type": "object",
       "properties": {
-        "from": { "type": "string" },
-        "to": { "type": "string" },
-        "rows": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "date": { "type": "string" },
-              "region": { "type": "string" },
-              "customer": { "type": "string" },
-              "amount": { "type": "number" }
-            },
-            "required": ["date", "region", "customer", "amount"]
-          }
-        },
+        "rows": { "type": "array", "items": { "type": "object" } },
         "total": { "type": "number" },
         "needs_reconnect": { "type": "boolean" }
       },
-      "required": ["from", "to", "rows", "total", "needs_reconnect"]
+      "required": ["rows", "total", "needs_reconnect"]
     }
   },
   "dependencies": {
@@ -383,28 +265,18 @@ Fetch the sales report of the Acme intranet for the period given in the input
 input gives no period, use the previous calendar month: run `date +%F` to learn
 today's date.
 
-Return every sale of the period and the total of the amounts with the output tool.
-If the intranet session has expired, return `needs_reconnect: true` and stop.
+Return every sale (date, region, customer, amount) and the total of the amounts
+with the output tool. If the intranet session has expired, return
+`needs_reconnect: true` and stop.
 ```
 
-The agent gets the integration's tool as `acme_intranet__api_call`, the skill under `.pi/skills/`, and the `output` tool for its result. Both inputs are optional, so a schedule can run it without any. Import it:
-
-```bash
-cd sales-report && zip ../sales-report.afps manifest.json prompt.md && cd ..
-
-curl -X POST "http://localhost:3000/api/packages/import" \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -F file=@sales-report.afps
-# {"packageId":"@acme/sales-report","type":"agent","version":"1.0.0"}
-```
-
-`GET /api/agents/@acme/sales-report/connection-readiness` confirms that your connection will be used before you launch anything.
+The agent gets the integration's tool as `acme_intranet__api_call`, the skill, and the `output` tool for its result. Zip `manifest.json` and `prompt.md` and import the archive as in step 3. `GET /api/agents/@acme/sales-report/connection-readiness` then confirms that your connection will be used.
 
 </Step>
 
 <Step>
 
-### Run it
+### Run it, then schedule it
 
 ```bash
 # Launch. Answers 201 with the run resource; keep its id.
@@ -418,42 +290,15 @@ curl "http://localhost:3000/api/runs/$RUN_ID?wait=true" \
   -H "Authorization: Bearer $APPSTRATE_KEY"
 ```
 
-The agent calls `acme_intranet__api_call` on the sales page, reads the table and returns it through `output`. The finished run carries it in `result.output`:
+The agent calls `acme_intranet__api_call` on the sales page, reads the table and returns it through `output`. The finished run carries it in `result.output`, for example `{ "rows": [{ "date": "2026-09-02", "region": "North", "customer": "Bolt & Co", "amount": 1200.5 }, ...], "total": 4355.5, "needs_reconnect": false }`.
 
-```json
-{
-  "status": "success",
-  "result": {
-    "output": {
-      "to": "2026-09-30",
-      "from": "2026-09-01",
-      "rows": [
-        { "date": "2026-09-02", "amount": 1200.5, "region": "North", "customer": "Bolt & Co" },
-        { "date": "2026-09-15", "amount": 845, "region": "South", "customer": "Maple Foods" },
-        { "date": "2026-09-28", "amount": 2310, "region": "North", "customer": "Kite Labs" }
-      ],
-      "total": 4355.5,
-      "needs_reconnect": false
-    }
-  }
-}
-```
-
-</Step>
-
-<Step>
-
-### Schedule it
-
-Run it at 7am on the first day of every month. With no input, the agent takes the previous month:
+To run it at 7am on the first day of every month, with no input so that the agent takes the previous month:
 
 ```bash
 curl -X POST "http://localhost:3000/api/agents/@acme/sales-report/schedules" \
   -H "Authorization: Bearer $APPSTRATE_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "name": "Monthly sales", "cron_expression": "0 7 1 * *", "timezone": "America/Toronto" }'
-# {"id":"sched_...","name":"Monthly sales","enabled":true,"cron_expression":"0 7 1 * *",
-#  "timezone":"America/Toronto","input":{},"next_run_at":"2026-11-01T12:00:00.000Z",...}
 ```
 
 A scheduled run executes as the person who created the schedule, with their connection. See [Scheduling](/features/scheduling).
@@ -464,54 +309,22 @@ A scheduled run executes as the person who created the schedule, with their conn
 
 ## When the session expires
 
-The login runs only when someone connects. The platform keeps the cookie, not the password, so it never logs in again by itself. When the intranet drops the session, it redirects to `/login`. `api_call` follows that redirect, which stays on an authorized host, and returns the login form with a `200` status: nothing flags the connection as broken. This is why the skill tells the agent to recognise the form and return `needs_reconnect: true` instead of empty figures.
+When the intranet drops the session, it redirects to `/login`. `api_call` follows that redirect and returns the login form with a `200` status, so nothing flags the connection as broken: this is why the skill tells the agent to return `needs_reconnect: true` instead of empty figures. To get a fresh session, the user connects again on the same connection, passing its id as `connection_id` (to `connect/session` or `connect/fields`). The connection keeps its id, so the schedule and any pin that names it keep working.
 
-To get a fresh session, run the connection flow again on the same connection, with its `id` as `connection_id`. The hosted form takes it the same way (`connect/session` with `{ "connection_id": "..." }`):
-
-```bash
-curl -X POST "http://localhost:3000/api/integrations/@acme/intranet/auths/primary/connect/fields" \
-  -H "Authorization: Bearer $APPSTRATE_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "connection_id": "ea386420-...", "credentials": { "zone": "north", "username": "alice", "password": "correct-horse-battery" } }'
-```
-
-The connection keeps its id, so the schedule and any pin that names it keep working.
-
-## Limits of the declarative login
-
-- **One request.** `connect.login` sends a single request, with no cookie jar and no redirect following. A login that first reads a CSRF token from the form page, takes several steps, or needs JavaScript cannot be written this way.
-- **No automatic re-login.** The password is not stored, so a session that expires needs a person to reconnect.
-- **Values are inserted as typed.** `{{password}}` is not URL-encoded in the body, so a password containing `&`, `=`, `+`, `%` or a space breaks a form body. Type it URL-encoded in the connect form (`&` as `%26`).
-- **One host per integration.** The host is fixed in `authorized_uris` and in the login URL.
-- **The model reads the HTML.** That suits a table of a few hundred rows. A larger page is written to a file under `resources/` in the agent's workspace instead of the model's context, as described in [Tools](/features/tools#receiving-a-file-responsemodetofile), and the skill tells the agent to parse it with a script.
-
-## When the HTML or the login gets hard
-
-The code route is a local MCP server: an `mcp-server` package plus an integration with `source.kind: "local"`, exposing one clean tool such as `get_sales_report(from, to)` that logs in, walks the pages and returns JSON. Its auth would hand the server the user's fields through `delivery.env`, so it can log in on every call and never meets an expired session. [Custom integrations](/integrations/custom-integrations#a-local-mcp-server) walks through such a package. Check three constraints first:
-
-- The server runs in its own container, which needs a container-capable backend (see [Tools](/features/tools#adding-your-own-tools)).
-- Its traffic leaves through the sidecar. The proxy the server is given accepts only `CONNECT` tunnels, so a plain `http://` request sent through it is refused: plan for HTTPS.
-- That route applies the private address blocklist without the `EGRESS_ALLOW_INTERNAL_HOSTS` exemption. An app on a private address is refused, so today this route fits an app published on a public HTTPS address, not one inside a private network.
-
-For an app on a private network, keep the declarative login and `api_call` described on this page.
+For a login this page cannot express, the code route is a local MCP server that logs in on every call and exposes a tool such as `get_sales_report(from, to)`: see [Custom integrations](/integrations/custom-integrations#a-local-mcp-server). That route does not apply the `EGRESS_ALLOW_INTERNAL_HOSTS` exemption, so today it fits an app on a public HTTPS address, not one inside a private network.
 
 ## Troubleshooting
 
-| Symptom                                                                                            | Cause                                                                                                                                                                | Fix                                                                                                                 |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Import refused: `delivery.http.in "cookie" is not yet supported`                                   | Only header delivery is implemented                                                                                                                                  | Send the cookie as a `Cookie` header with a `prefix`, as in step 2                                                  |
-| Connecting answers `500 internal_error`, log `LoginError: unexpected status`                       | The app did not answer as `success_criteria` expects: wrong credentials, an unencoded special character, or a success status other than the one declared             | Check the credentials, encode special characters, and match `success_criteria` to the app                           |
-| Import or save refused, the message ending in `the platform does not evaluate it (AFPS §7.6/§7.7)` | A `connect.login` criterion or output outside the forms the login engine evaluates: a compound condition, an unquoted string, `xpath`, a regex that does not compile | Write one `<expression> == <value>` comparison per criterion and quote strings (`'ok'`), or use a `regex` criterion |
-| Log `LoginError: url targets a blocked/internal address`                                           | The intranet host is on a private address and not in `EGRESS_ALLOW_INTERNAL_HOSTS`                                                                                   | Step 1                                                                                                              |
-| Log `LoginError: output 'session_id' extracted an empty value`                                     | The cookie named in `outputs` is not in the login answer                                                                                                             | Check the cookie name the app sets                                                                                  |
-| `403 unauthorized_target` on a call                                                                | The URL is outside `authorized_uris`                                                                                                                                 | Fix the URL, or the pattern                                                                                         |
-| The run succeeds with `needs_reconnect: true`                                                      | The session expired                                                                                                                                                  | Reconnect, as described above                                                                                       |
+| Symptom                                                                      | Cause                                                                                                                  | Fix                                                                          |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Connecting answers `500 internal_error`, log `LoginError: unexpected status` | Wrong credentials, an unencoded special character, or a success status other than the one in `success_criteria`        | Check the credentials, encode special characters, match `success_criteria`   |
+| Log `LoginError: url targets a blocked/internal address`                     | The intranet host is on a private address and not in `EGRESS_ALLOW_INTERNAL_HOSTS`                                     | Step 1                                                                       |
+| Import or save refused on `connect.login`                                    | A criterion the platform does not evaluate (a compound condition, an unquoted string), or `delivery.http.in: "cookie"` | One `<expression> == <value>` per criterion, strings quoted; header delivery |
+| `403 unauthorized_target` on a call                                          | The URL is outside `authorized_uris`                                                                                   | Fix the URL, or the pattern                                                  |
 
 ## Resources
 
 - [Custom integrations](/integrations/custom-integrations)
 - [How integrations work](/integrations/how-integrations-work)
 - [Skills](/features/skills)
-- [Agents](/features/agents)
-- [Scheduling](/features/scheduling)
 - [Isolation and Security](/self-hosting/isolation-and-security)

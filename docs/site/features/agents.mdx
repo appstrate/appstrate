@@ -12,7 +12,7 @@ An agent is an [AFPS package](/features/packages) of type `agent`. It is made of
 - `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
 - `prompt.md`: the instructions the model receives.
 
-At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/overview) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
+At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
 
 Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/features/files)).
 
@@ -173,13 +173,13 @@ A run with no output schema can finish without calling `output`.
 
 ## Capabilities
 
-| Capability                                                          | Where it is declared                                         | Page                                   |
-| ------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
-| Skills                                                              | `dependencies.skills`                                        | [Skills](/features/skills)             |
-| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/overview) |
-| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/features/packages)         |
-| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/features/tools)               |
-| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)             |
+| Capability                                                          | Where it is declared                                         | Page                                                |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| Skills                                                              | `dependencies.skills`                                        | [Skills](/features/skills)                          |
+| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/how-integrations-work) |
+| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/features/packages)                      |
+| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/features/tools)                            |
+| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)                          |
 
 Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
 

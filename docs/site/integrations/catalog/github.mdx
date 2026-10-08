@@ -7,66 +7,15 @@ description: "Connect GitHub to your Appstrate agents: the REST API, GitHub's ho
 
 GitHub hosts code and collaboration. Appstrate ships three GitHub integrations, each a separate package with separate connections.
 
-| Integration                             | Source       | Use it for                                                                                                                                                |
-| --------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/github` (version 1.0.5)     | `api_call`   | Calling the GitHub REST API directly                                                                                                                      |
-| `@appstrate/github-mcp` (version 1.1.3) | Remote MCP   | GitHub's hosted MCP server: 93 tools covering repositories, issues, pull requests, Actions, code security, notifications, projects, gists and discussions |
-| `@appstrate/github-git` (version 1.0.3) | Local runner | A clone, edit, commit, push and pull request loop on a real working tree                                                                                  |
+| Integration             | Source       | Use it for                                                                                                                                             |
+| ----------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@appstrate/github`     | `api_call`   | Calling the GitHub REST API directly                                                                                                                   |
+| `@appstrate/github-mcp` | Remote MCP   | GitHub's hosted MCP server: tools covering repositories, issues, pull requests, Actions, code security, notifications, projects, gists and discussions |
+| `@appstrate/github-git` | Local runner | A clone, edit, commit, push and pull request loop on a real working tree                                                                               |
 
-## GitHub (API): `@appstrate/github`
+**GitHub (MCP)** accepts an OAuth App registered by an administrator (GitHub's MCP server does not support dynamic client registration) or a personal access token, classic or fine-grained, pasted into the connect form. With OAuth, consent asks only for the scopes the selected tools use; a token carries whatever permissions you gave it. This integration allows `tools: "*"`, so an agent can select every tool the server advertises, but prefer an explicit list.
 
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `repo`, `read:user`                  |
-| Token endpoint auth | `client_secret_post`                 |
-
-### Scopes
-
-| Scope           | Description                     | Default |
-| --------------- | ------------------------------- | ------- |
-| `repo`          | Full repository access          | yes     |
-| `read:user`     | Read user profile               | yes     |
-| `user:email`    | Read user emails                |         |
-| `read:org`      | Read org membership             |         |
-| `gist`          | Create gists                    |         |
-| `notifications` | Access notifications            |         |
-| `workflow`      | Update GitHub Actions workflows |         |
-
-### Authorized URIs
-
-- `https://api.github.com/**`
-- `https://codeload.github.com/**`
-- `https://raw.githubusercontent.com/**`
-- `https://gist.githubusercontent.com/**`
-- `https://objects.githubusercontent.com/**`
-- `https://media.githubusercontent.com/**`
-- `https://release-assets.githubusercontent.com/**`
-- `https://pipelines.actions.githubusercontent.com/**`
-
-A call or redirect hop to another `githubusercontent.com` host, such as `avatars.githubusercontent.com`, is refused.
-
-## GitHub (MCP): `@appstrate/github-mcp`
-
-Two authentication methods, both accepted:
-
-| Auth key | Type      | Details                                                                                                                                                                                                                                                                                  |
-| -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `oauth`  | `oauth2`  | An OAuth App registered by an administrator. GitHub's MCP server does not support dynamic client registration. Default scopes: `read:user`, `repo`, `read:org`, `workflow`, `security_events`, `notifications`, `gist`, `read:discussion`, `write:discussion`, `read:project`, `project` |
-| `pat`    | `api_key` | A personal access token (classic or fine-grained), pasted into the connect form as `personal_access_token`, sent as `Authorization: Bearer <token>`                                                                                                                                      |
-
-Each tool declares the scopes it needs (`public_repo`, `repo`, `security_events`, `notifications`, `workflow`, `gist`, `read:discussion`, `write:discussion`, `read:user`, `read:org`, `read:project`, `project`), so OAuth consent asks only for what the selected tools use. A personal access token carries whatever permissions you gave it.
-
-This integration allows `tools: "*"`: an agent can select every tool the server advertises instead of listing them. Prefer an explicit list.
-
-Authorized URIs: `https://api.githubcopilot.com/**` and `https://api.github.com/**`.
-
-## GitHub Git: `@appstrate/github-git`
-
-Runs the `@appstrate/github-git-mcp` server in a sandboxed runner container. The platform gives the runner an OAuth token with the `repo` scope as a Basic credential for git over HTTPS, mounts a per-run workspace at `/workspace`, and the server shells out to `git`. The agent edits the files with its own file tools. Tools: `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push`, `open_pr`.
-
-Authorized URIs: `https://api.github.com/**`, `https://github.com/**` and `https://codeload.github.com/**`. Needs the `docker` or `firecracker` run adapter.
+**GitHub Git** runs the `@appstrate/github-git-mcp` server in a sandboxed runner container, with a per-run workspace at `/workspace`, and shells out to `git`. The agent edits the files with its own file tools. Its tools are `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push` and `open_pr`. It needs the `docker` or `firecracker` run adapter.
 
 ## Connect GitHub
 

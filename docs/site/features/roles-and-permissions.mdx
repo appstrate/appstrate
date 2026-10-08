@@ -61,7 +61,7 @@ An organization can have several owners and always keeps at least one. See [Orga
 | `llm-proxy`                                       | `call`                                    |
 | `org-integrations`                                | `configure`                               |
 
-Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and admins only), and `@appstrate/module-ee` adds `billing` with `read` (owners, admins and members) and `manage` (owners and admins).
+Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and admins only), and the optional billing module adds `billing` with `read` (owners, admins and members) and `manage` (owners and admins).
 
 ### Space level
 
@@ -124,7 +124,7 @@ You can only grant permissions you hold yourself. Owners and admins are never gi
 
 ## API keys and ceilings
 
-An API key is bound to one space and delegates its creator's standing there, checked live on every request. The key's `scopes` are a ceiling, and only permissions marked as grantable to keys can be listed (`GET /api/api-keys/available-scopes` returns what you may grant). Some permissions are never grantable to keys, among them `share`, `integrations:configure`, the organization-level role and member management, and `org-webhooks`. See [API Keys](/features/api-keys).
+An API key's `scopes` are a ceiling on its creator's standing in its space, and some permissions can never be put on a key. Which ones, and how scopes are granted, is in [API Keys](/features/api-keys).
 
 ## Previewing a role
 

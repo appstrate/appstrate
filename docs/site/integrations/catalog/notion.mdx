@@ -7,33 +7,12 @@ description: Connect Notion to your Appstrate agents, with the direct API integr
 
 Notion is a workspace for notes, docs and databases. Appstrate ships two Notion integrations, as separate packages.
 
-| Integration                             | Source     | How the agent reaches Notion                                                                   |
-| --------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `@appstrate/notion` (version 1.0.4)     | `api_call` | Calls the Notion REST API directly. Needs an OAuth client registered by an administrator.      |
-| `@appstrate/notion-mcp` (version 1.0.2) | Remote MCP | Uses Notion's hosted MCP server. The OAuth client is registered automatically at connect time. |
+| Integration             | Source     | How the agent reaches Notion                                                                   |
+| ----------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| `@appstrate/notion`     | `api_call` | Calls the Notion REST API directly. Needs an OAuth client registered by an administrator.      |
+| `@appstrate/notion-mcp` | Remote MCP | Uses Notion's hosted MCP server. The OAuth client is registered automatically at connect time. |
 
-## Notion (API): `@appstrate/notion`
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Token endpoint auth | `client_secret_basic`                |
-
-Notion does not use OAuth scopes: access is granted per page and database when the user authorizes. Authorized URI: `https://api.notion.com/**`.
-
-## Notion (MCP): `@appstrate/notion-mcp`
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | none                                 |
-| Token endpoint auth | `none`                               |
-
-The platform discovers Notion's authorization server and registers a public client on first connect (discovery, dynamic client registration and PKCE), so an administrator has nothing to configure. Authorized URI: `https://mcp.notion.com/**`.
-
-Tools (14): `notion-create-comment`, `notion-create-database`, `notion-create-pages`, `notion-create-view`, `notion-duplicate-page`, `notion-fetch`, `notion-get-comments`, `notion-get-teams`, `notion-get-users`, `notion-move-pages`, `notion-search`, `notion-update-data-source`, `notion-update-page`, `notion-update-view`.
+Notion does not use OAuth scopes: access is granted per page and database when the user authorizes.
 
 ## Connect Notion
 

@@ -7,35 +7,7 @@ description: Connect Google Sheets to your Appstrate agents.
 
 Google Sheets is Google's online spreadsheet. The integration lets agents read and write spreadsheet data through the Sheets API.
 
-Integration: `@appstrate/google-sheets` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                                                      |
-| ------------------- | -------------------------------------------------------------------------- |
-| Type                | `oauth2`                                                                   |
-| Credential sent as  | `Authorization: Bearer <credential>`                                       |
-| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/spreadsheets.readonly` |
-| Token endpoint auth | `client_secret_post`                                                       |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                                                   | Description                            | Default |
-| ------------------------------------------------------- | -------------------------------------- | ------- |
-| `openid`                                                | Identity (OpenID)                      | yes     |
-| `email`                                                 | Email address                          | yes     |
-| `https://www.googleapis.com/auth/userinfo.email`        | Email address (Google canonical scope) |         |
-| `https://www.googleapis.com/auth/spreadsheets.readonly` | Read-only access                       | yes     |
-| `https://www.googleapis.com/auth/spreadsheets`          | Full spreadsheet access                |         |
-| `https://www.googleapis.com/auth/drive.file`            | Per-file access (recommended)          |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://sheets.googleapis.com/**`
+Integration: `@appstrate/google-sheets`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect Google Sheets
 

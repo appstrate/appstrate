@@ -7,46 +7,7 @@ description: Connect X (Twitter) to your Appstrate agents.
 
 X is a social network. The integration uses the X API v2 with OAuth 2.0 and PKCE, and requests `offline.access` by default so tokens can refresh.
 
-Integration: `@appstrate/x` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                        |
-| ------------------- | -------------------------------------------- |
-| Type                | `oauth2`                                     |
-| Credential sent as  | `Authorization: Bearer <credential>`         |
-| Default scopes      | `tweet.read`, `users.read`, `offline.access` |
-| Token endpoint auth | `client_secret_basic`                        |
-| PKCE                | `S256`                                       |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                  | Description                       | Default |
-| ---------------------- | --------------------------------- | ------- |
-| `tweet.read`           | Read tweets                       | yes     |
-| `tweet.write`          | Post & delete tweets              |         |
-| `tweet.moderate.write` | Moderate tweet replies            |         |
-| `users.read`           | Read user profiles                | yes     |
-| `follows.read`         | Read followers & following        |         |
-| `follows.write`        | Follow & unfollow users           |         |
-| `like.read`            | Read likes                        |         |
-| `like.write`           | Like & unlike tweets              |         |
-| `list.read`            | Read lists                        |         |
-| `list.write`           | Create & manage lists             |         |
-| `bookmark.read`        | Read bookmarks                    |         |
-| `bookmark.write`       | Manage bookmarks                  |         |
-| `space.read`           | Read Spaces                       |         |
-| `dm.read`              | Read direct messages              |         |
-| `dm.write`             | Send direct messages              |         |
-| `offline.access`       | Refresh token (long-lived access) | yes     |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://api.x.com/**`
+Integration: `@appstrate/x`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect X (Twitter)
 

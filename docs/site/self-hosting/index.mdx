@@ -5,46 +5,13 @@ description: Run Appstrate on your own infrastructure with the one-line installe
 
 Self-hosting gives you control over your data, your network and your configuration. Appstrate has no third-party service dependency at boot: the database, queue, cache and storage all have in-process fallbacks, and everything else (Google or GitHub sign-in, SMTP, LLM providers, OpenTelemetry) is opt-in through environment variables.
 
-## Install
+## Install and size the host
 
-```bash
-curl -fsSL https://get.appstrate.dev | bash
-```
+[Install](/get-started/install) covers the one-line installer, the tiers and what each needs on the host. To manage the Compose files yourself, see [Docker Compose](/self-hosting/docker-compose). The installer's flags, verification options and lifecycle commands are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md).
 
-This downloads the `appstrate` CLI for your OS and architecture, verifies it against a minisign-signed checksum manifest, and puts it on your `PATH` (default `~/.local/bin`). It then prints the next step:
+The shipped root `docker-compose.yml` caps the platform container at 8 GiB, PostgreSQL at 1 GiB, Redis at 256 MiB and MinIO at 512 MiB. Agent runs are separate sibling containers, each bounded by the run limits (1536 MiB and 2 vCPU by default). See [Isolation and Security](/self-hosting/isolation-and-security#container-hardening-and-resource-limits).
 
-```bash
-appstrate install
-```
-
-`appstrate install` asks for a tier and an install directory (default `~/appstrate`). On a fresh Docker-tier install it also asks for an optional owner email, a public URL (Enter keeps `http://localhost:<port>`) and the agent execution backend. It asks for a port only if the default one is taken. It generates the secrets, writes `.env` and `docker-compose.yml`, starts the stack, waits for the health check and opens the dashboard. Press Enter at the tier prompt to take the recommended Tier 2 stack (PostgreSQL and Redis, files on a persisted volume). If Docker is not reachable, the default becomes Tier 0.
-
-For unattended installs (CI, cloud-init, Ansible), pass `--yes`. The script then installs and starts everything in one command:
-
-```bash
-curl -fsSL https://get.appstrate.dev | bash -s -- --yes
-```
-
-Every `appstrate install` flag (`--tier`, `--dir`, `--port`, `--app-url`, `--run-adapter`) passes through. Details, the verification options and the lifecycle commands (`appstrate start`, `stop`, `logs`, `status`, `uninstall`) are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md). To manage the Compose files yourself, see [Docker Compose](/self-hosting/docker-compose).
-
-## Requirements
-
-| Tier | Host dependencies                                                                                          | What runs                                             |
-| ---- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| 0    | Bun 1.3.14 or later (the installer fetches Bun if it is missing, but does not check its version)           | PGlite, filesystem storage, runs as host subprocesses |
-| 1    | Docker Engine 20+ with Compose v2 (recommended, not checked by the installer), access to the Docker socket | PostgreSQL                                            |
-| 2    | Same as Tier 1                                                                                             | PostgreSQL and Redis                                  |
-| 3    | Same as Tier 1                                                                                             | PostgreSQL, Redis and bundled MinIO                   |
-
-The self-hosting README recommends at least 4 GB of available RAM for the Docker tiers. The shipped root `docker-compose.yml` caps the platform container at 8 GiB, PostgreSQL at 1 GiB, Redis at 256 MiB and MinIO at 512 MiB. Agent runs are separate sibling containers, each bounded by the run limits (1536 MiB and 2 vCPU by default), so size the host for your expected concurrency. See [Isolation and Security](/self-hosting/isolation-and-security#container-hardening-and-resource-limits).
-
-On Windows, run the installer inside WSL2.
-
-## How the pieces fit
-
-- **Tiers** decide which data services you run. Each missing service is replaced by an in-process fallback. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
-- **Execution backends** decide where agent runs execute: `docker` (one isolated container pair per run), `process` (host subprocesses, no isolation, the code default) or `firecracker` (microVMs, opt-in). They are independent of the tiers.
-- **Modules** are optional features loaded at boot from the `MODULES` variable. The default set is `oidc`, `webhooks`, `mcp`, `core-providers` and `@appstrate/module-chat`. Others are opt-in. See [Modules](/self-hosting/progressive-infrastructure#modules).
+Three things are configured independently: the **tier** (which data services you run), the **execution backend** (where agent runs execute) and the **modules** (optional features loaded from `MODULES`). See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## First run and auth modes
 

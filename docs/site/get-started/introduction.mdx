@@ -29,7 +29,7 @@ import { Rocket, Blocks, Server, Code2 } from "lucide-react";
     icon={<Code2 />}
     title="API Reference"
     description="The OpenAPI 3.1 REST API: authentication, webhooks, errors."
-    href="/api/introduction"
+    href="/api"
   />
 </Cards>
 
@@ -68,7 +68,7 @@ Each run gets its own sidecar and agent process. The **sidecar** holds the crede
 - **AFPS packages.** Agents, skills, MCP servers and integrations are all versioned [AFPS packages](/features/packages) you can import, publish and share.
 - **Spaces, roles and end-users.** An organization holds spaces, each with its own agents, runs, schedules and API keys, and role-based access. [End-users](/features/end-users) let a product you build run agents on behalf of its own customers.
 - **Webhooks.** Run events delivered with Standard Webhooks signatures, with up to 8 delivery attempts.
-- **A complete REST API.** Everything the dashboard does goes through an [OpenAPI 3.1 API](/api/introduction). Each instance serves its own spec at `/api/openapi.json` and Swagger UI at `/api/docs`.
+- **A complete REST API.** Everything the dashboard does goes through an [OpenAPI 3.1 API](/api). Each instance serves its own spec at `/api/openapi.json` and Swagger UI at `/api/docs`.
 - **MCP server.** With the default modules, every organization exposes the API as a Model Context Protocol endpoint, so Claude Code, Cursor or any MCP client can drive the platform. See [MCP clients](/using-appstrate/mcp-clients).
 - **Self-hosting.** [Four infrastructure tiers](/self-hosting/progressive-infrastructure), from a zero-install Bun process with an embedded database to a full Docker stack.
 
@@ -81,7 +81,7 @@ Each run gets its own sidecar and agent process. The **sidecar** holds the crede
 | [CLI](/using-appstrate/cli)                   | Install and operate an instance, script the API, edit packages locally, run agents |
 | [Coding agent plugin](/using-appstrate/skill) | Bring your spaces' skills and agents into Claude Code and Codex                    |
 | [MCP clients](/using-appstrate/mcp-clients)   | Let any MCP client call the platform with your permissions                         |
-| [REST API](/api/introduction)                 | Embed Appstrate in your own product                                                |
+| [REST API](/api)                              | Embed Appstrate in your own product                                                |
 
 ## Who is Appstrate for?
 

@@ -1,6 +1,6 @@
 ---
 title: LLM Models
-description: Connect model providers with an API key or a subscription, choose the models your agents run on, tune temperature and reasoning, and understand system models and aliases.
+description: Connect model providers, choose the models your agents run on, tune temperature and reasoning, and understand system models and aliases.
 ---
 
 Every agent needs a model. Models are not integrations: they are configured separately, through **model providers**. This page covers how a provider is connected, how a model is created from it, and which model an agent ends up using.
@@ -10,7 +10,7 @@ Every agent needs a model. Models are not integrations: they are configured sepa
 | Layer              | What it is                                                                                                    | API                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | **Model provider** | A vendor entry contributed by a module: wire format, default endpoint, how to authenticate. Read-only.        | `GET /api/model-provider-credentials/registry` |
-| **Credential**     | Your API key (or subscription login) for one provider, stored encrypted.                                      | `/api/model-provider-credentials`              |
+| **Credential**     | Your API key for one provider, stored encrypted.                                                              | `/api/model-provider-credentials`              |
 | **Model**          | A named model bound to one credential, with optional overrides (context window, max tokens, reasoning, cost). | `/api/models`                                  |
 
 ## Providers
@@ -32,49 +32,9 @@ The two **custom endpoint** providers are the escape hatch: give them a `base_ur
 
 Google, Vertex, Azure OpenAI and AWS Bedrock are not native providers. To use a model served by one of them, put a gateway that exposes an OpenAI or Anthropic compatible API in front of it and connect that gateway through a custom endpoint provider.
 
-### Subscription providers (opt-in modules)
+### Subscription providers
 
-Two modules let an organization run agents on a personal subscription instead of an API key. Neither is in the `MODULES` default: an operator adds them deliberately.
-
-| Provider      | Display name            | Module                          | Subscription                  |
-| ------------- | ----------------------- | ------------------------------- | ----------------------------- |
-| `claude-code` | Claude Code (Anthropic) | `@appstrate/module-claude-code` | Claude Pro, Max or Team       |
-| `codex`       | Codex (ChatGPT)         | `@appstrate/module-codex`       | ChatGPT Plus, Pro or Business |
-
-These use OAuth, not a pasted key. The real token never enters the agent container: the agent holds a placeholder and the sidecar swaps in the real bearer server-side. Subscription runs need an isolating run adapter (`docker` or `firecracker`), because the plain `process` adapter does not deliver subscription credentials.
-
-#### Connect a subscription
-
-1. **Add the module to `MODULES`** and restart the platform. Keep the rest of your list:
-
-   ```bash
-   MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,@appstrate/module-claude-code,@appstrate/module-codex
-   ```
-
-   Load one or both. Without the module the provider id is unknown to the platform: no credential can be created for it, and no subscription traffic is possible.
-
-2. **Start the connection from the dashboard.** In the organization settings, open the **Models** page, then the **Model Provider Keys** tab, click **Add key** and pick the provider. The dashboard mints a pairing token, valid for five minutes, and shows a **Connect via CLI** command: `npx @appstrate/connect-helper@<version> <token>`, pinned to the helper version your platform speaks. Copy it and run it in a terminal on **your own machine**, where a browser can open. The login runs there because the Claude Code authorize endpoint only accepts loopback redirect addresses.
-
-3. **Sign in when the helper asks.** The helper runs the browser login against the provider and sends the credentials back to Appstrate. The dashboard shows "Waiting for the connection" until it arrives. Closing the dialog does not cancel a connection already in progress, and an expired command can be replaced with **Generate a new command**.
-
-4. **Pick models.** Connecting from the **Model Provider Keys** tab only creates the credential. Only the first-run onboarding flow seeds the provider's featured models. Open the **Models** tab, choose **Add model** and pick the new key under **My keys**.
-
-When the stored subscription token can no longer be used, the credential shows **Reconnection required** with a **Reconnect** action, and the models bound to it are flagged until you reconnect.
-
-#### Models are the provider's offer, not discovered per credential
-
-Appstrate never calls the vendor to list the models of a subscription credential. The models you can choose are the provider's offer: the records of Pi's pinned model catalogue for that provider (`anthropic` for `claude-code`, `openai-codex` for `codex`). They are the same for every credential, and nothing is stored per credential. `POST /api/model-provider-credentials/discover` refuses these providers with a `400`. A model that your plan does not serve is therefore still listed, and fails at the first run (Pro, Max and Team differ for Claude).
-
-The same rule covers testing. `POST /api/models/{id}/test` runs an offline check on the stored token: whether it is well-formed and unexpired. It is not a signature check and not a live call, so a passing test does not prove the token still works upstream. A subscription credential is proven live only when the first agent run presents it to the vendor.
-
-#### Compliance
-
-Using a personal subscription to power a product is a policy question that belongs to the operator, and vendor terms can change. For production and team automation, use an API key: both vendors' clean contract is API-key billing. The reasoning is in [`SUBSCRIPTION_COMPLIANCE.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md), which says plainly that Appstrate does not certify compliance with any vendor's terms, and records the following:
-
-- **What the code guarantees.** Pi, the agent engine, builds every subscription request. The platform forges no client identity, the sidecar swaps the bearer and forwards every other header Pi signed unchanged, and the real token stays server-side. The token is the user's or organization's own and is never pooled across tenants. The platform sends no request that a subscription token authenticates for testing or model discovery. The one honest narrowing: the upstream request is made by the sidecar, not by a vendor binary, so Appstrate does not claim transport-level client identity.
-- **Claude Code.** The file records a timeline of policy changes through 2026, and quotes Anthropic's Agent SDK documentation as not allowing third-party developers to offer claude.ai login or rate limits for their products without prior approval. It concludes that pointing Appstrate at a personal Claude subscription is an operator-owned grey-zone choice, not a sanctioned integration.
-- **Codex.** OpenAI had not banned subscription OAuth in third-party tools when the file was reviewed, but has not endorsed it either. The path relies on the Codex OAuth client and could be closed at any time.
-- **Re-verify before relying on it.** The file was last reviewed on 2026-07-08, calls the policy half volatile, and ends with a checklist of vendor terms to re-check. A burst of `401` or `410` answers on a subscription credential is its operational sign that a vendor has closed the path.
+Two opt-in modules, `@appstrate/module-claude-code` and `@appstrate/module-codex`, let an organization use a Claude or ChatGPT subscription instead of an API key; an operator adds them to `MODULES` (see [Modules](/self-hosting/progressive-infrastructure#modules)). Check the provider's terms before enabling them.
 
 ## Adding a provider and a model
 
@@ -105,8 +65,6 @@ appstrate api POST /api/models -d '{
 - Each model returned by `GET /api/models` carries `pi_provider`, the key of the Pi registry provider it is served through (for example `moonshotai` for `moonshot`). It is `null` for a gateway and for an aliased system model.
 - Per-model overrides (`contextWindow`, `maxTokens`, `reasoning`, `input`, `cost`) are optional. Left out, they come from the model catalogue and follow catalogue updates.
 
-For a subscription provider, start from the dashboard so the pairing token and command are generated for you.
-
 The dashboard also seeds a provider's featured models the first time you connect it.
 
 ### Where the offer comes from
@@ -122,7 +80,7 @@ An operator can offer models to every organization with the `SYSTEM_PROVIDER_KEY
 
 ### Model aliases
 
-An operator can expose a system model under a vanity name (for example `appstrate-medium`) while the real model and endpoint stay on the server. Set `"aliased": true` and an explicit `"label"` on the entry. API callers see the alias, not the backing. This hides what the platform hands out, not what the model reveals about itself when asked. Subscription providers cannot back an alias. The pattern and its limits are described in [`MODEL_ALIASES.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_ALIASES.md).
+An operator can expose a system model under a vanity name (for example `appstrate-medium`) while the real model and endpoint stay on the server. Set `"aliased": true` and an explicit `"label"` on the entry. API callers see the alias, not the backing. This hides what the platform hands out, not what the model reveals about itself when asked. The pattern and its limits are described in [`MODEL_ALIASES.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_ALIASES.md).
 
 ## Which model does a run use
 
@@ -189,4 +147,4 @@ In the last case the run's log says so. For each dropped setting the run gets on
 
 ## Cost tracking
 
-Appstrate records token usage for every inference call in a ledger and prices it from the model's rate card: the model catalogue, OpenRouter's price list for OpenRouter models, or the `cost` you set on the model. Prices are in US dollars per million tokens, and a run's cost is in USD, the sum of its ledger rows. The mechanics are in [`RUN_COST.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md). Usage on a subscription provider goes through the same ledger.
+Appstrate records token usage for every inference call in a ledger and prices it from the model's rate card: the model catalogue, OpenRouter's price list for OpenRouter models, or the `cost` you set on the model. Prices are in US dollars per million tokens, and a run's cost is in USD, the sum of its ledger rows. The mechanics are in [`RUN_COST.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md).

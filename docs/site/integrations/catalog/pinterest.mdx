@@ -7,38 +7,7 @@ description: Connect Pinterest to your Appstrate agents.
 
 Pinterest is a visual discovery platform. The integration lets agents read account data and, with the matching scopes, manage boards and pins.
 
-Integration: `@appstrate/pinterest` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `user_accounts:read`                 |
-| Token endpoint auth | `client_secret_basic`                |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                | Description             | Default |
-| -------------------- | ----------------------- | ------- |
-| `boards:read`        | Read boards             |         |
-| `boards:write`       | Create & edit boards    |         |
-| `pins:read`          | Read pins               |         |
-| `pins:write`         | Create & edit pins      |         |
-| `user_accounts:read` | Read user profile       | yes     |
-| `ads:read`           | Read ads data           |         |
-| `ads:write`          | Manage ads campaigns    |         |
-| `catalogs:read`      | Read product catalogs   |         |
-| `catalogs:write`     | Manage product catalogs |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://api.pinterest.com/**`
+Integration: `@appstrate/pinterest`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect Pinterest
 

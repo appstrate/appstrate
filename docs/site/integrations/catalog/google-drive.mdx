@@ -7,40 +7,9 @@ description: Connect Google Drive to your Appstrate agents.
 
 Google Drive is Google's cloud file storage. The integration lets agents list, read, upload and organize files through the Drive API, including resumable uploads.
 
-Integration: `@appstrate/google-drive` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+Integration: `@appstrate/google-drive`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
-## Authentication
-
-| Property            | Value                                                           |
-| ------------------- | --------------------------------------------------------------- |
-| Type                | `oauth2`                                                        |
-| Credential sent as  | `Authorization: Bearer <credential>`                            |
-| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/drive.file` |
-| Token endpoint auth | `client_secret_post`                                            |
-| Uploads             | `google-resumable` upload protocol for `api_upload`             |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                                                     | Description                            | Default |
-| --------------------------------------------------------- | -------------------------------------- | ------- |
-| `openid`                                                  | Identity (OpenID)                      | yes     |
-| `email`                                                   | Email address                          | yes     |
-| `https://www.googleapis.com/auth/userinfo.email`          | Email address (Google canonical scope) |         |
-| `https://www.googleapis.com/auth/drive.file`              | Per-file access (recommended)          | yes     |
-| `https://www.googleapis.com/auth/drive.readonly`          | Read-only access                       |         |
-| `https://www.googleapis.com/auth/drive`                   | Full access                            |         |
-| `https://www.googleapis.com/auth/drive.metadata.readonly` | Read metadata only                     |         |
-| `https://www.googleapis.com/auth/drive.appdata`           | App data folder                        |         |
-| `https://www.googleapis.com/auth/drive.photos.readonly`   | Read photos/videos                     |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://www.googleapis.com/drive/**`
-- `https://www.googleapis.com/upload/drive/**`
+By default the integration asks for the `drive.file` scope, which covers only the files the app created or the user opened with it. To read the rest of the Drive, add `https://www.googleapis.com/auth/drive.readonly` under `scopes`.
 
 ## Connect Google Drive
 

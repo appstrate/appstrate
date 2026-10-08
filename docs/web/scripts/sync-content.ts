@@ -66,16 +66,40 @@ async function assertNoDocsPrefixLinks() {
   }
 }
 
+/**
+ * Rows `verify:env-docs` requires in ENV.md that no operator sets: build stamps
+ * written by the image build, and internal tuning knobs.
+ */
+const INTERNAL_ENV_VARS = new Set([
+  'APP_VERSION',
+  'GIT_SHA',
+  'RUN_WAIT_POLL_INTERVAL_MS',
+  'REMOTE_RUN_BUFFER_FLUSH_MS',
+  'CHAT_SELF_ORIGIN',
+]);
+
+/** Replaces ENV.md's own intro, which is written for contributors (the gate and its populations). */
+const ENV_INTRO = [
+  'Appstrate validates these variables at boot and refuses to start when one is invalid or a required one is missing; a name it does not know is ignored without a warning.',
+  'A row tagged **[not in the Zod schema]** is read by a module, the sidecar or the agent runtime instead of the platform schema, and is still set in the platform environment.',
+].join(' ');
+
 async function writeEnvPage() {
   const raw = await readText(resolve(REPO, 'docs/ENV.md'));
-  const body = raw.replace(/^# .*\n+/, '');
+  const tableStart = raw.indexOf('\n| Variable ');
+  if (tableStart < 0) throw new Error('docs/ENV.md: the `| Variable |` table is missing.');
+  const table = raw
+    .slice(tableStart + 1)
+    .split('\n')
+    .filter((line) => !INTERNAL_ENV_VARS.has(/^\| `([A-Z0-9_]+)`/.exec(line)?.[1] ?? ''))
+    .join('\n');
   const page = [
     '---',
     'title: Environment Variables',
     'description: Every environment variable Appstrate reads, with defaults and notes.',
     '---',
     '',
-    toMdx(body),
+    toMdx(`${ENV_INTRO}\n\n${table}`),
     '',
   ].join('\n');
   await Bun.write(resolve(CONTENT, 'self-hosting/environment-variables.mdx'), page);

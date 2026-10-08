@@ -7,42 +7,7 @@ description: Connect LinkedIn to your Appstrate agents.
 
 LinkedIn is a professional network. The integration lets agents read the connected member's profile and, with the matching scopes, post on their behalf or work with organization pages and ads.
 
-Integration: `@appstrate/linkedin` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `openid`, `profile`, `email`         |
-| Token endpoint auth | `client_secret_post`                 |
-| PKCE                | `S256`                               |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                   | Description                             | Default |
-| ----------------------- | --------------------------------------- | ------- |
-| `openid`                | OpenID Connect (required)               | yes     |
-| `profile`               | Read name & profile picture             | yes     |
-| `email`                 | Read email address                      | yes     |
-| `w_member_social`       | Post on behalf of member                |         |
-| `r_organization_social` | Read organization posts                 |         |
-| `w_organization_social` | Post on behalf of organization          |         |
-| `rw_organization_admin` | Manage organization pages               |         |
-| `r_ads`                 | Read ads data                           |         |
-| `r_ads_reporting`       | Read ads reporting                      |         |
-| `rw_ads`                | Manage ad campaigns                     |         |
-| `r_basicprofile`        | Read full profile (headline, positions) |         |
-| `r_liteprofile`         | Read basic profile (name, photo)        |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://api.linkedin.com/**`
+Integration: `@appstrate/linkedin`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect LinkedIn
 

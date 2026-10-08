@@ -7,36 +7,7 @@ description: Connect HubSpot to your Appstrate agents.
 
 HubSpot is a CRM and marketing platform. The integration lets agents read and write contacts, companies and deals through the HubSpot API.
 
-Integration: `@appstrate/hubspot` (version 1.0.4), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `crm.objects.contacts.read`          |
-| Token endpoint auth | `client_secret_post`                 |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                         | Description     | Default |
-| ----------------------------- | --------------- | ------- |
-| `crm.objects.contacts.read`   | Read contacts   | yes     |
-| `crm.objects.contacts.write`  | Write contacts  |         |
-| `crm.objects.companies.read`  | Read companies  |         |
-| `crm.objects.companies.write` | Write companies |         |
-| `crm.objects.deals.read`      | Read deals      |         |
-| `crm.objects.deals.write`     | Write deals     |         |
-| `content`                     | Content access  |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://api.hubapi.com/**`
+Integration: `@appstrate/hubspot`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect HubSpot
 

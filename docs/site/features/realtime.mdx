@@ -84,7 +84,7 @@ data:
 
 ## Behaviour to plan for
 
-- **No replay.** A reconnect resumes on the live tail. After reconnecting, fetch the current state with `GET /api/runs/{id}` and then keep listening.
+- **No replay.** A reconnect resumes on the live tail: the `Last-Event-ID` header a browser sends back is not honored. Frame ids are `<subscriber>:<n>`, unique across connections, so use them to deduplicate, not to resume. After reconnecting, fetch the current state with `GET /api/runs/{id}` and then keep listening.
 - **Slow consumers are dropped.** A subscriber with more than 2000 unsent frames, or a connection that stops accepting writes for 60 seconds, is closed. Reconnect and resync.
 - **Isolation.** A subscriber only receives events of the organization and space it authenticated against.
 - **Proxies.** The response sets `X-Accel-Buffering: no`. Make sure any reverse proxy in front of the API does not buffer `text/event-stream`.

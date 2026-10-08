@@ -5,6 +5,16 @@
 
 / /get-started/introduction 302
 
+# Pages merged or removed since the docs moved to this repository.
+/api/introduction /api 301
+/api/webhooks-guide /features/webhooks 301
+/integrations/overview /integrations/how-integrations-work 301
+/integrations/coding-agents /using-appstrate/skill 301
+/integrations/catalog/brevo /integrations/catalog 301
+/integrations/catalog/firecrawl /integrations/catalog 301
+/integrations/catalog/stripe /integrations/catalog 301
+/resources/community /resources/contributing 301
+
 # Pages removed before the docs moved to this repository. Until then the site
 # lived under /docs on appstrate.com, so the old URLs keep that prefix.
 /docs/api/agents/deleteAgentMemory /api/agents 301
@@ -44,10 +54,18 @@
 /docs/api/packages/updateTool /api/packages 301
 /docs/features/applications /features/spaces 301
 /docs/integrations/providers/trello /integrations/catalog 301
+/docs/integrations/providers/brevo /integrations/catalog 301
+/docs/integrations/providers/firecrawl /integrations/catalog 301
+/docs/integrations/providers/stripe /integrations/catalog 301
+/docs/api/introduction /api 301
+/docs/api/webhooks-guide /features/webhooks 301
+/docs/integrations/overview /integrations/how-integrations-work 301
+/docs/integrations/coding-agents /using-appstrate/skill 301
 /docs/resources/compare /resources/why-appstrate 301
 /docs/integrations/providers /integrations/catalog 301
 /docs/integrations/custom-providers /integrations/custom-integrations 301
-/docs/community /resources/community 301
+/docs/community /resources/contributing 301
+/docs/resources/community /resources/contributing 301
 /docs /get-started/introduction 301
 /docs/api/applications/:operation /api/spaces 301
 /docs/api/connection-profiles/:operation /api/integrations 301

@@ -7,33 +7,12 @@ description: Connect ClickUp to your Appstrate agents, with the direct API integ
 
 ClickUp is a project management platform. Appstrate ships two ClickUp integrations, as separate packages.
 
-| Integration                              | Source     | How the agent reaches ClickUp                                                                   |
-| ---------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
-| `@appstrate/clickup` (version 1.0.5)     | `api_call` | Calls the ClickUp REST API (v2) directly. Needs an OAuth client registered by an administrator. |
-| `@appstrate/clickup-mcp` (version 1.2.3) | Remote MCP | Uses ClickUp's hosted MCP server. The OAuth client is registered automatically at connect time. |
+| Integration              | Source     | How the agent reaches ClickUp                                                                   |
+| ------------------------ | ---------- | ----------------------------------------------------------------------------------------------- |
+| `@appstrate/clickup`     | `api_call` | Calls the ClickUp REST API (v2) directly. Needs an OAuth client registered by an administrator. |
+| `@appstrate/clickup-mcp` | Remote MCP | Uses ClickUp's hosted MCP server. The OAuth client is registered automatically at connect time. |
 
-## ClickUp (API): `@appstrate/clickup`
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Token endpoint auth | `client_secret_post`                 |
-
-ClickUp does not use OAuth scopes: the token carries the permissions of the member who authorizes. Authorized URI: `https://api.clickup.com/**`.
-
-## ClickUp (MCP): `@appstrate/clickup-mcp`
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `read`, `write`                      |
-| Token endpoint auth | `none`                               |
-
-The platform discovers ClickUp's authorization server and registers a public client on first connect, so an administrator has nothing to configure. The `read` and `write` scopes are requested by default, and ClickUp's own workspace role is the only access control behind them. Authorized URI: `https://mcp.clickup.com/**`.
-
-The integration declares 61 tools (tasks, lists, folders, comments, documents, time tracking, chat and more). `clickup_execute_operator` and `clickup_get_operators` are hidden from agents, because they run whatever operators ClickUp enables server-side, which a per-tool selection cannot bound. ClickUp applies its own rate limits to the MCP server.
+The token carries the permissions of the member who authorizes: ClickUp's own workspace role is the only access control behind it. In the MCP integration, `clickup_execute_operator` and `clickup_get_operators` are hidden from agents, because they run whatever operators ClickUp enables server-side, which a per-tool selection cannot bound. ClickUp applies its own rate limits to the MCP server.
 
 ## Connect ClickUp
 

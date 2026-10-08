@@ -7,38 +7,7 @@ description: Connect Slack to your Appstrate agents.
 
 Slack is a team messaging platform. The integration lets agents read channels, post messages and work with files and reactions.
 
-Integration: `@appstrate/slack` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `channels:read`, `users:read`        |
-| Token endpoint auth | `client_secret_post`                 |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope              | Description           | Default |
-| ------------------ | --------------------- | ------- |
-| `channels:read`    | View channels         | yes     |
-| `channels:history` | View channel messages |         |
-| `chat:write`       | Send messages         |         |
-| `users:read`       | View users            | yes     |
-| `users:read.email` | View user emails      |         |
-| `files:read`       | View files            |         |
-| `files:write`      | Upload files          |         |
-| `reactions:read`   | View reactions        |         |
-| `reactions:write`  | Add reactions         |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://slack.com/api/**`
+Integration: `@appstrate/slack`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect Slack
 

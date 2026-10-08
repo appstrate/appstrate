@@ -82,13 +82,13 @@ In the web app, the **Webhooks** page creates and edits webhooks, shows the deli
 }
 ```
 
-| Field         | Description                                                                 |
-| ------------- | --------------------------------------------------------------------------- |
-| `id`          | Event id (`evt_` prefix). The same id is reused when a delivery is retried. |
-| `type`        | One of the events above.                                                    |
-| `apiVersion`  | The API version of the event payload.                                       |
-| `timestamp`   | When the event occurred (RFC 3339).                                         |
-| `data.object` | The run, kept minimal on purpose.                                           |
+| Field         | Description                                                                  |
+| ------------- | ---------------------------------------------------------------------------- |
+| `id`          | Event id (`evt_` prefix). The same id is reused when a delivery is retried.  |
+| `type`        | One of the events above.                                                     |
+| `apiVersion`  | The API version of the event payload.                                        |
+| `timestamp`   | When the event occurred (RFC 3339). The signing time is `webhook-timestamp`. |
+| `data.object` | The run, kept minimal on purpose.                                            |
 
 `data.object` carries `id`, `packageId` and `status` on every run event. Terminal events add `duration` (milliseconds). `run.success` adds `result` (an object holding the `output`). Failed, timed out and cancelled runs add `error` (a string). Runs of an inline agent add `package: { "ephemeral": true }`. Fetch `GET /api/runs/{id}` for everything else (input, cost, files).
 
@@ -97,7 +97,7 @@ For `run.connection_missing`, `data.object` has `object: "run_attempt"`, the `pa
 ### Payload modes
 
 - `full` includes `result`. If the run object would exceed 256 KiB of serialized JSON, `result` is dropped and `resultTruncated: true` is added.
-- `summary` never includes `result`. Read it from the API.
+- `summary` removes `result` and `input` from the run object. Run events do not carry `input`, so in practice only `result` goes. Read it from the API.
 
 ## Verifying signatures
 
@@ -111,7 +111,7 @@ webhook-attempt: 1
 content-type: application/json
 ```
 
-The signature is `v1,` followed by the base64 HMAC-SHA256 of `webhook-id + "." + webhook-timestamp + "." + raw body`. The HMAC key is the secret without its `whsec_` prefix, **decoded as base64url**.
+`webhook-timestamp` is the signing time in Unix seconds, and `webhook-attempt` starts at 1. The signature is `v1,` followed by the base64 HMAC-SHA256 of `webhook-id + "." + webhook-timestamp + "." + raw body`. The HMAC key is the secret without its `whsec_` prefix, **decoded as base64url**, not standard base64. Verify against the raw request body, before any JSON parsing.
 
 ```ts
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -133,16 +133,17 @@ export function verify(secret: string, headers: Headers, rawBody: string): boole
 }
 ```
 
-Also reject deliveries whose `webhook-timestamp` is far from your clock. Use `webhook-id` to deduplicate: ordering is not guaranteed, and a retry reuses the event id and increments `webhook-attempt`.
+Also reject deliveries whose `webhook-timestamp` is far from your clock (five minutes is a common tolerance). Delivery is at least once and not ordered: deduplicate on `webhook-id`, which a retry reuses while it increments `webhook-attempt`.
 
 ## Delivery and retries
 
-Each attempt has a 15 second timeout. Redirects are not followed. The destination is checked against private and reserved addresses at every delivery, not only at creation.
+Each attempt has a 15 second timeout, so answer quickly and process the event asynchronously. Redirects are never followed: a signed payload is not re-sent to another address.
 
 - A `2xx` answer is a success.
-- A `4xx` answer other than `408` and `429` is a **permanent failure**: no retry.
-- A network error, timeout, `5xx`, `408` or `429` is retried, up to 8 attempts in total, with delays of 30 s, 5 min, 30 min, 1 h, 2 h, 3 h and 4 h.
+- A `4xx` answer other than `408` and `429` is a **permanent failure**: no retry. Fix the endpoint and send a test ping.
+- A network error, timeout, redirect, `5xx`, `408` or `429` is retried, up to 8 attempts in total, with delays of 30 s, 5 min, 30 min, 1 h, 2 h, 3 h and 4 h.
 - A hostname that does not resolve is abandoned at the third attempt instead of going through all eight.
+- The destination is resolved and checked again at every delivery. One that now resolves to a private or reserved address is refused permanently.
 
 `test.ping` is a single attempt. The history of every attempt is available:
 
@@ -151,7 +152,7 @@ curl "https://your-instance/api/webhooks/wh_xxx/deliveries?limit=20" \
   -H "Authorization: Bearer apst_your_key"
 ```
 
-Each entry has `id`, `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, `error` and `createdAt`. Request and response bodies are not stored. Pagination follows the `Link: rel="next"` header (`startingAfter`).
+Each entry has `id`, `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, `error` and `createdAt`, newest first. Request and response bodies are not stored. Pagination follows the `Link: rel="next"` header (`startingAfter`).
 
 ## Rotating the secret
 
@@ -162,11 +163,11 @@ curl -X POST https://your-instance/api/webhooks/wh_xxx/rotate \
   -d '{ "windowSeconds": 604800 }'
 ```
 
-The response returns the new `secret`, the `secretPrevious` and `rotationWindowEndsAt`. During the window (7 days by default, 30 at most) every delivery is signed with both secrets, so you can switch your receiver without dropping events. After the window, the previous secret is retired.
+The body is optional. The response returns the new `secret`, the `secretPrevious` and `rotationWindowEndsAt`. During the window (7 days by default, 30 at most) every delivery is signed with both secrets, so you can switch your receiver without dropping events. After the window, the previous secret is retired.
 
 ## Testing
 
-`POST /api/webhooks/{id}/test` queues a signed `test.ping` event and returns its `eventId` and `payload`. The `200` confirms the delivery was queued, not that your endpoint received it: read the outcome in the delivery history. It is sent even if the webhook is disabled.
+`POST /api/webhooks/{id}/test` queues a signed `test.ping` event with a sample run object and returns its `eventId` and `payload`. The `200` confirms the delivery was queued, not that your endpoint received it: read the outcome in the delivery history. It is sent even if the webhook is disabled.
 
 ## Rate limits
 

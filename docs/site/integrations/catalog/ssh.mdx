@@ -7,7 +7,7 @@ description: "Connect a server to your Appstrate agents over SSH: run commands a
 
 SSH lets an agent reach a host that has `sshd` and no HTTP API: a VPS, a NAS, a build machine. Each connection is one key on one Unix account of one host.
 
-Integration: `@appstrate/ssh` (version 1.0.1), a local runner. It runs the `@appstrate/ssh-mcp` server package (version 1.0.1) in a sandboxed runner container, which shells out to the `ssh` and `sftp` clients. For how this works, see [How integrations work](/integrations/how-integrations-work). Local runners need the `docker` or `firecracker` run adapter, as described in [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+Integration: `@appstrate/ssh`, a local runner. It runs the `@appstrate/ssh-mcp` server package in a sandboxed runner container, which shells out to the `ssh` and `sftp` clients. For how this works, see [How integrations work](/integrations/how-integrations-work). Local runners need the `docker` or `firecracker` run adapter, as described in [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## The Unix account is the security boundary
 
@@ -31,13 +31,9 @@ Read-only is a property of the agent, not of the connection. Grant an agent `ssh
 
 A reader built this way can browse directories and read files up to 8 MiB, but it cannot search. For log analysis, grant `ssh_exec` on a dedicated, restricted account instead.
 
-## Authorized URIs
+## Reachable hosts
 
-The runner can reach only the host and port of the connection:
-
-- `ssh://{$credential.host}:{$credential.port}`
-
-The host must be a DNS name or a public IPv4 address. IPv6 is not supported, and a private, loopback or link-local address is refused, so a server on your local network cannot be reached.
+The runner can reach only the host and port of the connection. The host must be a DNS name or a public IPv4 address. IPv6 is not supported, and a private, loopback or link-local address is refused, so a server on your local network cannot be reached.
 
 ## Connect a host
 

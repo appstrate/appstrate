@@ -3,7 +3,7 @@ title: Firecracker Execution Backend
 description: "Run each agent in its own microVM. What the opt-in Firecracker backend requires, how to install the runner daemon on a KVM host, how the platform pairs with it, and how to check it."
 ---
 
-The `firecracker` execution backend runs every agent run in its own [Firecracker](https://firecracker-microvm.github.io/) microVM, behind a hardware virtualization boundary (KVM). It is **opt-in**: it is not in the default `MODULES`, it needs a dedicated Linux host, and nothing in it is read unless you select it. The installer defaults to `docker`. Choose Firecracker when you want a stronger boundary than a container for untrusted or multi-tenant workloads. What each backend protects is compared in [Isolation and Security](/self-hosting/isolation-and-security), and the backends are listed in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends).
+The `firecracker` execution backend runs every agent run in its own [Firecracker](https://firecracker-microvm.github.io/) microVM, behind a hardware virtualization boundary (KVM). It is an **early preview** and **opt-in**: it is not in the default `MODULES`, it needs a dedicated Linux host, and nothing in it is read unless you select it. The installer defaults to `docker`. Choose it when you want a hardware boundary rather than a container, within the limits listed below. What each backend protects is compared in [Isolation and Security](/self-hosting/isolation-and-security), and the backends are listed in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends).
 
 ## How it is split
 
@@ -141,7 +141,3 @@ Day-2 commands on the KVM host:
 | `sudo appstrate runner uninstall` | Stops and removes the daemon, its unit and config, and its state directory unless you pass `--keep-data` |
 
 When a run's microVM exits abnormally, the last 2 KiB of its console are recorded in the run's logs as a `system` entry named `firecracker_console`, so the cause is visible without logging into the host. The daemon logs `Firecracker workload destroyed` with a `reason` for every microVM it tears down. At start it also warns, without stopping, when the host has SMT enabled, KSM on or swap in use, because those weaken isolation on a multi-tenant host.
-
-## For contributors
-
-The smoke test that boots a real microVM runs in GitHub Actions on standard Linux runners, which expose KVM (see the [workflow](https://github.com/appstrate/appstrate/blob/main/.github/workflows/firecracker.yml)). Locally, `bun run test:firecracker` runs it, inside a Lima VM on macOS. The architecture, threat model and every daemon variable are in [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).

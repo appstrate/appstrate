@@ -7,14 +7,12 @@ Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging
 
 ## Package types
 
-| Type          | What it is                                                                                                              | Content file                               |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                               | `prompt.md`                                |
-| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                       | `SKILL.md`                                 |
-| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/integrations/overview). | `manifest.json`, optional `INTEGRATION.md` |
-| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                              | Server entry point                         |
-
-Earlier versions also had `tool` and `provider` types. They were replaced by [runtime tools](/features/tools) and integrations.
+| Type          | What it is                                                                                                                           | Content file                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                                            | `prompt.md`                                |
+| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                                    | `SKILL.md`                                 |
+| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/integrations/how-integrations-work). | `manifest.json`, optional `INTEGRATION.md` |
+| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                                           | Server entry point                         |
 
 Package ids are scoped names, `@scope/name`. The scope defaults to your organization's slug. Packages shipped with the platform use `@appstrate/`.
 
@@ -115,4 +113,4 @@ Creating a package needs the type's `write` permission (`agents:write`, `skills:
 
 ## System packages
 
-The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/overview).
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).

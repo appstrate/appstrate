@@ -55,4 +55,4 @@ A space can also **require** skills on its chat. A person with `skills:write` in
 - Every chat turn runs inside the API process, on the Pi engine. `CHAT_PI_MAX_CONCURRENCY` (default 6) caps concurrent turns per API process, and a full instance answers new turns with `429`. Size it from measured capacity before opening chat to many users. The variables are in [Environment Variables](/self-hosting/environment-variables).
 - Inference goes through the platform's LLM proxy: the model's key is injected server-side and the usage is metered like any run. With the billing module, a chat can stop on an exhausted quota.
 - The assistant drives the platform through the same [MCP tools](/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
-- Developers can reach the same surface over the API: `POST /api/chat` and `/api/chat/sessions`. See the [API reference](/api/introduction).
+- Developers can reach the same surface over the API: `POST /api/chat` and `/api/chat/sessions`. See the [API reference](/api).

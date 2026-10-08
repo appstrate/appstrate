@@ -7,43 +7,7 @@ description: Connect Reddit to your Appstrate agents.
 
 Reddit is a discussion platform. The integration lets agents read subreddits and the connected account's history and, with the matching scopes, submit posts and comments.
 
-Integration: `@appstrate/reddit` (version 1.0.6), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `identity`, `read`, `history`        |
-| Token endpoint auth | `client_secret_basic`                |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope             | Description                     | Default |
-| ----------------- | ------------------------------- | ------- |
-| `identity`        | Read user identity              | yes     |
-| `read`            | Read posts & comments           | yes     |
-| `submit`          | Submit posts & comments         |         |
-| `edit`            | Edit posts & comments           |         |
-| `history`         | Read voting & post history      | yes     |
-| `subscribe`       | Manage subreddit subscriptions  |         |
-| `mysubreddits`    | List subscribed subreddits      |         |
-| `vote`            | Upvote & downvote               |         |
-| `save`            | Save & unsave content           |         |
-| `privatemessages` | Read & send private messages    |         |
-| `report`          | Report content                  |         |
-| `flair`           | Manage flairs                   |         |
-| `modposts`        | Moderate posts (approve/remove) |         |
-| `modconfig`       | Manage subreddit settings       |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://oauth.reddit.com/**`
+Integration: `@appstrate/reddit`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect Reddit
 

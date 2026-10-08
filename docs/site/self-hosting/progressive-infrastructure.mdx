@@ -22,33 +22,21 @@ Three things are configured independently:
 
 The installer's recommended single-node stack is **Tier 2**. All file traffic, uploads included, goes through the platform on `APP_URL`, so a separate object store adds a container without adding capability on one node. Bundled MinIO stays private inside the Compose network. To let browsers upload straight to a public S3 endpoint (multi-node setups), set `S3_PUBLIC_ENDPOINT`. See the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md) for the proxy and bucket-policy notes.
 
-### Tier 0
-
-```bash
-curl -fsSL https://get.appstrate.dev | bash -s -- --yes --tier 0
-```
-
-Or run `appstrate install --tier 0` once the CLI is installed. The installer clones the release tag matching the CLI into the install directory and starts `bun run dev`. For development from a checkout, `cp .env.example .env && bun run dev` does the same. Everything is in one process, which is right for evaluation and local development. The queue is in memory and its cron evaluator polls every 30 seconds, so nothing is shared across instances.
-
-### Tiers 1 to 3 with Docker
-
-The installer renders the matching Compose template from `examples/self-hosting/` (`docker-compose.tier1.yml`, `docker-compose.tier2.yml`, `docker-compose.tier3.yml`). All three default `RUN_ADAPTER` to `docker`. The root `docker-compose.yml` of the repository is the Tier 3 stack with its own service names. See [Docker Compose](/self-hosting/docker-compose).
-
-For development from a checkout, `bun run docker:dev:minimal` (Tier 1), `bun run docker:dev:standard` (Tier 2) and `bun run docker:dev` (Tier 3) start the services of `docker-compose.dev.yml`.
+The tier is chosen at install time: see [Install](/get-started/install). On Tier 0 the queue is in memory and its cron evaluator polls every 30 seconds, so nothing is shared across instances. The Docker tiers run the Compose templates of `examples/self-hosting/` (see [Docker Compose](/self-hosting/docker-compose)), which all default `RUN_ADAPTER` to `docker`.
 
 ## Execution backends
 
 `RUN_ADAPTER` selects the backend that runs each agent. The id is resolved against a registry at boot, and an unknown id is a fatal error that lists the registered backends.
 
-| Backend       | Isolation                                                                | Notes                                                                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `process`     | None. The agent and its sidecar are host subprocesses                    | The code default, and what Tier 0 uses. Refuses to spawn `source.kind: "local"` integrations unless `INTEGRATION_RUNTIME_ADAPTER=docker`                                           |
-| `docker`      | One internal network, an agent container and a sidecar container per run | Needs the Docker socket (`DOCKER_SOCKET`, default `/var/run/docker.sock`). The installer's Compose files set it as the default                                                     |
-| `firecracker` | One microVM per run                                                      | Opt-in. Needs the `firecracker` module in `MODULES`, a KVM host running the `appstrate-runner` daemon, and `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` on the platform |
+| Backend       | Isolation                                                                | Use it for                                                                    | Requirements and notes                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `process`     | None. The agent and its sidecar are host subprocesses                    | Local development and evaluation only. The code default, and what Tier 0 uses | Refuses to spawn `source.kind: "local"` integrations unless `INTEGRATION_RUNTIME_ADAPTER=docker`                                                           |
+| `docker`      | One internal network, an agent container and a sidecar container per run | Production. The installer's Compose files set it as the default               | Needs the Docker socket (`DOCKER_SOCKET`, default `/var/run/docker.sock`)                                                                                  |
+| `firecracker` | One microVM per run, behind a guest firewall                             | Early preview. See [Firecracker](/self-hosting/firecracker) for what it suits | Needs the `firecracker` module in `MODULES`, a KVM host running the `appstrate-runner` daemon, and `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` |
 
 For Firecracker, pass `--run-adapter firecracker` to `appstrate install`. It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`) and the runner settings, and either installs the daemon on this host (`--host-ip`) or prints the one-liner for a remote KVM host (`--runner-url` and `--runner-token`). Topology, requirements, hardening status and known limits are in [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
 
-Use `docker` or `firecracker` for anything multi-tenant. See [Isolation and Security](/self-hosting/isolation-and-security) for what each backend protects and what it does not.
+Never use `process` for anything multi-tenant. See [Isolation and Security](/self-hosting/isolation-and-security) for what the isolation protects and what it does not.
 
 ## Modules
 
@@ -66,12 +54,13 @@ Enabled by default (`oidc,webhooks,mcp,core-providers,@appstrate/module-chat`):
 
 Opt-in, append them to `MODULES`:
 
-| Module                                                     | What it provides                                                                                                                                                                                                                                                            |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `firecracker`                                              | The Firecracker execution backend (see above)                                                                                                                                                                                                                               |
-| `@appstrate/module-observability`                          | OpenTelemetry traces and metrics. See [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md)                                                                                                                               |
-| `@appstrate/module-codex`, `@appstrate/module-claude-code` | Model providers backed by a ChatGPT or Claude subscription. Using a personal subscription to power a product is a grey zone you own. Read [SUBSCRIPTION_COMPLIANCE.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md) first |
-| `@appstrate/module-ee`                                     | Stripe billing, credit quotas and usage metering. Source-available, not Apache-2.0, and running it needs a commercial agreement. Needs PostgreSQL (it refuses to start on PGlite)                                                                                           |
+| Module                            | What it provides                                                                                                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `firecracker`                     | The Firecracker execution backend (see above)                                                                                                                                   |
+| `@appstrate/module-observability` | OpenTelemetry traces and metrics. See [Monitoring](/self-hosting/monitoring)                                                                                                    |
+| `@appstrate/module-claude-code`   | Lets an organization use a Claude subscription instead of an API key. Check the provider's terms before enabling it                                                             |
+| `@appstrate/module-codex`         | Lets an organization use a ChatGPT subscription instead of an API key. Check the provider's terms before enabling it                                                            |
+| `@appstrate/module-ee`            | The optional billing module: Stripe billing, credit quotas and usage metering. Needs PostgreSQL (it refuses to start on PGlite). Its licence is in `packages/module-ee/LICENSE` |
 
 Disable what you do not use to reduce the attack surface. Keep `oidc` if you use the CLI, since `appstrate login` goes through it. The authoritative default is the `MODULES` row in [Environment Variables](/self-hosting/environment-variables), and module authoring is covered in the [modules README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
 

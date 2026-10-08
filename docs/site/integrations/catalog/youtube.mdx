@@ -7,37 +7,7 @@ description: Connect YouTube to your Appstrate agents.
 
 YouTube is Google's video platform. The integration lets agents read channel and video data, and upload videos when the matching scopes are granted.
 
-Integration: `@appstrate/youtube` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                              |
-| ------------------- | -------------------------------------------------- |
-| Type                | `oauth2`                                           |
-| Credential sent as  | `Authorization: Bearer <credential>`               |
-| Default scopes      | `https://www.googleapis.com/auth/youtube.readonly` |
-| Token endpoint auth | `client_secret_post`                               |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                                                                 | Description                                      | Default |
-| --------------------------------------------------------------------- | ------------------------------------------------ | ------- |
-| `https://www.googleapis.com/auth/youtube.readonly`                    | Read-only access (videos, channels, playlists)   | yes     |
-| `https://www.googleapis.com/auth/youtube`                             | Full access (manage account)                     |         |
-| `https://www.googleapis.com/auth/youtube.upload`                      | Upload videos                                    |         |
-| `https://www.googleapis.com/auth/youtube.force-ssl`                   | Manage videos, comments, captions (SSL required) |         |
-| `https://www.googleapis.com/auth/youtubepartner`                      | YouTube Partner (content & rights management)    |         |
-| `https://www.googleapis.com/auth/youtube.channel-memberships.creator` | Read channel memberships                         |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://www.googleapis.com/youtube/**`
-- `https://youtube.googleapis.com/**`
-- `https://www.googleapis.com/upload/youtube/**`
+Integration: `@appstrate/youtube`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect YouTube
 

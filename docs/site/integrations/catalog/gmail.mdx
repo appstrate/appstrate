@@ -7,67 +7,14 @@ description: Connect Gmail to your Appstrate agents, with the direct API integra
 
 Gmail is Google's email service. Appstrate ships two Gmail integrations. They are separate packages with separate connections.
 
-| Integration                            | Source     | How the agent reaches Gmail                                                              |
-| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------- |
-| `@appstrate/gmail` (version 1.1.6)     | `api_call` | Calls the Gmail REST API directly                                                        |
-| `@appstrate/gmail-mcp` (version 2.3.5) | Remote MCP | Uses Google's hosted Gmail MCP server (`gmailmcp.googleapis.com`) and its tool catalogue |
+| Integration            | Source     | How the agent reaches Gmail                                                              |
+| ---------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `@appstrate/gmail`     | `api_call` | Calls the Gmail REST API directly                                                        |
+| `@appstrate/gmail-mcp` | Remote MCP | Uses Google's hosted Gmail MCP server (`gmailmcp.googleapis.com`) and its tool catalogue |
 
 Both use Google OAuth 2.0 and need an OAuth client registered by an administrator. For the model behind this page, see [How integrations work](/integrations/how-integrations-work).
 
-## Gmail (API): `@appstrate/gmail`
-
-| Property            | Value                                                                                                             |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Type                | `oauth2`                                                                                                          |
-| Credential sent as  | `Authorization: Bearer <credential>`                                                                              |
-| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send` |
-| Token endpoint auth | `client_secret_post`                                                                                              |
-
-Extra parameters on the authorization request: `access_type=offline` and `prompt=consent`, so Google returns a refresh token.
-
-### Scopes
-
-Scope values are Google URLs. The table shows the part after `https://www.googleapis.com/auth/` (the full-mailbox scope is `https://mail.google.com/`).
-
-| Scope                      | Description                            | Default |
-| -------------------------- | -------------------------------------- | ------- |
-| `openid`                   | Identity (OpenID)                      | yes     |
-| `email`                    | Email address                          | yes     |
-| `userinfo.email`           | Email address (Google canonical scope) |         |
-| `gmail.readonly`           | Read-only access                       | yes     |
-| `gmail.send`               | Send messages                          | yes     |
-| `gmail.compose`            | Compose & send drafts                  |         |
-| `gmail.modify`             | Read & write (no delete)               |         |
-| `gmail.labels`             | Manage labels                          |         |
-| `gmail.metadata`           | Read metadata only                     |         |
-| `gmail.insert`             | Insert messages                        |         |
-| `gmail.settings.basic`     | Manage basic settings                  |         |
-| `https://mail.google.com/` | Full mailbox access                    |         |
-
-### Authorized URIs
-
-- `https://gmail.googleapis.com/**`
-- `https://www.googleapis.com/gmail/**`
-
-## Gmail (MCP): `@appstrate/gmail-mcp`
-
-| Property            | Value                                                                                                                |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Type                | `oauth2`                                                                                                             |
-| Credential sent as  | `Authorization: Bearer <credential>`                                                                                 |
-| Default scopes      | `openid`, `email`, `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.compose` |
-| Token endpoint auth | `client_secret_post`                                                                                                 |
-
-The MCP integration exposes 23 tools. The platform grants the OAuth scopes the selected tools need, so an agent that only searches mail is never asked for write access. No tool in the catalogue sends a message: agents create drafts.
-
-| Required scope   | Tools                                                                                                                                                                                                                                                                                                                      |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gmail.readonly` | `search_threads`, `get_thread`, `get_message`, `get_draft`, `list_drafts`, `list_labels`                                                                                                                                                                                                                                   |
-| `gmail.compose`  | `create_draft`                                                                                                                                                                                                                                                                                                             |
-| `gmail.labels`   | `create_label`                                                                                                                                                                                                                                                                                                             |
-| `gmail.modify`   | `apply_sensitive_message_label`, `apply_sensitive_thread_label`, `label_message`, `unlabel_message`, `update_message_labels`, `label_thread`, `unlabel_thread`, `trash_message`, `untrash_message`, `mark_message_spam`, `unmark_message_spam`, `trash_thread`, `untrash_thread`, `mark_thread_spam`, `unmark_thread_spam` |
-
-Authorized URI: `https://gmailmcp.googleapis.com/**`.
+With the MCP integration, the platform grants the OAuth scopes the selected tools need, so an agent that only searches mail is never asked for write access. No tool in its catalogue sends a message: agents create drafts.
 
 ## Connect Gmail
 

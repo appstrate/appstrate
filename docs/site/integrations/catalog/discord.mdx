@@ -7,39 +7,7 @@ description: Connect Discord to your Appstrate agents.
 
 Discord is a communication platform for communities. The integration works through OAuth 2.0 user authorization against the Discord API.
 
-Integration: `@appstrate/discord` (version 1.0.5), reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
-
-## Authentication
-
-| Property            | Value                                |
-| ------------------- | ------------------------------------ |
-| Type                | `oauth2`                             |
-| Credential sent as  | `Authorization: Bearer <credential>` |
-| Default scopes      | `identify`                           |
-| Token endpoint auth | `client_secret_basic`                |
-
-### Scopes
-
-The scopes below are the catalogue the integration declares. An agent gets the default scopes plus any it lists under `scopes` in its `integrations_configuration`.
-
-| Scope                   | Description                              | Default |
-| ----------------------- | ---------------------------------------- | ------- |
-| `identify`              | Read user profile (id, username, avatar) | yes     |
-| `email`                 | Read user email address                  |         |
-| `guilds`                | List user's guilds (servers)             |         |
-| `guilds.join`           | Add user to a guild                      |         |
-| `guilds.members.read`   | Read user's guild member info            |         |
-| `connections`           | View user's linked accounts              |         |
-| `bot`                   | Add bot to a guild                       |         |
-| `webhook.incoming`      | Create incoming webhooks                 |         |
-| `applications.commands` | Register slash commands                  |         |
-| `messages.read`         | Read messages in channels                |         |
-
-## Authorized URIs
-
-The sidecar sends the credential only to URLs that match one of these patterns:
-
-- `https://discord.com/api/**`
+Integration: `@appstrate/discord`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
 
 ## Connect Discord
 

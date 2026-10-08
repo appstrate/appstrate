@@ -31,79 +31,11 @@ The routes that need a space are the ones under `/api/agents`, `/api/runs`, `/ap
 
 ## API keys
 
-API keys are the credential for servers and automation. A key is `apst_` followed by 30 random base62 characters and a 6-character checksum, so a leaked key can be recognized by a secret scanner and a malformed one is refused before any lookup. Appstrate stores only a SHA-256 hash and a display prefix (`apst_` plus 8 characters). Older `ask_` keys no longer authenticate.
+API keys (`apst_...`) are the credential for servers and automation. A key is pinned to the space it was created in, and its effective permissions are its scopes intersected with what its creator currently holds there. The full key is shown once, at creation, and a key cannot mint another key. Creating, using and revoking keys is covered in [API keys](/features/api-keys). Scopes are `resource:action` permissions from the [permission catalog](/features/roles-and-permissions#the-permission-catalog), and `GET /api/api-keys/available-scopes` lists the ones you can grant.
 
-### Create a key
+Two scopes exist only for remote runs, the mechanism the CLI and the GitHub Action use to run an agent outside the platform (see [Headless and CI runs](/using-appstrate/cli#headless-and-ci-runs)). A key with `llm-proxy:call` spends the organization's model budget, and one with `credential-proxy:call` uses the space's connected accounts, so give these scopes only to keys that run agents remotely. A key created without `scopes` receives every grantable scope its creator holds, these two included.
 
-In the dashboard: **Organization settings**, **API Keys** under **Space**, **New API key**. Over the API, from a session that holds `api-keys:create`. An API key cannot mint another key, because `api-keys:*` is not a grantable scope:
-
-```bash
-curl -X POST http://localhost:3000/api/api-keys \
-  -b cookies.txt \
-  -H "X-Org-Id: $ORG_ID" \
-  -H "X-Space-Id: $SPACE_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "production backend",
-    "scopes": ["agents:read", "agents:run", "runs:read"],
-    "expiresAt": "2027-01-01T00:00:00Z"
-  }'
-```
-
-```json
-{
-  "id": "…",
-  "key": "apst_…",
-  "keyPrefix": "apst_AbCd1234",
-  "scopes": ["agents:read", "agents:run", "runs:read"]
-}
-```
-
-The full `key` is returned **once**. Store it immediately.
-
-The `X-Org-Id` and `X-Space-Id` headers choose the space the key is created in (see [Session cookies](#session-cookies) for the sign-in that produces `cookies.txt`). A personal space takes no API keys (`409 personal_space_takes_no_keys`): create the key in a team space.
-
-### What a key can do
-
-A key is **pinned to the space it was created in** and acts with a ceiling:
-
-```
-effective permissions = key scopes  ∩  what the key's creator currently holds in that space
-```
-
-- The scopes are a ceiling, not a grant. The key never has more than its creator, and it follows the creator: if they lose a role or leave the organization, their keys lose that authority, and leaving the organization revokes them.
-- Scopes you request but your own role does not hold are silently dropped from the new key. A scope no key can carry at all is `400 invalid_request`.
-- If you omit `scopes` or send an empty list, the key receives every grantable scope you hold, which includes `credential-proxy:call` and `llm-proxy:call` when you hold them. A non-empty `scopes` list mints a narrower key. Prefer an explicit list.
-- `expiresAt` is an ISO 8601 date in the future, or `null` for no expiry. There is no rotation: create a new key, switch over, then revoke the old one with `DELETE /api/api-keys/{id}`. Revocation is immediate.
-
-### Scopes
-
-Scopes are `resource:action` strings. `GET /api/api-keys/available-scopes` lists the ones you can grant. The built-in set:
-
-| Resource             | Scopes                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agents               | `agents:read`, `agents:write`, `agents:configure`, `agents:delete`, `agents:run`                                                                                      |
-| Skills               | `skills:read`, `skills:write`, `skills:delete`                                                                                                                        |
-| MCP servers          | `mcp-servers:read`, `mcp-servers:write`, `mcp-servers:delete`                                                                                                         |
-| Integrations         | `integrations:read`, `integrations:write`, `integrations:delete`, `integrations:install`, `integrations:uninstall`, `integrations:connect`, `integrations:disconnect` |
-| Runs                 | `runs:read`, `runs:read-all`, `runs:cancel`, `runs:delete`                                                                                                            |
-| Files                | `files:read`, `files:delete`                                                                                                                                          |
-| Schedules            | `schedules:read`, `schedules:write`, `schedules:delete`                                                                                                               |
-| Models and proxies   | `models:read`, `models:write`, `models:delete`, `proxies:read`, `proxies:write`, `proxies:delete`                                                                     |
-| Spaces and end-users | `spaces:read`, `spaces:write`, `spaces:delete`, `end-users:read`, `end-users:write`, `end-users:delete`                                                               |
-| Remote execution     | `credential-proxy:call`, `llm-proxy:call`                                                                                                                             |
-
-Loaded modules add their own: `webhooks:read|write|delete` (webhooks module), `oauth-clients:read|write|delete` (OIDC module), and `mcp:read`, `mcp:invoke` (MCP module). `credential-proxy:call` and `llm-proxy:call` let a key use stored credentials and model access from outside the platform (the CLI and the GitHub Action); grant them deliberately. The RBAC model behind all of this is in the [RBAC specification](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RBAC_PERMISSIONS_SPEC.md).
-
-### Server-Sent Events
-
-`EventSource` cannot send headers. On the realtime routes only, pass the key as a query parameter:
-
-```
-GET /api/realtime/runs/{id}?token=apst_...
-```
-
-Other routes only read the `Authorization` header. See [Realtime streams](/api#realtime-streams).
+Realtime streams take the key as a query parameter (`?token=apst_...`), because `EventSource` cannot send headers. Other routes only read the `Authorization` header. See [Realtime](/features/realtime).
 
 ## Session cookies
 
@@ -164,12 +96,7 @@ Authorization: Bearer apst_...
 Appstrate-User: eu_...
 ```
 
-- Only API keys can impersonate. With a session cookie or an OIDC token the answer is `400 header_not_allowed`.
-- The value must start with `eu_` (`400 invalid_end_user_id`) and name an end-user of the key's space (`403 invalid_end_user`).
-- Runs, memory, and integration connections used by the request belong to that end-user, and end-users only see their own runs.
-- Every impersonated request is logged server-side with the request id, key id, end-user id, method, path, IP, and user agent.
-
-See [Multi-tenancy](/features/multi-tenancy) and [End-users](/features/end-users).
+Only API keys can impersonate: with a session cookie or an OIDC token the answer is `400 header_not_allowed`. The rules, and what an impersonated request can reach, are in [End-users](/features/end-users#acting-on-behalf-of-an-end-user).
 
 ## Errors
 
@@ -179,6 +106,6 @@ See [Multi-tenancy](/features/multi-tenancy) and [End-users](/features/end-users
 | 403    | `forbidden`          | The credential is valid but lacks the permission, or a context header contradicts the credential |
 | 403    | `not_a_space_member` | The caller holds no role in the requested space                                                  |
 | 400    | `header_not_allowed` | A header such as `Appstrate-User` was sent with a credential that cannot honor it                |
-| 429    | `rate_limited`       | Too many requests. See [API Reference](/api#rate-limiting)                                       |
+| 429    | `rate_limited`       | Too many requests. See [Rate limits](/self-hosting/rate-limits)                                  |
 
 All errors are RFC 9457 problem documents. See [Errors](/api/errors).

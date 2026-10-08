@@ -80,14 +80,7 @@ appstrate install --yes --app-url https://appstrate.example.com
 | `--runner-url`, `--runner-token`, `--host-ip` | Firecracker topology options                                                                                                             |
 | `--upgrade-compose`                           | Maintenance: clean stale defaults out of an existing `docker-compose.yml`                                                                |
 
-| Tier | Runtime | Services                   | Storage    |
-| ---- | ------- | -------------------------- | ---------- |
-| 0    | Bun     | None (PGlite in-process)   | Filesystem |
-| 1    | Docker  | PostgreSQL                 | Filesystem |
-| 2    | Docker  | PostgreSQL + Redis         | Filesystem |
-| 3    | Docker  | PostgreSQL + Redis + MinIO | S3         |
-
-**Tier 0** clones the Appstrate repository at the CLI's release tag, runs `bun install`, writes `.env` and starts the platform as a detached process. If Bun is missing the CLI offers to install it into `~/.bun/bin`. **Tiers 1 to 3** check `docker info`, write `docker-compose.yml` and `.env` and run `docker compose up -d`. With `--yes` the tier is 2 if Docker is reachable and 0 otherwise. Who can sign up on the new instance is explained in [Install](/get-started/install#who-can-sign-up).
+What each tier runs, and who can sign up on the new instance, are in [Install](/get-started/install).
 
 </Accordion>
 
@@ -131,7 +124,7 @@ appstrate login --profile prod --instance https://app.example.com
 | `--no-space`             | Do not pin a space                                                                          |
 | `--device-name <name>`   | Label shown in the dashboard's list of devices (default: the hostname)                      |
 
-The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. A refresh token is single-use, and presenting one twice revokes the session, so `appstrate` processes running at the same time (a background `code sync` and your own command, for example) take turns on the refresh through a lock file, `credentials.lock`, beside the credentials in `~/.config/appstrate/`. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
+The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
 
 After the token exchange, login pins what you work in. One organization is pinned automatically, several give a picker, none offers to create one. Then the organization's default space is pinned. Every later call sends them as `X-Org-Id` and `X-Space-Id`. You can see and revoke your CLI sessions under **Preferences → Devices**, and admins can see everyone's under **Organization settings → CLI sessions**.
 
@@ -229,7 +222,7 @@ Most flags that only make sense in one mode are refused in the other, with a mes
 
 <Accordion title="appstrate models list">
 
-Lists the model presets the instance exposes: id, API shape and label, flagged `default`, `disabled` or `needs-reconnection`. A preset whose API shape the [LLM proxy](/features/runs#llm-proxy-and-credential-proxy) cannot route is flagged `proxy-unsupported`. `--proxy-only` hides those, so what remains can be routed by the proxy (a preset backed by an OAuth subscription is still refused when called). `--json` prints the list for scripts. The command reads the instance with the session of a logged-in profile.
+Lists the model presets the instance exposes: id, API shape and label, flagged `default`, `disabled` or `needs-reconnection`. A preset whose API shape the [LLM proxy](#llm-proxy-and-credential-proxy) cannot route is flagged `proxy-unsupported`, and `--proxy-only` hides those. `--json` prints the list for scripts. The command reads the instance with the session of a logged-in profile.
 
 </Accordion>
 
@@ -291,7 +284,7 @@ Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update
 | `APPSTRATE_SPACE_ID` | Id of the space (`spc_...`). Not needed for a platform run. A remote run with remote integrations (the default, see below) requires it, and the command stops without it.      |
 | `APPSTRATE_ORG_ID`   | Organization id. Not needed for a platform run. Required by `--model-source preset`, which refuses to start without it.                                                        |
 
-With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile: a key is pinned to one organization and one space. `X-Org-Id` is ignored with an API key (the key is bound to its organization); only `X-Space-Id` is checked, and one that disagrees with the key is answered with `403`. Leave both unset for a platform run, and when you set them, set the ones the key is pinned to. An empty value counts as unset. Only the instance falls back to the profile. If you upgrade the CLI and a job used to rely on the profile's space, it now needs `APPSTRATE_SPACE_ID`, or stops with the message `No space id for a local run`.
+With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile, and only the instance falls back to the profile. A key is pinned to one organization and one space: leave both unset for a platform run, and when you set them, use the ones the key is pinned to (a space that disagrees with the key is a `403`). An empty value counts as unset.
 
 The key needs a few scopes, depending on what you run:
 
@@ -303,7 +296,7 @@ The key needs a few scopes, depending on what you run:
 | A remote run with integrations (the default) | `credential-proxy:call`                                                                                                                                                                |
 | A remote run with `--model-source preset`    | `llm-proxy:call`                                                                                                                                                                       |
 
-The last two are described under [Remote runs](/features/runs#remote-runs). Mint the key with the narrowest list that covers your case.
+The last two are explained in [LLM proxy and credential proxy](#llm-proxy-and-credential-proxy). Mint the key with the narrowest list that covers your case.
 
 ### Call the API with an API key
 
@@ -315,7 +308,7 @@ export APPSTRATE_INSTANCE=https://appstrate.example.com   # optional when a prof
 appstrate api GET /api/agents
 ```
 
-- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable. An empty `--api-key` is refused. Leading and trailing whitespace is trimmed, and a key that still contains whitespace, a line break or a non-ASCII character is refused.
+- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable.
 - The instance is `APPSTRATE_INSTANCE`, else the profile's. With neither, the command stops.
 - No `X-Org-Id` or `X-Space-Id` is sent: a key is pinned to one organization and one space, and those apply. Your own `-H` headers still pass through.
 - **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If that variable is already set for `appstrate run`, `api` in the same shell stops using your login: another principal, no org or space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to your profile.
@@ -323,10 +316,7 @@ appstrate api GET /api/agents
 
 ### Platform run or remote run
 
-The two words name two different things, and the CLI flag `--remote` selects the first one.
-
-- A **platform run** executes on the instance, in its sandbox, as if you had clicked Run in the dashboard. It is the default for a package id, and `--remote` selects it explicitly.
-- A **remote run** (`runOrigin: "remote"`) executes on your own host, in the `appstrate` process, with your shell, filesystem and environment. It is what you get with `--local` or with a bundle path. When the run has credentials for an instance, the CLI also registers it and streams signed events back, so it shows up in the dashboard with a **Remote** badge. See [Runs](/features/runs#remote-runs).
+A **platform run** executes on the instance, in its sandbox, as if you had clicked Run in the dashboard. It is the default for a package id, and `--remote` selects it explicitly. A **remote run** (`runOrigin: "remote"`) executes on your own host, in the `appstrate` process, with your shell, filesystem and environment: you get one with `--local` or with a bundle path. When the CLI has credentials for an instance, it registers the run and streams signed events back, so the run shows up in the dashboard with a **Remote** badge.
 
 |                      | Platform run                                                               | Remote run                                                                                        |
 | -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -343,21 +333,28 @@ One limit of a remote run: only serverless `apiCall` integrations are available 
 
 ### Flags of a remote run
 
-| Flag                    | What it does                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--api-key <key>`       | The API key, instead of `APPSTRATE_API_KEY`. Valid in both modes.                                                                                                                                                                                                                                                                                                                                                            |
-| `--model-source <mode>` | `env` or `preset`. Order of precedence: the flag, then `APPSTRATE_MODEL_SOURCE`, then automatic. Automatic is `preset` for a package id with `--integrations remote`, and `env` otherwise.                                                                                                                                                                                                                                   |
-| `--model <id>`          | With `env`, the model id sent to your provider (default `claude-sonnet-4-5`, or `APPSTRATE_MODEL_ID`). With `preset`, a preset id from `appstrate models list`. Without `--no-inherit`, a model stored in the agent's run configuration for the space is used when you pass none, and in `preset` mode the instance's default preset comes after it.                                                                         |
-| `--model-api <api>`     | `env` only. The protocol of your provider (default `anthropic-messages`, or `APPSTRATE_MODEL_API`). Accepted: `pi-messages`, `anthropic-messages`, `openai-completions`, `openai-responses`, `openai-codex-responses`, `mistral-conversations`.                                                                                                                                                                              |
-| `--llm-api-key <key>`   | `env` only. The provider key. Without it the CLI reads `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MISTRAL_API_KEY` according to the protocol, then `APPSTRATE_LLM_API_KEY`, then `LLM_API_KEY`. No key at all stops the run before any network call.                                                                                                                                                                          |
-| `--snapshot <path>`     | A JSON file with optional `memories`, `history` and `checkpoint`, seeded into the run's context before it starts. `memories` replaces the context's list, it is not appended. Other keys are ignored.                                                                                                                                                                                                                        |
-| `--report <mode>`       | `auto` (default), `true` or `false`. `true` stops the run when there are no credentials for an instance (unless `--report-fallback console`). `--report-fallback console` lets the run continue console-only if registering it fails, instead of the default `abort`.                                                                                                                                                        |
-| `--sink-ttl <seconds>`  | A positive integer. How long the signing credentials of the event sink stay valid. The instance takes the smaller of this value and `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, and uses `REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS` when you pass nothing (see [Environment Variables](/self-hosting/environment-variables)). Events sent after the sink expires are refused, so raise it for a run that can last longer than the default. |
-| `--run-id <id>`         | A platform run sends it as the `Idempotency-Key` of the launch: repeating the command with the same value replays the original response instead of creating a second run (see [Idempotency](/api/idempotency)). A remote run uses it to name the in-process run (default `cli_` followed by a timestamp and a random suffix). The instance still assigns its own `run_` id to a reported run.                                |
+The flags that matter most:
 
-`--model-source preset` reads the list of presets with `GET /api/models`, using the session of a CLI profile, not the API key. So preset mode needs `appstrate login` on that machine even when `APPSTRATE_API_KEY` is set. A job that has only an API key must pass `--model-source env`, since `preset` is the automatic choice for a package id, or call the [LLM proxy](/features/runs#llm-proxy-and-credential-proxy) itself.
+- `--model-source env|preset`: your own provider key, or the instance's model presets through the LLM proxy. The automatic choice is `preset` for a package id with `--integrations remote`, and `env` otherwise. With `env`, `--model` and `--model-api` name the model and its protocol, and the key comes from `--llm-api-key` or from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MISTRAL_API_KEY`.
+- `--integrations remote|local|none`: through the credential proxy (the default), from a `--creds-file`, or none.
+- `--report auto|true|false`: whether the run is registered on the instance. `auto` registers it when the CLI has credentials for an instance.
+- `--sink-ttl <seconds>`: how long the run may keep reporting, for a run that outlives the default (see [Run liveness](/features/run-liveness)).
+- `--run-id <id>`: a platform run sends it as its [`Idempotency-Key`](/api/idempotency), so repeating the command replays the first launch instead of starting a second run.
+
+`appstrate run --help` lists every flag, and the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-run) covers the rest of the command.
+
+`--model-source preset` reads the list of presets with the session of a CLI profile, not with the API key, so it needs `appstrate login` on that machine. A job that has only an API key must pass `--model-source env`.
 
 When you run a package id with `--local`, the CLI also reads the space's run configuration for that agent (model, generation settings, stored input values) and applies it under your flags. Pass `--no-inherit` in CI so that a change made in the dashboard cannot alter a pipeline.
+
+### LLM proxy and credential proxy
+
+A remote run has no sidecar on the platform, so the CLI reaches the organization's models and the space's connections through two routes of the instance, the same ones the GitHub Action uses. They are the plumbing of remote runs, not an API to build on.
+
+- With `--integrations remote`, every `api_call` of an integration goes through the **credential proxy**, which injects the connection's credential on the platform and checks the target against the integration's `authorized_uris`. A remote runner addresses one connection per integration: when the space binds several connections to one integration, the run is refused with `remote_binds_one_connection`. Narrow it to one connection with a member pin, or run the agent on the platform.
+- With `--model-source preset`, model calls go through the **LLM proxy**, which resolves the organization's model preset, adds the provider key and meters the usage. With `--model-source env`, the CLI calls your provider directly.
+
+The CLI never holds a provider key or an integration credential. A key with `llm-proxy:call` spends the organization's model budget, and one with `credential-proxy:call` uses the space's connected accounts, so give these scopes only to keys that run agents remotely. A key created without an explicit `scopes` list carries both when its creator holds them. Both proxies are rate-limited (see [Rate limits](/self-hosting/rate-limits)).
 
 ### CI examples
 
@@ -430,4 +427,4 @@ More entries are in the [CLI README](https://github.com/appstrate/appstrate/blob
 ## Reference
 
 - [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md): every flag, exit code and edge case.
-- [REST API](/api/introduction).
+- [REST API](/api).

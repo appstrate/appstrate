@@ -82,7 +82,7 @@ An end-user can be the actor of a [schedule](/features/scheduling) too.
 
 ## Connections of an end-user
 
-An end-user connects its own accounts (Gmail, Slack, a PAT) to integrations. Your backend can mint a hosted **connect** link for it, or import credentials through the API, using the key and `Appstrate-User`. The connection then belongs to that end-user and is the one its runs use. It is never shared with the space: setting `shared_with_org: true` on it answers `409 end_user_connection_not_shareable`, so no admin pin or organization default can name it, and deleting the end-user leaves none of them pointing at a removed connection. See [Integrations](/integrations/overview).
+An end-user connects its own accounts (Gmail, Slack, a PAT) to integrations. Your backend can mint a hosted **connect** link for it, or import credentials through the API, using the key and `Appstrate-User`. The connection then belongs to that end-user and is the one its runs use. It is never shared with the space: setting `shared_with_org: true` on it answers `409 end_user_connection_not_shareable`, so no admin pin or organization default can name it, and deleting the end-user leaves none of them pointing at a removed connection. See [Integrations](/integrations/how-integrations-work).
 
 ## Signing in end-users
 

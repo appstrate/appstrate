@@ -7,15 +7,7 @@ Every run executes in a short-lived **sandbox** next to a **sidecar**. The sandb
 
 ## Execution backends
 
-The `RUN_ADAPTER` setting chooses how the sandbox is built. The default is `process`.
-
-| `RUN_ADAPTER`       | What a run is                                                                        | Isolation                                                                                                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `process` (default) | Bun subprocesses of the platform.                                                    | No container boundary. The agent shares the host's filesystem and network. Credentials are still held by the sidecar, but the sandbox is not a security boundary. For local development. |
-| `docker`            | An agent container and a sidecar container on a private network created for the run. | Container isolation. The agent cannot reach the host or another run, and can leave only through the sidecar.                                                                             |
-| `firecracker`       | One microVM per run, behind a KVM boundary.                                          | Hardware isolation. Opt-in module that talks to a runner daemon on the host.                                                                                                             |
-
-Isolation guarantees below (network separation, no direct egress) describe `docker` and `firecracker`. Credential hiding applies in every mode. Use `docker` or `firecracker` for anything beyond local development. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure) and [Isolation and Security](/self-hosting/isolation-and-security) for the operator side.
+The `RUN_ADAPTER` setting chooses how the sandbox is built: `process` (the default, Bun subprocesses with no container boundary, for local development), `docker` (an agent container and a sidecar container on a private network per run) or `firecracker` (one microVM per run, an early preview). Credential hiding applies in every mode. The isolation guarantees below (network separation, no direct egress) describe `docker` and `firecracker`. The backends and their requirements are in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends), and what each one protects in [Isolation and Security](/self-hosting/isolation-and-security).
 
 ## Shape of a Docker run
 

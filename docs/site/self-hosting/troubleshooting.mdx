@@ -173,7 +173,7 @@ Both calls answer `403 Platform admin access required` unless all of these hold:
 - The session belongs to the `platform` audience. A person who signed in as an end-user of a space is refused.
 - Your email address is in `AUTH_PLATFORM_ADMIN_EMAILS`, a comma-separated list compared without regard to case. With the variable empty, nobody qualifies. The account for a listed address is only created with proof that you own it, see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
 
-These two routes need no `X-Org-Id`, so an operator who belongs to no organization can call them. Before 1.0.0-beta.65 they answered `400` without that header.
+These two routes need no `X-Org-Id`, so an operator who belongs to no organization can call them.
 
 ## Rate limit hits (`429`)
 

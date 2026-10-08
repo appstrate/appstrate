@@ -9,7 +9,7 @@ The defaults suit local development. Going live takes a few deliberate decisions
 
 - **Single node:** Tier 2 (PostgreSQL and Redis, files on a persisted volume) with `RUN_ADAPTER=docker`. This is the installer's recommended stack.
 - **Several platform instances, or object storage:** add S3-compatible storage (`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT` for MinIO or R2) and point every instance at the same PostgreSQL, Redis and bucket. Bundled MinIO is Tier 3.
-- **Hostile or multi-tenant workloads:** consider `RUN_ADAPTER=firecracker` for a microVM per run.
+- **A microVM per run:** `RUN_ADAPTER=firecracker` is an early preview. Read [Firecracker](/self-hosting/firecracker) for the workloads it suits.
 - Do not use Tier 0, Tier 1 or `RUN_ADAPTER=process` in production. They give up persistence, shared state or isolation. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## Terminate TLS and set the public URL
@@ -88,7 +88,7 @@ The Compose files shipped since 1.0.0-beta.65 forward the SMTP and the Google an
 
 ## Choose your modules
 
-`MODULES` defaults to `oidc,webhooks,mcp,core-providers,@appstrate/module-chat`. Drop what you do not use to reduce the attack surface, but keep `oidc` if you use the CLI. Opt-in modules (`firecracker`, `@appstrate/module-observability`, the two subscription providers, `@appstrate/module-ee`) are listed in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#modules).
+`MODULES` defaults to `oidc,webhooks,mcp,core-providers,@appstrate/module-chat`. Drop what you do not use to reduce the attack surface, but keep `oidc` if you use the CLI. The opt-in modules are listed in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#modules).
 
 ## Protect the Docker socket
 

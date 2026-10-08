@@ -20,7 +20,7 @@ export APPSTRATE_URL=http://localhost:3000
 
 ### Create an API key
 
-In the dashboard, open **Organization settings**, then **API Keys** under **Space**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, the `credential-proxy:call` and `llm-proxy:call` proxy scopes included when you hold them, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
+In the dashboard, open **Organization settings**, then **API Keys** under **Space**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
 export APPSTRATE_KEY=apst_your_key_here
@@ -137,13 +137,13 @@ curl "$APPSTRATE_URL/api/runs/$RUN_ID/logs" \
 
 ### Stream a run instead
 
-Server-Sent Events push status changes, log entries, and cost updates as they happen. Browsers cannot set headers on `EventSource`, so the key goes in a query parameter on these routes only. Open it right after you launch the run:
+Server-Sent Events push status changes, log entries, and cost updates as they happen. The key goes in a query parameter, because `EventSource` cannot send headers. Open the stream right after you launch the run:
 
 ```bash
 curl -N "$APPSTRATE_URL/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
 ```
 
-You receive `run_update`, `run_log`, and `run_metric` events, plus a `ping` on connect and after every 30 seconds without another event. The stream starts with the run's current status but does not replay past log lines. See [Realtime streams](/api#realtime-streams).
+You receive `run_update`, `run_log`, and `run_metric` events. Past log lines are not replayed. See [Realtime](/features/realtime).
 
 </Step>
 
@@ -184,7 +184,7 @@ curl -X POST "$APPSTRATE_URL/api/agents/@acme/summarizer/run" \
   -d '{ "input": { "text": "..." } }'
 ```
 
-Runs, memory, and integration connections used by that request belong to `eu_...`, and that end-user sees only their own runs. See [End-user impersonation](/api/authentication#end-user-impersonation).
+The run, and the memory and connections it uses, belong to `eu_...`. See [End-users](/features/end-users#acting-on-behalf-of-an-end-user).
 
 </Step>
 
@@ -199,6 +199,6 @@ Runs, memory, and integration connections used by that request belong to `eu_...
 ## Next
 
 - [Authentication](/api/authentication): keys, sessions, OIDC tokens, scopes.
-- [Webhooks](/api/webhooks-guide): get notified instead of polling.
-- [API Reference](/api): versioning, rate limits, pagination.
+- [Webhooks](/features/webhooks): get notified instead of polling.
+- [API Reference](/api): versioning, pagination, long polling.
 - [Tutorial: email digest agent](/resources/tutorials/email-agent): build a saved agent that uses integrations and a schedule.

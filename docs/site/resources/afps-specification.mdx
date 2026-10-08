@@ -28,7 +28,7 @@ AFPS defines four types. Appstrate stores, versions, and runs all four.
 | `mcp-server`  | A runnable MCP tool server, described with the MCPB vocabulary (`node`, `python`, `binary`, `uv`)                                                        | the entry point named in the manifest                           |
 | `integration` | A connection to a service: its authentication methods, the URLs it may call, and the MCP tools it exposes, backed by an `mcp-server` or a remote MCP URL | `manifest.json`                                                 |
 
-An integration replaces what earlier versions of Appstrate called a **provider**. Packages are identified by a scoped name, `@scope/name`, and versioned with semver.
+Packages are identified by a scoped name, `@scope/name`, and versioned with semver.
 
 A package is a ZIP archive, conventionally `.afps`, with `manifest.json` at its root. Every manifest requires `name`, `version`, and `type`. A pure `SKILL.md` folder with a manifest is a valid skill, so skills written for other tools carry over.
 
@@ -49,7 +49,7 @@ Integrity, signing, and bundles are runtime features: the specification itself d
 - [Packages](/features/packages): importing, publishing, versions, and placing a package in a space.
 - [Skills](/features/skills): writing and publishing a skill.
 - [Agents](/features/agents): the agent manifest in practice.
-- [Integrations overview](/integrations/overview): what integrations are and which ship with the platform.
+- [How integrations work](/integrations/how-integrations-work) and the [catalog](/integrations/catalog): what integrations are and which ship with the platform.
 
 ## Contributing to the spec
 

@@ -5,13 +5,7 @@ description: How Appstrate isolates runs, keeps credentials away from agents and
 
 Every run executes untrusted, model-driven code next to credentials that must never reach it. Appstrate's answer has four parts: an isolated network per run, a per-run sidecar that holds the credentials, URL authorization on every outbound call, and hardened containers. This page covers what an operator controls. The full threat model is in [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md), and the protocol details are in [SIDECAR.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SIDECAR.md).
 
-How the guarantees depend on the backend:
-
-| Backend       | Network isolation               | Filesystem isolation | Use it for                                                                                                                                                               |
-| ------------- | ------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `docker`      | Per-run internal network        | Per-run containers   | Production                                                                                                                                                               |
-| `firecracker` | MicroVM per run, guest firewall | MicroVM per run      | Production, stronger boundary. See [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md) for its status and residual risks |
-| `process`     | None                            | None                 | Local development and evaluation only                                                                                                                                    |
+The isolation depends on the execution backend. `docker`, described on this page, and `firecracker` (see [Firecracker](/self-hosting/firecracker)) isolate each run; `process` gives up network and filesystem isolation (see [When Docker is not available](#when-docker-is-not-available)). The backends are compared in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends).
 
 ## Per-run network (Docker)
 
@@ -63,9 +57,7 @@ Run containers drop all Linux capabilities (`CapDrop: ALL`), set `no-new-privile
 
 See [Rate Limits](/self-hosting/rate-limits) for the other keys and the [resource guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md) for the manifest hints.
 
-### Liveness watchdog
-
-A run must prove it is alive. Until its first event, the platform vouches for it for up to `RUN_BOOT_DEADLINE_SECONDS` (default 300), which covers image pulls and container boot. After that, the runner sends a heartbeat every `RUN_HEARTBEAT_INTERVAL_SECONDS` (default 15), and a run silent for more than `RUN_STALL_THRESHOLD_SECONDS` (default 60) is failed. A sweep runs every `RUN_WATCHDOG_INTERVAL_SECONDS` (default 15). Keep the stall threshold at three heartbeats or more.
+A run that stops reporting is failed by the liveness watchdog. Its settings are in [Run Liveness and Timeouts](/features/run-liveness).
 
 ### Runtime image version contract
 
@@ -77,7 +69,7 @@ The `docker` backend needs the Docker socket, and access to it is effectively ro
 
 - Keep the socket owned by `root:docker` with mode `0660`, and run the platform container with the host's docker group (`group_add: ["${DOCKER_GID:-0}"]`, as the tier templates do).
 - The root `docker-compose.yml` ships a commented `appstrate-docker-proxy` service that filters Docker API verbs. Read its comment before enabling it: it narrows the reachable API surface but is not a security boundary, because container creation is itself a host-root primitive, and the platform needs a build whose Docker client can target a TCP `DOCKER_HOST`.
-- For a real boundary, use `RUN_ADAPTER=firecracker`, or a rootless or VM-isolated Docker daemon.
+- For a stronger boundary, use a rootless or VM-isolated Docker daemon, or `RUN_ADAPTER=firecracker` (early preview).
 
 Run containers are siblings of the platform container, not children: there is no Docker-in-Docker.
 

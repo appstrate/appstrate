@@ -27,14 +27,14 @@ curl -fsSL https://get.appstrate.dev | bash -s -- --yes --tier 1 --dir ~/apps/ap
 
 With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachable and **Tier 0** otherwise. The flags are those of [`appstrate install`](/using-appstrate/cli). `minisign` must be installed to verify the download. The script offers to install it with your package manager, and does so without asking when unattended.
 
-| Tier | Runtime | Services                   | Storage            |
-| ---- | ------- | -------------------------- | ------------------ |
-| 0    | Bun     | None (PGlite in-process)   | Filesystem         |
-| 1    | Docker  | PostgreSQL                 | Filesystem         |
-| 2    | Docker  | PostgreSQL + Redis         | Filesystem         |
-| 3    | Docker  | PostgreSQL + Redis + MinIO | S3 (bundled MinIO) |
+| Tier | Host needs                                                                                        | Services                   | Storage            |
+| ---- | ------------------------------------------------------------------------------------------------- | -------------------------- | ------------------ |
+| 0    | Bun 1.3.14 or later (the installer fetches Bun if it is missing, but does not check its version)  | None (PGlite in-process)   | Filesystem         |
+| 1    | Docker Engine 20+ with Compose v2 (not checked by the installer), and access to the Docker socket | PostgreSQL                 | Filesystem         |
+| 2    | Same as Tier 1                                                                                    | PostgreSQL + Redis         | Filesystem         |
+| 3    | Same as Tier 1                                                                                    | PostgreSQL + Redis + MinIO | S3 (bundled MinIO) |
 
-Tier 2 is the recommended single-node production stack. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure) for the trade-offs.
+Tier 2 is the recommended single-node production stack. The Docker tiers need at least 4 GB of available RAM, and every agent run is a separate container with its own limits, so size the host for your expected concurrency. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure) for what each tier adds.
 
 </Tab>
 

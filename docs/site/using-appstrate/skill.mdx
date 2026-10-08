@@ -1,13 +1,13 @@
 ---
 title: Skills and coding agents
-description: Bring your spaces' skills and agents into Claude Code and Codex with appstrate code sync, and let a coding agent drive the CLI.
+description: Bring your spaces' skills and agents into Claude Code and Codex with appstrate code sync, and let a coding agent configure Appstrate through the CLI or MCP.
 ---
 
-Coding agents such as Claude Code and Codex can work with Appstrate in three ways, and they combine:
+Coding agents such as Claude Code and Codex can work with Appstrate in three ways, and they combine: the skills carry your team's conventions, the CLI or MCP is the hands.
 
 - **Your skills, locally.** `appstrate code sync` copies the [skills](/features/skills) of the spaces you belong to into the agent's skill directories, and keeps them current.
 - **Your agents, as commands.** In Claude Code, every agent active in your pinned space becomes a `/appstrate:run-<agent>` command that launches it through the organization's MCP server.
-- **The CLI and the API.** A coding agent can call the platform through `appstrate api` without ever seeing a token. The repository ships an operating manual for exactly that: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md).
+- **The CLI and the API.** A coding agent can call the platform through `appstrate api` without ever seeing a token. The repository ships an operating manual for exactly that: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). An agent without the CLI can use the organization's MCP server instead, as described in [MCP clients](/using-appstrate/mcp-clients).
 
 What you need first: an instance and the [CLI](/using-appstrate/cli), signed in (`appstrate login`) with an organization and a space pinned. Login pins them for you when there is only one choice.
 
@@ -80,6 +80,17 @@ If your organization blocks command-sourced plugins, or you use Codex only, sche
 
 `appstrate code sync` only copies down. To author a skill, agent, integration or MCP server in a local folder, push it to its draft and publish it, use [`appstrate packages`](/using-appstrate/cli). To try a skill in Claude Code before publishing it, load its folder directly with `claude --plugin-dir <dir>`.
 
+## What to delegate
+
+A platform engineer rolling out Appstrate can hand configuration work to the coding agent instead of clicking through the dashboard or hand-typing API calls. Requests that land well:
+
+- _"Create an agent called `email-triage` that reads my Gmail inbox and posts a summary to Slack. Use the `@appstrate/gmail-mcp` and `@appstrate/slack` integrations and select only the tools it needs."_
+- _"Write a custom integration for our internal API at `https://api.acme.com`, with an API key in the `Authorization` header, import it, and add it to the `reporting` agent."_
+- _"Rotate the API key named `ci-deploy`: create the new one, check it works, then revoke the old one."_
+- _"Diff my `dev` profile's agent list with `prod` and tell me what is missing on prod."_
+
+If something fails, the agent should stop and show the error instead of retrying blindly. Review what it is about to do on a production profile, as you would a colleague's change.
+
 ## A standalone skill repository
 
 A separate open-source repository, [`appstrate/skills`](https://github.com/appstrate/skills), publishes a skill for coding agents. It is not part of this repository, so follow its own README for installation and contents.
@@ -88,5 +99,4 @@ A separate open-source repository, [`appstrate/skills`](https://github.com/appst
 
 - [CLI](/using-appstrate/cli): the commands a coding agent drives.
 - [MCP clients](/using-appstrate/mcp-clients): connect any MCP client to an organization.
-- [Coding Agents integration](/integrations/coding-agents): why this combination is useful for platform teams.
 - [CLI README, `code sync`](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-code-sync): the full behaviour.

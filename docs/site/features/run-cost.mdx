@@ -37,7 +37,7 @@ A rate card can define **price tiers**: when the input of a single request excee
 Where the rows come from depends on how inference reaches the model:
 
 - **API-key models** are served through the platform's LLM proxy, which writes one row per call.
-- **Subscription models** (OAuth credentials of the optional `@appstrate/module-claude-code` and `@appstrate/module-codex` modules) are metered from the runner's cumulative token counters, priced server-side. They are priced at the public API rates even though the user pays a flat subscription, so the figure is an estimate of the equivalent API cost.
+- **Subscription models** (see [LLM Models](/integrations/llm-models)) are metered from the runner's token counters and priced at the public API rates, so their cost is an estimate.
 - **Remote runs** report their usage through signed events. When their inference goes through the platform's LLM proxy, the proxy rows are the source of truth.
 - **Chat turns** are metered per turn and attributed to the chat session, not to a run (see [Chat](/using-appstrate/chat)).
 
@@ -60,7 +60,7 @@ Every successful call that reached the provider ends up in the ledger. When the 
 
 ## Limits and quotas
 
-`cost` is reporting. Spending limits are not part of the open-source core. A deployment can load a billing module (the source-available `@appstrate/module-ee`) that admits or refuses usage before a run or chat turn starts. A refusal answers `402` with `quota_exceeded` or `subscription_blocked`.
+`cost` is reporting, not a limit. A deployment can load the optional billing module (Stripe billing, credit quotas, usage metering), which admits or refuses usage before a run or chat turn starts. A refusal answers `402` with `quota_exceeded` or `subscription_blocked`.
 
 ## Reference
 

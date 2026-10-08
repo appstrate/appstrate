@@ -13,8 +13,6 @@ A **tool** is a function the model can call during a run. A skill tells the agen
 
 All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
 
-> Earlier versions of Appstrate had a `tool` package type (`@appstrate/log`, `@appstrate/add-memory`, TypeScript extensions). It no longer exists. Runtime tools replaced the system tools, and integrations and MCP servers replaced custom tool code. A retired runtime tool id is refused when you save a manifest in the editor or import a ZIP or a GitHub URL. A manifest already stored, or one in an `.afps-bundle`, keeps working: the id is dropped and reported.
-
 ## Sandbox tools
 
 The agent runs on the Pi coding agent, which gives the model file and shell tools inside its workspace: `read`, `write`, `edit`, `bash`, plus `grep`, `find` and `ls`. The model uses them to read input files, run scripts shipped by [skills](/features/skills), process data, and write deliverables under `./outputs/` (see [Files](/features/files)). `python3` is available with `openpyxl`, `pandas`, `requests` and `PyPDF2` preinstalled.
@@ -65,7 +63,7 @@ The agent author picks which tools an agent can use. Excerpt of the agent manife
 
 Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/self-hosting/environment-variables).
 
-For connections, scopes and the catalog, see [Integrations](/integrations/overview).
+For connections, scopes and the catalog, see [Integrations](/integrations/how-integrations-work).
 
 ## The `api_call` and `api_upload` tools
 
@@ -73,9 +71,9 @@ For connections, scopes and the catalog, see [Integrations](/integrations/overvi
 
 ### Names
 
-Like every integration tool, they are advertised as `{namespace}__{tool}`. The namespace is the integration id with the leading `@` dropped, every run of characters other than letters and digits replaced by `_`, lowercased and cut to 20 characters. Two integrations that land on the same namespace get `_2`, `_3` and so on. So `@appstrate/gmail` gives `appstrate_gmail__api_call`, and `@appstrate/google-drive` gives `appstrate_google_dri__api_call`.
+Like every integration tool, they are advertised as `{namespace}__{tool}`, with a namespace derived from the integration id: `@appstrate/gmail` gives `appstrate_gmail__api_call`.
 
-When an integration opts several auths into `api_call`, each auth gets its own tool, `api_call__<authToken>`. An auth key of up to 17 characters appears verbatim. In `integrations_configuration` you select the unprefixed name (`api_call`, or `api_call__<authToken>`), and selecting either tool of the pair, `api_call` or `api_upload`, grants both.
+When an integration opts several auths into `api_call`, each auth gets its own tool, `api_call__<authToken>`. In `integrations_configuration` you select the unprefixed name (`api_call`, or `api_call__<authToken>`), and selecting either tool of the pair, `api_call` or `api_upload`, grants both.
 
 ### Arguments of `api_call`
 
@@ -109,7 +107,7 @@ Without `toFile`, large responses still stay out of the model's context. A text 
 
 ### Status and failure codes
 
-Without `toFile`, the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. With `toFile`, the descriptor carries `status`. A status of `0` means the sidecar answered itself: the call was refused before it was sent, or it failed after sending (a timeout, an unreachable host). When such a failure belongs to the shared vocabulary, the line names its code, for example `[api_call status=0 code=blocked_target]`, the `toFile` descriptor carries it as `code`, and the result's `_meta["dev.appstrate/api-call-error"]` holds it too. The codes are `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`, `upstream_unresolvable`, `credential_unusable`, `upstream_unreachable` and `upstream_timeout`, with the meanings listed in [Errors](/api/errors#outbound-calls-and-resolvers). The platform's credential proxy answers the same codes, and a run started with `appstrate run --integrations local` shows the agent the same line.
+Without `toFile`, the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. With `toFile`, the descriptor carries `status`. A status of `0` means the sidecar answered itself: the call was refused before it was sent, or it failed after sending (a timeout, an unreachable host). When such a failure belongs to the shared vocabulary, the line names its code, for example `[api_call status=0 code=blocked_target]`, the `toFile` descriptor carries it as `code`, and the result's `_meta["dev.appstrate/api-call-error"]` holds it too. The codes are `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`, `upstream_unresolvable`, `credential_unusable`, `upstream_unreachable` and `upstream_timeout`, with the meanings listed in [Errors](/api/errors#code-unauthorized-target). The platform's credential proxy answers the same codes, and a run started with `appstrate run --integrations local` shows the agent the same line.
 
 ### Resumable uploads: `api_upload`
 
@@ -142,7 +140,7 @@ There is no tool-code package. To give agents a new capability, publish an **int
 - an integration with `source.kind: "remote"` points at a hosted MCP server (Streamable HTTP or SSE);
 - an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per connection bound to the run.
 
-Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/integrations/overview) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/integrations/how-integrations-work) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## Related
 

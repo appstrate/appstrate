@@ -139,7 +139,7 @@ An inbound `traceparent` header is **not trusted by default**. On a public API, 
 
 ### Limits
 
-- The LLM latency histogram measures calls that go through the platform's LLM proxy. Runs on a subscription provider send inference through the run's sidecar and are not in that histogram. See [LLM Models](/integrations/llm-models).
+- The LLM latency histogram measures only the calls that go through the platform's LLM proxy.
 - There is no automatic instrumentation of libraries (database driver, HTTP client). Spans exist at the places listed above.
 - Spans and metrics are flushed during a graceful shutdown, so a clean restart does not drop the last interval.
 
