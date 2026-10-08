@@ -157,7 +157,8 @@ describe("full persona invariants", () => {
     for (const persona of [FULL, REDUCED]) {
       expect(persona).toContain("`integration_unbound`");
       expect(persona).toMatch(/offer to connect it/);
-      expect(persona).toContain("`required_integration_unbound`");
+      // `required_integration_unbound` is the MCP server's to teach (its instructions reach chat).
+      expect(persona).not.toContain("`required_integration_unbound`");
       expect(persona).toContain("`[]` runs without that integration");
       expect(persona).toContain("`integration_not_active`");
     }

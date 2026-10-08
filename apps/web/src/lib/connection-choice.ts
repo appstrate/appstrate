@@ -22,7 +22,6 @@ const SCHEDULE_CHOICE_CODES = [
   "override_connection_unavailable",
   "auth_serves_no_selected_tool",
   "override_outranked",
-  // Sent only when the schedule's own set is the `[]` of an integration the agent requires.
   "required_integration_unbound",
 ] as const;
 
@@ -62,9 +61,8 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
 }
 
 /**
- * The refused integrations whose current set is still the one the refused save sent — no pick
- * and "no connection" (`[]`) are different answers. Derived, so a mark clears as soon as the
- * user picks — and comes back if they undo it.
+ * The refused integrations whose current set is still the one the refused save sent (no pick and
+ * `[]` differ). Derived, so a mark clears as soon as the user picks — and comes back on undo.
  */
 export function pendingConnectionChoices(
   choices: readonly ConnectionChoice[],

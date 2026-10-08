@@ -27,8 +27,7 @@ import { ConnectionSetChecklist } from "./connection-set-checklist";
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
  * write. With an org default in place, these are per-agent EXCEPTIONS. An empty set pins
- * "no connection": the agent runs without the integration — or, if it requires it, cannot run
- * (its readiness says so).
+ * "no connection" (an agent that requires the integration then cannot run).
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");

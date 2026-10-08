@@ -430,7 +430,7 @@ export async function selectAccessibleConnection(
   }
   const { resolved, errors } = resolveConnections({
     // No agent selection: every declared auth serves, no scope is required. `required`: no usable
-    // connection stays an error (→ null below), never an empty binding.
+    // connection is an error (→ null below), not an empty binding.
     requirements: [
       {
         integrationId: packageId,
@@ -3383,7 +3383,7 @@ interface PinForget {
   agentPackageId: string;
   integrationId: string;
   connectionIds: string[];
-  /** `connectionIds` without the connection; empty drops the pin, never pins it to none. */
+  /** `connectionIds` without the connection; empty drops the pin. */
   nextConnectionIds: string[];
 }
 

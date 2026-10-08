@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { EnrichedRun } from "@appstrate/shared-types";
-import { groupByIntegration, unboundIntegrationIds, type ConnectionUsed } from "../run-connections";
+import { groupByIntegration, type ConnectionUsed } from "../run-connections";
 
 const used = (
   integration_package_id: string,
@@ -63,25 +62,5 @@ describe("groupByIntegration — integrations the run started without", () => {
   it("never turns a bound integration into an unbound row", () => {
     const rows = [used("@o/gmail", "work")];
     expect(groupByIntegration(rows, ["@o/gmail"])).toEqual([["@o/gmail", rows]]);
-  });
-});
-
-describe("unboundIntegrationIds", () => {
-  const run = (integrations_unbound: EnrichedRun["integrations_unbound"]) =>
-    ({ integrations_unbound }) as EnrichedRun;
-
-  it("reads the run's unbound integrations", () => {
-    expect(unboundIntegrationIds(run(["@o/notion", "@o/slack"]))).toEqual([
-      "@o/notion",
-      "@o/slack",
-    ]);
-  });
-
-  it("is empty when every integration was bound", () => {
-    expect(unboundIntegrationIds(run([]))).toEqual([]);
-  });
-
-  it("is empty when the run has no connection snapshot", () => {
-    expect(unboundIntegrationIds(run(null))).toEqual([]);
   });
 });

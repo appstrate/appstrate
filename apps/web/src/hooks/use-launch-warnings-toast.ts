@@ -16,9 +16,8 @@ import {
 } from "../lib/launch-warnings";
 
 /**
- * Says, once per launch or schedule write, which integrations the run starts without. Non
- * blocking: the run is already created. "Connecter" opens the agent's Connexions tab, whose
- * pickers hold the VIEWER's connections — so it is offered only when the run is theirs.
+ * Toasts which integrations a launch or schedule write starts without. "Connecter" opens the
+ * Connexions tab, whose pickers hold the VIEWER's connections: offered only when the run is theirs.
  */
 export function useLaunchWarningsToast() {
   const navigate = useNavigate();
@@ -39,7 +38,7 @@ export function useLaunchWarningsToast() {
       ...(canConnect
         ? {
             action: {
-              label: i18n.t("launchWarnings.connect", { ns: "agents" }),
+              label: i18n.t("detail.integrationConnect", { ns: "agents" }),
               onClick: () => navigate(`${agentPath}#connections`),
             },
           }

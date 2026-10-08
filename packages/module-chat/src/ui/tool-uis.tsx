@@ -424,12 +424,10 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // `connect_url` per actionable integration (#1207), so the connect cards render
 // UNDER the run panel and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
-// without a non-required integration carries the same link on its
-// `integration_unbound` warning (#1830), shown once the run ends; connecting it
-// then resumes without asking the model to run the agent again. Zero offers
-// adds nothing: unlike the invoke_operation connect branch there is no
-// placeholder card here, because the run panel already holds the block's
-// geometry.
+// without an optional integration carries the same link on its warning, shown
+// once the run ends. Zero offers adds nothing: unlike the invoke_operation
+// connect branch there is no placeholder card here, because the run panel
+// already holds the block's geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
   render: (props: AnyToolProps) => (

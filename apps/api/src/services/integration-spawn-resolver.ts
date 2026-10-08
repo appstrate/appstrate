@@ -380,8 +380,7 @@ async function resolveOne(
   // keeps only its connection's (below).
   const wildcardSelection = isToolsWildcard(effectiveSelection);
   const exposesTools = wildcardSelection || !!effectiveSelection?.length;
-  // `[]` is the cascade binding none on purpose: the run starts without it, and
-  // nothing past this point (server resolution, credentials) is needed.
+  // `[]`: the cascade bound none on purpose — no server or credentials to resolve.
   if (exposesTools && boundConnections?.length === 0) return drop("unbound");
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
     (cfg) => {

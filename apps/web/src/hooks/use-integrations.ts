@@ -138,10 +138,7 @@ export function useIntegrations() {
   );
 }
 
-/**
- * An integration's display name from the cached {@link useIntegrations} list — never fetched;
- * the id when absent.
- */
+/** Display name from the cached {@link useIntegrations} list (never fetched), else the id. */
 export function useCachedIntegrationName(): (integrationId: string) => string {
   const qc = useQueryClient();
   const { header } = useIntegrationsReadScope();
@@ -275,11 +272,7 @@ export function useReadIntegrationResolution(
   };
 }
 
-/**
- * One declared integration's whole readiness entry — the resolution plus the run-semantics
- * `run_blocking` flag (inert optional integrations do not block, inert required ones do) and the
- * agent's `required` flag. Selected from the same bulk query the picker uses.
- */
+/** One declared integration's readiness entry (resolution, `run_blocking`, `required`). */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,

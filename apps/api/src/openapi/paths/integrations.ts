@@ -109,7 +109,7 @@ export const connectionIdSetJsonSchema = {
   minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
   description:
-    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is refused (400) and a `[]` pin is stored but refuses the runs it governs (409 `required_integration_unbound`).",
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is a 400 and a `[]` pin refuses the runs it governs (409 `required_integration_unbound`).",
 } as const;
 
 /** The org default's set: never empty — none for every agent of the space is deactivation. */
@@ -117,7 +117,7 @@ const orgDefaultConnectionIdSetJsonSchema = {
   ...connectionIdSetJsonSchema,
   minItems: 1,
   description:
-    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that — agents that do not require it then start without it (a launch warning), agents that require it are refused (409 `integration_not_active`).",
+    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */

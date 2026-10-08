@@ -19,10 +19,7 @@ import {
 } from "./integration-service.ts";
 import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
-import type {
-  ConnectionResolutionError,
-  ConnectionResolutionWarning,
-} from "@appstrate/core/integration";
+import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -53,9 +50,7 @@ interface AgentReadinessParams {
    * Opt-in relay for the run-kickoff connect link (#1207) — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    *
-   * Read by the THROWING wrapper only: `collectAgentReadiness` ignores it, so
-   * the dry-run validator (the accumulate branch of `inline-run-preflight.ts`)
-   * stays link-free by passing none — not by anything this function does.
+   * Read by the THROWING wrapper only: `collectAgentReadiness` ignores it.
    */
   connectOffers?: ConnectOfferPolicy | null;
 }
@@ -102,21 +97,17 @@ function manifestFailureError(
   }
 }
 
-/**
- * Every readiness error and warning (non-throwing), wire-shaped and as the resolver produced
- * them. Single source of truth: `validateAgentReadiness` delegates to this.
- */
+/** Every readiness error and warning (non-throwing); `validateAgentReadiness` delegates to this. */
 export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
   errors: ValidationFieldError[];
   resolutionErrors: ConnectionResolutionError[];
   warnings: ResolutionFieldError[];
-  resolutionWarnings: ConnectionResolutionWarning[];
 }> {
   const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
   const resolutionErrors: ConnectionResolutionError[] = [];
-  const resolutionWarnings: ConnectionResolutionWarning[] = [];
+  let warnings: ResolutionFieldError[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -172,7 +163,6 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     if (!result.ok) errors.push(manifestFailureError(id, result.failure));
   }
 
-  // Activation and connections: the resolver the run snapshot re-runs.
   if (actor) {
     const resolution = await resolveConnectionsForRun({
       agentManifest: manifest as Record<string, unknown>,
@@ -186,15 +176,10 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
       errors.push(translateResolutionError(e));
     }
     resolutionErrors.push(...resolution.errors);
-    resolutionWarnings.push(...resolution.warnings);
+    warnings = resolution.warnings.map(translateResolutionError);
   }
 
-  return {
-    errors,
-    resolutionErrors,
-    warnings: resolutionWarnings.map(translateResolutionError),
-    resolutionWarnings,
-  };
+  return { errors, resolutionErrors, warnings };
 }
 
 /**
@@ -202,8 +187,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
  * `collectAgentReadiness` and throws the first error, preserving the
  * historical fail-fast contract (single ApiError with the original code and
  * human-readable title carried on the field entry). On success returns the
- * launch response's `warnings`, connect links attached under the same opt-in
- * as the 409's.
+ * launch `warnings`, with connect links under the same opt-in as the 409's.
  */
 export async function validateAgentReadiness(
   params: AgentReadinessParams,

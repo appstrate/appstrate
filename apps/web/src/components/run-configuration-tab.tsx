@@ -23,7 +23,7 @@ import { InfoCard } from "./run-info-card";
 import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { inlineRunDisplayName } from "../lib/run-title";
-import { groupByIntegration, unboundIntegrationIds } from "../lib/run-connections";
+import { groupByIntegration } from "../lib/run-connections";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 interface RunConfigurationTabProps {
@@ -34,7 +34,10 @@ interface RunConfigurationTabProps {
 
 export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const connectionRows = groupByIntegration(run.connections_used ?? [], unboundIntegrationIds(run));
+  const connectionRows = groupByIntegration(
+    run.connections_used ?? [],
+    run.integrations_unbound ?? [],
+  );
   const isInline = run.package_ephemeral;
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but the agent page it would link to is gone.

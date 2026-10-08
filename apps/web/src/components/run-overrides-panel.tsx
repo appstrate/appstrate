@@ -288,8 +288,9 @@ export function RunOverridesPanel({
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, "no connection" writes `[]`, "inherit" clears the key. The pick freezes
+ * `connection_overrides` map, "inherit" clears the key. The pick freezes
  * into the schedule row on save (the launch override — below admin pins, above member pins).
+ * "No connection" writes `[]`.
  *
  * Identical UX to the agent page's connection picker — same candidate
  * list, scope/lock verdicts and inline connect flow — only the

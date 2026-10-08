@@ -217,14 +217,13 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
-/** The original 201 body, its run fields re-read: launch-time detail (`warnings`) is kept as sent. */
+/** The original 201 body with its run fields re-read; launch-time `warnings` are kept as sent. */
 async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
   if (response.status !== 201) return response;
   const cached = z.looseObject({ id: z.string() }).parse(await response.json());
-  const { id } = cached;
   const run = await getRunFull(
     getSpaceScope(c),
-    id,
+    cached.id,
     getActor(c),
     runVisibilityFilter(c),
     !agentReadIsSummary(c),

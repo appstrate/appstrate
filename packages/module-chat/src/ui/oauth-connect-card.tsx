@@ -144,7 +144,7 @@ export function OAuthConnectCard({
   toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
-  /** The offer came from a run that started without the integration, not a refused launch. */
+  /** The offer came from a run that started without the integration. */
   runStarted?: boolean;
 }) {
   const aui = useAui();

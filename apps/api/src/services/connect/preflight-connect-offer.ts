@@ -65,8 +65,7 @@ const FRESH_CONNECT_CODES: ReadonlySet<string> = new Set(["not_connected", "inte
  * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * `not_connected` and `integration_unbound` qualify outright (a fresh connect,
- * no `connection_id`) whenever the item names an `auth_key`.
+ * `not_connected` / `integration_unbound` qualify outright (a fresh connect, no `connection_id`).
  * The two {@link IN_PLACE_CODES} qualify only on a connection the actor OWNS
  * and only with an id to re-consent: a foreign-owned row is somebody else's
  * account, and minting against it would let the caller re-consent a

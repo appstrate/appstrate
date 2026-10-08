@@ -121,10 +121,8 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
 }
 
 /**
- * The offers of a `run_and_wait` result, withheld while its run is still in
- * flight (`done: false` without an `error`). A started run's offers come from
- * its `integration_unbound` warnings (#1830); a connect completing mid-run would
- * append a resume turn over the live one, so the cards wait for the call to end.
+ * A `run_and_wait` result's offers, withheld while its run is in flight (`done: false`, no
+ * `error`): a connect completing mid-run would append a resume turn over the live one.
  */
 export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
   const payload = asRecord(unwrapResult(result));
@@ -132,16 +130,12 @@ export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
   return extractAuthOffers(result);
 }
 
-/** Whether a `run_and_wait` result is a run that started (it has an id), not a refused launch. */
+/** A started run (it has an id), not a refused launch. */
 export function isStartedRunResult(result: unknown): boolean {
   return typeof asRecord(unwrapResult(result))?.id === "string";
 }
 
-/**
- * The instruction the resume turn carries. After a refused launch the model
- * continues the task; after a run that started without the integration it only
- * acknowledges it, since running the agent again is the user's call.
- */
+/** The resume turn's instruction: a run that started anyway is re-run only if the user asks. */
 export function resumeInstruction(label: string, runStarted: boolean): string {
   return runStarted
     ? `L'intégration ${label} est maintenant connectée. Ne relance pas l'agent : propose-le, l'utilisateur décide.`

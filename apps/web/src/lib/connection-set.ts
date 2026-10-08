@@ -12,10 +12,7 @@ export function toggleCapped(ids: string[], id: string): string[] {
   return [...ids, id];
 }
 
-/**
- * One cascade layer's stored set for an integration: `null` is no set (the layer is absent and
- * the next one decides), `[]` is "no connection" — it wins and binds none.
- */
+/** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
 export type ConnectionSet = string[] | null;
 
 /** `picks` (integration id → set) with one integration's set replaced; `null` removes the key. */
@@ -60,9 +57,8 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
 }
 
 /**
- * "Valider" writes a non-empty set that differs from the stored pick — "no connection" is its
- * own menu entry. Untouched, that is only a stored pick naming an id no longer a candidate —
- * never the cascade's fallback.
+ * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
+ * only a stored pick naming an id no longer a candidate — never the cascade's fallback.
  */
 export function canApplyConnectionSet(
   checked: readonly { id: string }[],
@@ -77,10 +73,7 @@ export function canApplyConnectionSet(
   );
 }
 
-/**
- * Bound as displayed: a stored set (`[]` included) as is; with none, an unpinned member still
- * sees the cascade and an unpicked override inherits.
- */
+/** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */
 export function displayedConnectionIds(input: {
   overrideMode: boolean;
   explicitIds: ConnectionSet;
@@ -110,8 +103,8 @@ export function unavailableConnectionIds(explicitIds: string[], candidateIds: st
 }
 
 /**
- * Where a connection created from the picker goes. With no pick of the actor's own, or a pick of
- * none, it becomes the pick — never joined onto the cascade's fallback, which would freeze an org
+ * Where a connection created from the picker goes. With no pick of the actor's own (or a pick of
+ * none) it becomes the pick — never joined onto the cascade's fallback, which would freeze an org
  * default into a member pin. Beside an explicit pick it is only ticked: binding several
  * connections is always the actor's explicit "Valider".
  */

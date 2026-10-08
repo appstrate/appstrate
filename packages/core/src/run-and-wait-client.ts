@@ -354,10 +354,8 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
 }
 
 /**
- * The launch response's `warnings` (e.g. `integration_unbound`: the run started
- * without a declared, non-required integration), carried onto every step so the
- * caller can say what the run lacks and offer to connect it. The run resource
- * the poll reads does not repeat them. Absent when the launch reported none.
+ * The launch response's non-empty `warnings` (integrations the run started without), carried
+ * onto every payload: the run resource the poll reads does not repeat them.
  */
 function withLaunchWarnings(
   payload: Record<string, unknown>,
@@ -373,10 +371,10 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
 
 /**
  * Project a run record onto the documented run_and_wait payload —
- * `{ id, packageId, status, done, result?, error? }` (the tool description's
- * shape, before `withLaunchWarnings` adds `warnings?`). The full run resource
- * also carries operational fields (cost, token usage, timestamps) the model
- * has no use for: the chat UI already renders live progress and metrics from the run's SSE stream,
+ * `{ id, packageId, status, done, result?, error? }` (the exact shape the tool
+ * description promises). The full run resource also carries operational fields
+ * (cost, token usage, timestamps) the model has no use for: the
+ * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
  * user. A caller that genuinely needs the full resource reads `getRun`.
  */

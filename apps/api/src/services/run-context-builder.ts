@@ -406,7 +406,7 @@ export async function recordDroppedIntegrations(
   dropped: readonly DroppedIntegration[],
 ): Promise<void> {
   for (const entry of dropped) {
-    // `unbound` is a chosen absence, not a failure to start: info, not warn.
+    // A chosen absence, not a failure to start.
     const unbound = entry.reason === "unbound";
     const cause = unbound
       ? "has no connection bound to this run"

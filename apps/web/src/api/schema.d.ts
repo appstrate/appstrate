@@ -254,7 +254,7 @@ export interface paths {
         };
         /**
          * Bulk integration connection readiness for an agent
-         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without — nothing to bind, or switched off in the space — is not in `errors`: it reads `run_blocking: false` with an empty `resolution.resolved_connection_ids` — the launch reports it in `warnings`.
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning_code` says why.
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
@@ -5267,7 +5267,7 @@ export interface components {
                 integration_package_id: string;
                 /** @description The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here. */
                 required: boolean;
-                /** @description True iff this integration is one of the run-blocking `errors`. A non-required integration the run would start without is not blocking: `run_blocking` false, `resolution.error_code` null and `resolution.resolved_connection_ids` empty. */
+                /** @description True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning_code`). */
                 run_blocking: boolean;
                 resolution: components["schemas"]["IntegrationAgentResolution"];
             }[];
@@ -5755,12 +5755,12 @@ export interface components {
         /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. */
         IntegrationAgentResolution: {
             /**
-             * @description The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, and `integration_not_active` — a required integration switched off in the space), when the integration resolves to none (`[]` — an explicit-none layer, or a non-required integration with nothing to bind) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).
+             * @description The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).
              * @enum {string|null}
              */
             source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
             /**
-             * @description Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (an empty set included: a non-required integration the run starts without), for a non-required integration switched off in the space (not resolved: the run starts without it), and when there is no verdict.
+             * @description Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (`[]` included), for a non-required integration switched off in the space, and when there is no verdict.
              * @enum {string|null}
              */
             error_code: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "required_integration_unbound" | "integration_not_active" | null;
@@ -5841,7 +5841,7 @@ export interface components {
             updatedAt: string;
         };
         LaunchWarnings: {
-            /** @description Declared integrations the run starts without, each a non-required one (`integrations_configuration.<id>.required` absent or false). `integration_unbound`: nothing usable to bind — no connection on a serving auth (`auth_key` + `required_scopes` as on a `not_connected` 409 item, and `connect_url` with `X-Appstrate-Connect-Offers`), only connections other members share (`candidate_connections`, never bound without a pick), or only connections on another auth (`required_auth_key` + `available_auth_keys`) — or a pin or override set to `[]` (none of those fields: the absence was chosen). `integration_not_active`: the integration is switched off in the space. The run still starts, and its agent is told the integration is unavailable. Always present, empty when nothing is missing; on a schedule written for another member, always empty. A `required: true` integration in the same state refuses the launch instead (409 `not_connected`, `auth_key_mismatch`, `required_integration_unbound` or `integration_not_active`). */
+            /** @description Declared, non-required integrations the run starts without (its agent is told). `integration_unbound`: nothing to bind — no serving connection (`auth_key`, `required_scopes`, and `connect_url` with `X-Appstrate-Connect-Offers`), only other members' shared ones (`candidate_connections`), or only ones on another auth (`required_auth_key` + `available_auth_keys`); none of those fields when a pin or override chose `[]`. `integration_not_active`: switched off in the space. Always present; always empty on a schedule written for another member. A `required` integration in the same state is a 409 instead. */
             warnings: (components["schemas"]["ResolutionFieldError"] & {
                 /** @enum {string} */
                 code?: "integration_unbound" | "integration_not_active";
@@ -7093,7 +7093,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`) — a `required` one with nothing to bind (`not_connected`, `required_integration_unbound`, …), a bound set that cannot serve, or an open choice, whose `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. A non-required integration with nothing to bind does not block: it is a `warnings[]` item of the success response. */
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. What does not block is a `warnings[]` item of the success response (see LaunchWarnings). */
         RunAdmissionConflict: {
             headers: {
                 "Request-Id": components["headers"]["RequestId"];
@@ -8412,7 +8412,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration: a `required` one with nothing to bind, a bound set that cannot serve, or an open choice, `must_choose_connection` items carrying `candidate_connections`; a non-required one with nothing to bind is a 201 `warnings[]` item instead) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8657,7 +8657,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule created, plus `warnings`: the integrations its fires would start without, judged for its actor — empty when the caller writes it for another member, whose connections are theirs to manage. */
+            /** @description Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings). */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13452,7 +13452,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
-                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that — agents that do not require it then start without it (a launch warning), agents that require it are refused (409 `integration_not_active`). */
+                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that. */
                         connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
@@ -13510,7 +13510,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
-                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that — agents that do not require it then start without it (a launch warning), agents that require it are refused (409 `integration_not_active`). */
+                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that. */
                         connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
@@ -15158,7 +15158,7 @@ export interface operations {
                         object: "list";
                         data: {
                             integration_package_id: string;
-                            /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is refused (400) and a `[]` pin is stored but refuses the runs it governs (409 `required_integration_unbound`). */
+                            /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is a 400 and a `[]` pin refuses the runs it governs (409 `required_integration_unbound`). */
                             connection_ids: string[];
                         }[];
                         hasMore: boolean;
@@ -15190,7 +15190,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none — it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is refused (400) and a `[]` pin is stored but refuses the runs it governs (409 `required_integration_unbound`). */
+                    /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is a 400 and a `[]` pin refuses the runs it governs (409 `required_integration_unbound`). */
                     connection_ids: string[];
                 };
             };
@@ -23156,7 +23156,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule updated, plus `warnings`: the integrations its fires would start without, judged for its actor — empty while the schedule is disabled, and when the caller writes it for another member, whose connections are theirs to manage. */
+            /** @description Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

@@ -559,7 +559,6 @@ function refusalHint(body: unknown): string | undefined {
     : undefined;
 }
 
-/** The created run's id, and the launch `warnings` the 201 carries (wire items). */
 async function triggerRun(
   opts: RunRemoteOptions,
   deps: HttpDeps,

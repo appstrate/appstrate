@@ -46,13 +46,9 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
   };
 }
 
-/**
- * Why a run starts without one declared integration: switched off in the space, a pin to none
- * (an admin's or the caller's), only other members' shared connections, or nothing usable at all.
- */
 type UnboundReason = "inactive" | "admin_none" | "member_none" | "shared_only" | "not_connected";
 
-/** The run starts without it: nothing binds, nothing refuses. `null` otherwise. */
+/** Why the run starts without this integration (nothing binds, nothing refuses), else `null`. */
 export function unboundReason(entry: {
   run_blocking: boolean;
   resolution: Pick<
@@ -75,7 +71,6 @@ export function unboundReason(entry: {
   return r.candidates.some((c) => !c.is_own) ? "shared_only" : "not_connected";
 }
 
-/** The `agents` sentence for each {@link UnboundReason}. */
 export const UNBOUND_LABEL_KEYS: Record<UnboundReason, string> = {
   inactive: "detail.integrationUnboundInactive",
   admin_none: "detail.integrationUnboundAdminNone",

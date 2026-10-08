@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The integration items a run launch answers with, rendered as one line each:
- * the `warnings` of a 201 (`integration_unbound`, `integration_not_active`: the
- * run started without a declared, non-required integration) and the `errors` of a 409
- * `missing_integration_connection` (the launch was refused). Shared by the
- * `--remote` trigger and the `--report` registration, which hit different
- * routes with the same item shape.
+ * The integration items a launch answers with, one line each: a 201's `warnings` (the run
+ * started without a non-required integration) and a 409 `missing_integration_connection`'s
+ * `errors`. Shared by `--remote` and `--report`, whose routes answer the same item shape.
  */
 
 /** `<integration>: <message> (<code>)` per well-formed item; anything else is skipped. */
@@ -24,24 +21,9 @@ function launchItemLines(items: unknown): string[] {
   return lines;
 }
 
-type LaunchEnvelopeType = "appstrate.remote.triggered" | "appstrate.report.started";
-
-/**
- * The `--json` line announcing a launched run (`appstrate.remote.triggered` for `--remote`,
- * `appstrate.report.started` for `--report`); `warnings` only when the launch reported some.
- */
-function launchEnvelope(
-  type: LaunchEnvelopeType,
-  runId: string,
-  instance: string,
-  warnings: unknown[],
-): string {
-  const envelope = { type, runId, instance, ...(warnings.length > 0 ? { warnings } : {}) };
-  return JSON.stringify(envelope) + "\n";
-}
-
 export interface LaunchAnnouncement {
-  type: LaunchEnvelopeType;
+  /** The `--json` envelope type. */
+  type: "appstrate.remote.triggered" | "appstrate.report.started";
   json?: boolean | undefined;
   bundleLabel: string;
   instance: string;
@@ -57,7 +39,11 @@ export interface LaunchAnnouncement {
  */
 export function announceLaunch(a: LaunchAnnouncement): void {
   if (a.json) {
-    if (a.run) a.writeStdout(launchEnvelope(a.type, a.run.runId, a.instance, a.run.warnings));
+    if (!a.run) return;
+    const { runId, warnings } = a.run;
+    const envelope = { type: a.type, runId, instance: a.instance };
+    const line = warnings.length > 0 ? { ...envelope, warnings } : envelope;
+    a.writeStdout(JSON.stringify(line) + "\n");
     return;
   }
   const reportNote = a.run ? ` (reporting to ${a.instance} as ${a.run.runId})` : "";
@@ -65,10 +51,7 @@ export function announceLaunch(a: LaunchAnnouncement): void {
   for (const line of launchItemLines(a.run?.warnings)) a.writeStderr(`⚠ ${line}\n`);
 }
 
-/**
- * The items of a 409 `missing_integration_connection`, one line each, or null for any other
- * body (the caller then shows it raw).
- */
+/** A 409 `missing_integration_connection`'s items, one line each, or null for any other body. */
 export function connectionRefusalLines(body: unknown): string[] | null {
   if (body === null || typeof body !== "object") return null;
   const { code, errors } = body as { code?: unknown; errors?: unknown };

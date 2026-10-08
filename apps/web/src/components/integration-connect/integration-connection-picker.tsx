@@ -25,8 +25,7 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
 /**
  * Per-integration connection picker, rendered as a rich dropdown. Lists every
  * accessible connection (own + shared-with-org) with its name, auth type
- * (OAuth / API key …), and who created it, plus a "no connection" entry (an
- * integration the agent does not require), a reset entry and "add a
+ * (OAuth / API key …), and who created it, plus a "no connection" entry, a reset entry and "add a
  * connection" entries (one per declared auth) that launch the connect flow
  * inline.
  *
@@ -71,8 +70,7 @@ export function IntegrationConnectionPicker({
     return <ReconfigurePicker integrationId={integrationId} />;
   }
 
-  // An admin force (pin — to none included — or enforced org default) renders read-only: a
-  // member pin loses to it.
+  // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
   if (lockedBy !== null) {
     return <LockedPicker integrationId={integrationId} picker={picker} />;
   }

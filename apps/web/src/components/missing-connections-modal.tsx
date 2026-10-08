@@ -66,8 +66,8 @@ export function MissingConnectionsModal({
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
 
-  // A must_choose row waits for a pick — "no connection" is one, where offered; the others
-  // re-run freely (a fresh 409 reopens this).
+  // A must_choose row waits for a pick (`[]` counts); the others re-run freely (a fresh 409
+  // reopens this).
   const mustChooseIds = integrationErrors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
@@ -77,7 +77,7 @@ export function MissingConnectionsModal({
   const showRetry = hasActionable;
   const canRetry = !retrying && allMustChosen;
 
-  // A cleared pick drops the key: the re-run falls back to the cascade.
+  // A `null` pick drops the key: the re-run falls back to the cascade.
   const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
 
@@ -161,8 +161,7 @@ function MissingRow({
   const resolution = verdict?.resolution;
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject it — a run starting without a
-  // non-required integration included; no verdict is not "ready".
+  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
   const resolved = !!verdict && !verdict.run_blocking;
   const unbound = verdict ? unboundReason(verdict) : null;
   // The picker needs the manifest + first verdict to render fully wired; hold

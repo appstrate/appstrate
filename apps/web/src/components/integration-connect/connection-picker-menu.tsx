@@ -54,7 +54,6 @@ export function PickerMenu({
     hasCandidates,
     explicitIds,
     pickedNone,
-    canPickNone,
     required,
     storedIds,
     unavailableIds,
@@ -97,7 +96,7 @@ export function PickerMenu({
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
   // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
-  // warns — or "no connection" for an integration the agent requires (stored before it was).
+  // warns — or a stored "no connection" for an integration the agent now requires.
   const triggerWarn = overrideMode
     ? underScopedConns.length > 0 ||
       unavailableIds.length > 0 ||
@@ -274,7 +273,7 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
-        {canPickNone && (
+        {!required && (
           <DropdownMenuItem
             disabled={busy || pickedNone}
             onSelect={() => void persist([])}

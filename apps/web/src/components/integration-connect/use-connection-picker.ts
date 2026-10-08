@@ -45,8 +45,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `override` — controlled form value (schedule editor, per-run modal);
  *                 nothing is persisted until the form is. `null` = inherit.
  *
- * In both, `[]` is "no connection": offered only for an integration the agent does not
- * require, it wins the cascade and the run starts without the integration.
+ * In both, `[]` is "no connection", offered only when the agent does not require the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
@@ -109,8 +108,7 @@ export function useConnectionPicker(
     agentPackageId,
     version,
   );
-  // Run semantics (`run_blocking`) and the agent's `required` flag — same bulk query as the
-  // launch badge, selected per-integration.
+  // Same bulk query as the launch badge, selected per-integration.
   const { data: entry } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
   const runBlocking = entry?.run_blocking ?? false;
   const required = entry?.required ?? false;
@@ -313,8 +311,6 @@ export function useConnectionPicker(
     // Sets
     explicitIds,
     pickedNone,
-    // "No connection" is a choice only where the run may start without the integration.
-    canPickNone: !required,
     fromDefault,
     storedIds,
     unavailableIds,

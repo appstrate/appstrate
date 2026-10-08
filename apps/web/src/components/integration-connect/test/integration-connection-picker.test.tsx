@@ -400,10 +400,10 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     return picker;
   }
 
-  it("is offered for an integration the agent does not require, never for a required one", () => {
+  it("surfaces the agent's `required` flag, which withholds 'no connection'", () => {
     const unbound = resolution({ source: null, resolved_connection_ids: [] });
-    expect(pickerFor(unbound).canPickNone).toBe(true);
-    expect(pickerFor(unbound, { required: true }).canPickNone).toBe(false);
+    expect(pickerFor(unbound).required).toBe(false);
+    expect(pickerFor(unbound, { required: true }).required).toBe(true);
   });
 
   it("persists [] for 'no connection' and null for inherit, as two different overrides", async () => {

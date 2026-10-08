@@ -61,9 +61,8 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 
 /**
  * The locked set, read-only. A stored override within it narrows it, so that subset is what
- * binds — `[]` included, which binds none; one reaching outside it is refused
- * (`override_outranked`) and offered its only fix, being cleared. A stored "no connection" is
- * offered the same way back to the locked set.
+ * binds (`[]`: none); one reaching outside it is refused (`override_outranked`). Either can be
+ * cleared back to the locked set.
  */
 export function LockedPicker({
   integrationId,

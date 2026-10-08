@@ -15,8 +15,7 @@ import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
  * control instead — only connections the viewer reaches too, so the list can be empty: the
  * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
  * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable. Unticking the last connection clears the pick; "no
- * connection" — naming none of the actor's connections — is a toggle of its own, for each
+ * read-only, each integration's clearable. "No connection" (`[]`) is a toggle of its own, for each
  * integration the agent does not require.
  */
 export function ScheduleActorConnectionChoice({
@@ -131,7 +130,6 @@ export function ScheduleActorConnectionChoice({
   );
 }
 
-/** Ticked: the schedule runs without the integration (`[]`); unticked: no pick. */
 function NoConnectionToggle({
   integrationId,
   value,

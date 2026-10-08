@@ -265,7 +265,7 @@ const canonicalRunsPaths = {
         },
         "409": {
           description:
-            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration: a `required` one with nothing to bind, a bound set that cannot serve, or an open choice, `must_choose_connection` items carrying `candidate_connections`; a non-required one with nothing to bind is a 201 `warnings[]` item instead)",
+            "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings)",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {

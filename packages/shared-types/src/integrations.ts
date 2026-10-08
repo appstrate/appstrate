@@ -257,8 +257,7 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).
  *  - `warning_code` — why the run would start without this integration
- *                   (`integration_unbound`, `integration_not_active`); `null`
- *                   when the resolver emitted no warning for it.
+ *                   (`integration_unbound`, `integration_not_active`), else `null`.
  * Both `null`: the integration manifest could not be loaded, so nothing was
  * resolved.
  */

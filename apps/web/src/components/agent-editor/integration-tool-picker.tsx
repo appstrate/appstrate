@@ -26,9 +26,8 @@
  * `integrations_configuration[id]` selection (§4.4) by
  * `setResourceEntries('integrations')`.
  *
- * Above the panel, for every integration whatever its catalog, the §4.4
- * `required` flag: set, a run refuses to start without a connection; unset (the
- * default, written as an absent key), it starts without the integration.
+ * Above it, the §4.4 `required` flag: set, a run refuses to start without a
+ * connection; unset (an absent key), it starts without the integration.
  */
 
 import { useState } from "react";

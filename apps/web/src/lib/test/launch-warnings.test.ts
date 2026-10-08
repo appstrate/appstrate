@@ -50,7 +50,7 @@ describe("launchWarningsToast", () => {
       }),
     ).toEqual({
       message: "Ce run s'exécute sans l'intégration Gmail",
-      description: "Elle n'est pas connectée : l'agent s'exécute sans elle et en est informé.",
+      description: "Elle n'est pas connectée ; l'agent en est informé.",
       connectable: true,
     });
   });
@@ -70,9 +70,7 @@ describe("launchWarningsToast", () => {
     expect(toast?.message).toBe(
       "Ce run s'exécute sans les intégrations Slack, Gmail, @acme/notion",
     );
-    expect(toast?.description).toBe(
-      "Elles ne sont pas connectées : l'agent s'exécute sans elles et en est informé.",
-    );
+    expect(toast?.description).toBe("Elles ne sont pas connectées ; l'agent en est informé.");
   });
 
   it("speaks of the fires for a schedule", async () => {
@@ -80,7 +78,7 @@ describe("launchWarningsToast", () => {
     expect(
       launchWarningsToast({ kind: "schedule", warnings: [warning("@acme/gmail")], nameOf })
         ?.message,
-    ).toBe("Fires will run without the Gmail integration");
+    ).toBe("Scheduled runs will start without the Gmail integration");
   });
 
   it("ignores an item about anything but an integration", async () => {
@@ -110,7 +108,7 @@ describe("launchWarningsToast — why", () => {
     await i18n.changeLanguage("fr");
     const toast = describeOf([warning("@acme/gmail", { code: "integration_not_active" })]);
     expect(toast?.description).toBe(
-      "Elle est désactivée dans cet espace : l'agent s'exécute sans elle et en est informé.",
+      "Elle est désactivée dans cet espace ; l'agent en est informé.",
     );
     expect(toast?.connectable).toBe(false);
   });
@@ -118,7 +116,7 @@ describe("launchWarningsToast — why", () => {
   it("never claims 'not connected' for an item naming no connect target — a chosen none", async () => {
     await i18n.changeLanguage("fr");
     const toast = describeOf([warning("@acme/gmail")]);
-    expect(toast?.description).toBe("L'agent s'exécute sans elle et en est informé.");
+    expect(toast?.description).toBe("L'agent est informé qu'elle est indisponible.");
     expect(toast?.connectable).toBe(false);
   });
 
@@ -128,7 +126,7 @@ describe("launchWarningsToast — why", () => {
       warning("@acme/gmail", { auth_key: "oauth" }),
       warning("@acme/slack", { code: "integration_not_active" }),
     ]);
-    expect(toast?.description).toBe("L'agent s'exécute sans elles et en est informé.");
+    expect(toast?.description).toBe("L'agent est informé qu'elles sont indisponibles.");
     // Control: one of them a connection would still bring back.
     expect(toast?.connectable).toBe(true);
   });

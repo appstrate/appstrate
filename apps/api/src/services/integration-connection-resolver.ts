@@ -16,11 +16,9 @@
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
  * naming anything outside it is `override_outranked`. A shared connection is never bound
- * implicitly. A layer with no row or key is absent; one set to `[]` wins and binds none —
- * `required_integration_unbound` when required. An integration off in the space is not
- * resolved (`integration_not_active`). A non-required integration started without gets a
- * warning instead of an error. `resolveConnections()` is pure; `resolveConnectionsForRun()`
- * loads its inputs.
+ * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
+ * bind (or switched off in the space), a `required` integration is an error, any other a
+ * warning. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -119,7 +117,7 @@ interface ResolveConnectionsInput {
   actorEndUserId?: string | null;
   /** Also resolve INERT integrations (never spawned): the agent-page picker still manages them. */
   includeInert?: boolean;
-  /** Declared integrations switched off in the space: never resolved, the run starts without them. */
+  /** Declared integrations switched off in the space: never resolved. */
   inactiveIntegrationIds?: ReadonlySet<string>;
 }
 
@@ -376,7 +374,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     : null;
   // `[]` names nothing outside the governing set, so "none" narrows under governance too.
   if (governing && override && override.ids.some((id) => !governing.ids.includes(id))) {
-    const by = governing.source === "admin_pin" ? "an admin pin" : "an enforced org default";
+    const by = LAYER_PHRASE[governing.source];
     return errorOf(args, {
       code: "override_outranked",
       source: override.source,
@@ -397,6 +395,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   for (const layer of explicit) {
     if (layer.ids === null) continue;
     if (layer.ids.length === 0) {
+      // No connect target: the absence was chosen.
       if (!args.required) {
         return {
           kind: "unbound",
@@ -458,7 +457,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   });
 }
 
-/** Who set an explicit-none layer, for the warning; no connect target: the absence is chosen. */
+/** Who set a layer, as messages name it. */
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
   admin_pin: "an admin pin",
   org_default_enforced: "an enforced org default",
@@ -750,10 +749,7 @@ export function missingIntegrationConnection(errors: ValidationFieldError[]): Ap
 type ResolveRunConnectionsOutcome =
   { ok: true; resolved: ResolvedConnectionMap | null } | { ok: false; error: ApiError };
 
-/**
- * The run's connection snapshot, else the 409 both kickoff paths relay. `null` only when no
- * integration needs one: an all-`[]` map is kept.
- */
+/** The run's connection snapshot (`null` when empty, all-`[]` kept), else the kickoff 409. */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
 ): Promise<ResolveRunConnectionsOutcome> {

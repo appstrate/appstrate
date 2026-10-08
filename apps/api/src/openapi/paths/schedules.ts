@@ -175,7 +175,7 @@ export const schedulesPaths = {
       responses: {
         "201": {
           description:
-            "Schedule created, plus `warnings`: the integrations its fires would start without, judged for its actor — empty when the caller writes it for another member, whose connections are theirs to manage.",
+            "Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings).",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -381,7 +381,7 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description:
-            "Schedule updated, plus `warnings`: the integrations its fires would start without, judged for its actor — empty while the schedule is disabled, and when the caller writes it for another member, whose connections are theirs to manage.",
+            "Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {

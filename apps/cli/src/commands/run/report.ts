@@ -75,7 +75,7 @@ export interface ReportSession {
    * session boundary makes its use auditable.
    */
   runSecret: string;
-  /** The registration's `warnings` (wire items): integrations the run starts without. */
+  /** The registration's `warnings`: integrations the run starts without. */
   warnings: unknown[];
 }
 
@@ -298,10 +298,7 @@ function truncateSnapshot(snap: ReportContextSnapshot): Record<string, unknown> 
   return obj;
 }
 
-/**
- * A 409 `missing_integration_connection` one item per line (at the snippet's indent), or null
- * for any other body.
- */
+/** A 409 `missing_integration_connection`, one item per line at the snippet's indent. */
 function refusalSummary(snippet: string | null): string | null {
   if (snippet === null) return null;
   try {

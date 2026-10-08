@@ -50,7 +50,6 @@ interface AgentIntegrationsBlockProps {
  * agent selected tools/scopes: connection management applies even to an inert
  * integration. Whether an integration BLOCKS the run (run semantics) is the
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
- * One the run starts without says why — a pin to none, only shared connections, nothing usable.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
   // The list carries `active` (placed here and switched on). An agent can
@@ -179,7 +178,7 @@ function ManagedIntegrationCard({
       : null;
   const unbound = entry ? unboundReason(entry) : null;
 
-  // The verdict knows the integration is off even when the list said otherwise: no picker either.
+  // The verdict can know it is off when the list did not.
   if (unbound === "inactive") {
     return (
       <InactiveIntegrationCard
@@ -297,7 +296,7 @@ function CardShell({
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
   icon?: React.ReactNode;
   title: string;
-  /** Optional badge after the title (e.g. "Requise"). */
+  /** Optional badge after the title. */
   badge?: React.ReactNode;
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
