@@ -2,7 +2,10 @@
 
 import { describe, it, expect } from "bun:test";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { connectionIdSetSchema } from "../../../src/lib/connection-set.ts";
+import {
+  connectionIdSetSchema,
+  nonEmptyConnectionIdSetSchema,
+} from "../../../src/lib/connection-set.ts";
 
 const uuid = () => crypto.randomUUID();
 
@@ -22,8 +25,10 @@ describe("connectionIdSetSchema", () => {
     expect(folded.error?.issues[0]?.message).toMatch(/repeat/);
   });
 
-  it("refuses an empty set and one past the cap; accepts exactly the cap", () => {
-    expect(connectionIdSetSchema.safeParse([]).success).toBe(false);
+  it("accepts an empty set (explicitly none) and exactly the cap; refuses one past it", () => {
+    const empty = connectionIdSetSchema.safeParse([]);
+    expect(empty.success).toBe(true);
+    expect(empty.data).toEqual([]);
     const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, uuid);
     expect(connectionIdSetSchema.safeParse(over).success).toBe(false);
     expect(connectionIdSetSchema.safeParse(over.slice(1)).success).toBe(true);
@@ -31,5 +36,16 @@ describe("connectionIdSetSchema", () => {
 
   it("refuses a non-uuid id", () => {
     expect(connectionIdSetSchema.safeParse(["conn_1"]).success).toBe(false);
+  });
+});
+
+describe("nonEmptyConnectionIdSetSchema", () => {
+  it("refuses an empty set; otherwise folds like connectionIdSetSchema", () => {
+    expect(nonEmptyConnectionIdSetSchema.safeParse([]).success).toBe(false);
+    const a = uuid();
+    expect(nonEmptyConnectionIdSetSchema.safeParse([a.toUpperCase()]).data).toEqual([a]);
+    expect(nonEmptyConnectionIdSetSchema.safeParse([a, a.toUpperCase()]).success).toBe(false);
+    const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, uuid);
+    expect(nonEmptyConnectionIdSetSchema.safeParse(over).success).toBe(false);
   });
 });

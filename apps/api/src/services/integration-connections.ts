@@ -429,7 +429,8 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required.
+    // No agent selection: every declared auth serves, no scope is required. `required`: no usable
+    // connection stays an error (→ null below), never an empty binding.
     requirements: [
       {
         integrationId: packageId,
@@ -437,6 +438,7 @@ export async function selectAccessibleConnection(
         hasSelectedTools: true,
         agentTools: [],
         agentScopes: [],
+        required: true,
       },
     ],
     accessibleConnections: rows,
@@ -3349,7 +3351,7 @@ async function forgetDeletedConnection(
   const owner = actorFromIds(row.userId, row.endUserId)!;
   const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
   for (const pin of plan.pins) {
-    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
     } else {
@@ -3381,7 +3383,7 @@ interface PinForget {
   agentPackageId: string;
   integrationId: string;
   connectionIds: string[];
-  /** `connectionIds` without the connection; empty drops the pin. */
+  /** `connectionIds` without the connection; empty drops the pin, never pins it to none. */
   nextConnectionIds: string[];
 }
 
@@ -3469,6 +3471,7 @@ export async function planConnectionForget(
     schedules: ownRows.map((row) => {
       const overrides = row.connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        if (!ids.includes(id)) return [[integrationId, ids] as const]; // `[]` (none) included
         const rest = ids.filter((c) => c !== id);
         return rest.length > 0 ? [[integrationId, rest] as const] : [];
       });
@@ -3663,7 +3666,7 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
     // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
-    // under `_meta["dev.appstrate/auth"].required`.
+    // under `_meta["dev.appstrate/auth"].required` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       { required?: boolean } | undefined;
@@ -3672,7 +3675,7 @@ export async function getIntegrationAuthStatuses(
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required ?? true,
+      required: authMeta?.required === true,
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,

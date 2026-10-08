@@ -265,10 +265,10 @@ export interface IntegrationAgentResolution {
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
   resolved_missing_scopes: string[];
-  /** This agent's admin pin set, else empty. */
-  admin_pinned_connection_ids: string[];
-  /** The actor's own member pin connection set, else empty. */
-  member_pinned_connection_ids: string[];
+  /** This agent's admin pin set; `null` when there is no pin, `[]` when it pins none. */
+  admin_pinned_connection_ids: string[] | null;
+  /** The actor's own member pin set; `null` when there is no pin, `[]` when it pins none. */
+  member_pinned_connection_ids: string[] | null;
   /**
    * Org-wide default connection set for this integration (all agents),
    * empty when unset. `org_default_enforced` distinguishes a hard lock

@@ -432,11 +432,11 @@ describe("run_and_wait", () => {
       ).connection_overrides;
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      // 1..MAX connection ids per integration, always an array — the route's shape.
+      // 0..MAX connection ids per integration (`[]` = none), always an array — the route's shape.
       expect(property!.additionalProperties).toEqual({
         type: "array",
         items: { type: "string" },
-        minItems: 1,
+        minItems: 0,
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
       });
       // Not required: the argument only exists for the retry after the 409, so

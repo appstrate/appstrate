@@ -57,7 +57,7 @@ const SECOND_AGENT = "@adminorg/agent-b";
 const INTEGRATION = "@adminorg/svc";
 const MCP_SERVER = "@adminorg/svc-server";
 
-function buildAgentManifest(name: string): Record<string, unknown> {
+function buildAgentManifest(name: string, required = false): Record<string, unknown> {
   return {
     name,
     version: "1.0.0",
@@ -65,9 +65,14 @@ function buildAgentManifest(name: string): Record<string, unknown> {
     schema_version: "0.2",
     display_name: `Admin Test Agent ${name}`,
     dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-    integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+    integrations_configuration: {
+      [INTEGRATION]: { tools: ["search"], ...(required ? { required: true } : {}) },
+    },
   };
 }
+
+/** An agent that cannot run without {@link INTEGRATION}. */
+const REQUIRED_AGENT = "@adminorg/agent-required";
 
 function buildIntegrationManifest() {
   return localIntegrationManifest({
@@ -151,6 +156,14 @@ describe("/api/integrations/:packageId admin surface", () => {
       draftManifest: buildAgentManifest(AGENT),
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedAgent({
+      id: REQUIRED_AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest(REQUIRED_AGENT, true),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, REQUIRED_AGENT);
 
     await seedPackage({
       id: INTEGRATION,
@@ -172,12 +185,35 @@ describe("/api/integrations/:packageId admin surface", () => {
     error_code: string | null;
     resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
-    admin_pinned_connection_ids: string[];
-    member_pinned_connection_ids: string[];
+    admin_pinned_connection_ids: string[] | null;
+    member_pinned_connection_ids: string[] | null;
     org_default_connection_ids: string[];
     org_default_enforced: boolean;
     can_add_connection: boolean;
     candidates: Array<{ id: string; is_own: boolean; missing_scopes: string[] }>;
+  }
+
+  interface ReadinessEntryDTO {
+    integration_package_id: string;
+    required: boolean;
+    run_blocking: boolean;
+    resolution: AgentResolutionDTO;
+  }
+
+  /** GET the bulk readiness and return one integration's entry. */
+  async function getEntry(
+    agentId: string,
+    integrationId: string,
+    as: TestContext = ctx,
+  ): Promise<ReadinessEntryDTO> {
+    const res = await app.request(`/api/agents/${agentId}/connection-readiness`, {
+      headers: authHeaders(as),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { integrations: ReadinessEntryDTO[] };
+    const entry = body.integrations.find((i) => i.integration_package_id === integrationId);
+    if (!entry) throw new Error(`integration ${integrationId} not in readiness`);
+    return entry;
   }
 
   /** GET the bulk readiness and return one integration's resolution DTO. */
@@ -186,16 +222,7 @@ describe("/api/integrations/:packageId admin surface", () => {
     integrationId: string,
     as: TestContext = ctx,
   ): Promise<AgentResolutionDTO> {
-    const res = await app.request(`/api/agents/${agentId}/connection-readiness`, {
-      headers: authHeaders(as),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      integrations: Array<{ integration_package_id: string; resolution: AgentResolutionDTO }>;
-    };
-    const entry = body.integrations.find((i) => i.integration_package_id === integrationId);
-    if (!entry) throw new Error(`integration ${integrationId} not in readiness`);
-    return entry.resolution;
+    return (await getEntry(agentId, integrationId, as)).resolution;
   }
 
   describe("GET /api/agents/:scope/:name/connection-readiness — per-integration resolution", () => {
@@ -223,11 +250,50 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(body.resolved_connection_ids).toEqual([connId]);
     });
 
-    it("returns not_connected, no layer, when actor has no accessible connection", async () => {
-      const body = await getResolution(AGENT, INTEGRATION);
-      expect(body.source).toBeNull();
-      expect(body.error_code).toBe("not_connected");
-      expect(body.candidates).toEqual([]);
+    it("returns not_connected, no layer, when a required integration has no accessible connection", async () => {
+      const entry = await getEntry(REQUIRED_AGENT, INTEGRATION);
+      expect(entry.required).toBe(true);
+      expect(entry.run_blocking).toBe(true);
+      expect(entry.resolution.source).toBeNull();
+      expect(entry.resolution.error_code).toBe("not_connected");
+      expect(entry.resolution.candidates).toEqual([]);
+    });
+
+    // Absence degrades: an optional integration with no connection is unbound, not blocking.
+    it("reports an optional integration with no accessible connection as unbound, not blocking", async () => {
+      const entry = await getEntry(AGENT, INTEGRATION);
+      expect(entry.required).toBe(false);
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution.source).toBeNull();
+      expect(entry.resolution.error_code).toBeNull();
+      expect(entry.resolution.resolved_connection_ids).toEqual([]);
+    });
+
+    it("tells no pin (null) from a pin to none ([])", async () => {
+      const shared = await seedSharedConnection();
+      const unpinned = await getResolution(AGENT, INTEGRATION);
+      expect(unpinned.admin_pinned_connection_ids).toBeNull();
+      expect(unpinned.member_pinned_connection_ids).toBeNull();
+
+      expect((await putPin([])).status).toBe(200);
+      const memberPin = await app.request(
+        `/api/me/integration-pins/${AGENT}/integrations/${INTEGRATION}`,
+        {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: [] }),
+        },
+      );
+      expect(memberPin.status).toBe(200);
+
+      const entry = await getEntry(AGENT, INTEGRATION);
+      expect(entry.resolution.admin_pinned_connection_ids).toEqual([]);
+      expect(entry.resolution.member_pinned_connection_ids).toEqual([]);
+      // The admin pin wins and binds nothing, though a shared connection would serve.
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution.error_code).toBeNull();
+      expect(entry.resolution.resolved_connection_ids).toEqual([]);
+      expect(entry.resolution.candidates.map((c) => c.id)).toEqual([shared]);
     });
 
     it("returns 401 without auth", async () => {
@@ -328,7 +394,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect([...body.connection_ids].sort()).toEqual([connA, connB].sort());
 
       const resolution = await getResolution(AGENT, INTEGRATION);
-      expect([...resolution.admin_pinned_connection_ids].sort()).toEqual([connA, connB].sort());
+      expect([...resolution.admin_pinned_connection_ids!].sort()).toEqual([connA, connB].sort());
     });
 
     // An admin pin binds every member's run: the admin's own private account is no pin target.
@@ -412,10 +478,9 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(err.message).toContain(shared);
     });
 
-    it("DENY: 400 on an empty set, a repeated id, and a set over the cap", async () => {
+    it("DENY: 400 on a repeated id and a set over the cap", async () => {
       const connId = await seedSharedConnection();
 
-      expect((await putPin([])).status).toBe(400);
       expect((await putPin([connId, connId])).status).toBe(400);
       const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
         crypto.randomUUID(),
@@ -423,6 +488,30 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect((await putPin(over)).status).toBe(400);
       // Control: the singleton the other cases degenerate from still lands.
       expect((await putPin([connId])).status).toBe(200);
+    });
+
+    it("ALLOW: an empty set pins the agent to no connection, replacing the previous set", async () => {
+      const connId = await seedSharedConnection();
+      expect((await putPin([connId])).status).toBe(200);
+
+      const res = await putPin([]);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { connection_ids: string[] }).connection_ids).toEqual([]);
+      expect((await getResolution(AGENT, INTEGRATION)).admin_pinned_connection_ids).toEqual([]);
+    });
+
+    it("DENY: 400 invalid_request on an empty set for an integration the agent requires", async () => {
+      const connId = await seedSharedConnection();
+      expect((await putPin([connId], REQUIRED_AGENT)).status).toBe(200);
+
+      const res = await putPin([], REQUIRED_AGENT);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param?: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("connection_ids");
+      // The stored pin is untouched.
+      const resolution = await getResolution(REQUIRED_AGENT, INTEGRATION);
+      expect(resolution.admin_pinned_connection_ids).toEqual([connId]);
     });
 
     it("the body's ids are lowercased, and a repeat that differs only in case is refused", async () => {

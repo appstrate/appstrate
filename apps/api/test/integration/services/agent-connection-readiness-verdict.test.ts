@@ -120,7 +120,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     });
   }
 
-  async function verdictOf(integrationId = INTEG) {
+  async function entryOf(integrationId = INTEG) {
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
@@ -129,11 +129,15 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       canConfigureIntegrations: true,
       version: "draft",
     });
-    return readiness.integrations.find((i) => i.integration_package_id === integrationId)!
-      .resolution;
+    return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;
+  }
+
+  async function verdictOf(integrationId = INTEG) {
+    return (await entryOf(integrationId)).resolution;
   }
 
   const TOOLS = { tools: ["search"] };
+  const REQUIRED = { ...TOOLS, required: true };
 
   describe("bound — `error_code` null, `source` the layer that bound", () => {
     it("the actor's single own connection → fallback_auto", async () => {
@@ -185,9 +189,25 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
   });
 
   describe("refused — `error_code` the 409 code, `source` the failing layer or null", () => {
-    it("nothing connected → not_connected, no layer", async () => {
-      await seedAgentDeclaring(TOOLS);
-      expect(await verdictOf()).toMatchObject({ source: null, error_code: "not_connected" });
+    it("required, nothing connected → not_connected, no layer", async () => {
+      await seedAgentDeclaring(REQUIRED);
+      const entry = await entryOf();
+      expect(entry.required).toBe(true);
+      expect(entry.run_blocking).toBe(true);
+      expect(entry.resolution).toMatchObject({ source: null, error_code: "not_connected" });
+    });
+
+    it("required, pinned to none → required_integration_unbound", async () => {
+      await seedAgentDeclaring(REQUIRED);
+      await seedConnection();
+      await pin([], null);
+      const entry = await entryOf();
+      expect(entry.run_blocking).toBe(true);
+      expect(entry.resolution).toMatchObject({
+        error_code: "required_integration_unbound",
+        resolved_connection_ids: [],
+        admin_pinned_connection_ids: [],
+      });
     });
 
     it("two own connections → must_choose_connection, no layer", async () => {
@@ -230,14 +250,66 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       });
     });
 
-    it("the dep pins an auth no connection is on → auth_key_mismatch, no layer", async () => {
-      await seedAgentDeclaring({ ...TOOLS, auth_key: "backup" });
+    it("required, the dep pins an auth no connection is on → auth_key_mismatch, no layer", async () => {
+      await seedAgentDeclaring({ ...REQUIRED, auth_key: "backup" });
       await seedConnection({ authKey: "primary" });
       // The picker offers the resolver's candidates: none on the pinned auth.
       expect(await verdictOf()).toMatchObject({
         source: null,
         error_code: "auth_key_mismatch",
         candidates: [],
+      });
+    });
+  });
+
+  // Absence degrades: no `error_code`, no layer, no set — and the run is not blocked.
+  describe("unbound — optional, `error_code` null, `resolved_connection_ids` empty", () => {
+    it("nothing connected", async () => {
+      await seedAgentDeclaring(TOOLS);
+      const entry = await entryOf();
+      expect(entry.required).toBe(false);
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({
+        source: null,
+        error_code: null,
+        resolved_connection_ids: [],
+        admin_pinned_connection_ids: null,
+        member_pinned_connection_ids: null,
+      });
+    });
+
+    it("only connections on another auth than the dep's", async () => {
+      await seedAgentDeclaring({ ...TOOLS, auth_key: "backup" });
+      await seedConnection({ authKey: "primary" });
+      const entry = await entryOf();
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({ error_code: null, resolved_connection_ids: [] });
+    });
+
+    it("an admin pin to none wins over a connection the fallback would bind", async () => {
+      await seedAgentDeclaring(TOOLS);
+      await seedConnection();
+      await pin([], null);
+      const entry = await entryOf();
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({
+        source: null,
+        error_code: null,
+        resolved_connection_ids: [],
+        admin_pinned_connection_ids: [],
+        member_pinned_connection_ids: null,
+      });
+    });
+
+    it("a member pin to none is reported as [] — not as no pin", async () => {
+      await seedAgentDeclaring(TOOLS);
+      await seedConnection();
+      await pin([], ctx.user.id);
+      expect(await verdictOf()).toMatchObject({
+        error_code: null,
+        resolved_connection_ids: [],
+        admin_pinned_connection_ids: null,
+        member_pinned_connection_ids: [],
       });
     });
   });

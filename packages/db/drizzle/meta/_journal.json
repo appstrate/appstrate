@@ -589,6 +589,13 @@
       "when": 1791449590201,
       "tag": "0083_integration_connections_label_normalized",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791487321484,
+      "tag": "0084_integration_pins_allow_empty_set",
+      "breakpoints": true
     }
   ]
 }

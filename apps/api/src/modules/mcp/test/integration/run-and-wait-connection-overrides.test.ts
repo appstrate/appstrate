@@ -244,4 +244,49 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
+
+  // `[]` is "use none of them": an optional integration launches unbound, its key kept as `[]` in
+  // the snapshot (declared, not inert); a required one is refused before any run exists.
+  it("launches with an optional integration bound to none when the override is []", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [] },
+    });
+
+    expect(result.data.body).toBeUndefined();
+    const runId = result.data.id as string;
+    expect(runId).toStartWith("run_");
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+    expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+  }, 60_000);
+
+  it("refuses [] for an integration the agent marks required, without launching", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    const manifest = inlineAgentManifest([INTEGRATION]);
+    (manifest.integrations_configuration as Record<string, Record<string, unknown>>)[
+      INTEGRATION
+    ]!.required = true;
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest,
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [] },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
 });

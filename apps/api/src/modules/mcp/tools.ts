@@ -1046,15 +1046,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: {
             type: "array",
             items: { type: "string" },
-            minItems: 1,
+            minItems: 0,
             maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
           },
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
-            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "`[]` runs without that integration — only for one the agent does not mark " +
+            "`required` (a 400 otherwise). " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
