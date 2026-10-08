@@ -49,6 +49,7 @@ import {
   listMeConnections,
   type MeConnectionAuthority,
   getConnectionDeleteImpact,
+  NO_CONNECTION_DELETE_IMPACT,
 } from "../services/me-connections.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
@@ -218,7 +219,7 @@ router.get(
   requireCeiling("integrations", "read"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    if (!z.uuid().safeParse(connectionId).success) return c.json({ pins: [], schedules: [] });
+    if (!z.uuid().safeParse(connectionId).success) return c.json(NO_CONNECTION_DELETE_IMPACT);
     return c.json(
       await getConnectionDeleteImpact(
         getActor(c),

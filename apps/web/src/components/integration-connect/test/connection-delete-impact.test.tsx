@@ -4,7 +4,8 @@
  * The delete confirmation says which of the caller's agents and schedules lose
  * the connection, and what each keeps: fewer connections, or none (back to the
  * usual resolution) — or, for an enabled schedule left with none, that it is
- * disabled. Until the impact arrives it says it is checking; a failed check says so.
+ * disabled — and how many schedules of other people it disables, unnamed. Until the
+ * impact arrives it says it is checking; a failed check says so.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -58,6 +59,7 @@ describe("ConnectionDeleteImpact", () => {
         },
       ],
       schedules: [],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain(i18n.t("settings:connections.pinImpact.intro", { count: 2 }));
     expect(html).toContain("Ops multi");
@@ -90,6 +92,7 @@ describe("ConnectionDeleteImpact", () => {
           disables: false,
         },
       ],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 2 }));
     expect(html).toContain("Rapport du lundi");
@@ -117,6 +120,7 @@ describe("ConnectionDeleteImpact", () => {
           disables: true,
         },
       ],
+      other_schedules_disabled_count: 0,
     });
     expect(html).toContain("Veille");
     expect(html).toContain("(Ops multi)");
@@ -124,10 +128,19 @@ describe("ConnectionDeleteImpact", () => {
     expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.resets"));
   });
 
-  it("renders nothing when the delete rewrites none of the caller's references", () => {
-    expect(renderWith({ pins: [], schedules: [] })).not.toContain(
-      'data-testid="connection-delete-impact"',
+  it("counts other people's schedules the delete disables, naming none of them", () => {
+    const html = renderWith({ pins: [], schedules: [], other_schedules_disabled_count: 2 });
+    expect(html).toContain('data-testid="connection-delete-impact"');
+    expect(html).toContain(
+      i18n.t("settings:connections.scheduleImpact.othersDisabled", { count: 2 }),
     );
+    expect(html).not.toContain(i18n.t("settings:connections.scheduleImpact.intro", { count: 2 }));
+  });
+
+  it("renders nothing when the delete rewrites none of the caller's references", () => {
+    expect(
+      renderWith({ pins: [], schedules: [], other_schedules_disabled_count: 0 }),
+    ).not.toContain('data-testid="connection-delete-impact"');
   });
 
   it("says it is checking until the impact arrives", () => {

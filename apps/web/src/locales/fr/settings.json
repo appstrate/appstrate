@@ -439,6 +439,8 @@
   "connections.scheduleImpact.resets": "plus aucune connexion choisie : elle revient à la résolution habituelle, vérifiée quand vous la réactiverez",
   "connections.scheduleImpact.disables": "elle sera désactivée : choisissez une autre connexion puis réactivez-la",
   "connections.scheduleImpact.unnamed": "Planification sans nom",
+  "connections.scheduleImpact.othersDisabled_one": "Une planification d'une autre personne utilise cette connexion : elle sera désactivée.",
+  "connections.scheduleImpact.othersDisabled_other": "{{count}} planifications d'autres personnes utilisent cette connexion : elles seront désactivées.",
   "connections.deleteImpact.loading": "Vérification de ce que la suppression modifie…",
   "connections.deleteImpact.error": "Impossible de vérifier ce que la suppression modifie.",
   "connections.connectedAtLabel": "Connecté le",

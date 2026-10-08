@@ -40,7 +40,10 @@ import {
   seedSpace,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import type { ConnectionDeleteImpact } from "../../../src/services/me-connections.ts";
+import {
+  NO_CONNECTION_DELETE_IMPACT,
+  type ConnectionDeleteImpact,
+} from "../../../src/services/me-connections.ts";
 import {
   auditEvents,
   integrationConnections,
@@ -562,6 +565,7 @@ describe("/api/me/integration-pins", () => {
       return db
         .select({
           id: schedules.id,
+          userId: schedules.userId,
           enabled: schedules.enabled,
           connectionOverrides: schedules.connectionOverrides,
           nextRunAt: schedules.nextRunAt,
@@ -618,9 +622,10 @@ describe("/api/me/integration-pins", () => {
             disables: true,
           },
         ],
+        other_schedules_disabled_count: 0,
       });
       // A connection nothing names lists nothing.
-      expect(await impactOf(spare!)).toEqual({ pins: [], schedules: [] });
+      expect(await impactOf(spare!)).toEqual(NO_CONNECTION_DELETE_IMPACT);
     });
 
     it("announces exactly the rewrites the delete then makes, read back from the rows", async () => {
@@ -669,7 +674,7 @@ describe("/api/me/integration-pins", () => {
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
       const announced = await impactOf(gone!);
       // An id no connection carries previews nothing, though one of the caller's schedules names it.
-      expect(await impactOf(unknown)).toEqual({ pins: [], schedules: [] });
+      expect(await impactOf(unknown)).toEqual(NO_CONNECTION_DELETE_IMPACT);
 
       const del = await app.request(`/api/me/connections/${gone}`, {
         method: "DELETE",
@@ -688,10 +693,10 @@ describe("/api/me/integration-pins", () => {
           integration_package_id: before.integration,
           connection_count: before.connectionIds.length,
         }));
-      // The preview lists the owner's schedules; the colleague's is checked below.
+      // The preview lists the owner's schedules and counts the others'.
       const rewrittenSchedules = schedulesBefore.flatMap((before) => {
         const after = schedulesAfter.get(before.id)!;
-        if (before.id === colleagues.id || Bun.deepEquals(after, before)) return [];
+        if (before.userId !== ctx.user.id || Bun.deepEquals(after, before)) return [];
         return Object.entries(before.connectionOverrides ?? {})
           .filter(([, ids]) => ids.includes(gone!))
           .map(([id, ids]) => ({
@@ -724,17 +729,20 @@ describe("/api/me/integration-pins", () => {
         ),
       ).toEqual(sortedBy(rewrittenSchedules, (s) => s.scheduleId + s.integration_package_id));
 
-      // The ids the delete reports disabled are the ones the preview said it would, and the
-      // colleague's schedule, disabled with its overrides kept.
+      // The ids the delete reports disabled are the ones the preview said it would: the owner's it
+      // lists, and the colleague's it counts, disabled with its overrides kept.
       const [audit] = await db
         .select({ after: auditEvents.after })
         .from(auditEvents)
         .where(eq(auditEvents.action, "integration.connection.deleted"));
       const { disabledScheduleIds } = audit!.after as { disabledScheduleIds: string[] };
-      const disabling = announced.schedules.filter((s) => s.disables);
-      expect([...disabledScheduleIds].sort()).toEqual(
-        [...new Set([...disabling.map((s) => s.scheduleId), colleagues.id])].sort(),
+      const listed = new Set(
+        announced.schedules.filter((s) => s.disables).map((s) => s.scheduleId),
       );
+      const counted = disabledScheduleIds.filter((id) => !listed.has(id));
+      expect(disabledScheduleIds.filter((id) => listed.has(id)).sort()).toEqual([...listed].sort());
+      expect(counted).toEqual([colleagues.id]);
+      expect(announced.other_schedules_disabled_count).toBe(counted.length);
       expect(schedulesAfter.get(colleagues.id)).toMatchObject({
         connectionOverrides: { [INTEGRATION]: [gone!] },
         enabled: false,
@@ -765,7 +773,7 @@ describe("/api/me/integration-pins", () => {
       await scheduleFor([shared], { userId: ctx.user.id });
       const [pinsBefore, schedulesBefore] = [await readPins(), await readSchedules()];
 
-      expect(await impactOf(shared)).toEqual({ pins: [], schedules: [] });
+      expect(await impactOf(shared)).toEqual(NO_CONNECTION_DELETE_IMPACT);
       const del = await app.request(`/api/me/connections/${shared}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
@@ -792,7 +800,7 @@ describe("/api/me/integration-pins", () => {
         "X-Space-Id": ctx.defaultSpaceId,
       };
 
-      expect(await impactOf(elsewhere, keyHeaders)).toEqual({ pins: [], schedules: [] });
+      expect(await impactOf(elsewhere, keyHeaders)).toEqual(NO_CONNECTION_DELETE_IMPACT);
       // Unbound, the same caller sees the schedule: the empty answer is the binding's.
       expect((await impactOf(elsewhere)).schedules.map((s) => s.scheduleId)).toEqual([
         inKeySpace.id,
@@ -869,7 +877,7 @@ describe("/api/me/integration-pins", () => {
     });
 
     it("is empty for an id that is not a UUID", async () => {
-      expect(await impactOf("not-a-uuid")).toEqual({ pins: [], schedules: [] });
+      expect(await impactOf("not-a-uuid")).toEqual(NO_CONNECTION_DELETE_IMPACT);
     });
 
     it("gives an end user previewing its own connection only its own schedules", async () => {

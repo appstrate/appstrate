@@ -50,6 +50,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   member pin, a schedule or a run override of another actor naming one fails
   (`pinned_connection_unavailable` / `override_connection_unavailable`) until
   a new pick.
+- **A schedule naming another member's connection that is deleted or stops
+  being shared is disabled instead of failing at every fire** (#1767). In the
+  same transaction as the delete or the unshare (by the owner, or when the
+  owner loses access to the space), every enabled schedule of another actor
+  whose `connection_overrides` name the connection gets `enabled: false` and
+  a `disabled_reason`, `connection_deleted` or the new `connection_unshared`;
+  its overrides are kept, and re-enabling it requires choosing that
+  integration's connections again. The delete is never refused, and the
+  owner's own schedules and other members' pins behave as before.
+  `GET /api/me/connections/{id}/delete-impact` gains the required
+  `other_schedules_disabled_count`, which the delete dialog shows without
+  names. Not a breaking API change: one enum value and one response field are
+  added.
 
 ### Fixed
 
