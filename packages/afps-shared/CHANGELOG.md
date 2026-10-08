@@ -43,6 +43,11 @@ return a `root` with each field.
   literal labels, before an optional literal port) under the host-form rules;
   any other entry carrying a variable is dropped. `isHostUnboundedUriPattern`
   bounds a variable placeholder like a credential one.
+- **`isSelectorOutput`**, **`isJwtOutput`**, **`isJsonNumber`** and
+  **`SimpleOperand`** (`./runtime-expression`): the type guard of a Selector
+  Object output (a non-string output with no `from`) and the jwt-extractor test,
+  shared by the import rule and the login engine; the JSON number test (RFC 8259
+  §6); one parsed side of a `simple` criterion. (#1773)
 
 ### Changed
 
@@ -50,6 +55,30 @@ return a `root` with each field.
   **`UnrenderableUriField`** gains `root` (`"credential" | "variable"`, exported
   as `TemplateRoot`), so a caller tells a credential field from a variable of
   the same name.
+- **BREAKING: `simpleCriterionOperands`** (`./runtime-expression`) returns two
+  `SimpleOperand`s (a `ResponseExpression`, or a literal value) and accepts only
+  one `<expr> == <operand>` comparison: exactly one `==`; no other `=`, `!`, `<`,
+  `>`, `&&`, `||`, `(`, `)` outside a quoted literal; each side a response
+  expression `parseResponseExpression` accepts or a literal, at least one side an
+  expression. A literal is a JSON number
+  (`-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?`; `+5`, `.5`, `5.`, `01`, `0x10`
+  are refused), `true`, `false`, `null`, a single-quoted string (`''` is a
+  quote, unescaped in the value), or a double-quoted string holding no double
+  quote. Any other condition is `null`; it used to return the raw sides of the
+  first `==`. (#1773)
+- **BREAKING: `loginBlockIssues` refuses more** (`./runtime-expression`): a
+  `simple` criterion `simpleCriterionOperands` rejects; a criterion `type` other
+  than `simple`, `jsonpath`, `regex`; a selector `type` other than `jsonpath`,
+  `jsonpointer`; an extractor (`from`) carrying a Selector field (`context`,
+  `selector`, `type`); a `jsonpath` criterion or selector outside the
+  `./jsonpath` subset; a `regex` criterion or extractor pattern that does not
+  compile, or an extractor whose `group` (default 1) the pattern does not
+  capture; a `jsonpointer` selector or jwt `path` that is not an RFC 6901
+  pointer; an output named `__proto__`. It reads a block the AFPS schema
+  accepted. (#1773)
+- **BREAKING: `parseResponseExpression`** (`./runtime-expression`) requires an
+  RFC 6901 pointer after `$response.body#`: a `~` not followed by `0` or `1`
+  (`$response.body#/a~x`), which it used to accept, is `null`. (#1773)
 
 ## [0.11.0] — 2026-10-08
 

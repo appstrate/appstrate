@@ -12,23 +12,10 @@
  * redirect chains) belong on the Orchestrated `connect.tool` path, not here.
  *
  * The `connect` block (AFPS, snake_case) is checked up front by `loginBlockIssues`
- * (`@appstrate/afps-shared/runtime-expression`), as at import: a refusal is `invalid_config`.
+ * (`@appstrate/afps-shared/runtime-expression`), as at import: a refusal is `invalid_config`,
+ * before any request is sent.
  *
- * KNOWN LIMITATIONS (documented for manifest authors). The xpath ones are
- * import-time warnings (`apps/api/src/services/integration-import-warnings.ts`),
- * never blocking; a jsonpath selector or criterion outside the subset is
- * refused at import by `integrationManifestSchema` (`@appstrate/core/integration`):
- *   - `success_criteria` evaluation supports `type` omitted/`"simple"`
- *     (runtime-expression equality), `"jsonpath"`, and `"regex"` (AFPS §7.7).
- *     `"xpath"` is parsed but conservatively fails — there is no XML evaluator
- *     in this engine.
- *   - The Arazzo Selector Object `type: "xpath"` is parsed but raises a
- *     runtime `LoginError` at extraction time — there is no XPath evaluator
- *     in this engine yet.
- *   - The Arazzo Selector Object `type: "jsonpath"` supports only the
- *     single-value RFC 9535 subset of `@appstrate/afps-shared/jsonpath` (no
- *     filters, no slices, no wildcards). More complex queries raise a
- *     `LoginError`.
+ * It evaluates the AFPS §7.7 evaluation profile; `loginBlockIssues` refuses every other form.
  *
  * This is a manifest-author-driven HTTP request → an SSRF / exfil / DoS
  * surface. It is bounded by construction:
@@ -37,9 +24,8 @@
  *     allowlist, the SSRF blocklist (loopback/RFC1918/link-local/metadata)
  *     applies instead so there is never an unbounded in-process fetch;
  *   - per-request timeout; capped response body;
- *   - regex patterns are length-capped (schema) and run against a size-capped
- *     body (true ReDoS needs RE2 — documented residual; the body cap bounds
- *     worst-case input length);
+ *   - regex patterns run against a size-capped body (true ReDoS needs RE2 —
+ *     documented residual; the body cap bounds worst-case input length);
  *   - `{{...}}` resolves ONLY `inputs` — never another connection's material;
  *     unresolved placeholders fail closed.
  *   - a declared `output` whose extractor produced an empty/undefined value
@@ -52,15 +38,16 @@ import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris
 import { substituteVars } from "../proxy-primitives.ts";
 import { unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import {
-  evaluateJsonPath as evaluateManifestJsonPath,
-  JsonPathSyntaxError,
-} from "@appstrate/afps-shared/jsonpath";
+import { evaluateJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
 import {
+  isJsonNumber,
+  isJwtOutput,
+  isSelectorOutput,
   loginBlockIssues,
   parseResponseExpression,
   simpleCriterionOperands,
+  type SimpleOperand,
 } from "@appstrate/afps-shared/runtime-expression";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
@@ -96,7 +83,7 @@ type LoginOutput =
 interface ArazzoSelectorObject {
   context: string;
   selector: string;
-  type: "jsonpath" | "xpath" | "jsonpointer";
+  type: "jsonpath" | "jsonpointer";
 }
 
 interface LoginRequest {
@@ -116,7 +103,7 @@ interface ArazzoCriterion {
    * `"jsonpath"` / `"regex"`, the criterion is evaluated against the
    * `context` document (defaulting to `$response.body`).
    */
-  type?: "simple" | "jsonpath" | "regex" | "xpath";
+  type?: "simple" | "jsonpath" | "regex";
   /**
    * Arazzo runtime expression naming the document the criterion runs against
    * (typically `$response.body`). Only honored for `jsonpath` / `regex`
@@ -184,156 +171,97 @@ export class LoginError extends Error {
   }
 }
 
-/**
- * Resolve an Arazzo runtime-expression operand to a comparable value.
- *  - `$statusCode` → numeric status
- *  - `$response.body` → the body text
- *  - `$response.body#/<json-pointer>` → JSON-pointer read against the parsed body
- *  - `$response.header.<name>` → header value (string)
- *  - literal numbers / quoted strings (`"foo"` / `'foo'`) / `true|false|null`
- *  - bare identifier → returned as a literal string (best-effort)
- *
- * Body parsing is lazy: the parsed-body slot is shared across operands within
- * a single criterion evaluation so the body is parsed at most once.
- */
-function evaluateRuntimeOperand(
-  raw: string,
-  status: number,
-  headers: Headers,
-  bodyText: () => string,
-  parsedBodySlot: { parsed?: unknown; tried?: boolean },
-): unknown {
-  const expr = raw.trim();
-  if (expr.startsWith("$")) {
-    const parsed = parseResponseExpression(expr)!;
-    if (parsed.kind === "status") return status;
-    if (parsed.kind === "header") return headers.get(parsed.name) ?? undefined;
-    if (parsed.pointer === undefined) return bodyText();
-    if (!parsedBodySlot.tried) {
-      parsedBodySlot.tried = true;
-      try {
-        parsedBodySlot.parsed = JSON.parse(bodyText());
-      } catch {
-        parsedBodySlot.parsed = undefined;
-      }
-    }
-    return readJsonPointer(parsedBodySlot.parsed, parsed.pointer);
+/** The login response the criteria and outputs read; its body is parsed once. */
+interface LoginResponse {
+  status: number;
+  headers: Headers;
+  bodyText: string;
+  /** The body as JSON, `undefined` when it is not JSON (`jsonError` then says why). */
+  json: unknown;
+  jsonError?: unknown;
+}
+
+function loginResponse(status: number, headers: Headers, bodyText: string): LoginResponse {
+  try {
+    return { status, headers, bodyText, json: JSON.parse(bodyText) };
+  } catch (jsonError) {
+    return { status, headers, bodyText, json: undefined, jsonError };
   }
-  // Literals.
-  if (/^-?\d+(\.\d+)?$/.test(expr)) return Number(expr);
-  if (expr === "true") return true;
-  if (expr === "false") return false;
-  if (expr === "null") return null;
-  if (
-    (expr.startsWith('"') && expr.endsWith('"')) ||
-    (expr.startsWith("'") && expr.endsWith("'"))
-  ) {
-    return expr.slice(1, -1);
-  }
-  return expr;
 }
 
 /**
- * Loose equality comparison for Arazzo simple criteria. Numbers coerce
- * strings on either side; everything else falls back to strict equality.
+ * The value one side of a `simple` criterion compares: a literal as parsed, the status as a
+ * number, a header or the whole body as text, a body pointer read against the parsed body.
+ */
+function evaluateOperand(operand: SimpleOperand, res: LoginResponse): unknown {
+  if (operand.kind === "literal") return operand.value;
+  const expr = operand.expression;
+  if (expr.kind === "status") return res.status;
+  if (expr.kind === "header") return res.headers.get(expr.name) ?? undefined;
+  if (expr.pointer === undefined) return res.bodyText;
+  return readJsonPointer(res.json, expr.pointer);
+}
+
+/**
+ * Equality of Arazzo simple criteria: an absent value equals nothing; strings compare
+ * case-insensitively (Arazzo); a number equals a string that is the same JSON number;
+ * anything else compares strictly.
  */
 function arazzoEquals(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left === "number" && typeof right === "string") return left === Number(right);
-  if (typeof right === "number" && typeof left === "string") return right === Number(left);
-  return false;
+  if (left === undefined || right === undefined) return false;
+  if (typeof left === "string" && typeof right === "string") {
+    return left.toLowerCase() === right.toLowerCase();
+  }
+  if (typeof left === "number" && typeof right === "string") {
+    return isJsonNumber(right) && left === Number(right);
+  }
+  if (typeof right === "number" && typeof left === "string") return arazzoEquals(right, left);
+  return left === right;
 }
 
 /**
  * Evaluate one Arazzo Criterion (AFPS §7.7).
  *
- *  - `type` absent or `"simple"`: `condition` is a runtime-expression equality
- *    (`<lhs> == <rhs>`). LHS / RHS resolve via {@link evaluateRuntimeOperand}.
+ *  - `type` absent or `"simple"`: `condition` is `<lhs> == <rhs>`, the one form
+ *    `loginBlockIssues` admits. LHS / RHS resolve via {@link evaluateOperand}.
  *  - `type: "jsonpath"`: `condition` is a JSONPath query evaluated against
  *    `context` (defaulting to `$response.body`). Passes when the result is
  *    a defined non-empty value (matches Arazzo's "non-empty result set"
  *    semantics for the single-value subset this engine supports).
  *  - `type: "regex"`: `condition` is a regex tested against `context`
  *    (defaulting to `$response.body`).
- *  - `type: "xpath"`: not implemented — returns `false` (conservative fail).
  */
-function evaluateCriterion(
-  criterion: ArazzoCriterion,
-  status: number,
-  headers: Headers,
-  bodyText: () => string,
-  parsedBodySlot: { parsed?: unknown; tried?: boolean },
-): boolean {
+function evaluateCriterion(criterion: ArazzoCriterion, res: LoginResponse): boolean {
   const condition = criterion.condition;
   const type = criterion.type ?? "simple";
 
   if (type === "simple") {
-    // Equality only — Arazzo's simple criterion grammar includes more
-    // operators but the AFPS profile (§7.7) treats `simple` as the legacy
-    // shape; equality covers `$statusCode == 200` and richer body checks.
-    const operands = simpleCriterionOperands(condition);
-    if (!operands) return false;
-    const [lhs, rhs] = operands.map((operand) =>
-      evaluateRuntimeOperand(operand, status, headers, bodyText, parsedBodySlot),
+    const [lhs, rhs] = simpleCriterionOperands(condition)!.map((operand) =>
+      evaluateOperand(operand, res),
     );
     return arazzoEquals(lhs, rhs);
   }
 
   if (type === "jsonpath") {
-    if (!parsedBodySlot.tried) {
-      parsedBodySlot.tried = true;
-      try {
-        parsedBodySlot.parsed = JSON.parse(bodyText());
-      } catch {
-        parsedBodySlot.parsed = undefined;
-      }
-    }
-    if (parsedBodySlot.parsed === undefined) return false;
-    let result: unknown;
-    try {
-      result = evaluateJsonPath(parsedBodySlot.parsed, condition);
-    } catch {
-      return false;
-    }
+    if (res.json === undefined) return false;
+    const result = evaluateJsonPath(res.json, condition);
     if (result === undefined || result === null) return false;
     if (typeof result === "string") return result.length > 0;
     if (Array.isArray(result)) return result.length > 0;
     return true;
   }
 
-  if (type === "regex") {
-    const target = regexSubject(criterion.context ?? "$response.body", bodyText, headers);
-    let re: RegExp;
-    try {
-      re = new RegExp(condition);
-    } catch {
-      return false;
-    }
-    return re.test(target);
-  }
-
-  // xpath / unknown → conservative fail.
-  return false;
+  return new RegExp(condition).test(regexSubject(criterion.context ?? "$response.body", res));
 }
 
 /**
- * Evaluate AFPS `success_criteria` (Arazzo, §7.7). Supports the four declared
- * types: omitted/`"simple"` (runtime-expression equality), `"jsonpath"`,
- * `"regex"`. `"xpath"` is parsed but conservatively fails (no XML evaluator
- * in this engine). When no criteria are declared, defaults to the 2xx range.
- *
- * Body-bearing criteria use a lazy reader so a criteria-set that only checks
- * `$statusCode` never reads the body.
+ * Evaluate AFPS `success_criteria` (Arazzo, §7.7): omitted/`"simple"`
+ * (runtime-expression equality), `"jsonpath"`, `"regex"`. When no criteria
+ * are declared, defaults to the 2xx range.
  */
-function passesSuccessCriteria(
-  status: number,
-  headers: Headers,
-  bodyText: () => string,
-  criteria?: ArazzoCriterion[],
-): boolean {
-  if (!criteria || criteria.length === 0) return status >= 200 && status < 300;
-  const parsedBodySlot: { parsed?: unknown; tried?: boolean } = {};
-  return criteria.every((c) => evaluateCriterion(c, status, headers, bodyText, parsedBodySlot));
+function passesSuccessCriteria(res: LoginResponse, criteria?: ArazzoCriterion[]): boolean {
+  if (!criteria || criteria.length === 0) return res.status >= 200 && res.status < 300;
+  return criteria.every((c) => evaluateCriterion(c, res));
 }
 
 /**
@@ -347,13 +275,15 @@ export function evaluateSuccessCriteriaForTest(
   bodyText: string,
   criteria: ArazzoCriterion[],
 ): boolean {
-  return passesSuccessCriteria(status, headers, () => bodyText, criteria);
+  return passesSuccessCriteria(loginResponse(status, headers, bodyText), criteria);
 }
+
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object";
 
 /**
  * RFC 6901 JSON-pointer read. `/a/b/0` → root.a.b[0]. Empty pointer ("") →
- * the document itself. Returns `undefined` on a miss. Decodes `~1` → `/` and
- * `~0` → `~` per RFC 6901.
+ * the document itself. Returns `undefined` on a miss: an array takes only a canonical index,
+ * an object only an own member. Decodes `~1` → `/` and `~0` → `~` per RFC 6901.
  */
 function readJsonPointer(root: unknown, pointer: string): unknown {
   if (pointer === "") return root;
@@ -364,10 +294,14 @@ function readJsonPointer(root: unknown, pointer: string): unknown {
     .map((t) => t.replace(/~1/g, "/").replace(/~0/g, "~"));
   let cur: unknown = root;
   for (const tok of tokens) {
-    if (cur == null || typeof cur !== "object") return undefined;
-    const asArray = cur as unknown[];
-    const asObj = cur as Record<string, unknown>;
-    cur = /^\d+$/.test(tok) ? asArray[Number(tok)] : asObj[tok];
+    if (Array.isArray(cur)) {
+      if (!/^(0|[1-9]\d*)$/.test(tok)) return undefined;
+      cur = cur[Number(tok)];
+    } else if (isObject(cur) && Object.prototype.hasOwnProperty.call(cur, tok)) {
+      cur = cur[tok];
+    } else {
+      return undefined;
+    }
   }
   return cur;
 }
@@ -427,100 +361,74 @@ async function readBoundedText(res: Response, maxBytes: number): Promise<string>
 }
 
 /** The text a regex criterion or extractor runs on: the whole body or one header. */
-function regexSubject(expr: string, bodyText: () => string, headers: Headers): string {
+function regexSubject(expr: string, res: LoginResponse): string {
   const parsed = parseResponseExpression(expr)!;
-  return parsed.kind === "header" ? (headers.get(parsed.name) ?? "") : bodyText();
+  return parsed.kind === "header" ? (res.headers.get(parsed.name) ?? "") : res.bodyText;
 }
 
-/** Type guard for the Arazzo Selector Object form. */
-function isSelectorObject(out: LoginOutput): out is ArazzoSelectorObject {
+const isBodyExpression = (expr: string) => parseResponseExpression(expr)?.kind === "body";
+
+/** Whether a criterion or an output reads the response body (a jwt reads another output). */
+function readsBody(login: LoginRequestSpec): boolean {
+  const criteria = (login.success_criteria ?? []).some((c) => {
+    const type = c.type ?? "simple";
+    if (type === "jsonpath") return true;
+    if (type === "regex") return isBodyExpression(c.context ?? "$response.body");
+    return simpleCriterionOperands(c.condition)!.some(
+      (o) => o.kind === "expression" && o.expression.kind === "body",
+    );
+  });
   return (
-    typeof out === "object" &&
-    out !== null &&
-    typeof (out as Record<string, unknown>).selector === "string" &&
-    typeof (out as Record<string, unknown>).type === "string" &&
-    typeof (out as Record<string, unknown>).context === "string"
+    criteria ||
+    Object.values(login.outputs ?? {}).some((out) => {
+      if (typeof out === "string") return isBodyExpression(out);
+      if (isSelectorOutput(out)) return true;
+      return out.from === "regex" && isBodyExpression(out.source);
+    })
   );
 }
 
-/** Whether an output expression must consume the response body to resolve. */
-function outputNeedsBody(out: LoginOutput): boolean {
-  if (typeof out === "string") return out.startsWith("$response.body");
-  if (isSelectorObject(out)) return out.context.startsWith("$response.body");
-  // jwt resolves from another (already-extracted) value
-  return out.from === "regex" && out.source === "$response.body";
-}
-
 /** The response body as JSON; the only document a selector or body pointer reads. */
-function parseBodyJson(bodyText: string, name: string): unknown {
-  try {
-    return JSON.parse(bodyText);
-  } catch (err) {
-    throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
+function bodyJson(res: LoginResponse, name: string): unknown {
+  if (res.json === undefined) {
+    throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: res.jsonError });
   }
-}
-
-/** The shared manifest JSONPath subset; an unsupported form is the author's `invalid_config`. */
-function evaluateJsonPath(root: unknown, path: string): unknown {
-  try {
-    return evaluateManifestJsonPath(root, path);
-  } catch (err) {
-    if (err instanceof JsonPathSyntaxError) {
-      throw new LoginError(err.message, "invalid_config", { cause: err });
-    }
-    throw err;
-  }
+  return res.json;
 }
 
 /**
  * Apply one AFPS `outputs` expression. `scope` carries values already
  * extracted in this pass (for jwt `token` resolution). Returns `undefined`
- * when the expression is unrecognised or its target is absent — the caller
- * fails closed on `undefined`/empty for declared outputs.
+ * when its target is absent — the caller fails closed on `undefined`/empty.
  */
 function applyOutput(
   out: LoginOutput,
-  bodyText: string,
-  status: number,
-  headers: Headers,
+  res: LoginResponse,
   scope: Record<string, string>,
   name: string,
 ): string | undefined {
   if (typeof out === "string") {
     const expr = parseResponseExpression(out)!;
-    if (expr.kind === "status") return String(status);
-    if (expr.kind === "header") return headers.get(expr.name) ?? undefined;
-    if (expr.pointer === undefined) return bodyText;
-    const v = readJsonPointer(parseBodyJson(bodyText, name), expr.pointer);
+    if (expr.kind === "status") return String(res.status);
+    if (expr.kind === "header") return res.headers.get(expr.name) ?? undefined;
+    if (expr.pointer === undefined) return res.bodyText;
+    const v = readJsonPointer(bodyJson(res, name), expr.pointer);
     return v === undefined ? undefined : stringifyValue(v);
   }
 
   // Arazzo Selector Object form (`{ context, selector, type }`).
-  if (isSelectorObject(out)) {
-    // Reject xpath up-front — there is no XML/HTML parser in this engine and
-    // attempting to JSON.parse() a body that's likely XML would surface as
-    // a misleading `extract_failed`. The right error is `invalid_config`.
-    if (out.type === "xpath") {
-      throw new LoginError(
-        `'${name}' xpath selector is not yet supported by the Appstrate login engine (AFPS §7.7)`,
-        "invalid_config",
-      );
-    }
-    const doc = parseBodyJson(bodyText, name);
-    if (out.type === "jsonpointer") {
-      const v = readJsonPointer(doc, out.selector);
-      return v === undefined ? undefined : stringifyValue(v);
-    }
-    if (out.type === "jsonpath") {
-      const v = evaluateJsonPath(doc, out.selector);
-      return v === undefined ? undefined : stringifyValue(v);
-    }
-    throw new LoginError(`'${name}' unsupported selector type`, "invalid_config");
+  if (isSelectorOutput(out)) {
+    const doc = bodyJson(res, name);
+    const v =
+      out.type === "jsonpointer"
+        ? readJsonPointer(doc, out.selector)
+        : evaluateJsonPath(doc, out.selector);
+    return v === undefined ? undefined : stringifyValue(v);
   }
 
   switch (out.from) {
     case "cookie":
-      return parseSetCookie(headers, out.name);
+      return parseSetCookie(res.headers, out.name);
     case "jwt": {
       const token = scope[parseCredentialRef(out.token)!];
       if (!token) {
@@ -534,25 +442,10 @@ function applyOutput(
       return v === undefined ? undefined : stringifyValue(v);
     }
     case "regex": {
-      // `out.pattern` is manifest-authored — a malformed pattern makes the
-      // RegExp ctor throw a raw SyntaxError. Wrap it into a typed LoginError
-      // so the failure surfaces as an "invalid_config" rather than an
-      // unhandled internal error.
-      let re: RegExp;
-      try {
-        re = new RegExp(out.pattern);
-      } catch (err) {
-        throw new LoginError(
-          `'${name}' invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`,
-          "invalid_config",
-        );
-      }
-      const m = re.exec(regexSubject(out.source, () => bodyText, headers));
+      const m = new RegExp(out.pattern).exec(regexSubject(out.source, res));
       if (!m) return undefined;
       return m[out.group ?? 1] ?? undefined;
     }
-    default:
-      throw new LoginError(`'${name}' unsupported extractor`, "invalid_config");
   }
 }
 
@@ -681,24 +574,15 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     clearTimeout(timer);
   }
 
-  // Some Arazzo `success_criteria` (`jsonpath`, `regex`, and simple criteria
-  // referencing `$response.body#/...`) need the body to evaluate. Determine
-  // whether ANY consumer (criteria OR outputs) requires it, then read once.
   const outputEntries = Object.entries(login.outputs ?? {});
-  const criteriaNeedsBody = (login.success_criteria ?? []).some((c) => {
-    const t = c.type ?? "simple";
-    if (t === "jsonpath" || t === "regex") {
-      return (c.context ?? "$response.body") === "$response.body";
-    }
-    return c.condition.includes("$response.body");
-  });
-  const outputsNeedsBody = outputEntries.some(([, out]) => outputNeedsBody(out));
-  const bodyText =
-    criteriaNeedsBody || outputsNeedsBody
-      ? await readBoundedText(res, limits.maxResponseBytes)
-      : "";
+  // Read only a body something reads: a large page behind a status-only login must not fail.
+  const response = loginResponse(
+    res.status,
+    res.headers,
+    readsBody(login) ? await readBoundedText(res, limits.maxResponseBytes) : "",
+  );
 
-  if (!passesSuccessCriteria(res.status, res.headers, () => bodyText, login.success_criteria)) {
+  if (!passesSuccessCriteria(response, login.success_criteria)) {
     // Never log/echo the body — only the status.
     throw new LoginError(`unexpected status ${res.status}`, "bad_status");
   }
@@ -709,18 +593,16 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   // order, so the decrypted `outputs` map comes back reordered. Pass 1 runs
   // every self-contained expression (body/header/cookie/regex/statusCode);
   // pass 2 runs `jwt`, whose `token` names another extracted value.
-  const extracted: Record<string, string> = {};
-  const isJwt = (out: LoginOutput): boolean =>
-    typeof out !== "string" && !isSelectorObject(out) && (out as { from?: string }).from === "jwt";
+  // No prototype: a jwt `token` never resolves to an inherited property.
+  const extracted: Record<string, string> = Object.create(null);
   for (const [name, out] of outputEntries) {
-    if (isJwt(out)) continue;
-    const v = applyOutput(out, bodyText, res.status, res.headers, extracted, name);
+    if (isJwtOutput(out)) continue;
+    const v = applyOutput(out, response, extracted, name);
     if (v !== undefined) extracted[name] = v;
   }
   for (const [name, out] of outputEntries) {
-    if (!isJwt(out)) continue;
-    const scope = { ...extracted };
-    const v = applyOutput(out, bodyText, res.status, res.headers, scope, name);
+    if (!isJwtOutput(out)) continue;
+    const v = applyOutput(out, response, extracted, name);
     if (v !== undefined) extracted[name] = v;
   }
 

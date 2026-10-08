@@ -39,6 +39,7 @@ import {
   readBundleFromBuffer,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { findUnevaluableExpressions } from "@appstrate/core/integration";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
@@ -62,7 +63,6 @@ import { activatePackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
-  collectConnectLoginWarnings,
   collectMetaWarnings,
   collectRetiredDependencyKeyWarnings,
 } from "./integration-import-warnings.ts";
@@ -241,10 +241,10 @@ interface ImportBundleResult {
   root_package_id: string;
   root_version: string;
   /**
-   * Non-blocking import-time warnings (AFPS §7.7) — surfaces
-   * `connect.login` selector/criteria patterns the Appstrate runtime engine
-   * cannot evaluate (XPath, multi-value JSONPath, xpath criteria). Empty
-   * array when no integration manifest in the bundle hits a limitation.
+   * Non-blocking import-time warnings, each prefixed with its package identity
+   * (e.g. dropped runtime tools, `_meta` soft-fails, retired dependency keys, an expression a
+   * dependency integration holds that its connect will refuse).
+   * Empty when nothing is degraded.
    */
   warnings: string[];
 }
@@ -441,20 +441,12 @@ export async function importBundle(
     parsedZip ??= parseIncomingPackage();
 
     // A drop keeps the import alive but is a silent capability loss — lift it
-    // into the same non-blocking warning channel the AFPS §7.7 / §10.1
-    // soft-fails use, so the operator learns which package needs a republish.
+    // into the same non-blocking warning channel the AFPS §10.1 soft-fails
+    // use, so the operator learns which package needs a republish.
     if (parsedZip.droppedRuntimeTools.length > 0) {
       warnings.push(
         `${identity}: dropped retired runtime tools (${parsedZip.droppedRuntimeTools.join(", ")}) — republish this package to remove them from its manifest`,
       );
-    }
-
-    // Surface engine-subset limitations for integration manifests as
-    // non-blocking warnings (AFPS §7.7).
-    if (parsedZip.type === "integration") {
-      for (const w of collectConnectLoginWarnings(parsedZip.manifest)) {
-        warnings.push(`${identity}: ${w}`);
-      }
     }
 
     // Surface `_meta` policy warnings for all package types — the validator
@@ -473,6 +465,14 @@ export async function importBundle(
     // were never honoured and that a republish removes the key.
     for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
+    }
+
+    // The root was already refused by `assertBundleRootConforms`; a dependency holding an
+    // expression the platform does not evaluate still imports, and its connect or run refuses it.
+    if (parsedZip.type === "integration") {
+      for (const v of findUnevaluableExpressions(parsedZip.manifest)) {
+        warnings.push(`${identity}: ${v.path.join(".")}: ${v.message}`);
+      }
     }
 
     // Claim-or-validate the packages row ATOMICALLY, in ONE transaction,

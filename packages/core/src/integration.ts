@@ -333,9 +333,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
-    // (1f) §7.4 + §7.7 install gate — every manifest JSONPath the shared
-    // evaluator reads later is parsed here, so an unsupported form fails the
-    // import instead of the first connect.
+    // (1f) §7.4 install gate — an `identity_claims` JSONPath is parsed here, so an unsupported
+    // form fails the import instead of the first connect. The `connect.login` ones are
+    // `loginBlockIssues`' (write paths and connect start).
     const checkJsonPath = (path: string, at: (string | number)[]) => {
       try {
         parseJsonPath(path);
@@ -352,24 +352,6 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
       checkJsonPath(path, ["identity_claims", claim]);
     }
-    const login = auth.connect?.login;
-    for (const [name, output] of Object.entries(login?.outputs ?? {})) {
-      const selector = output as { type?: unknown; selector?: unknown };
-      if (selector.type === "jsonpath" && typeof selector.selector === "string") {
-        checkJsonPath(selector.selector, ["connect", "login", "outputs", name, "selector"]);
-      }
-    }
-    (login?.success_criteria ?? []).forEach((criterion, index) => {
-      if (criterion.type === "jsonpath") {
-        checkJsonPath(criterion.condition, [
-          "connect",
-          "login",
-          "success_criteria",
-          index,
-          "condition",
-        ]);
-      }
-    });
 
     // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
     // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
@@ -443,6 +425,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
     // surface here).
+    const login = auth.connect?.login;
     if (login) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {

@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `https://*.github.io/**` are refused, `https://*.example.com/**` and
   `https://*.example.co.uk/**` still pass. No API change; a behaviour change:
   a manifest that passed may be refused on its next write. (#1656)
+- **`findUnevaluableExpressions` (`@appstrate/core/integration`) refuses
+  every `connect.login` form `@appstrate/afps-shared`'s `loginBlockIssues`
+  now refuses** (see its CHANGELOG; AFPS §7.7 evaluation profile).
+  No API change; a behaviour change: a manifest that passed may be refused on
+  its next write. (#1773)
+- **`integrationManifestSchema` no longer checks the jsonpath subset of
+  `connect.login` selectors and criteria**: `findUnevaluableExpressions` (write
+  paths) and the login engine (connect start) refuse them, so a stored manifest
+  holding one still parses. `identity_claims` is still checked by the schema.
+  (#1773)
 
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration

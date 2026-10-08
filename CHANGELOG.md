@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deploy: it normalizes those labels, renames the duplicates it creates, turns
   a label left empty into `Connexion N`, and lists every label it rewrites,
   for their owners.
+- **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
+  again** (#1773). It writes nothing and now also lists the `connect.login`
+  success criteria and selectors this release refuses (below); it exits 1
+  while one remains. How to fix one: `scripts/migration/README.md`.
 
 ### Changed
 
@@ -91,6 +95,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so does a literal host or a host rendered from the connection. A stored
   manifest that passed keeps loading but is refused on its next write; no
   stored version is grandfathered. The cookie jar is unchanged.
+- **BREAKING (manifest authors): a `connect.login` the login engine cannot
+  evaluate is refused** (#1773), when the manifest is written and, for a stored
+  one, when a connection starts (`invalid_config`, before the login request is
+  sent). The accepted forms are the AFPS §7.7 evaluation profile, stated in
+  `docs/guides/writing-an-integration-with-connect.md`. Refused: a `simple`
+  criterion other than one `<expr> == <operand>` comparison; `xpath`; an output
+  carrying both `from` and Selector fields (`context`, `selector`, `type`); a
+  regex that does not compile (`(?i)…`) or does not capture the extracted
+  `group`; a JSON pointer that is not RFC 6901 (in a body expression, a
+  jsonpointer selector or a jwt `path`); an output named `__proto__`; a jsonpath
+  outside the supported subset, now checked at connect start too. Most such manifests never connected: a compound or grouped
+  condition or an uncompilable regex criterion always failed as `bad_status`
+  ("unexpected status 200"), and the other forms failed only after the user's
+  login inputs had been sent. These forms worked and are refused too:
+  - a number literal that is not a JSON number (`+200`, `200.`, `0x10`, `01`);
+  - an unquoted string literal (`$response.body#/status == ok`): quote it
+    (`'ok'`);
+  - a comparison of two literals (`1 == 1`);
+  - a JSON pointer key or header name holding an operator character or a quote
+    (`$response.body#/a=b == 1`): check such a key with a `regex` criterion;
+  - an extractor carrying Selector fields: drop them;
+  - a JSON pointer with a `~` not followed by `0` or `1`
+    (`$response.body#/a~x`, in a criterion, an output, a jsonpointer selector
+    or a jwt `path`), which used to be read literally: write `~0` for `~`.
+
+  In a bundle, the root is refused; a dependency integration the import
+  inserts imports with a warning naming each such form (a dependency version
+  already present is reused without one). A dependency whose jsonpath is
+  outside the subset, which the manifest schema refused before, now imports
+  the same way, with a warning.
+
+- **A `simple` success criterion compares as Arazzo does** (#1815, #1773).
+  Strings ignore case: `$response.body#/status == 'ok'` now passes on `"OK"`.
+  A number equals a string only when the string is the same JSON number, so
+  `' 200'` and `''` no longer equal `200` and `0`. An absent value (a missing
+  header or body key) equals nothing, not even another absent value.
+- **JSON pointers are read per RFC 6901** (#1773), in criteria, outputs,
+  jsonpointer selectors and jwt `path`s: an array takes only a canonical index
+  and an object only its own members. `#/items/01` and `#/items/length` now
+  yield nothing (an output fails `extract_failed`) where they read index 1 and
+  the array length; an object key `"01"` is read as such.
 - **`@appstrate/shopify` 1.0.3 allows only the connection's own store**:
   `authorized_uris` is `https://{$credential.shop_domain}/**` instead of
   `https://*.myshopify.com/**`, and `shop_domain` must be
