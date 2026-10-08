@@ -7,7 +7,7 @@ This is the single instruction file for this directory: every coding agent reads
 > **Deep references** (read on demand, not loaded every session):
 >
 > - Env vars → `docs/ENV.md` (authoritative: `@appstrate/env` Zod schema)
-> - Public documentation (docs.appstrate.com) → `docs/site/` (pages) and `docs/web/` (the static site, outside the workspaces): update the page in the same PR when a change alters what a user sees, runs or configures
+> - Public documentation (docs.appstrate.com) → `docs/site/` (pages) and `docs/web/` (the static site, outside the workspaces): update the page in the same PR when a change alters what a user sees, runs or configures, and fill the PR template's **Documentation** section either way (the pages updated, or that no documented behaviour changes)
 > - AFPS integration model → `docs/architecture/INTEGRATIONS_RUNTIME.md`
 > - Sidecar protocol → `docs/architecture/SIDECAR.md`
 > - Run cost tracking → `docs/architecture/RUN_COST.md`
