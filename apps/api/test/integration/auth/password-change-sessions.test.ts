@@ -3,7 +3,7 @@
 /**
  * Core's half of a password change or reset, with the OIDC module's hook taken
  * out: the account's other sessions end, and its stored reset links, magic
- * links and social-link states stop working.
+ * links, social-link states and pending pairing tokens stop working.
  * The OAuth tokens, CLI sessions and device codes the OIDC module revokes are
  * covered by
  * `apps/api/src/modules/oidc/test/integration/services/password-change-revocation.test.ts`.
@@ -13,9 +13,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { eq, like } from "drizzle-orm";
 import { _swapMagicLinkIssuedHookForTesting } from "@appstrate/db/auth";
 import { _swapCredentialChangeHookForTesting } from "@appstrate/db/credential-change";
-import { session as sessionTable, verification } from "@appstrate/db/schema";
+import { modelProviderPairings, session as sessionTable, verification } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { createTestUser, SESSION_TTL_MS } from "../../helpers/auth.ts";
+import { createTestOrg, createTestUser, SESSION_TTL_MS } from "../../helpers/auth.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { enableSmtpForSuite, captureMails, firstLink } from "../../helpers/smtp.ts";
 
@@ -142,6 +142,36 @@ describe("password change without SMTP", () => {
       .from(verification)
       .where(like(verification.identifier, "auth-state:%"));
     expect(left.map((r) => r.identifier).sort()).toEqual(["auth-state:other", "auth-state:raw"]);
+  });
+
+  it("drops the account's pairing tokens not yet redeemed", async () => {
+    const { id, a } = await twoBrowsers();
+    const { org } = await createTestOrg(id);
+    const pairing = (consumedAt: Date | null) => ({
+      id: `pair_${crypto.randomUUID()}`,
+      tokenHash: crypto.randomUUID(),
+      userId: id,
+      orgId: org.id,
+      providerId: "codex",
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      consumedAt,
+    });
+    const pending = pairing(null);
+    const redeemed = pairing(new Date());
+    await db.insert(modelProviderPairings).values([pending, redeemed]);
+
+    const res = await postAuth(
+      "/change-password",
+      { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+      a,
+    );
+
+    expect(res.status).toBe(200);
+    const left = await db
+      .select({ id: modelProviderPairings.id })
+      .from(modelProviderPairings)
+      .where(eq(modelProviderPairings.userId, id));
+    expect(left.map((r) => r.id)).toEqual([redeemed.id]);
   });
 
   it("keeps the session Better Auth hands back when the caller asks it to rotate", async () => {

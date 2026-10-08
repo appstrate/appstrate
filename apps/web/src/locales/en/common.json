@@ -122,7 +122,7 @@
   "apiError.failed_to_unlink_last_account": "You cannot unlink your last sign-in method.",
   "apiError.social_account_already_linked": "This account is already linked to another user.",
   "apiError.credential_account_not_found": "This account has no password.",
-  "apiError.credential_change_revocation_failed": "Your password was changed, but not all of your other devices could be signed out. Change it again from your settings, or contact an administrator.",
+  "apiError.credential_change_revocation_failed": "Your password was changed and the new one is now your current password, but not all of your other sign-ins could be revoked. Change it again to retry, or contact an administrator.",
   "apiError.signup_disabled": "Sign-ups are closed on this instance: an administrator must invite you.",
   "apiError.signup_domain_not_allowed": "Sign-ups are not open to email addresses of this domain.",
   "apiError.email_change_refused": "This email address cannot be used.",

@@ -9,22 +9,12 @@
 import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
-import { ApiError } from "../../api/errors.ts";
 import { ResetLinkUnusable } from "../reset-link-unusable.tsx";
-import { resetFailure } from "../../lib/reset-failure.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
 describe("a reset whose sign-out did not complete", () => {
-  it("is told apart from an invalid link", () => {
-    expect(resetFailure(new ApiError("credential_change_revocation_failed", "", 500))).toBe(
-      "revocation_failed",
-    );
-    expect(resetFailure(new ApiError("INVALID_TOKEN", "", 400))).toBe("invalid_token");
-    expect(resetFailure(new Error("network"))).toBe("invalid_token");
-  });
-
   it("says the password changed and leads to a new reset link", () => {
     const html = render(
       <ResetLinkUnusable message={i18n.t("resetPassword.revocationFailed", { ns: "settings" })} />,

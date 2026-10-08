@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { APIError } from "better-auth/api";
-import { and, eq, like, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNull, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { createLogger } from "@appstrate/core/logger";
 import { db } from "./client.ts";
-import { session, verification } from "./schema/index.ts";
+import { modelProviderPairings, session, verification } from "./schema/index.ts";
 
 const logger = createLogger("info");
 
@@ -45,6 +45,25 @@ export function _swapCredentialChangeHookForTesting(
   return previous;
 }
 
+/** Through Better Auth rather than SQL so its session-delete hooks run (back-channel logout). */
+async function endOtherSessions(
+  sessions: SessionStore,
+  userId: string,
+  keepSessionId: string | null,
+): Promise<void> {
+  const others = await db
+    .select({ token: session.token })
+    .from(session)
+    .where(
+      keepSessionId
+        ? and(eq(session.userId, userId), ne(session.id, keepSessionId))
+        : eq(session.userId, userId),
+    );
+  for (let i = 0; i < others.length; i += SESSION_DELETE_BATCH) {
+    await sessions.deleteSessions(others.slice(i, i + SESSION_DELETE_BATCH).map((s) => s.token));
+  }
+}
+
 /** A `verification` value read as JSON, or NULL when the row's value is not JSON. */
 function jsonValue(path: SQL): SQL {
   return sql`CASE WHEN pg_input_is_valid(${verification.value}, 'jsonb') THEN ${path} END`;
@@ -53,15 +72,19 @@ function jsonValue(path: SQL): SQL {
 /**
  * Once a password has been changed or reset: ends the account's sessions other
  * than `keepSessionId`, deletes the stored links that would sign in or attach a
- * sign-in method (reset links, magic links, social-link states), then runs the
- * module hook. Signed emailed links and linked accounts are left as they are.
+ * sign-in method (reset links, magic links, social-link states) and the
+ * unredeemed model-provider pairing tokens, runs the module hook, then ends the
+ * other sessions once more. Signed emailed links and linked accounts are left
+ * as they are.
  *
  * Sessions go first, so a session about to end can no longer authorize a new
- * token or approve a device code by the time the hook runs. What this order
- * cannot close is a token minted without a session while the hook runs: an
- * OAuth refresh rotation whose new row lands after the hook's UPDATE, or Better
- * Auth's own `/device/token` exchanging a code approved earlier. A CLI rotation
- * in that window revokes itself (sibling check in `cli-tokens.ts`).
+ * token or approve a device code by the time the hook runs; the second sweep
+ * ends a session minted while the steps ran (a magic link verified in between,
+ * Better Auth's own `/device/token`, a sign-in that checked the old password
+ * before the write). What remains open is a token minted without a session
+ * after the last step: an OAuth refresh rotation whose new row lands after the
+ * hook's UPDATE. A CLI rotation in that window revokes itself (sibling check in
+ * `cli-tokens.ts`).
  *
  * Runs after Better Auth has written the password, which it does outside any
  * transaction. A failure is logged and fails the request: answering success
@@ -75,20 +98,7 @@ export async function endOtherAccessAfterCredentialChange(
   const userId = account.id;
   let step = "sessions";
   try {
-    const others = await db
-      .select({ token: session.token })
-      .from(session)
-      .where(
-        keepSessionId
-          ? and(eq(session.userId, userId), ne(session.id, keepSessionId))
-          : eq(session.userId, userId),
-      );
-    // Through Better Auth rather than SQL so its session-delete hooks run
-    // (the OAuth provider's back-channel logout).
-    for (let i = 0; i < others.length; i += SESSION_DELETE_BATCH) {
-      const batch = others.slice(i, i + SESSION_DELETE_BATCH).map((s) => s.token);
-      await sessions.deleteSessions(batch);
-    }
+    await endOtherSessions(sessions, userId, keepSessionId);
     step = "sign_in_links";
     // `reset-password:<token>` → user id; `magic-link:<token>` → `{"email": …}`
     // as typed, hence `lower`; `auth-state:<state>` → `{"link": {"userId": …}}`
@@ -111,10 +121,17 @@ export async function endOtherAccessAfterCredentialChange(
           ),
         ),
       );
+    await db
+      .delete(modelProviderPairings)
+      .where(
+        and(eq(modelProviderPairings.userId, userId), isNull(modelProviderPairings.consumedAt)),
+      );
     if (_credentialChangeHook) {
       step = "module";
       await _credentialChangeHook(userId);
     }
+    step = "sessions_again";
+    await endOtherSessions(sessions, userId, keepSessionId);
   } catch (err) {
     logger.error("auth: ending other access after a password change failed", {
       userId,
