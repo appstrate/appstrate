@@ -911,7 +911,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
-enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted
+enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)
