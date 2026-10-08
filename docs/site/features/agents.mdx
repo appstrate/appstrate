@@ -7,14 +7,14 @@ description: What an agent is, how it is defined, versioned, configured per spac
 
 An agent is an **LLM in a loop with tools**, running inside an isolated sandbox. You give it a goal, and it decides which tools to call, in what order, to reach it. Unlike a workflow (a predefined graph of steps), an agent plans and reacts as it goes.
 
-An agent is an [AFPS package](/docs/features/packages) of type `agent`. It is made of:
+An agent is an [AFPS package](/features/packages) of type `agent`. It is made of:
 
 - `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
 - `prompt.md`: the instructions the model receives.
 
-At run time Appstrate assembles the agent, its [skills](/docs/features/skills), its [integrations](/docs/integrations/overview) and the [runtime tools](/docs/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
+At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/overview) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
 
-Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/docs/features/files)).
+Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/features/files)).
 
 ## Drafts, versions and where an agent lives
 
@@ -23,7 +23,7 @@ Every agent package has:
 - a **draft**: the working copy, edited in place;
 - immutable **published versions** (semver, forward-only), cut from the draft.
 
-An agent also has a **home space**, the space whose `agents:write` permission governs editing, publishing, renaming and deleting it. Other spaces reach it by **sharing** and run it by **activating** it. Both concepts are covered in [Library and sharing](/docs/features/library) and [Spaces](/docs/features/spaces).
+An agent also has a **home space**, the space whose `agents:write` permission governs editing, publishing, renaming and deleting it. Other spaces reach it by **sharing** and run it by **activating** it. Both concepts are covered in [Library and sharing](/features/library) and [Spaces](/features/spaces).
 
 A launch with no selector runs the **latest published version**. The draft runs only when the caller asks for it (`?version=draft`) and can write the agent.
 
@@ -68,13 +68,13 @@ curl -X POST https://your-instance/api/packages/agents/@acme/email-summarizer/ve
   -d '{ "version": "1.0.1" }'
 ```
 
-`content` is the prompt and must not be blank. A version is cut at the draft's manifest `version` unless the body names another one; reusing a published number for changed content is `409 version_exists`, and a draft identical to the latest version is `409 no_changes`. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/docs/features/multi-tenancy)).
+`content` is the prompt and must not be blank. A version is cut at the draft's manifest `version` unless the body names another one; reusing a published number for changed content is `409 version_exists`, and a draft identical to the latest version is `409 no_changes`. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/features/multi-tenancy)).
 
-You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See [Packages](/docs/features/packages).
+You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See [Packages](/features/packages).
 
 ## The manifest
 
-A manifest follows the [AFPS specification](/docs/resources/afps-specification), plus Appstrate's `runtime_tools` field.
+A manifest follows the [AFPS specification](/resources/afps-specification), plus Appstrate's `runtime_tools` field.
 
 ```json
 {
@@ -134,7 +134,7 @@ The platform validates manifests on every write path. An unknown `runtime_tools`
 - the available skills (files under `.pi/skills/`);
 - one section per connected integration, including its API documentation when the integration ships an `INTEGRATION.md`;
 - the **User Input** and **Files** of this run;
-- the **Checkpoint** and **Pinned Slots** left by earlier runs (see [Memory](/docs/features/memory));
+- the **Checkpoint** and **Pinned Slots** left by earlier runs (see [Memory](/features/memory));
 - a **Deliverables** section telling it to write user-facing files under `./outputs/`;
 - the **Output Format**, with the full schema, when `output.schema` is declared.
 
@@ -144,13 +144,13 @@ Tools are not listed in the prompt. The model discovers them through MCP, each t
 
 ### Input
 
-`input.schema` describes what a run takes. A field can be a file (`format: "uri"` with a `contentMediaType`), in which case the caller passes an `upload://` or `appfile://` reference or an inline data URI (see [Files](/docs/features/files)).
+`input.schema` describes what a run takes. A field can be a file (`format: "uri"` with a `contentMediaType`), in which case the caller passes an `upload://` or `appfile://` reference or an inline data URI (see [Files](/features/files)).
 
 Values resolve in this order, last one wins:
 
 1. the author `default` in the schema;
 2. the **stored value** saved for the agent in this space;
-3. the caller's input at launch, or, for a scheduled run, the value frozen on the [schedule](/docs/features/scheduling). A run has one or the other, never both.
+3. the caller's input at launch, or, for a scheduled run, the value frozen on the [schedule](/features/scheduling). A run has one or the other, never both.
 
 A member who holds `agents:configure` in the space (the `admin` and `builder` roles) can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
 
@@ -173,13 +173,13 @@ A run with no output schema can finish without calling `output`.
 
 ## Capabilities
 
-| Capability                                                          | Where it is declared                                         | Page                                        |
-| ------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------- |
-| Skills                                                              | `dependencies.skills`                                        | [Skills](/docs/features/skills)             |
-| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/docs/integrations/overview) |
-| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/docs/features/packages)         |
-| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/docs/features/tools)               |
-| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/docs/features/memory)             |
+| Capability                                                          | Where it is declared                                         | Page                                   |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
+| Skills                                                              | `dependencies.skills`                                        | [Skills](/features/skills)             |
+| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/overview) |
+| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/features/packages)         |
+| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/features/tools)               |
+| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)             |
 
 Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
 
@@ -204,13 +204,13 @@ curl -X PATCH https://your-instance/api/agents/@acme/support-triage/model \
   -d '{ "modelId": "<model id>", "generation": { "temperature": 0.2, "reasoning_level": "medium" } }'
 ```
 
-Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/docs/integrations/llm-models). The proxy cascade is in [Proxies](/docs/features/proxies).
+Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/integrations/llm-models). The proxy cascade is in [Proxies](/features/proxies).
 
 The same per-space settings are also available through `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (`modelId`, `proxyId`, `generation_config`) and read back, resolved, by `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
 
 ## Running an agent
 
-An agent can be launched from the web app, the API, the CLI, a [schedule](/docs/features/scheduling), the [chat](/docs/using-appstrate/chat) assistant or an [MCP client](/docs/using-appstrate/mcp-clients). See [Runs](/docs/features/runs).
+An agent can be launched from the web app, the API, the CLI, a [schedule](/features/scheduling), the [chat](/using-appstrate/chat) assistant or an [MCP client](/using-appstrate/mcp-clients). See [Runs](/features/runs).
 
 An agent must be **active** in the space to be launched there. A space that has it switched off answers `404 agent_not_active_in_space`, while reads keep working.
 

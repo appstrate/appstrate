@@ -3,7 +3,7 @@ title: MCP clients
 description: Connect Claude Code, Claude Desktop, Cursor, Codex or any MCP client to an Appstrate organization.
 ---
 
-Every organization on an instance has its own **Model Context Protocol** endpoint. A generic MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf) that connects to it can discover and call the Appstrate API, and launch agents and wait for their results, with the permissions of the person or key that connected and confined to that one organization. It is the same surface the dashboard [chat](/docs/using-appstrate/chat) uses.
+Every organization on an instance has its own **Model Context Protocol** endpoint. A generic MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf) that connects to it can discover and call the Appstrate API, and launch agents and wait for their results, with the permissions of the person or key that connected and confined to that one organization. It is the same surface the dashboard [chat](/using-appstrate/chat) uses.
 
 ```
 https://<your-instance>/api/mcp/o/<orgId>
@@ -53,7 +53,7 @@ codex mcp login appstrate
 
 ## Which space it acts in
 
-The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). `get_me` names the space a call resolved to, so an empty list can be told from a wrong space. For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/docs/using-appstrate/skill) sets this header to your pinned space for you.
+The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). `get_me` names the space a call resolved to, so an empty list can be told from a wrong space. For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/using-appstrate/skill) sets this header to your pinned space for you.
 
 ## The tools
 

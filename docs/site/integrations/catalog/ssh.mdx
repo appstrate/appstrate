@@ -7,7 +7,7 @@ description: "Connect a server to your Appstrate agents over SSH: run commands a
 
 SSH lets an agent reach a host that has `sshd` and no HTTP API: a VPS, a NAS, a build machine. Each connection is one key on one Unix account of one host.
 
-Integration: `@appstrate/ssh` (version 1.0.1), a local runner. It runs the `@appstrate/ssh-mcp` server package (version 1.0.1) in a sandboxed runner container, which shells out to the `ssh` and `sftp` clients. For how this works, see [How integrations work](/docs/integrations/how-integrations-work). Local runners need the `docker` or `firecracker` run adapter, as described in [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure).
+Integration: `@appstrate/ssh` (version 1.0.1), a local runner. It runs the `@appstrate/ssh-mcp` server package (version 1.0.1) in a sandboxed runner container, which shells out to the `ssh` and `sftp` clients. For how this works, see [How integrations work](/integrations/how-integrations-work). Local runners need the `docker` or `firecracker` run adapter, as described in [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## The Unix account is the security boundary
 
@@ -71,7 +71,7 @@ The server must run OpenSSH 7.2 or later. An older `sshd` rejects the `restrict`
 
 The same page shows a second block that removes the key from the server. Keep it. Deleting the connection destroys the private key held by Appstrate but cannot reach your server to remove the line from `authorized_keys`, and once the connection is deleted Appstrate can no longer show the block.
 
-An agent can bind several SSH connections in one run (up to 10 per integration), and each tool then takes a `connection` parameter, as described in [Tools](/docs/features/tools). Binding several SSH connections to one run works only under the `docker` adapter.
+An agent can bind several SSH connections in one run (up to 10 per integration), and each tool then takes a `connection` parameter, as described in [Tools](/features/tools). Binding several SSH connections to one run works only under the `docker` adapter.
 
 ## Use it in an agent
 
@@ -100,7 +100,7 @@ Read /etc/os-release on the web host and tell me which distribution and version 
 
 ## Related
 
-- [How integrations work](/docs/integrations/how-integrations-work)
-- [Tools](/docs/features/tools)
-- [Isolation and Security](/docs/self-hosting/isolation-and-security)
-- [Built-in Integrations](/docs/integrations/catalog)
+- [How integrations work](/integrations/how-integrations-work)
+- [Tools](/features/tools)
+- [Isolation and Security](/self-hosting/isolation-and-security)
+- [Built-in Integrations](/integrations/catalog)

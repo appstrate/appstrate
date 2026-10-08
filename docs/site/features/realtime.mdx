@@ -41,7 +41,7 @@ curl -N -b cookies.txt \
 
 ## What you may receive
 
-Visibility follows [roles and permissions](/docs/features/roles-and-permissions). The single-run and per-agent streams need `runs:read` or `runs:read-all` in the space and answer `403` otherwise. Run frames only concern runs you may see: your own with `runs:read`, the whole space with `runs:read-all`. `debug` log lines are sent only to callers who hold `runs:delete`.
+Visibility follows [roles and permissions](/features/roles-and-permissions). The single-run and per-agent streams need `runs:read` or `runs:read-all` in the space and answer `403` otherwise. Run frames only concern runs you may see: your own with `runs:read`, the whole space with `runs:read-all`. `debug` log lines are sent only to callers who hold `runs:delete`.
 
 On `/api/realtime/runs` you receive the channels you are allowed to read: `run_update`, `run_log` and `run_metric` need a run read, `connection_update` is held back from an API key that lacks the `integrations:read` scope, `chat_session_update` needs `chat:read`.
 
@@ -78,7 +78,7 @@ data:
 
 - `run_update`: `status` is one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`. `operation` is `INSERT` or `UPDATE`. The frame carries no `result`.
 - `run_log`: `level` is `debug`, `info`, `warn` or `error`. `data` (the structured payload) is present only with `verbose=true`, and is the string `"[payload too large]"` when it does not fit.
-- `run_metric`: `costPricingStatus` can be `null`, which must not be read as `priced`. See [Run cost](/docs/features/run-cost).
+- `run_metric`: `costPricingStatus` can be `null`, which must not be read as `priced`. See [Run cost](/features/run-cost).
 - `connection_update`: `operation` (`INSERT`, `UPDATE`, `DELETE`), `id`, `integrationPackageId`, `authKey`, `userId`, `endUserId`, `spaceId`, `needsReconnection`, `deleted`.
 - `chat_session_update`: `sessionId`, `orgId`, `userId`. It is a change signal: refetch the session list.
 
@@ -103,4 +103,4 @@ src.addEventListener("run_log", (e) => console.log(JSON.parse(e.data).message));
 src.addEventListener("run_metric", (e) => console.log("cost so far", JSON.parse(e.data).costSoFar));
 ```
 
-For a server-side wait on a single result, `GET /api/runs/{id}?wait=55` is simpler. See [Runs](/docs/features/runs#waiting-for-the-result).
+For a server-side wait on a single result, `GET /api/runs/{id}?wait=55` is simpler. See [Runs](/features/runs#waiting-for-the-result).

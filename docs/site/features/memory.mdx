@@ -3,7 +3,7 @@ title: Memory
 description: How agents keep a checkpoint, named slots and an archive of notes across runs, and who can read them.
 ---
 
-A run starts with a fresh sandbox, so anything the agent should remember must be written to the platform. Appstrate gives agents three kinds of persistent state. They live in one store and are written with two opt-in [runtime tools](/docs/features/tools), `note` and `pin`.
+A run starts with a fresh sandbox, so anything the agent should remember must be written to the platform. Appstrate gives agents three kinds of persistent state. They live in one store and are written with two opt-in [runtime tools](/features/tools), `note` and `pin`.
 
 | Kind               | Written with                 | Visible to the agent                    | Typical use                                        |
 | ------------------ | ---------------------------- | --------------------------------------- | -------------------------------------------------- |
@@ -35,10 +35,10 @@ A third form, a keyless pinned memo (shown in the prompt under **Memory**), exis
 
 Every `note` and `pin` takes a `scope`:
 
-- `actor` (default): private to the identity the run executes as, a member or an [end-user](/docs/features/end-users). For a scheduled run that is the schedule's actor. Different members never read each other's private memory.
+- `actor` (default): private to the identity the run executes as, a member or an [end-user](/features/end-users). For a scheduled run that is the schedule's actor. Different members never read each other's private memory.
 - `shared`: visible to every actor of the space. Use it for facts about a shared resource, such as the structure of a shared inbox or an API quirk.
 
-A run reads its own private rows plus the shared ones. Memory is also partitioned by [space](/docs/features/spaces): the same agent in two spaces has two separate memories.
+A run reads its own private rows plus the shared ones. Memory is also partitioned by [space](/features/spaces): the same agent in two spaces has two separate memories.
 
 ## Inspecting and deleting memory
 
@@ -57,6 +57,6 @@ curl "https://your-instance/api/agents/@acme/support-triage/persistence?kind=mem
 | `DELETE /api/agents/{scope}/{name}/persistence/memories/{id}` | Delete one memory.                                                                                                                          | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}`   | Delete one pinned slot.                                                                                                                     | `persistence:delete` |
 
-Without `persistence:delete` you see your own scope plus shared rows. A caller holding it (the `admin` and `builder` space roles) who inspects an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/docs/features/roles-and-permissions).
+Without `persistence:delete` you see your own scope plus shared rows. A caller holding it (the `admin` and `builder` space roles) who inspects an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/features/roles-and-permissions).
 
 There is no endpoint that writes memory directly. Memory only changes when an agent run calls the tools, or when someone deletes it. It lives in the platform database.

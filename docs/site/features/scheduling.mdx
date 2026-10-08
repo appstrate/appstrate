@@ -3,13 +3,13 @@ title: Scheduling
 description: Run agents on a cron schedule, as a chosen identity, with frozen input and overrides.
 ---
 
-A **schedule** fires an agent on a cron expression. Each tick goes through the same pipeline as a manual launch, so a scheduled run gets the same sandbox, proxy cascade and credential injection, and shows up in the run list with its `scheduleId` (see [Runs](/docs/features/runs)).
+A **schedule** fires an agent on a cron expression. Each tick goes through the same pipeline as a manual launch, so a scheduled run gets the same sandbox, proxy cascade and credential injection, and shows up in the run list with its `scheduleId` (see [Runs](/features/runs)).
 
-Schedules live in a [space](/docs/features/spaces). They are stored in the database and re-armed when the API boots.
+Schedules live in a [space](/features/spaces). They are stored in the database and re-armed when the API boots.
 
 ## Queue backend
 
-With `REDIS_URL` set, schedules are driven by BullMQ and fire once across all API instances. Without Redis the platform falls back to an in-process evaluator that checks every 30 seconds. That fallback is meant for a single instance: it coordinates nothing across processes. Use Redis for any multi-instance or production deployment. See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure).
+With `REDIS_URL` set, schedules are driven by BullMQ and fire once across all API instances. Without Redis the platform falls back to an in-process evaluator that checks every 30 seconds. That fallback is meant for a single instance: it coordinates nothing across processes. Use Redis for any multi-instance or production deployment. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## In the web app
 
@@ -39,7 +39,7 @@ Only `cron_expression` is required. The body is closed: an unknown field is a `4
 | `input`                                                                | Frozen on the schedule and replayed at every tick. Validated against the agent's input schema, merged on top of the stored values of the space. Naming a locked field is refused. |
 | `version_override`                                                     | Which agent definition to run: `published` (default, the latest published version), a version spec, or `draft` (needs write access to the agent when you write the schedule).     |
 | `model_id_override`, `generation_config_override`, `proxy_id_override` | Frozen overrides applied to every run of the schedule.                                                                                                                            |
-| `connection_overrides`                                                 | Per-integration connection picks, as arrays of connection ids. See [Integrations](/docs/integrations/overview).                                                                   |
+| `connection_overrides`                                                 | Per-integration connection picks, as arrays of connection ids. See [Integrations](/integrations/overview).                                                                        |
 | `dependency_overrides`                                                 | Per-dependency version overrides for skills and integrations.                                                                                                                     |
 | `actor`                                                                | The identity the schedule runs as: exactly one of `userId` or `endUserId`. Defaults to the caller.                                                                                |
 
@@ -47,7 +47,7 @@ An agent whose input schema declares **file fields cannot be scheduled**. The in
 
 ## Who a schedule runs as
 
-A schedule runs as an **actor**: a member or an [end-user](/docs/features/end-users). The actor decides whose connections the runs use and whose memory scope they read ([Memory](/docs/features/memory)).
+A schedule runs as an **actor**: a member or an [end-user](/features/end-users). The actor decides whose connections the runs use and whose memory scope they read ([Memory](/features/memory)).
 
 - By default the actor is the member who created the schedule.
 - Naming **another member** as actor, or editing or deleting a schedule that runs as another member, requires the organization role `owner` or `admin` on the user's own session. An API key or third-party OAuth client is refused with `403`, because such a schedule lends that member's connections to every run.

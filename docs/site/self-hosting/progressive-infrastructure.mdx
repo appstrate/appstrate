@@ -32,7 +32,7 @@ Or run `appstrate install --tier 0` once the CLI is installed. The installer clo
 
 ### Tiers 1 to 3 with Docker
 
-The installer renders the matching Compose template from `examples/self-hosting/` (`docker-compose.tier1.yml`, `docker-compose.tier2.yml`, `docker-compose.tier3.yml`). All three default `RUN_ADAPTER` to `docker`. The root `docker-compose.yml` of the repository is the Tier 3 stack with its own service names. See [Docker Compose](/docs/self-hosting/docker-compose).
+The installer renders the matching Compose template from `examples/self-hosting/` (`docker-compose.tier1.yml`, `docker-compose.tier2.yml`, `docker-compose.tier3.yml`). All three default `RUN_ADAPTER` to `docker`. The root `docker-compose.yml` of the repository is the Tier 3 stack with its own service names. See [Docker Compose](/self-hosting/docker-compose).
 
 For development from a checkout, `bun run docker:dev:minimal` (Tier 1), `bun run docker:dev:standard` (Tier 2) and `bun run docker:dev` (Tier 3) start the services of `docker-compose.dev.yml`.
 
@@ -48,7 +48,7 @@ For development from a checkout, `bun run docker:dev:minimal` (Tier 1), `bun run
 
 For Firecracker, pass `--run-adapter firecracker` to `appstrate install`. It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`) and the runner settings, and either installs the daemon on this host (`--host-ip`) or prints the one-liner for a remote KVM host (`--runner-url` and `--runner-token`). Topology, requirements, hardening status and known limits are in [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
 
-Use `docker` or `firecracker` for anything multi-tenant. See [Isolation and Security](/docs/self-hosting/isolation-and-security) for what each backend protects and what it does not.
+Use `docker` or `firecracker` for anything multi-tenant. See [Isolation and Security](/self-hosting/isolation-and-security) for what each backend protects and what it does not.
 
 ## Modules
 
@@ -73,7 +73,7 @@ Opt-in, append them to `MODULES`:
 | `@appstrate/module-codex`, `@appstrate/module-claude-code` | Model providers backed by a ChatGPT or Claude subscription. Using a personal subscription to power a product is a grey zone you own. Read [SUBSCRIPTION_COMPLIANCE.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SUBSCRIPTION_COMPLIANCE.md) first |
 | `@appstrate/module-ee`                                     | Stripe billing, credit quotas and usage metering. Source-available, not Apache-2.0, and running it needs a commercial agreement. Needs PostgreSQL (it refuses to start on PGlite)                                                                                           |
 
-Disable what you do not use to reduce the attack surface. Keep `oidc` if you use the CLI, since `appstrate login` goes through it. The authoritative default is the `MODULES` row in [Environment Variables](/docs/self-hosting/environment-variables), and module authoring is covered in the [modules README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
+Disable what you do not use to reduce the attack surface. Keep `oidc` if you use the CLI, since `appstrate login` goes through it. The authoritative default is the `MODULES` row in [Environment Variables](/self-hosting/environment-variables), and module authoring is covered in the [modules README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/README.md).
 
 The Compose files pass `MODULES` through from `.env` and leave the default to the platform. An older on-disk Compose file can still pin a stale default that masks a newer one. `appstrate doctor` reports this under **Compose drift**, and `appstrate install --upgrade-compose` strips the stale defaults (it backs the file up and never touches `.env`).
 
@@ -83,7 +83,7 @@ The Compose files pass `MODULES` through from `.env` and leave the default to th
 - **Tier 0 to PostgreSQL**: the repository ships no export tool for a PGlite directory. Set `DATABASE_URL` and restart for a fresh, empty schema. Migrations run at boot on both PGlite and PostgreSQL.
 - **Filesystem to S3 on an instance that already holds files**: objects are not copied for you. Plan the copy yourself before switching `S3_BUCKET`.
 
-Migrations are applied automatically at boot and there is no built-in rollback. See [Upgrading](/docs/self-hosting/upgrading).
+Migrations are applied automatically at boot and there is no built-in rollback. See [Upgrading](/self-hosting/upgrading).
 
 ## What happens at boot
 

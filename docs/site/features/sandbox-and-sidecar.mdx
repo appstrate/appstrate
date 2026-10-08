@@ -15,7 +15,7 @@ The `RUN_ADAPTER` setting chooses how the sandbox is built. The default is `proc
 | `docker`            | An agent container and a sidecar container on a private network created for the run. | Container isolation. The agent cannot reach the host or another run, and can leave only through the sidecar.                                                                             |
 | `firecracker`       | One microVM per run, behind a KVM boundary.                                          | Hardware isolation. Opt-in module that talks to a runner daemon on the host.                                                                                                             |
 
-Isolation guarantees below (network separation, no direct egress) describe `docker` and `firecracker`. Credential hiding applies in every mode. Use `docker` or `firecracker` for anything beyond local development. See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure) and [Isolation and Security](/docs/self-hosting/isolation-and-security) for the operator side.
+Isolation guarantees below (network separation, no direct egress) describe `docker` and `firecracker`. Credential hiding applies in every mode. Use `docker` or `firecracker` for anything beyond local development. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure) and [Isolation and Security](/self-hosting/isolation-and-security) for the operator side.
 
 ## Shape of a Docker run
 
@@ -57,10 +57,10 @@ The secrets of a run (the sidecar address and token, the keys that sign its even
 
 The sidecar is a small server in front of everything the agent reaches.
 
-- **A single MCP endpoint.** Everything beyond the sandbox is an MCP tool served at `/mcp`: the `{namespace}__api_call` and MCP tools of each integration, `run_history`, `recall_memory`, and the [runtime tools](/docs/features/tools) the agent selected. Every request must carry the run's sidecar token.
+- **A single MCP endpoint.** Everything beyond the sandbox is an MCP tool served at `/mcp`: the `{namespace}__api_call` and MCP tools of each integration, `run_history`, `recall_memory`, and the [runtime tools](/features/tools) the agent selected. Every request must carry the run's sidecar token.
 - **Credential injection.** For an integration call the sidecar fetches the connection's credentials from the platform at request time, substitutes them into the request, checks the target against the integration's `authorized_uris`, and sends it. The response comes back without any credential. A call that would carry a credential to a host the integration did not name is refused.
-- **Model relay.** Inference goes through `/llm`. The sidecar holds, or fetches, the provider credential. API-key models are served through the platform's LLM proxy, which meters usage (see [Run cost](/docs/features/run-cost)).
-- **Network policy.** All outbound traffic leaves through its forward proxy, through the [proxy](/docs/features/proxies) that resolved for the run, if any.
+- **Model relay.** Inference goes through `/llm`. The sidecar holds, or fetches, the provider credential. API-key models are served through the platform's LLM proxy, which meters usage (see [Run cost](/features/run-cost)).
+- **Network policy.** All outbound traffic leaves through its forward proxy, through the [proxy](/features/proxies) that resolved for the run, if any.
 - **Integration runners.** An integration backed by a local MCP server is spawned by the sidecar in its own container on the same run network. It gets its credentials from the sidecar but can reach only the hosts of its connection's allowlist.
 
 ### SSRF protection
@@ -69,11 +69,11 @@ Every target, and every redirect hop, is checked three ways: a literal check aga
 
 ### Large results
 
-Tool output above an inline cap is not pushed into the model's context. It is stored for the run and the model receives a link to read it. The caps (per call and per run) are operator settings, see [Environment Variables](/docs/self-hosting/environment-variables).
+Tool output above an inline cap is not pushed into the model's context. It is stored for the run and the model receives a link to read it. The caps (per call and per run) are operator settings, see [Environment Variables](/self-hosting/environment-variables).
 
 ## Observability
 
-The sidecar does not keep a separate audit log. What happened is visible in the run's logs, the denormalized columns of the run (model, proxy, connections used, trigger), the live cost stream and, when the observability module is enabled, OpenTelemetry traces and metrics. See [Runs](/docs/features/runs), [Run cost](/docs/features/run-cost) and the [observability notes](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md).
+The sidecar does not keep a separate audit log. What happened is visible in the run's logs, the denormalized columns of the run (model, proxy, connections used, trigger), the live cost stream and, when the observability module is enabled, OpenTelemetry traces and metrics. See [Runs](/features/runs), [Run cost](/features/run-cost) and the [observability notes](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md).
 
 ## Going deeper
 

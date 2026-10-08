@@ -14,7 +14,7 @@ Every run reports what it consumed. The figures come from one place, a usage led
 | `token_usage`                 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`.                                   |
 | `model_label`, `model_source` | The model the run used, and whether it came from the platform (`system`) or from the organization's own credentials (`org`). |
 
-`GET /api/runs/{id}` and the run list return them. While the run is in flight, the same figures stream over [realtime](/docs/features/realtime) as `run_metric` events (`costSoFar`, `tokenUsage`, `costPricingStatus`), throttled per run.
+`GET /api/runs/{id}` and the run list return them. While the run is in flight, the same figures stream over [realtime](/features/realtime) as `run_metric` events (`costSoFar`, `tokenUsage`, `costPricingStatus`), throttled per run.
 
 ## How the cost is computed
 
@@ -39,7 +39,7 @@ Where the rows come from depends on how inference reaches the model:
 - **API-key models** are served through the platform's LLM proxy, which writes one row per call.
 - **Subscription models** (OAuth credentials of the optional `@appstrate/module-claude-code` and `@appstrate/module-codex` modules) are metered from the runner's cumulative token counters, priced server-side. They are priced at the public API rates even though the user pays a flat subscription, so the figure is an estimate of the equivalent API cost.
 - **Remote runs** report their usage through signed events. When their inference goes through the platform's LLM proxy, the proxy rows are the source of truth.
-- **Chat turns** are metered per turn and attributed to the chat session, not to a run (see [Chat](/docs/using-appstrate/chat)).
+- **Chat turns** are metered per turn and attributed to the chat session, not to a run (see [Chat](/using-appstrate/chat)).
 
 The platform prices usage itself and does not trust a figure computed inside the sandbox. Cost data is stored as floating point numbers, so a re-summation can differ from the stored total by sub-cent amounts.
 
@@ -54,7 +54,7 @@ A cost of zero, or no cost at all, does not always mean the run was free. `cost_
 | `unpriced` | The model has no rates at all, for example a custom gateway model without a `cost` override. A `0` here means "not priced", not "free". |
 | `null`     | No claim. Runs finalized before the field existed, runs that produced no usage rows. Never read `null` as `priced`.                     |
 
-The web app withholds the amount of an `unpriced` run instead of showing `$0.00`, and marks a `partial` run as a lower bound. API consumers should do the same. To price a gateway model, set its `cost` when you create the model (see [LLM Models](/docs/integrations/llm-models)).
+The web app withholds the amount of an `unpriced` run instead of showing `$0.00`, and marks a `partial` run as a lower bound. API consumers should do the same. To price a gateway model, set its `cost` when you create the model (see [LLM Models](/integrations/llm-models)).
 
 Every successful call that reached the provider ends up in the ledger. When the usage of a successful call cannot be parsed, the platform records a row with zero tokens so the call is still countable.
 

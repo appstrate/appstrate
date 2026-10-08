@@ -14,7 +14,7 @@ Typical reasons:
 
 ## How it is applied
 
-Every run has a sidecar that mediates outbound requests (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)). When a proxy resolves for the run, the platform hands its URL to that sidecar, which tunnels the agent's HTTP and HTTPS requests through it with `CONNECT`. Without a proxy the sidecar connects directly. In both cases the SSRF protections (private ranges, DNS rebinding, redirects) still apply, and credentials are still injected by the sidecar and never exposed to the agent.
+Every run has a sidecar that mediates outbound requests (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). When a proxy resolves for the run, the platform hands its URL to that sidecar, which tunnels the agent's HTTP and HTTPS requests through it with `CONNECT`. Without a proxy the sidecar connects directly. In both cases the SSRF protections (private ranges, DNS rebinding, redirects) still apply, and credentials are still injected by the sidecar and never exposed to the agent.
 
 ## Managing proxies
 
@@ -56,14 +56,14 @@ An operator can preload proxies with `SYSTEM_PROXIES`, a JSON array of `{ id, la
 SYSTEM_PROXIES='[{"id":"corp-egress","label":"Corporate egress","url":"http://user:secret@proxy.internal:8080","isDefault":true}]'
 ```
 
-They appear as `source: "built-in"` and are read-only. Admins can select one as the default or pin it on an agent without seeing or changing its URL. `PROXY_URL` is a simpler, instance-wide fallback with no UI. See [Environment Variables](/docs/self-hosting/environment-variables).
+They appear as `source: "built-in"` and are read-only. Admins can select one as the default or pin it on an agent without seeing or changing its URL. `PROXY_URL` is a simpler, instance-wide fallback with no UI. See [Environment Variables](/self-hosting/environment-variables).
 
 ## Which proxy a run uses
 
 The first match wins:
 
-1. `proxyId` in the launch body of the run, or `proxy_id_override` on the [schedule](/docs/features/scheduling) that fired it. `"none"` forces a direct connection.
-2. The proxy pinned on the agent in this [space](/docs/features/spaces).
+1. `proxyId` in the launch body of the run, or `proxy_id_override` on the [schedule](/features/scheduling) that fired it. `"none"` forces a direct connection.
+2. The proxy pinned on the agent in this [space](/features/spaces).
 3. The organization default proxy.
 4. The built-in proxy flagged `isDefault`.
 5. `PROXY_URL`.

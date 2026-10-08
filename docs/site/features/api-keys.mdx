@@ -16,7 +16,7 @@ effective = what the creator can do now in the key's space  ∩  the key's scope
 - If the creator is demoted or removed from the space, the key loses the same rights immediately.
 - If the creator leaves or is removed from the organization, their keys in it are revoked.
 - A key cannot grant itself anything its creator lacks: when you mint it, requested scopes the creator does not hold are dropped from the key, and a scope that no key can carry is a `400`.
-- Some permissions can never be put on a key, such as `share`, `integrations:configure`, member and role management. A key cannot create spaces or organizations either. See [Roles and permissions](/docs/features/roles-and-permissions).
+- Some permissions can never be put on a key, such as `share`, `integrations:configure`, member and role management. A key cannot create spaces or organizations either. See [Roles and permissions](/features/roles-and-permissions).
 
 Only people holding `api-keys:create` in the space can mint keys: the `admin` space role (which organization owners and admins hold in every space), or a custom space role that includes it. A personal space takes no keys (`409 personal_space_takes_no_keys`).
 
@@ -57,9 +57,9 @@ curl https://your-instance/api/agents \
 ```
 
 - The organization and the space come from the key. You do not need `X-Org-Id` or `X-Space-Id`. `X-Org-Id` is ignored with an API key (the key is bound to its organization), and an `X-Space-Id` that disagrees with the key is a `403`.
-- Server-Sent Event streams take the key as `?token=apst_...`, since browsers cannot set headers on `EventSource`. See [Realtime](/docs/features/realtime).
-- A key can act for an [end-user](/docs/features/end-users) with the `Appstrate-User` header.
-- Rate limits are counted per key, not per user. Only the operations listed in [Idempotency](/docs/api/idempotency) honor `Idempotency-Key`; another mutating route that receives it answers `400 idempotency_not_supported`.
+- Server-Sent Event streams take the key as `?token=apst_...`, since browsers cannot set headers on `EventSource`. See [Realtime](/features/realtime).
+- A key can act for an [end-user](/features/end-users) with the `Appstrate-User` header.
+- Rate limits are counted per key, not per user. Only the operations listed in [Idempotency](/api/idempotency) honor `Idempotency-Key`; another mutating route that receives it answers `400 idempotency_not_supported`.
 
 |                            | Browser session                          | API key                          |
 | -------------------------- | ---------------------------------------- | -------------------------------- |

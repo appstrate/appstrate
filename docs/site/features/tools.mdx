@@ -11,13 +11,13 @@ A **tool** is a function the model can call during a run. A skill tells the agen
 | Runtime tools     | The platform                                              | `runtime_tools` in the manifest                              |
 | Integration tools | Integrations, which wrap third-party APIs and MCP servers | `dependencies.integrations` and `integrations_configuration` |
 
-All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
+All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
 
 > Earlier versions of Appstrate had a `tool` package type (`@appstrate/log`, `@appstrate/add-memory`, TypeScript extensions). It no longer exists. Runtime tools replaced the system tools, and integrations and MCP servers replaced custom tool code. A retired runtime tool id is refused when you save a manifest in the editor or import a ZIP or a GitHub URL. A manifest already stored, or one in an `.afps-bundle`, keeps working: the id is dropped and reported.
 
 ## Sandbox tools
 
-The agent runs on the Pi coding agent, which gives the model file and shell tools inside its workspace: `read`, `write`, `edit`, `bash`, plus `grep`, `find` and `ls`. The model uses them to read input files, run scripts shipped by [skills](/docs/features/skills), process data, and write deliverables under `./outputs/` (see [Files](/docs/features/files)). `python3` is available with `openpyxl`, `pandas`, `requests` and `PyPDF2` preinstalled.
+The agent runs on the Pi coding agent, which gives the model file and shell tools inside its workspace: `read`, `write`, `edit`, `bash`, plus `grep`, `find` and `ls`. The model uses them to read input files, run scripts shipped by [skills](/features/skills), process data, and write deliverables under `./outputs/` (see [Files](/features/files)). `python3` is available with `openpyxl`, `pandas`, `requests` and `PyPDF2` preinstalled.
 
 These tools act inside the sandbox only. Anything that reaches the outside world on the agent's behalf goes through the sidecar. Raw credentials are never in the sandbox.
 
@@ -39,7 +39,7 @@ Excerpt of the agent manifest:
 { "runtime_tools": ["output", "log", "note"] }
 ```
 
-Alongside them the sidecar exposes two read-only first-party tools, `run_history` (metadata of recent runs) and `recall_memory` (search the memory archive). `note`, `pin` and `recall_memory` are explained in [Memory](/docs/features/memory). Files are covered in [Files](/docs/features/files).
+Alongside them the sidecar exposes two read-only first-party tools, `run_history` (metadata of recent runs) and `recall_memory` (search the memory archive). `note`, `pin` and `recall_memory` are explained in [Memory](/features/memory). Files are covered in [Files](/features/files).
 
 The model's plain text is never delivered. To reach the user, an agent must call `output`, `log` or write a file.
 
@@ -63,9 +63,9 @@ The agent author picks which tools an agent can use. Excerpt of the agent manife
 - `tools: "*"` accepts every tool an upstream server advertises, only when the integration allows it.
 - The OAuth scopes requested at connection time are inferred from the selected tools.
 
-Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/docs/self-hosting/environment-variables).
+Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/self-hosting/environment-variables).
 
-For connections, scopes and the catalog, see [Integrations](/docs/integrations/overview).
+For connections, scopes and the catalog, see [Integrations](/integrations/overview).
 
 ## The `api_call` and `api_upload` tools
 
@@ -109,7 +109,7 @@ Without `toFile`, large responses still stay out of the model's context. A text 
 
 ### Resumable uploads: `api_upload`
 
-`api_upload` uploads a workspace file in chunks through a protocol the service supports. It exists only for an integration that declares `upload_protocols` on an auth in its `_meta["dev.appstrate/api"]` block. Of the built-in integrations, only [Google Drive](/docs/integrations/catalog/google-drive) does, with `google-resumable`.
+`api_upload` uploads a workspace file in chunks through a protocol the service supports. It exists only for an integration that declares `upload_protocols` on an auth in its `_meta["dev.appstrate/api"]` block. Of the built-in integrations, only [Google Drive](/integrations/catalog/google-drive) does, with `google-resumable`.
 
 | Argument         | Meaning                                                                                                                          |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -138,9 +138,9 @@ There is no tool-code package. To give agents a new capability, publish an **int
 - an integration with `source.kind: "remote"` points at a hosted MCP server (Streamable HTTP or SSE);
 - an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per connection bound to the run.
 
-Both are authored, versioned and shared like any [package](/docs/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/docs/integrations/overview) and [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure).
+Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/integrations/overview) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## Related
 
-- [Agents](/docs/features/agents) for the manifest fields.
-- [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar) for how tool calls are isolated.
+- [Agents](/features/agents) for the manifest fields.
+- [Sandbox and Sidecar](/features/sandbox-and-sidecar) for how tool calls are isolated.

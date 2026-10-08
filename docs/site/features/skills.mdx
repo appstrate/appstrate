@@ -5,7 +5,7 @@ description: Reusable instructions, in the Agent Skills format, that agents and 
 
 A skill is a portable unit of instruction. It follows the [Agent Skills](https://agentskills.io/specification) format: a folder with a `SKILL.md` file (YAML frontmatter, then Markdown), plus any supporting files. A skill written for Claude Code or another Agent Skills host works in Appstrate unchanged. Appstrate adds the package layer: versions, a registry, integrity hashes, sharing between spaces.
 
-Skills are one of the four [package types](/docs/features/packages) (`skill`).
+Skills are one of the four [package types](/features/packages) (`skill`).
 
 ## A minimal skill
 
@@ -87,7 +87,7 @@ curl -X POST https://your-instance/api/packages/skills/@acme/ticket-tone/version
 
 An update body can also carry `operations`, an ordered list of file edits applied atomically with the manifest. Limits: 1 MiB per written file, 50 MiB and 10,000 entries for the whole package.
 
-Versions are semver, forward-only and immutable. Importing an archive (`POST /api/packages/import`) creates the draft and a version at once. See [Packages](/docs/features/packages) for versions, dist-tags, import and export.
+Versions are semver, forward-only and immutable. Importing an archive (`POST /api/packages/import`) creates the draft and a version at once. See [Packages](/features/packages) for versions, dist-tags, import and export.
 
 ## Using a skill in an agent
 
@@ -103,11 +103,11 @@ Skills are attached in the agent manifest and nowhere else. Excerpt of the agent
 }
 ```
 
-At launch, each range resolves to a published version and its files are placed in the sandbox. The prompt lists the available skills with their descriptions. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/docs/features/runs).
+At launch, each range resolves to a published version and its files are placed in the sandbox. The prompt lists the available skills with their descriptions. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/features/runs).
 
 ## Skills in the chat assistant
 
-The [chat](/docs/using-appstrate/chat) assistant also uses the skills of the space. Each conversation has a skill mode:
+The [chat](/using-appstrate/chat) assistant also uses the skills of the space. Each conversation has a skill mode:
 
 | Mode             | Behaviour                                                                                    |
 | ---------------- | -------------------------------------------------------------------------------------------- |
@@ -119,7 +119,7 @@ A space admin can also **enforce** a skill: with `chat_enforced: true` on the sk
 
 ## Who can see and use a skill
 
-A skill has a **home space**, where its `skills:write` permission governs editing and publishing. Other spaces receive it through [sharing](/docs/features/library) and use it once they activate it. The `operator` and `viewer` space roles can read skills (a `runner` cannot), `builder` and `admin` can write them. See [roles and permissions](/docs/features/roles-and-permissions).
+A skill has a **home space**, where its `skills:write` permission governs editing and publishing. Other spaces receive it through [sharing](/features/library) and use it once they activate it. The `operator` and `viewer` space roles can read skills (a `runner` cannot), `builder` and `admin` can write them. See [roles and permissions](/features/roles-and-permissions).
 
 ## Portability
 

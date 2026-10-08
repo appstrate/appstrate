@@ -5,7 +5,7 @@ description: How the platform detects runs that never started, stalled or ran ou
 
 A run that nobody watches can hang forever: a container that never boots, a model call that never returns, a remote runner that lost its network. Appstrate watches every run, platform-managed or remote, and always brings it to a terminal status.
 
-There is no way to pause a run and resume it later. A run is `pending`, `running`, or finished (see [Runs](/docs/features/runs)).
+There is no way to pause a run and resume it later. A run is `pending`, `running`, or finished (see [Runs](/features/runs)).
 
 ## Two phases, two questions
 
@@ -38,7 +38,7 @@ If an agent declares an `output.schema` and ends its turn without calling the `o
 
 ## Remote runs
 
-A [remote run](/docs/features/runs#remote-runs) streams signed events to a short-lived sink. Its liveness works the same way: events and explicit heartbeats keep it alive, and the stall threshold applies. A long idle period can be bridged with `PATCH /api/runs/{runId}/sink/extend`, which pushes the sink expiry out (up to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, 24 hours by default) and counts as a heartbeat. The default sink lifetime is 2 hours (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`).
+A [remote run](/features/runs#remote-runs) streams signed events to a short-lived sink. Its liveness works the same way: events and explicit heartbeats keep it alive, and the stall threshold applies. A long idle period can be bridged with `PATCH /api/runs/{runId}/sink/extend`, which pushes the sink expiry out (up to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, 24 hours by default) and counts as a heartbeat. The default sink lifetime is 2 hours (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`).
 
 ## Restarts and shutdown
 
@@ -47,4 +47,4 @@ A [remote run](/docs/features/runs#remote-runs) streams signed events to a short
 
 ## Operating it
 
-All the variables above are listed in [Environment Variables](/docs/self-hosting/environment-variables), and `docs/ENV.md` in the repository is authoritative. Raise `RUN_BOOT_DEADLINE_SECONDS` on hosts where cold image pulls are slow. Lower `RUN_STALL_THRESHOLD_SECONDS` only if you also keep the ratio to the heartbeat interval.
+All the variables above are listed in [Environment Variables](/self-hosting/environment-variables), and `docs/ENV.md` in the repository is authoritative. Raise `RUN_BOOT_DEADLINE_SECONDS` on hosts where cold image pulls are slow. Lower `RUN_STALL_THRESHOLD_SECONDS` only if you also keep the ratio to the heartbeat interval.

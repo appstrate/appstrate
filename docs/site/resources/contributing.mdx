@@ -28,7 +28,7 @@ cp .env.example .env
 bun run dev          # http://localhost:3000, embedded database, no Docker
 ```
 
-That is Tier 0: PGlite, filesystem storage, in-memory queues, agents as host subprocesses. It is enough for most frontend, API, and backend work. `bun run setup` brings up the full stack (PostgreSQL, Redis, S3-compatible storage, Docker execution) when you need it. Changes under `runtime-pi/` need `bun run build-runtime`, which rebuilds the agent and sidecar images together. The infrastructure tiers are described in [Progressive infrastructure](/docs/self-hosting/progressive-infrastructure), and the layout of the code in [Architecture](/docs/resources/architecture).
+That is Tier 0: PGlite, filesystem storage, in-memory queues, agents as host subprocesses. It is enough for most frontend, API, and backend work. `bun run setup` brings up the full stack (PostgreSQL, Redis, S3-compatible storage, Docker execution) when you need it. Changes under `runtime-pi/` need `bun run build-runtime`, which rebuilds the agent and sidecar images together. The infrastructure tiers are described in [Progressive infrastructure](/self-hosting/progressive-infrastructure), and the layout of the code in [Architecture](/resources/architecture).
 
 Useful commands:
 

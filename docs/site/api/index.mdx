@@ -23,7 +23,7 @@ Browser clients on another origin must be listed in the instance's `TRUSTED_ORIG
 
 ## Authentication
 
-API keys (`apst_...`), session cookies, and OIDC tokens are accepted. Context headers (`X-Org-Id`, `X-Space-Id`, `Appstrate-User`) select the organization, the space, and the end-user. All of it is in [Authentication](/docs/api/authentication).
+API keys (`apst_...`), session cookies, and OIDC tokens are accepted. Context headers (`X-Org-Id`, `X-Space-Id`, `Appstrate-User`) select the organization, the space, and the end-user. All of it is in [Authentication](/api/authentication).
 
 ## Versioning
 
@@ -35,11 +35,11 @@ Appstrate-Version: 2026-03-21
 
 - The version is resolved from the request header, then from the version pinned on the organization, then the current version, `2026-03-21`. A header or a pin the server cannot serve is a `400 unsupported_api_version`; it never silently falls back.
 - `2026-03-21` is currently the only version, and a version does not yet change any response: the header is a contract marker you can send now to pin your integration. No `Deprecation` or `Sunset` header is emitted yet.
-- The platform is still in beta (`1.0.0-beta.x`) and some releases change the wire contract on purpose, for example the `ask_` to `apst_` key format and the `applications` to `spaces` rename. Breaking changes are called out in the [changelog](/docs/resources/changelog).
+- The platform is still in beta (`1.0.0-beta.x`) and some releases change the wire contract on purpose, for example the `ask_` to `apst_` key format and the `applications` to `spaces` rename. Breaking changes are called out in the [changelog](/resources/changelog).
 
 ## Errors
 
-Errors are RFC 9457 `application/problem+json` with a stable `code` and a `request_id`. Every response, success or error, carries a `Request-Id` header (`req_...`). See [Errors](/docs/api/errors).
+Errors are RFC 9457 `application/problem+json` with a stable `code` and a `request_id`. Every response, success or error, carries a `Request-Id` header (`req_...`). See [Errors](/api/errors).
 
 ## Rate limiting
 
@@ -65,11 +65,11 @@ RateLimit-Policy: 20;w=60
 | Run logs (`GET /api/runs/{id}/logs`)                 | 120 per minute |
 | File reads (`GET /api/files`)                        | 120 per minute |
 
-Runs are also capped per organization across all callers and all launch paths, 200 per minute by default (`PLATFORM_RUN_LIMITS`), and by concurrency limits. Operators tune these in the [environment variables](/docs/self-hosting/environment-variables) and [rate limits](/docs/self-hosting/rate-limits) guides. The `RateLimit-Policy` header on each response is authoritative for that route.
+Runs are also capped per organization across all callers and all launch paths, 200 per minute by default (`PLATFORM_RUN_LIMITS`), and by concurrency limits. Operators tune these in the [environment variables](/self-hosting/environment-variables) and [rate limits](/self-hosting/rate-limits) guides. The `RateLimit-Policy` header on each response is authoritative for that route.
 
 ## Idempotency
 
-A handful of `POST` operations accept an `Idempotency-Key`. Others reject it. See [Idempotency](/docs/api/idempotency).
+A handful of `POST` operations accept an `Idempotency-Key`. Others reject it. See [Idempotency](/api/idempotency).
 
 ## Pagination
 

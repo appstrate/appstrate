@@ -3,7 +3,7 @@ title: Notifications
 description: The in-app feed that tells people when a run finished or a package was shared with them.
 ---
 
-Notifications are the **in-app** inbox of a person or an [end-user](/docs/features/end-users): the bell in the web app, the unread dots on runs, and the unread counts on agents and schedules. They are not emails or push messages. To notify an external system, use [webhooks](/docs/features/webhooks).
+Notifications are the **in-app** inbox of a person or an [end-user](/features/end-users): the bell in the web app, the unread dots on runs, and the unread counts on agents and schedules. They are not emails or push messages. To notify an external system, use [webhooks](/features/webhooks).
 
 Each notification belongs to one **recipient** and one space, and has its own read state. Marking a notification read affects only the person who read it.
 
@@ -39,7 +39,7 @@ The feed is the recipient's own, so no role permission is needed beyond being in
 
 Runs and schedules expose the same state as `unread` (a run) and `unread_count` (a schedule), computed for the caller. The run page marks its notification read when you open it.
 
-There is no dedicated notification stream. To learn about completed runs live, follow `run_update` events on the [realtime](/docs/features/realtime) streams.
+There is no dedicated notification stream. To learn about completed runs live, follow `run_update` events on the [realtime](/features/realtime) streams.
 
 ## Housekeeping
 

@@ -137,7 +137,7 @@ curl "http://localhost:3000/api/webhooks/wh_.../deliveries?limit=20" \
   -H "Authorization: Bearer $APPSTRATE_KEY"
 ```
 
-Each delivery records `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, and `error`, newest first. Page with `startingAfter`, or follow the `Link: <...>; rel="next"` header. See [API Reference](/docs/api#pagination).
+Each delivery records `eventId`, `eventType`, `status` (`success` or `failed`), `statusCode`, `latency`, `attempt`, and `error`, newest first. Page with `startingAfter`, or follow the `Link: <...>; rel="next"` header. See [API Reference](/api#pagination).
 
 ## Test ping
 
@@ -161,5 +161,5 @@ The body is optional. The response returns the new `secret`, the `secretPrevious
 
 ## Next
 
-- [Webhooks feature guide](/docs/features/webhooks): managing subscriptions from the dashboard.
-- [Errors](/docs/api/errors) and [Idempotency](/docs/api/idempotency): creating webhooks safely.
+- [Webhooks feature guide](/features/webhooks): managing subscriptions from the dashboard.
+- [Errors](/api/errors) and [Idempotency](/api/idempotency): creating webhooks safely.

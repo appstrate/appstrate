@@ -13,11 +13,11 @@ You will build an agent that:
 4. Returns a structured result.
 5. Runs by itself at 8am on weekdays, and tells your own system if it fails.
 
-It uses two **integrations** (Gmail and Slack), a prompt, an input, an output schema, a schedule, and a webhook. Credentials never reach the agent: it calls both services through the run's sidecar, which injects the OAuth token. See [Architecture](/docs/resources/architecture).
+It uses two **integrations** (Gmail and Slack), a prompt, an input, an output schema, a schedule, and a webhook. Credentials never reach the agent: it calls both services through the run's sidecar, which injects the OAuth token. See [Architecture](/resources/architecture).
 
 ## Prerequisites
 
-- A running Appstrate instance and an account in it ([Get Started quickstart](/docs/get-started/quickstart)).
+- A running Appstrate instance and an account in it ([Get Started quickstart](/get-started/quickstart)).
 - A model the agent can run on. In **Organization settings**, open **Models**, add one with **Add model**, and make it the default with **Set as default**.
 - A Google account for Gmail and a Slack workspace where you may add an app.
 - The **Gmail (API)** and **Slack (API)** integrations active in your space, with an OAuth client for each. On a deployment that ships shared OAuth apps, such as Appstrate Cloud, there is nothing to configure. On a self-hosted instance, an administrator registers an OAuth client per integration, as in step 2.
@@ -188,7 +188,7 @@ curl -X POST "http://localhost:3000/api/agents/@your-org/email-daily-digest/sche
   }'
 ```
 
-A scheduled run executes as the person who created the schedule, with their connections. If that person's access ends, or one of the connections they used is deleted, the schedule is disabled with a reason you can read on its page, rather than failing silently. See [Scheduling](/docs/features/scheduling).
+A scheduled run executes as the person who created the schedule, with their connections. If that person's access ends, or one of the connections they used is deleted, the schedule is disabled with a reason you can read on its page, rather than failing silently. See [Scheduling](/features/scheduling).
 
 </Step>
 
@@ -212,7 +212,7 @@ curl -X POST "http://localhost:3000/api/webhooks" \
   }'
 ```
 
-Save the `whsec_...` secret from the response and verify signatures on your side. See [Webhooks](/docs/api/webhooks-guide). The dashboard has a **Webhooks** page for the same thing.
+Save the `whsec_...` secret from the response and verify signatures on your side. See [Webhooks](/api/webhooks-guide). The dashboard has a **Webhooks** page for the same thing.
 
 </Step>
 
@@ -220,16 +220,16 @@ Save the `whsec_...` secret from the response and verify signatures on your side
 
 ## Going further
 
-- **Memory.** Enable the `note` and `pin` runtime tools so the agent can remember the last email it processed and skip duplicates. See [Memory](/docs/features/memory).
+- **Memory.** Enable the `note` and `pin` runtime tools so the agent can remember the last email it processed and skip duplicates. See [Memory](/features/memory).
 - **More inputs.** Make the time window or the label to read configurable with more input fields.
 - **A skill.** Attach a skill with your own rules for what counts as urgent.
-- **End-users.** Run the same agent for each of your customers, with their own mailboxes, using the `Appstrate-User` header. See [End-user impersonation](/docs/api/authentication#end-user-impersonation).
-- **From your terminal.** `appstrate run @your-org/email-daily-digest` launches it from the CLI. See the [CLI guide](/docs/using-appstrate/cli).
+- **End-users.** Run the same agent for each of your customers, with their own mailboxes, using the `Appstrate-User` header. See [End-user impersonation](/api/authentication#end-user-impersonation).
+- **From your terminal.** `appstrate run @your-org/email-daily-digest` launches it from the CLI. See the [CLI guide](/using-appstrate/cli).
 
 ## Resources
 
-- [Agents](/docs/features/agents)
-- [Integrations overview](/docs/integrations/overview)
-- [Scheduling](/docs/features/scheduling)
-- [Webhooks](/docs/api/webhooks-guide)
-- [API Reference](/docs/api)
+- [Agents](/features/agents)
+- [Integrations overview](/integrations/overview)
+- [Scheduling](/features/scheduling)
+- [Webhooks](/api/webhooks-guide)
+- [API Reference](/api)

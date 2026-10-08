@@ -89,7 +89,7 @@ docker compose pull
 docker compose up -d
 ```
 
-If you track the repository's Compose file, diff it against yours before you replace it: a new release can add services, volumes or environment lines. A variable that your file does not forward never reaches the container, and a file from before 1.0.0-beta.65 forwards fewer than the current ones (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+If you track the repository's Compose file, diff it against yours before you replace it: a new release can add services, volumes or environment lines. A variable that your file does not forward never reaches the container, and a file from before 1.0.0-beta.65 forwards fewer than the current ones (see [Docker Compose](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
 
 </Tab>
 
@@ -114,4 +114,4 @@ There is no downgrade path for the database. Pinning the previous image works on
 2. Restore the PostgreSQL dump (`pg_restore --clean --if-exists`) and, if the release changed files, the file snapshot.
 3. Pin the previous `APPSTRATE_VERSION` for all images, and start.
 
-If the problem persists, see [Troubleshooting](/docs/self-hosting/troubleshooting).
+If the problem persists, see [Troubleshooting](/self-hosting/troubleshooting).

@@ -3,9 +3,9 @@ title: Custom Integrations
 description: Write your own integration as an AFPS package when the service you need is not one of the built-in integrations.
 ---
 
-When the service you need is not in the [built-in catalogue](/docs/integrations/catalog), write your own. A custom integration uses the same manifest format, the same runtime and the same connection flow as the built-in ones. The built-in manifests are the best reference: every `.afps` in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages) is a zip with a `manifest.json` at its root, and their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages).
+When the service you need is not in the [built-in catalogue](/integrations/catalog), write your own. A custom integration uses the same manifest format, the same runtime and the same connection flow as the built-in ones. The built-in manifests are the best reference: every `.afps` in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages) is a zip with a `manifest.json` at its root, and their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages).
 
-This page is a summary. The complete guide, with every strategy and field, is [Writing an integration with connect](https://github.com/appstrate/appstrate/blob/main/docs/guides/writing-an-integration-with-connect.md), and the wire format is the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md). Read [How integrations work](/docs/integrations/how-integrations-work) first if sources, auths and connections are new to you.
+This page is a summary. The complete guide, with every strategy and field, is [Writing an integration with connect](https://github.com/appstrate/appstrate/blob/main/docs/guides/writing-an-integration-with-connect.md), and the wire format is the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md). Read [How integrations work](/integrations/how-integrations-work) first if sources, auths and connections are new to you.
 
 ## Pick a source
 
@@ -103,7 +103,7 @@ Points that matter:
 - `scope_separator` defaults to a space. Some providers use a comma, for example Slack, Pinterest and Linear.
 - `identity_claims` maps the provider's user payload to an `account_id` (for example `"account_id": "$.email"`), which labels the connection and tells two accounts of the same service apart. Keys must be snake_case, and the platform refuses a manifest that uses another spelling. Without `account_id`, connections fall back to `Connexion 1`, `Connexion 2`.
 - `callback_url_hint` and `setup_guide` give the admin the steps shown when they register the OAuth app. Use the `{{callback_url}}` placeholder for the redirect URI.
-- An admin still has to register an OAuth client for it, as described in [How integrations work](/docs/integrations/how-integrations-work#setting-up-an-integration). The `@acme` scope has no system client.
+- An admin still has to register an OAuth client for it, as described in [How integrations work](/integrations/how-integrations-work#setting-up-an-integration). The `@acme` scope has no system client.
 
 ## Several fields (custom auth)
 
@@ -300,7 +300,7 @@ Import both archives as described under "Pack, import, publish" below, then acti
 
 ## Tools and scopes in agents
 
-Agents pick tools from `tools_policy` (remote and local sources) or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/docs/integrations/how-integrations-work#scopes).
+Agents pick tools from `tools_policy` (remote and local sources) or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/integrations/how-integrations-work#scopes).
 
 ## Pack, import, publish
 

@@ -48,7 +48,7 @@ curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
 - Sharing the same pair twice is idempotent.
 - `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws an offer **and** the placement behind it, so a space cannot keep running something it may no longer see. `target` is a space id or a user id.
 - The `share` permission belongs to the `admin` and `builder` presets, and API keys never carry it.
-- A person who receives a share gets a `package_shared` [notification](/docs/features/notifications).
+- A person who receives a share gets a `package_shared` [notification](/features/notifications).
 
 ## Placement and activation
 
@@ -69,7 +69,7 @@ curl -X DELETE https://your-instance/api/spaces/spc_.../packages/@acme/support-t
 - If the package is not placed in the space yet, activation can create the offer in the same step, when you also hold `<type>:share` in the home space. An API key activates only what is already placed.
 - **Deactivation never deletes anything.** The space keeps its model, proxy, generation settings and stored input values, so activating the package again restores them. Only withdrawing the share removes them.
 - `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId`, `generation_config`, and `chat_enforced` for a skill). It has no `enabled` field: activation is its own act.
-- A deactivated agent answers `404 agent_not_active_in_space` on launch and schedule creation, while its detail and runs stay readable. A [schedule](/docs/features/scheduling) of a deactivated agent produces visible failed runs and stays armed, so reactivating resumes it.
+- A deactivated agent answers `404 agent_not_active_in_space` on launch and schedule creation, while its detail and runs stay readable. A [schedule](/features/scheduling) of a deactivated agent produces visible failed runs and stays armed, so reactivating resumes it.
 
 Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`, `inactive`, `none`). A `none` placement is an offer nobody has taken up yet.
 

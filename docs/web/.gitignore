@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+.source/
+next-env.d.ts
+*.tsbuildinfo
+.wrangler/
+
+# Generated at build time from docs/site, docs/ENV.md and the OpenAPI spec
+# (scripts/sync-content.ts, ../../scripts/export-openapi.ts).
+/content/
+/openapi.json

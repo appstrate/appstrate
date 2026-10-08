@@ -3,7 +3,7 @@ title: Quickstart
 description: Install an instance, connect a model and run your first agent.
 ---
 
-This is the local happy path. For server deployments, Docker Compose, or driving an instance from another machine, see [Install](/docs/get-started/install).
+This is the local happy path. For server deployments, Docker Compose, or driving an instance from another machine, see [Install](/get-started/install).
 
 <Steps>
 
@@ -23,7 +23,7 @@ appstrate install
 
 Pick a tier when asked. Tier 2 (PostgreSQL + Redis, agents in Docker containers) is the default when Docker is running. Tier 0 needs nothing but Bun: an embedded database, and agents as plain subprocesses, which is fine for evaluation. When the healthcheck passes, the instance is at `http://localhost:3000`.
 
-To skip the prompts, add `--yes`: `curl -fsSL https://get.appstrate.dev | bash -s -- --yes`. That also makes the instance invitation-only on Docker tiers, so you claim ownership at `/claim` with the token the installer prints. See [Install](/docs/get-started/install#who-can-sign-up).
+To skip the prompts, add `--yes`: `curl -fsSL https://get.appstrate.dev | bash -s -- --yes`. That also makes the instance invitation-only on Docker tiers, so you claim ownership at `/claim` with the token the installer prints. See [Install](/get-started/install#who-can-sign-up).
 
 </Step>
 
@@ -60,7 +60,7 @@ The run streams live: logs, tool calls, and the result when it finishes. Open **
 
 <Tab value="Chat">
 
-Open **Chat** in the sidebar, pick a model, and ask for what you want, for example "Run my Hello World agent and show me the result". The assistant acts with your own permissions, launches the run and reports back. See [Chat](/docs/using-appstrate/chat).
+Open **Chat** in the sidebar, pick a model, and ask for what you want, for example "Run my Hello World agent and show me the result". The assistant acts with your own permissions, launches the run and reports back. See [Chat](/using-appstrate/chat).
 
 </Tab>
 
@@ -72,7 +72,7 @@ appstrate api GET /api/agents                      # each agent has an id like @
 appstrate run @acme/hello-world@draft              # launch the draft and follow the logs
 ```
 
-`appstrate login` pins your organization and its default space on the profile, so later commands need no extra flags. Replace `@acme` with your organization's slug. See [CLI](/docs/using-appstrate/cli).
+`appstrate login` pins your organization and its default space on the profile, so later commands need no extra flags. Replace `@acme` with your organization's slug. See [CLI](/using-appstrate/cli).
 
 </Tab>
 
@@ -86,7 +86,7 @@ claude plugin marketplace add appstrate/claude-plugins
 claude plugin install appstrate@appstrate
 ```
 
-Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/docs/using-appstrate/skill).
+Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/using-appstrate/skill).
 
 </Tab>
 
@@ -106,8 +106,8 @@ On Docker tiers the agent ran in its own container, and the credentials of any i
 
 ## Where to go next
 
-- [Concepts](/docs/get-started/concepts): the mental model behind agents, runs, integrations, spaces and packages
-- [Using Appstrate / Webapp](/docs/using-appstrate/webapp): a tour of the dashboard
-- [Using Appstrate / CLI](/docs/using-appstrate/cli): the command reference
-- [Features](/docs/features/agents): one page per primitive
-- [Self-Hosting](/docs/self-hosting): when to leave Tier 0 and how to operate in production
+- [Concepts](/get-started/concepts): the mental model behind agents, runs, integrations, spaces and packages
+- [Using Appstrate / Webapp](/using-appstrate/webapp): a tour of the dashboard
+- [Using Appstrate / CLI](/using-appstrate/cli): the command reference
+- [Features](/features/agents): one page per primitive
+- [Self-Hosting](/self-hosting): when to leave Tier 0 and how to operate in production

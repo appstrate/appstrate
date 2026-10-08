@@ -63,7 +63,7 @@ Run the same command again and you get the same `201` and the same end-user, wit
 
 ## Storage
 
-Keys live in the platform's shared cache. With `REDIS_URL` set, that is Redis, shared by every replica and surviving restarts. Without it, the cache is in the memory of the single API process: keys are lost on restart and are not shared between replicas. That is fine for local development and a single-node install; use Redis for anything replicated. See [Progressive infrastructure](/docs/self-hosting/progressive-infrastructure).
+Keys live in the platform's shared cache. With `REDIS_URL` set, that is Redis, shared by every replica and surviving restarts. Without it, the cache is in the memory of the single API process: keys are lost on restart and are not shared between replicas. That is fine for local development and a single-node install; use Redis for anything replicated. See [Progressive infrastructure](/self-hosting/progressive-infrastructure).
 
 ## Practices
 

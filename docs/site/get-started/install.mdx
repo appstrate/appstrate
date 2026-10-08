@@ -25,7 +25,7 @@ Then it depends on where you run it:
 curl -fsSL https://get.appstrate.dev | bash -s -- --yes --tier 1 --dir ~/apps/appstrate --port 4000
 ```
 
-With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachable and **Tier 0** otherwise. The flags are those of [`appstrate install`](/docs/using-appstrate/cli). `minisign` must be installed to verify the download. The script offers to install it with your package manager, and does so without asking when unattended.
+With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachable and **Tier 0** otherwise. The flags are those of [`appstrate install`](/using-appstrate/cli). `minisign` must be installed to verify the download. The script offers to install it with your package manager, and does so without asking when unattended.
 
 | Tier | Runtime | Services                   | Storage            |
 | ---- | ------- | -------------------------- | ------------------ |
@@ -34,7 +34,7 @@ With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachabl
 | 2    | Docker  | PostgreSQL + Redis         | Filesystem         |
 | 3    | Docker  | PostgreSQL + Redis + MinIO | S3 (bundled MinIO) |
 
-Tier 2 is the recommended single-node production stack. See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure) for the trade-offs.
+Tier 2 is the recommended single-node production stack. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure) for the trade-offs.
 
 </Tab>
 
@@ -51,7 +51,7 @@ Use this when you already have [Bun](https://bun.sh) and prefer the package mana
 
 <Tab value="Docker Compose">
 
-For a manual Docker Compose setup (CI, Kubernetes preparation, custom orchestration), see [Self-Hosting / Docker Compose](/docs/self-hosting/docker-compose). You edit the compose file and the `.env` yourself; the installer is not involved.
+For a manual Docker Compose setup (CI, Kubernetes preparation, custom orchestration), see [Self-Hosting / Docker Compose](/self-hosting/docker-compose). You edit the compose file and the `.env` yourself; the installer is not involved.
 
 </Tab>
 
@@ -66,7 +66,7 @@ How the first account is created depends on how you installed:
 - **Open instance** (Tier 0, or a Docker tier where you left the bootstrap email empty). Anyone who can reach the URL can sign up, and each new account creates its own organization.
 - **Invitation-only instance** (an unattended Docker install, or a bootstrap email given at the prompt or in `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`). Public sign-up is off. The installer generates a single-use token, prints it with the claim URL at the end of the install, and stores it in `.env` as `AUTH_BOOTSTRAP_TOKEN`. Open `<APP_URL>/claim`, paste the token and enter your name, email and password to create the first owner. When you gave a bootstrap email, the claim accepts that address only. Everyone else joins by invitation. Re-running the installer on an existing install never mints a new token.
 
-The full matrix of options (domain restrictions, platform admins, magic links) is in [`AUTH_MODES.md`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). Environment variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
+The full matrix of options (domain restrictions, platform admins, magic links) is in [`AUTH_MODES.md`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). Environment variables are listed in [Environment Variables](/self-hosting/environment-variables).
 
 ### Behind a reverse proxy
 
@@ -76,11 +76,11 @@ For a server reached on a public domain, give the installer the public origin so
 curl -fsSL https://get.appstrate.dev | bash -s -- --yes --app-url https://appstrate.example.com
 ```
 
-The installer does not set up the reverse proxy or TLS. Point your proxy at `localhost:<port>`. See [Self-Hosting](/docs/self-hosting) and the [production considerations](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#production-considerations).
+The installer does not set up the reverse proxy or TLS. Point your proxy at `localhost:<port>`. See [Self-Hosting](/self-hosting) and the [production considerations](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#production-considerations).
 
 ### Manage and upgrade the install
 
-On Docker tiers the CLI wraps Docker Compose: `appstrate start`, `stop`, `restart`, `logs -f [service]`, `status` and `uninstall` (add `--purge` to delete the data too). `appstrate self-update` upgrades a CLI installed with curl. Upgrading the instance is covered in [Upgrading](/docs/self-hosting/upgrading), and the CLI channels in [Upgrading the CLI](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
+On Docker tiers the CLI wraps Docker Compose: `appstrate start`, `stop`, `restart`, `logs -f [service]`, `status` and `uninstall` (add `--purge` to delete the data too). `appstrate self-update` upgrades a CLI installed with curl. Upgrading the instance is covered in [Upgrading](/self-hosting/upgrading), and the CLI channels in [Upgrading the CLI](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
 
 To verify the installer before you run it, use `curl -fsSL https://get.appstrate.dev/verify.sh | bash`. Signature and provenance details are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#verifying-the-installer).
 
@@ -90,7 +90,7 @@ Once the instance is up there are several ways to use it. They all work whether 
 
 ### Webapp and chat
 
-Open the instance URL in a browser: `http://localhost:3000` locally, or `https://<your-domain>` for a deployment. Create or claim your account, add a model, then build and run agents or talk to the [chat](/docs/using-appstrate/chat). See [Using Appstrate / Webapp](/docs/using-appstrate/webapp).
+Open the instance URL in a browser: `http://localhost:3000` locally, or `https://<your-domain>` for a deployment. Create or claim your account, add a model, then build and run agents or talk to the [chat](/using-appstrate/chat). See [Using Appstrate / Webapp](/using-appstrate/webapp).
 
 ### CLI
 
@@ -107,15 +107,15 @@ appstrate login --instance http://localhost:3000       # local
 appstrate login --instance https://appstrate.acme.com  # remote
 ```
 
-The CLI uses a device flow: it prints a code and a URL, you approve in the browser, and it stores a short-lived access token and a rotating refresh token in your OS keyring. A profile (instance URL, pinned organization and space) is kept in `~/.config/appstrate/config.toml`. Use `--profile <name>` to keep several instances side by side. See [CLI](/docs/using-appstrate/cli).
+The CLI uses a device flow: it prints a code and a URL, you approve in the browser, and it stores a short-lived access token and a rotating refresh token in your OS keyring. A profile (instance URL, pinned organization and space) is kept in `~/.config/appstrate/config.toml`. Use `--profile <name>` to keep several instances side by side. See [CLI](/using-appstrate/cli).
 
 ### Coding agents and MCP clients
 
-`appstrate code sync` brings your spaces' skills and agents into Claude Code and Codex ([Skills and coding agents](/docs/using-appstrate/skill)). Any MCP client can also connect to an organization's MCP endpoint ([MCP clients](/docs/using-appstrate/mcp-clients)).
+`appstrate code sync` brings your spaces' skills and agents into Claude Code and Codex ([Skills and coding agents](/using-appstrate/skill)). Any MCP client can also connect to an organization's MCP endpoint ([MCP clients](/using-appstrate/mcp-clients)).
 
 ## Next steps
 
-- [Quickstart](/docs/get-started/quickstart): run your first agent
-- [Concepts](/docs/get-started/concepts): the mental model
-- [Self-Hosting](/docs/self-hosting): production checklist, environment variables, upgrades
-- [Using Appstrate / CLI](/docs/using-appstrate/cli): the command reference
+- [Quickstart](/get-started/quickstart): run your first agent
+- [Concepts](/get-started/concepts): the mental model
+- [Self-Hosting](/self-hosting): production checklist, environment variables, upgrades
+- [Using Appstrate / CLI](/using-appstrate/cli): the command reference

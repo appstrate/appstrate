@@ -27,11 +27,11 @@ The endpoint needs no authentication. The response has `status`, `version`, `upt
 
 The HTTP status is `503` when `status` is `unhealthy` and `200` otherwise, so a `degraded` platform still answers `200`. While the server is still starting, `/health` answers `503` with `status: "starting"` and a `Retry-After: 1` header, and every other path answers a `503` problem document with the code `starting`.
 
-The platform image has a built-in container health check. It polls `/health` every 30 seconds and counts the container as healthy only when `status` is exactly `healthy`, so a `degraded` platform shows as unhealthy to Docker. The root `docker-compose.yml` keeps that check, but the self-hosting templates in `examples/self-hosting` (the ones `appstrate install` writes) replace it with a request to `GET /`, which only shows that the server answers. Whichever you run, point an external uptime monitor at `/health`. Alert on a non-`200` answer, and also on any `status` other than `healthy` if you want to catch `degraded`. See [Docker Compose](/docs/self-hosting/docker-compose#verify) for a first check after install.
+The platform image has a built-in container health check. It polls `/health` every 30 seconds and counts the container as healthy only when `status` is exactly `healthy`, so a `degraded` platform shows as unhealthy to Docker. The root `docker-compose.yml` keeps that check, but the self-hosting templates in `examples/self-hosting` (the ones `appstrate install` writes) replace it with a request to `GET /`, which only shows that the server answers. Whichever you run, point an external uptime monitor at `/health`. Alert on a non-`200` answer, and also on any `status` other than `healthy` if you want to catch `degraded`. See [Docker Compose](/self-hosting/docker-compose#verify) for a first check after install.
 
 ## Logs and request ids
 
-The platform writes one JSON object per line to stdout. Fields passed with a message are merged into the object. Inside a trace context, `trace_id`, `span_id` and `trace_flags` are added to every line. See [Docker Compose](/docs/self-hosting/docker-compose#logs) for how to read the stream of a Compose install.
+The platform writes one JSON object per line to stdout. Fields passed with a message are merged into the object. Inside a trace context, `trace_id`, `span_id` and `trace_flags` are added to every line. See [Docker Compose](/self-hosting/docker-compose#logs) for how to read the stream of a Compose install.
 
 `LOG_LEVEL` accepts `debug`, `info` (default), `warn` and `error`. At `debug` the platform also writes one `request` line per request, with these fields:
 
@@ -43,11 +43,11 @@ The platform writes one JSON object per line to stdout. Fields passed with a mes
 | `status`     | The response status                                                                                          |
 | `durationMs` | Handler time in milliseconds. For a streamed response it is the time to the headers, not the stream lifetime |
 
-Every response carries a `Request-Id` header of the form `req_<uuid>`, and error bodies repeat it as `request_id` (see [Errors](/docs/api/errors)). The error lines written by the error handler (`Request failed` and `Unhandled error`) carry the same `requestId`, so a request id from a customer leads to the server-side cause. When a request arrives with a valid W3C `traceparent` header, the platform echoes it back and attaches its trace id to the logs of that request.
+Every response carries a `Request-Id` header of the form `req_<uuid>`, and error bodies repeat it as `request_id` (see [Errors](/api/errors)). The error lines written by the error handler (`Request failed` and `Unhandled error`) carry the same `requestId`, so a request id from a customer leads to the server-side cause. When a request arrives with a valid W3C `traceparent` header, the platform echoes it back and attaches its trace id to the logs of that request.
 
-The live model catalog logs `model catalog applied` at `info` when a new file is accepted, and a `model catalog not refreshed` warning when the hourly read fails (see [Isolation and Security](/docs/self-hosting/isolation-and-security#live-model-catalog)).
+The live model catalog logs `model catalog applied` at `info` when a new file is accepted, and a `model catalog not refreshed` warning when the hourly read fails (see [Isolation and Security](/self-hosting/isolation-and-security#live-model-catalog)).
 
-Log levels and messages change between releases. Before you build an alert on a log line, read the operator notes of the release in the [changelog](/docs/resources/changelog).
+Log levels and messages change between releases. Before you build an alert on a log line, read the operator notes of the release in the [changelog](/resources/changelog).
 
 ## OpenTelemetry traces and metrics
 
@@ -82,9 +82,9 @@ OTEL_SERVICE_NAME=appstrate-api
 
 </Steps>
 
-With the module loaded and no endpoint, everything stays a no-op. Without the module, the variables are inert. The four variables the module reads are `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` (the `service.name` of every span and metric, `appstrate-api` by default) and `OTEL_TRUST_INCOMING_TRACE`. They are listed in [Environment Variables](/docs/self-hosting/environment-variables). The exporters also honor the standard OTLP variables such as `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so any OTLP/HTTP backend works: an OpenTelemetry Collector, Grafana Alloy, or a hosted service.
+With the module loaded and no endpoint, everything stays a no-op. Without the module, the variables are inert. The four variables the module reads are `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` (the `service.name` of every span and metric, `appstrate-api` by default) and `OTEL_TRUST_INCOMING_TRACE`. They are listed in [Environment Variables](/self-hosting/environment-variables). The exporters also honor the standard OTLP variables such as `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so any OTLP/HTTP backend works: an OpenTelemetry Collector, Grafana Alloy, or a hosted service.
 
-On Docker Compose, remember that the container only receives the variables its `environment:` list names (see [Docker Compose](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). The shipped Compose files already pass through the four `OTEL_*` variables above plus `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so setting them in `.env` is enough. `MODULES` is passed through too.
+On Docker Compose, remember that the container only receives the variables its `environment:` list names (see [Docker Compose](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). The shipped Compose files already pass through the four `OTEL_*` variables above plus `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_PROTOCOL`, so setting them in `.env` is enough. `MODULES` is passed through too.
 
 To check that it worked, look for the boot log line `OpenTelemetry observability enabled`, which names the service and the endpoint. A misconfiguration never stops the platform: the boot logs `OpenTelemetry init failed` at `error` level and continues without telemetry.
 
@@ -139,8 +139,8 @@ An inbound `traceparent` header is **not trusted by default**. On a public API, 
 
 ### Limits
 
-- The LLM latency histogram measures calls that go through the platform's LLM proxy. Runs on a subscription provider send inference through the run's sidecar and are not in that histogram. See [LLM Models](/docs/integrations/llm-models).
+- The LLM latency histogram measures calls that go through the platform's LLM proxy. Runs on a subscription provider send inference through the run's sidecar and are not in that histogram. See [LLM Models](/integrations/llm-models).
 - There is no automatic instrumentation of libraries (database driver, HTTP client). Spans exist at the places listed above.
 - Spans and metrics are flushed during a graceful shutdown, so a clean restart does not drop the last interval.
 
-The design notes behind these choices are in [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md). Production recommendations, including what to alert on, are in the [Production Checklist](/docs/self-hosting/production-checklist#set-up-monitoring).
+The design notes behind these choices are in [OBSERVABILITY.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/OBSERVABILITY.md). Production recommendations, including what to alert on, are in the [Production Checklist](/self-hosting/production-checklist#set-up-monitoring).

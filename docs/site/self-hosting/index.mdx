@@ -25,7 +25,7 @@ For unattended installs (CI, cloud-init, Ansible), pass `--yes`. The script then
 curl -fsSL https://get.appstrate.dev | bash -s -- --yes
 ```
 
-Every `appstrate install` flag (`--tier`, `--dir`, `--port`, `--app-url`, `--run-adapter`) passes through. Details, the verification options and the lifecycle commands (`appstrate start`, `stop`, `logs`, `status`, `uninstall`) are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md). To manage the Compose files yourself, see [Docker Compose](/docs/self-hosting/docker-compose).
+Every `appstrate install` flag (`--tier`, `--dir`, `--port`, `--app-url`, `--run-adapter`) passes through. Details, the verification options and the lifecycle commands (`appstrate start`, `stop`, `logs`, `status`, `uninstall`) are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md). To manage the Compose files yourself, see [Docker Compose](/self-hosting/docker-compose).
 
 ## Requirements
 
@@ -36,15 +36,15 @@ Every `appstrate install` flag (`--tier`, `--dir`, `--port`, `--app-url`, `--run
 | 2    | Same as Tier 1                                                                                             | PostgreSQL and Redis                                  |
 | 3    | Same as Tier 1                                                                                             | PostgreSQL, Redis and bundled MinIO                   |
 
-The self-hosting README recommends at least 4 GB of available RAM for the Docker tiers. The shipped root `docker-compose.yml` caps the platform container at 8 GiB, PostgreSQL at 1 GiB, Redis at 256 MiB and MinIO at 512 MiB. Agent runs are separate sibling containers, each bounded by the run limits (1536 MiB and 2 vCPU by default), so size the host for your expected concurrency. See [Isolation and Security](/docs/self-hosting/isolation-and-security#container-hardening-and-resource-limits).
+The self-hosting README recommends at least 4 GB of available RAM for the Docker tiers. The shipped root `docker-compose.yml` caps the platform container at 8 GiB, PostgreSQL at 1 GiB, Redis at 256 MiB and MinIO at 512 MiB. Agent runs are separate sibling containers, each bounded by the run limits (1536 MiB and 2 vCPU by default), so size the host for your expected concurrency. See [Isolation and Security](/self-hosting/isolation-and-security#container-hardening-and-resource-limits).
 
 On Windows, run the installer inside WSL2.
 
 ## How the pieces fit
 
-- **Tiers** decide which data services you run. Each missing service is replaced by an in-process fallback. See [Progressive Infrastructure](/docs/self-hosting/progressive-infrastructure).
+- **Tiers** decide which data services you run. Each missing service is replaced by an in-process fallback. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 - **Execution backends** decide where agent runs execute: `docker` (one isolated container pair per run), `process` (host subprocesses, no isolation, the code default) or `firecracker` (microVMs, opt-in). They are independent of the tiers.
-- **Modules** are optional features loaded at boot from the `MODULES` variable. The default set is `oidc`, `webhooks`, `mcp`, `core-providers` and `@appstrate/module-chat`. Others are opt-in. See [Modules](/docs/self-hosting/progressive-infrastructure#modules).
+- **Modules** are optional features loaded at boot from the `MODULES` variable. The default set is `oidc`, `webhooks`, `mcp`, `core-providers` and `@appstrate/module-chat`. Others are opt-in. See [Modules](/self-hosting/progressive-infrastructure#modules).
 
 ## First run and auth modes
 
@@ -57,40 +57,40 @@ For a private deployment, use **closed mode**: signup is disabled, organizations
 - Open `<APP_URL>/claim`, paste the token and choose the owner email and password. The root organization is created in the same step.
 - Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is claimed.
 
-The token only works if the container receives it, and a Compose file forwards only the variables it lists. The Compose files shipped since 1.0.0-beta.65 list `AUTH_BOOTSTRAP_TOKEN`. A file that predates that release does not: add a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment` and restart before you open `/claim` (see [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+The token only works if the container receives it, and a Compose file forwards only the variables it lists. The Compose files shipped since 1.0.0-beta.65 list `AUTH_BOOTSTRAP_TOKEN`. A file that predates that release does not: add a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment` and restart before you open `/claim` (see [Compose forwards only what it lists](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
 
 Two rules about the named accounts:
 
 - When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the claim accepts that address only. Any other address is refused with `403 bootstrap_owner_email_mismatch`.
 - The token works only while the instance has no organization. Once one exists, `/claim` answers `410`. An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` that has no account yet is not created by the sign-up form: it gets its account from a magic link (SMTP required) or from a Google or GitHub sign-in whose provider asserts the address as verified. The claim itself creates one account, the owner's.
 
-The full matrix of flags, recipes, known limits and recovery procedures is in [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). The variables are listed in [Environment Variables](/docs/self-hosting/environment-variables).
+The full matrix of flags, recipes, known limits and recovery procedures is in [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). The variables are listed in [Environment Variables](/self-hosting/environment-variables).
 
 ## Guides
 
 <Cards>
-  <Card title="Progressive Infrastructure" href="/docs/self-hosting/progressive-infrastructure">
+  <Card title="Progressive Infrastructure" href="/self-hosting/progressive-infrastructure">
     Tiers 0 to 3, execution backends and modules.
   </Card>
-  <Card title="Docker Compose" href="/docs/self-hosting/docker-compose">
+  <Card title="Docker Compose" href="/self-hosting/docker-compose">
     Run the shipped Compose files without the installer.
   </Card>
-  <Card title="Environment Variables" href="/docs/self-hosting/environment-variables">
+  <Card title="Environment Variables" href="/self-hosting/environment-variables">
     Every variable, with defaults.
   </Card>
-  <Card title="Production Checklist" href="/docs/self-hosting/production-checklist">
+  <Card title="Production Checklist" href="/self-hosting/production-checklist">
     What to verify before taking the instance live.
   </Card>
-  <Card title="Isolation and Security" href="/docs/self-hosting/isolation-and-security">
+  <Card title="Isolation and Security" href="/self-hosting/isolation-and-security">
     Networks, credentials and egress rules.
   </Card>
-  <Card title="Rate Limits" href="/docs/self-hosting/rate-limits">
+  <Card title="Rate Limits" href="/self-hosting/rate-limits">
     Per-endpoint limits and run limits.
   </Card>
-  <Card title="Upgrading" href="/docs/self-hosting/upgrading">
+  <Card title="Upgrading" href="/self-hosting/upgrading">
     Back up, read the operator notes, upgrade.
   </Card>
-  <Card title="Troubleshooting" href="/docs/self-hosting/troubleshooting">
+  <Card title="Troubleshooting" href="/self-hosting/troubleshooting">
     Common boot, run and network problems.
   </Card>
 </Cards>

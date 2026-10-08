@@ -6,13 +6,14 @@ it; start here when you need the detail behind a subsystem.
 
 ## Public documentation
 
-[**site/**](./site/) is the documentation published on the Appstrate website under `/docs`: get started, features,
+[**site/**](./site/) is the public documentation at <https://docs.appstrate.com>: get started, features,
 integrations, self-hosting, API guides, resources. It is maintained here, next to the code it describes, so a
-change that alters behaviour updates its page in the same pull request. The website repository
-(`appstrate/website`) copies it at build time (`scripts/sync-docs.ts`); it also publishes [ENV.md](./ENV.md) as
-the "Environment Variables" page and generates the API reference from the OpenAPI spec, so neither is
-written in `site/`. Merging a change under `site/` or to `ENV.md` rebuilds the website
-(`.github/workflows/docs-site.yml`). Read `site/README.md` before adding a page.
+change that alters behaviour updates its page in the same pull request. [**web/**](./web/) is the site itself,
+a static Next.js export with its own `package.json` and lockfile, outside the workspaces and `bun run check`.
+It also publishes [ENV.md](./ENV.md) as the "Environment Variables" page and generates the API reference from
+the OpenAPI document of the same commit, so neither is written in `site/`.
+`.github/workflows/docs-site.yml` builds it on every pull request that touches the docs or the API spec and
+deploys it to Cloudflare Pages. Read `site/README.md` before adding a page.
 
 ## Reference
 

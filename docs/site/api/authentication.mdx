@@ -23,8 +23,8 @@ An organization contains spaces, and most resources (agents, runs, schedules, en
 | `X-Org-Id`          | Session cookies, instance-level OIDC tokens                    | Selects the organization. Ignored with an API key: the key is bound to its organization, and only `X-Space-Id` is checked                                                                                   |
 | `X-Space-Id`        | Session cookies, instance-level OIDC tokens                    | Selects the space on space-scoped routes. An API key is already pinned to one space. If they differ, the answer is `403`. If a space-scoped route gets none, the answer is `400` with `param: "X-Space-Id"` |
 | `Appstrate-User`    | API keys only                                                  | `eu_...` end-user id. Run the request on behalf of that end-user. See [End-user impersonation](#end-user-impersonation)                                                                                     |
-| `Appstrate-Version` | Optional                                                       | Date version of the API, `YYYY-MM-DD`. See [API Reference](/docs/api#versioning)                                                                                                                            |
-| `Idempotency-Key`   | Operations that declare it                                     | See [Idempotency](/docs/api/idempotency)                                                                                                                                                                    |
+| `Appstrate-Version` | Optional                                                       | Date version of the API, `YYYY-MM-DD`. See [API Reference](/api#versioning)                                                                                                                                 |
+| `Idempotency-Key`   | Operations that declare it                                     | See [Idempotency](/api/idempotency)                                                                                                                                                                         |
 | `X-View-As`         | Sessions (and instance-level OIDC tokens) of owners and admins | Preview the API as a lesser role. Refused with `400 view_as_unsupported` on API keys                                                                                                                        |
 
 The routes that need a space are the ones under `/api/agents`, `/api/runs`, `/api/schedules`, `/api/end-users`, `/api/api-keys`, `/api/notifications`, `/api/packages`, `/api/integrations`, `/api/uploads`, and `/api/files`. Organization-level routes such as `/api/models` need `X-Org-Id` only, and the `/api/orgs/{orgId}` family carries the organization in the path. The `parameters` of each operation in the OpenAPI document say which headers it takes.
@@ -103,7 +103,7 @@ Loaded modules add their own: `webhooks:read|write|delete` (webhooks module), `o
 GET /api/realtime/runs/{id}?token=apst_...
 ```
 
-Other routes only read the `Authorization` header. See [Realtime streams](/docs/api#realtime-streams).
+Other routes only read the `Authorization` header. See [Realtime streams](/api#realtime-streams).
 
 ## Session cookies
 
@@ -147,7 +147,7 @@ Endpoints:
 
 OAuth clients are registered and managed only through the `/api/oauth/clients` routes, under the `oauth-clients:*` permissions and the confinement of their level. The client endpoints of the underlying library (`/api/auth/oauth2/create-client`, `get-client`, `get-clients`, `update-client`, `delete-client` and `client/rotate-secret`) answer `401` to every session, so a signed-in user cannot mint or read a client through them. Dynamic client registration, which needs no session, is unchanged. The authorize, token, introspect, revoke and registration endpoints are rate limited per IP address, and a call refused by that limit is a `429` with a `Retry-After` header and an RFC 6749 body (`{ "error": "temporarily_unavailable", "error_description": "..." }`), not a problem document.
 
-A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). To register clients, embed the flow and set up per-space SMTP and social sign-in, see [Embedded sign-in](/docs/features/embedded-sign-in). The module's internals are in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
+A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). To register clients, embed the flow and set up per-space SMTP and social sign-in, see [Embedded sign-in](/features/embedded-sign-in). The module's internals are in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
 
 OIDC tokens are not accepted by the `?token=` query parameter of the SSE routes, which takes API keys only. Use a cookie session or an API key for realtime streams.
 
@@ -165,7 +165,7 @@ Appstrate-User: eu_...
 - Runs, memory, and integration connections used by the request belong to that end-user, and end-users only see their own runs.
 - Every impersonated request is logged server-side with the request id, key id, end-user id, method, path, IP, and user agent.
 
-See [Multi-tenancy](/docs/features/multi-tenancy) and [End-users](/docs/features/end-users).
+See [Multi-tenancy](/features/multi-tenancy) and [End-users](/features/end-users).
 
 ## Errors
 
@@ -175,6 +175,6 @@ See [Multi-tenancy](/docs/features/multi-tenancy) and [End-users](/docs/features
 | 403    | `forbidden`          | The credential is valid but lacks the permission, or a context header contradicts the credential |
 | 403    | `not_a_space_member` | The caller holds no role in the requested space                                                  |
 | 400    | `header_not_allowed` | A header such as `Appstrate-User` was sent with a credential that cannot honor it                |
-| 429    | `rate_limited`       | Too many requests. See [API Reference](/docs/api#rate-limiting)                                  |
+| 429    | `rate_limited`       | Too many requests. See [API Reference](/api#rate-limiting)                                       |
 
-All errors are RFC 9457 problem documents. See [Errors](/docs/api/errors).
+All errors are RFC 9457 problem documents. See [Errors](/api/errors).

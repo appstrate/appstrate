@@ -7,15 +7,15 @@ If you are the platform or internal-dev engineer rolling out Appstrate inside a 
 
 Instead of opening the dashboard, reading the docs and hand-typing `curl` or `appstrate api`, you describe what you want (_"connect Gmail and create an agent that summarizes new emails every morning"_) and the coding agent executes it against your active profile.
 
-This page covers when to use each connection path. For the plugin and skills sync (install, targets, flags), see [Skills and coding agents](/docs/using-appstrate/skill).
+This page covers when to use each connection path. For the plugin and skills sync (install, targets, flags), see [Skills and coding agents](/using-appstrate/skill).
 
 ## Three ways to connect
 
-| Way                   | What the coding agent gets                                                                                                                                                                                                                                                                                                                   | Setup                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| **Skills and plugin** | The skills of your spaces, synced into the agent's skill directories with `appstrate code sync`. In Claude Code, the agents of your pinned space also become `/appstrate:run-<agent>` commands.                                                                                                                                              | See [Skills and coding agents](/docs/using-appstrate/skill) |
-| **CLI**               | `appstrate api` for any REST call without handling a token, plus commands to run agents and edit packages (`appstrate packages pull`, `push`, `publish`). Uses your named profiles. The repository ships an operating manual for coding agents, [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). | [CLI](/docs/using-appstrate/cli)                            |
-| **MCP**               | The platform as an MCP server: `search_operations`, `describe_operation` and `invoke_operation` over the whole API, plus `run_and_wait`. No CLI needed, and the key's permissions decide what is visible.                                                                                                                                    | `claude mcp add --transport http ...`, see below            |
+| Way                   | What the coding agent gets                                                                                                                                                                                                                                                                                                                   | Setup                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Skills and plugin** | The skills of your spaces, synced into the agent's skill directories with `appstrate code sync`. In Claude Code, the agents of your pinned space also become `/appstrate:run-<agent>` commands.                                                                                                                                              | See [Skills and coding agents](/using-appstrate/skill) |
+| **CLI**               | `appstrate api` for any REST call without handling a token, plus commands to run agents and edit packages (`appstrate packages pull`, `push`, `publish`). Uses your named profiles. The repository ships an operating manual for coding agents, [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). | [CLI](/using-appstrate/cli)                            |
+| **MCP**               | The platform as an MCP server: `search_operations`, `describe_operation` and `invoke_operation` over the whole API, plus `run_and_wait`. No CLI needed, and the key's permissions decide what is visible.                                                                                                                                    | `claude mcp add --transport http ...`, see below       |
 
 They combine: the skills carry your team's conventions, the CLI or MCP is the hands.
 
@@ -36,7 +36,7 @@ Clients that support browser OAuth can skip the key and log in instead. The dash
 - **Multi-instance workflows.** The CLI uses named profiles (`dev`, `staging`, `prod`). The agent can diff a configuration between them or replay a production change on staging first.
 - **End-user impersonation checks.** Ask the agent to validate that a flow works for three end-users. With an API key, it loops through them with the `Appstrate-User` header.
 - **Less context switching.** Ship an internal feature that uses Appstrate from the same chat where you wrote the code.
-- **AFPS packaging.** The agent can write, import and publish AFPS packages through the CLI, including [custom integrations](/docs/integrations/custom-integrations).
+- **AFPS packaging.** The agent can write, import and publish AFPS packages through the CLI, including [custom integrations](/integrations/custom-integrations).
 
 ## Use cases that land well
 
@@ -51,7 +51,7 @@ The agent picks the right call, runs it and reports back. If something fails, it
 
 ## Reference
 
-- [Skills and coding agents](/docs/using-appstrate/skill): the Claude Code plugin and `appstrate code sync`.
-- [CLI reference](/docs/using-appstrate/cli): the commands a coding agent drives.
-- [Skills as a feature](/docs/features/skills): how Appstrate itself consumes Agent Skills.
-- [Design choices](/docs/resources/why-appstrate): why runs are isolated, multi-tenant and API-first.
+- [Skills and coding agents](/using-appstrate/skill): the Claude Code plugin and `appstrate code sync`.
+- [CLI reference](/using-appstrate/cli): the commands a coding agent drives.
+- [Skills as a feature](/features/skills): how Appstrate itself consumes Agent Skills.
+- [Design choices](/resources/why-appstrate): why runs are isolated, multi-tenant and API-first.

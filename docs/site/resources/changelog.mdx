@@ -18,17 +18,17 @@ Appstrate is in beta (`1.0.0-beta.N`), and a release can change the wire contrac
 | `Added`, `Changed`, `Removed`, `Fixed` | What changed for users and API clients                                                                                                                      |
 | `BREAKING` entries                     | A change that breaks existing integrations, with the migration                                                                                              |
 
-Read every version between yours and your target, not only the last one. The upgrade procedure is in [Upgrading](/docs/self-hosting/upgrading). Two rules worth knowing up front: the platform image, `appstrate-pi`, and `appstrate-sidecar` are one version contract and must be deployed at the same version, and migrations are applied at boot with no down migration, so take a database dump first.
+Read every version between yours and your target, not only the last one. The upgrade procedure is in [Upgrading](/self-hosting/upgrading). Two rules worth knowing up front: the platform image, `appstrate-pi`, and `appstrate-sidecar` are one version contract and must be deployed at the same version, and migrations are applied at boot with no down migration, so take a database dump first.
 
 ## Versioning
 
-| What                                          | Scheme                                                                 | Where it is published                 |
-| --------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
-| The platform (API, dashboard, runtime images) | `v1.0.0-beta.N` git tags                                               | GitHub releases, GHCR images          |
-| The `appstrate` CLI                           | `cli@1.0.0-beta.N` tags, numbered in the same sequence as the platform | GitHub releases, npm (`appstrate`)    |
-| `@appstrate/core`                             | `core@MAJOR.MINOR.PATCH`                                               | npm                                   |
-| `@appstrate/afps-shared`                      | `afps-shared@0.MINOR.PATCH`                                            | npm                                   |
-| The HTTP API                                  | Date version in the `Appstrate-Version` header, currently `2026-03-21` | [API Reference](/docs/api#versioning) |
+| What                                          | Scheme                                                                 | Where it is published              |
+| --------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
+| The platform (API, dashboard, runtime images) | `v1.0.0-beta.N` git tags                                               | GitHub releases, GHCR images       |
+| The `appstrate` CLI                           | `cli@1.0.0-beta.N` tags, numbered in the same sequence as the platform | GitHub releases, npm (`appstrate`) |
+| `@appstrate/core`                             | `core@MAJOR.MINOR.PATCH`                                               | npm                                |
+| `@appstrate/afps-shared`                      | `afps-shared@0.MINOR.PATCH`                                            | npm                                |
+| The HTTP API                                  | Date version in the `Appstrate-Version` header, currently `2026-03-21` | [API Reference](/api#versioning)   |
 
 The API date version is separate from the platform version and has not moved yet.
 
@@ -51,4 +51,4 @@ Version `1.0.0-beta.65` has an `Operators` section with a new environment variab
 
 ## Upgrading
 
-For self-hosted instances, follow [Upgrading](/docs/self-hosting/upgrading). For breaking API changes, check the `Operators` and `BREAKING` entries of each release between your version and the target.
+For self-hosted instances, follow [Upgrading](/self-hosting/upgrading). For breaking API changes, check the `Operators` and `BREAKING` entries of each release between your version and the target.

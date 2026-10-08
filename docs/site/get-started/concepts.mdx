@@ -3,7 +3,7 @@ title: Concepts
 description: The mental model behind Appstrate. Agents, runs, integrations, packages, spaces, and how they fit together.
 ---
 
-Appstrate gives an AI agent a prompt, credentials and context, and lets the model decide how to accomplish the task. This page lays out the vocabulary. Each concept has a deeper page in [Features](/docs/features/agents).
+Appstrate gives an AI agent a prompt, credentials and context, and lets the model decide how to accomplish the task. This page lays out the vocabulary. Each concept has a deeper page in [Features](/features/agents).
 
 ## Architecture at a glance
 
@@ -40,7 +40,7 @@ An agent is the core unit of work. It is defined by a **prompt** that describes 
 An agent package declares:
 
 - An **input schema** (JSON Schema) for the parameters a person or a schedule supplies at launch, and an optional **output schema** the result must satisfy. A space can store default input values and lock some of them.
-- **Dependencies**: the [skills](/docs/features/skills), MCP servers and integrations it uses.
+- **Dependencies**: the [skills](/features/skills), MCP servers and integrations it uses.
 - **Runtime tools**: built-in tools such as `output`, `log`, `note`, `pin` and `publish_file`.
 
 An agent also gets persistence across runs:
@@ -48,13 +48,13 @@ An agent also gets persistence across runs:
 - **Memory.** The `note` tool saves a memory that the `recall_memory` tool can search in later runs. The `pin` tool keeps an item under a named key that is shown to the agent at the start of every run. Memory belongs to a space and is partitioned by who the run acts for: a member, an end-user, or shared.
 - **Files.** Runs read uploaded files and publish deliverables with `publish_file`. Every file has a stable `appfile://` URI, so the output of one run can be the input of another.
 
-Deep-dive: [Features / Agents](/docs/features/agents) and [Features / Memory](/docs/features/memory).
+Deep-dive: [Features / Agents](/features/agents) and [Features / Memory](/features/memory).
 
 ## Integrations and connections
 
 ### Integrations
 
-An integration is the definition of an external service (Gmail, Slack, GitHub, Jira, an internal API, any MCP server). Appstrate ships a catalog of system integrations, and you can [author your own](/docs/integrations/custom-integrations) as a package. An integration declares:
+An integration is the definition of an external service (Gmail, Slack, GitHub, Jira, an internal API, any MCP server). Appstrate ships a catalog of system integrations, and you can [author your own](/integrations/custom-integrations) as a package. An integration declares:
 
 - Its **source**: a local MCP server that Appstrate runs in a runner container, a remote MCP endpoint, or a plain HTTP API called through the sidecar.
 - Its **authentication methods**: OAuth 2.0 (with discovery and PKCE), API key, basic auth, mTLS or custom credential fields.
@@ -66,9 +66,9 @@ An agent lists the integrations it needs and which of their tools it may use. Th
 
 A connection is one authenticated account on an integration, owned by the person who connected it. A member can share a connection with the other users of a space. Credentials are encrypted at rest and handed to the sidecar for the run, never to the agent: the agent calls a tool, the sidecar adds the credential and relays the request.
 
-A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from the agent's Connections tab or from the integration's page, and manage them under **Preferences → My connections**, and the [chat](/docs/using-appstrate/chat) can offer a connect link when it needs one.
+A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from the agent's Connections tab or from the integration's page, and manage them under **Preferences → My connections**, and the [chat](/using-appstrate/chat) can offer a connect link when it needs one.
 
-Deep-dive: [Integrations](/docs/integrations/catalog).
+Deep-dive: [Integrations](/integrations/catalog).
 
 ## Runs
 
@@ -76,16 +76,16 @@ A run is a single agent execution. Its lifecycle:
 
 `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`
 
-A run starts from the dashboard, the chat, a [schedule](/docs/features/scheduling), the CLI, the API or an [MCP client](/docs/using-appstrate/mcp-clients). Each run gets two cooperating parts:
+A run starts from the dashboard, the chat, a [schedule](/features/scheduling), the CLI, the API or an [MCP client](/using-appstrate/mcp-clients). Each run gets two cooperating parts:
 
 1. **Sidecar.** Holds the run's credentials, proxies the model calls, and exposes the agent's tools over MCP: integration tools, `api_call` with credential injection, `run_history` and `recall_memory`. It checks every outbound target against the integration's allowed URIs.
-2. **Agent.** The [Pi Coding Agent](/docs/features/sandbox-and-sidecar) process that receives the prompt and talks only to its sidecar. It never holds the credentials.
+2. **Agent.** The [Pi Coding Agent](/features/sandbox-and-sidecar) process that receives the prompt and talks only to its sidecar. It never holds the credentials.
 
 Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend, opt-in, gives each run its own microVM.
 
 Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced in US dollars from the model's rate card. A model without a known price leaves the run marked `unpriced` (`cost_pricing_status`): its `cost` is `null`, which means not priced rather than free, and the dashboard does not show an amount for it.
 
-Deep-dive: [Features / Runs](/docs/features/runs) and [Features / Sandbox and Sidecar](/docs/features/sandbox-and-sidecar).
+Deep-dive: [Features / Runs](/features/runs) and [Features / Sandbox and Sidecar](/features/sandbox-and-sidecar).
 
 ## Packages
 
@@ -98,11 +98,11 @@ Everything you author or install is a **package** in the open AFPS format (**A**
 | `mcp-server`  | A packaged MCP server (an MCP Bundle) that runs as a subprocess                           |
 | `integration` | An external-service definition: source, authentication methods, credential delivery       |
 
-Each package has an editable **draft** and immutable, **semver** versions you publish from it. Versions carry a SHA-256 integrity hash, and the `latest` tag points at the newest. The platform ships some packages itself (system packages), and you import the rest from a `.afps` or `.afps-bundle` file or from a GitHub URL. You can also edit a package in a local folder with the CLI ([`appstrate packages`](/docs/using-appstrate/cli)).
+Each package has an editable **draft** and immutable, **semver** versions you publish from it. Versions carry a SHA-256 integrity hash, and the `latest` tag points at the newest. The platform ships some packages itself (system packages), and you import the rest from a `.afps` or `.afps-bundle` file or from a GitHub URL. You can also edit a package in a local folder with the CLI ([`appstrate packages`](/using-appstrate/cli)).
 
 A package belongs to the organization and has a **home space**. It can be shared into other spaces, and a space decides which of its packages are active.
 
-The AFPS specification lives in the [afps-spec repository](https://github.com/appstrate/afps-spec). Deep-dive: [Features / Packages](/docs/features/packages) and [Resources / AFPS Specification](/docs/resources/afps-specification).
+The AFPS specification lives in the [afps-spec repository](https://github.com/appstrate/afps-spec). Deep-dive: [Features / Packages](/features/packages) and [Resources / AFPS Specification](/resources/afps-specification).
 
 ## Organizations, spaces and roles
 
@@ -123,17 +123,17 @@ Access is per space. A space is open (standard users enter with the default role
 
 Spaces replaced what were called applications. If you meet an `app_` id or an `applicationId` in older material, the current equivalents are `spc_` ids and `spaceId`.
 
-Deep-dive: [Features / Organizations](/docs/features/organizations) and [Features / Spaces](/docs/features/spaces). Internals: [Spaces](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md) and [RBAC](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RBAC_PERMISSIONS_SPEC.md).
+Deep-dive: [Features / Organizations](/features/organizations) and [Features / Spaces](/features/spaces). Internals: [Spaces](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md) and [RBAC](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RBAC_PERMISSIONS_SPEC.md).
 
 ### End-users
 
 End-users (`eu_` prefix) are the users of **your** product, distinct from Appstrate members. You manage them through the API and run agents on their behalf with **impersonation**: an API key plus the `Appstrate-User` header. Each end-user has their own connections, memory and run history, without ever using the dashboard. End-users live in team spaces, not personal ones.
 
-Deep-dive: [Features / End-Users](/docs/features/end-users), [Features / Multi-Tenancy](/docs/features/multi-tenancy).
+Deep-dive: [Features / End-Users](/features/end-users), [Features / Multi-Tenancy](/features/multi-tenancy).
 
 ## Where to go next
 
-- [Quickstart](/docs/get-started/quickstart): install an instance and run an agent.
-- [Using Appstrate](/docs/using-appstrate/webapp): the webapp, the chat, the CLI, and connecting coding agents and MCP clients.
-- [Features](/docs/features/agents): one deep-dive per primitive.
-- [Self-Hosting](/docs/self-hosting): infrastructure tiers and production operations.
+- [Quickstart](/get-started/quickstart): install an instance and run an agent.
+- [Using Appstrate](/using-appstrate/webapp): the webapp, the chat, the CLI, and connecting coding agents and MCP clients.
+- [Features](/features/agents): one deep-dive per primitive.
+- [Self-Hosting](/self-hosting): infrastructure tiers and production operations.

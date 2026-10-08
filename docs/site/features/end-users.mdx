@@ -3,7 +3,7 @@ title: End-Users
 description: Represent the users of your own product in Appstrate and run agents on their behalf.
 ---
 
-An **end-user** is a user of _your_ product, not of the Appstrate dashboard. It is an external identity that lives in a [space](/docs/features/spaces), has no password and cannot sign in to the dashboard. Its id starts with `eu_`. You create and manage end-users with the API, or in the web app on the **End-Users** page.
+An **end-user** is a user of _your_ product, not of the Appstrate dashboard. It is an external identity that lives in a [space](/features/spaces), has no password and cannot sign in to the dashboard. Its id starts with `eu_`. You create and manage end-users with the API, or in the web app on the **End-Users** page.
 
 Use end-users when your backend calls Appstrate for many customers and each customer's connections, memory and runs must stay separate.
 
@@ -75,14 +75,14 @@ Rules:
 
 - API keys only. On a cookie session the header is refused with `400 header_not_allowed`.
 - The id must start with `eu_` (`400 invalid_end_user_id`) and the end-user must belong to the key's space (`403 invalid_end_user`).
-- Under impersonation the caller is treated as an outsider, not as the key's creator. The run is attributed to the end-user (`endUserId`), uses **the end-user's connections**, reads and writes the end-user's [memory](/docs/features/memory), and the end-user only sees its own runs.
+- Under impersonation the caller is treated as an outsider, not as the key's creator. The run is attributed to the end-user (`endUserId`), uses **the end-user's connections**, reads and writes the end-user's [memory](/features/memory), and the end-user only sees its own runs.
 - Every impersonation is logged as a structured line with `requestId`, `apiKeyId`, `authenticatedMember`, `endUserId`, `spaceId`, `method`, `path`, `ip` and `userAgent`.
 
-An end-user can be the actor of a [schedule](/docs/features/scheduling) too.
+An end-user can be the actor of a [schedule](/features/scheduling) too.
 
 ## Connections of an end-user
 
-An end-user connects its own accounts (Gmail, Slack, a PAT) to integrations. Your backend can mint a hosted **connect** link for it, or import credentials through the API, using the key and `Appstrate-User`. The connection then belongs to that end-user and is the one its runs use. See [Integrations](/docs/integrations/overview).
+An end-user connects its own accounts (Gmail, Slack, a PAT) to integrations. Your backend can mint a hosted **connect** link for it, or import credentials through the API, using the key and `Appstrate-User`. The connection then belongs to that end-user and is the one its runs use. See [Integrations](/integrations/overview).
 
 ## Signing in end-users
 

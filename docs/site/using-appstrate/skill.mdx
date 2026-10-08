@@ -5,11 +5,11 @@ description: Bring your spaces' skills and agents into Claude Code and Codex wit
 
 Coding agents such as Claude Code and Codex can work with Appstrate in three ways, and they combine:
 
-- **Your skills, locally.** `appstrate code sync` copies the [skills](/docs/features/skills) of the spaces you belong to into the agent's skill directories, and keeps them current.
+- **Your skills, locally.** `appstrate code sync` copies the [skills](/features/skills) of the spaces you belong to into the agent's skill directories, and keeps them current.
 - **Your agents, as commands.** In Claude Code, every agent active in your pinned space becomes a `/appstrate:run-<agent>` command that launches it through the organization's MCP server.
 - **The CLI and the API.** A coding agent can call the platform through `appstrate api` without ever seeing a token. The repository ships an operating manual for exactly that: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md).
 
-What you need first: an instance and the [CLI](/docs/using-appstrate/cli), signed in (`appstrate login`) with an organization and a space pinned. Login pins them for you when there is only one choice.
+What you need first: an instance and the [CLI](/using-appstrate/cli), signed in (`appstrate login`) with an organization and a space pinned. Login pins them for you when there is only one choice.
 
 ## Claude Code
 
@@ -53,7 +53,7 @@ Codex reads skills from `~/.agents/skills/`. The Claude Code plugin already sync
 appstrate code sync --target codex
 ```
 
-Agent commands are not available in Codex, since nothing configures the MCP server there. To give Codex the organization's MCP server, see [MCP clients](/docs/using-appstrate/mcp-clients).
+Agent commands are not available in Codex, since nothing configures the MCP server there. To give Codex the organization's MCP server, see [MCP clients](/using-appstrate/mcp-clients).
 
 ## Sync options
 
@@ -76,7 +76,7 @@ If your organization blocks command-sourced plugins, or you use Codex only, sche
 
 ## Write skills and agents from your editor
 
-`appstrate code sync` only copies down. To author a skill, agent, integration or MCP server in a local folder, push it to its draft and publish it, use [`appstrate packages`](/docs/using-appstrate/cli). To try a skill in Claude Code before publishing it, load its folder directly with `claude --plugin-dir <dir>`.
+`appstrate code sync` only copies down. To author a skill, agent, integration or MCP server in a local folder, push it to its draft and publish it, use [`appstrate packages`](/using-appstrate/cli). To try a skill in Claude Code before publishing it, load its folder directly with `claude --plugin-dir <dir>`.
 
 ## A standalone skill repository
 
@@ -84,7 +84,7 @@ A separate open-source repository, [`appstrate/skills`](https://github.com/appst
 
 ## Reference
 
-- [CLI](/docs/using-appstrate/cli): the commands a coding agent drives.
-- [MCP clients](/docs/using-appstrate/mcp-clients): connect any MCP client to an organization.
-- [Coding Agents integration](/docs/integrations/coding-agents): why this combination is useful for platform teams.
+- [CLI](/using-appstrate/cli): the commands a coding agent drives.
+- [MCP clients](/using-appstrate/mcp-clients): connect any MCP client to an organization.
+- [Coding Agents integration](/integrations/coding-agents): why this combination is useful for platform teams.
 - [CLI README, `code sync`](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-code-sync): the full behaviour.

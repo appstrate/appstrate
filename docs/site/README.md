@@ -1,17 +1,17 @@
 # Public documentation source
 
-This directory is the source of the documentation published on the Appstrate website under `/docs`.
-It is **not** rendered here: the website repository (`appstrate/website`) copies it into its own
-`content/docs/` at build time with `scripts/sync-docs.ts`. This file is not copied.
+This directory is the source of the public documentation at <https://docs.appstrate.com>. The site
+itself is [`../web/`](../web/), a static Next.js export that copies these pages into its own `content/`
+at build time (`docs/web/scripts/sync-content.ts`). This file is not copied.
 
 ## What lives where
 
-| Page or section                                                                                                       | Source                                                                        |
-| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `get-started/`, `using-appstrate/`, `features/`, `integrations/`, `self-hosting/`, `resources/`                       | this directory                                                                |
-| `api/` guides (`introduction`, `quickstart`, `authentication`, ...) and the order of the API groups (`api/meta.json`) | this directory                                                                |
-| `/docs/self-hosting/environment-variables`                                                                            | [`../ENV.md`](../ENV.md), generated. Do not create a page here                |
-| One page per API operation under `api/<tag>/`                                                                         | The OpenAPI spec (`apps/api/src/openapi`), generated. Do not create them here |
+| Page or section                                                                                                       | Source                                                                |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `get-started/`, `using-appstrate/`, `features/`, `integrations/`, `self-hosting/`, `resources/`                       | this directory                                                        |
+| `api/` guides (`introduction`, `quickstart`, `authentication`, ...) and the order of the API groups (`api/meta.json`) | this directory                                                        |
+| `/self-hosting/environment-variables`                                                                                 | [`../ENV.md`](../ENV.md), generated. Do not create a page here        |
+| One page per API operation under `api/<tag>/`                                                                         | The OpenAPI spec of this checkout, generated. Do not create them here |
 
 A fact has one home. Environment variables live in `ENV.md`, internals in `docs/architecture/`.
 A page here summarises in a sentence and links to GitHub.
@@ -20,44 +20,44 @@ A page here summarises in a sentence and links to GitHub.
 
 - English prose. No em dash and no double hyphen as punctuation (flags inside code are fine).
 - Every page has `title` and `description` frontmatter and is listed in its folder's `meta.json`.
-- Internal links are site paths (`/docs/features/agents`), repository files are GitHub URLs.
-- Never rename or remove a page without telling the website: its old URL needs a redirect.
+- Internal links are site paths from the root (`/features/agents`, never `/docs/features/agents`),
+  repository files are GitHub URLs. The build fails on a `/docs/...` link, a dead link or a missing anchor.
+- Never rename or remove a page without a redirect for its old URL in `docs/web/public/_redirects`.
 - Escape `{`, `}` and bare `<` outside code fences (MDX).
 - Verify a claim against the code before writing it. A command, a default, an endpoint or a name
   that cannot be checked does not belong in the docs.
 
 ## Preview
 
-From a checkout of `appstrate/website`:
-
 ```sh
-DOCS_SOURCE_DIR=/path/to/appstrate bun run dev
+cd docs/web
+bun install            # once; the repository root needs its own `bun install` too
+bun run dev            # http://localhost:3480, rebuilds content/ first
+bun run build          # the static site in out/, then the link check
+bun run preview        # serves out/ with the /errors function, as Cloudflare does
 ```
 
-Re-run `bun run docs:sync` after editing a page. Without `DOCS_SOURCE_DIR` the script clones
-`main` of this repository.
+`bun run content` regenerates `content/` and `openapi.json` after editing a page or the spec.
 
 ## Publishing
 
-Nothing here is deployed by this repository. The website (`appstrate/website`) builds the docs when it
-is deployed, so a docs change reaches the public site only after a website rebuild.
+`.github/workflows/docs-site.yml` builds `docs/web` and deploys `out/` with `wrangler pages deploy` to the
+Cloudflare Pages project `appstrate-docs`, which serves `docs.appstrate.com`.
 
-- **Automatic rebuild.** `.github/workflows/docs-site.yml` calls Coolify with `force=true` when
-  `docs/site/**` or `docs/ENV.md` changes on `main`. The `force` is required: the website image build is
-  cached on the website repository's own files, so a plain redeploy would reuse the previous docs. The
-  workflow does nothing until the repository has the secret `COOLIFY_API_TOKEN` (ability `deploy`) and the
-  variables `COOLIFY_URL` and `WEBSITE_COOLIFY_UUID` (the website application in Coolify). Check
-  **Settings > Secrets and variables > Actions** if the site does not follow a merge.
-- **Manual rebuild.** Redeploy the website application in Coolify with the force option, or run the
-  workflow with `workflow_dispatch`.
-- **Renaming or removing a page** also needs a line in `docs-redirects.mjs` in the website repository,
-  otherwise the old public URL answers 404.
-- **API reference.** Its pages come from the OpenAPI spec of the instance that runs `main`
-  (`https://app.appstrate.com/api/openapi.json`), so a new endpoint appears on the site once that instance
-  is deployed, not at merge. A tag used by an operation must be declared in `apps/api/src/openapi/info.ts`.
-- **Preview before merging.** From a checkout of `appstrate/website`:
-  `DOCS_SOURCE_DIR=/path/to/appstrate bun run build` builds the site with your local pages and fails on a
-  broken MDX page. Crawl the result for dead `/docs/...` links before you merge a large change.
+- **When.** Every pull request touching `docs/**`, the OpenAPI sources or the modules builds the site and
+  fails on a broken MDX page or a dead internal link or anchor; with the secrets present it also deploys a
+  preview at `<branch>.appstrate-docs.pages.dev`. A merge to `main` deploys production. Forks only build.
+- **Secrets.** `CLOUDFLARE_API_TOKEN` (Account > Cloudflare Pages > Edit) and `CLOUDFLARE_ACCOUNT_ID`.
+  Without them the deploy step is skipped.
+- **API reference.** Generated at build time from the OpenAPI document of the same commit
+  (`scripts/export-openapi.ts`, every module in the tree), so it changes in the pull request that changes
+  the endpoint. A tag used by an operation should be declared in `apps/api/src/openapi/info.ts`.
+- **Redirects.** `docs/web/public/_redirects` (Cloudflare syntax, first match wins). It maps the pages
+  removed before the move and sends any other `/docs/<path>` to `/<path>`, so the old paths keep working
+  once `appstrate.com/docs/*` forwards to this host.
+- **Error URIs.** The API's `type: https://docs.appstrate.dev/errors/<code>` and the runtime's
+  `/errors/afps/<code>` are answered by `docs/web/functions/errors/[[path]].ts`, which redirects to the
+  matching `code-<code>` or `code-afps-<code>` anchor of `/api/errors`.
 
 ## Keeping the docs true
 

@@ -19,14 +19,14 @@ Five secrets are required and validated at boot:
 | `RUN_TOKEN_SECRET`          | At least 16 characters   |
 | `CONNECT_SESSION_SECRET`    | At least 16 characters   |
 
-The shipped Compose files also fail fast on `POSTGRES_PASSWORD`, on `MINIO_ROOT_PASSWORD` in the files that run MinIO (the root file, the Tier 3 template and `examples/self-hosting/docker-compose.yml`), and on `POSTGRES_USER` and `MINIO_ROOT_USER` in the root file. See [Docker Compose](/docs/self-hosting/docker-compose#set-up) for a generator.
+The shipped Compose files also fail fast on `POSTGRES_PASSWORD`, on `MINIO_ROOT_PASSWORD` in the files that run MinIO (the root file, the Tier 3 template and `examples/self-hosting/docker-compose.yml`), and on `POSTGRES_USER` and `MINIO_ROOT_USER` in the root file. See [Docker Compose](/self-hosting/docker-compose#set-up) for a generator.
 
 Other cross-field checks that stop the boot:
 
 - **`TRUST_PROXY=false` behind an HTTPS `APP_URL` in production.** Set `TRUST_PROXY` to your proxy depth, usually `1`.
 - **`APP_URL` is not an absolute origin.** It must be `http://` or `https://` with no path, query or fragment, and HTTPS in production (loopback excepted).
 - **`USERCONTENT_URL` on the same host as `APP_URL`**, or not HTTPS in production.
-- **Image versions disagree.** The platform, `PI_IMAGE` and `SIDECAR_IMAGE` must carry the same version. Pin them with `APPSTRATE_VERSION`. See [Upgrading](/docs/self-hosting/upgrading).
+- **Image versions disagree.** The platform, `PI_IMAGE` and `SIDECAR_IMAGE` must carry the same version. Pin them with `APPSTRATE_VERSION`. See [Upgrading](/self-hosting/upgrading).
 - **`PLATFORM_RUN_LIMITS`, `INLINE_RUN_LIMITS`, `LLM_PROXY_LIMITS` or `CREDENTIAL_PROXY_LIMITS` contains an unknown key** or a bad value. The error names the key.
 - **`RUN_ADAPTER` names a backend nobody registered.** The error lists the registered ones. `firecracker` needs the `firecracker` module in `MODULES`.
 - **A model in `SYSTEM_PROVIDER_KEYS`** is outside its provider's offer, or a provider needs an API shape the platform does not serve. The error names the entry.
@@ -35,8 +35,8 @@ Other cross-field checks that stop the boot:
 
 Two common causes:
 
-- **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. Even the current files do not list every variable (`LLM_PROXY_LIMITS` and `FILE_MAX_BYTES` are two that they do not), and a file from before 1.0.0-beta.65 lacks more. See [Compose forwards only what it lists](/docs/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
-- **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped without a warning. Compare the spelling with [Environment Variables](/docs/self-hosting/environment-variables) and the operator notes of the release.
+- **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. Even the current files do not list every variable (`LLM_PROXY_LIMITS` and `FILE_MAX_BYTES` are two that they do not), and a file from before 1.0.0-beta.65 lacks more. See [Compose forwards only what it lists](/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
+- **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped without a warning. Compare the spelling with [Environment Variables](/self-hosting/environment-variables) and the operator notes of the release.
 
 ## Database connection refused
 
@@ -48,7 +48,7 @@ Two common causes:
 ## Agents fail to run
 
 - **Wrong backend.** `RUN_ADAPTER` defaults to `process` (host subprocesses, no isolation). The shipped Compose files set `docker`.
-- **Docker socket.** The platform container must reach `/var/run/docker.sock`. Check the group mapping (`DOCKER_GID`) and the socket's permissions. See [Isolation and Security](/docs/self-hosting/isolation-and-security#the-docker-socket).
+- **Docker socket.** The platform container must reach `/var/run/docker.sock`. Check the group mapping (`DOCKER_GID`) and the socket's permissions. See [Isolation and Security](/self-hosting/isolation-and-security#the-docker-socket).
 - **Runtime images missing.** Check `docker images | grep appstrate`. Pull the same version of `appstrate-pi`, `appstrate-sidecar` and the five `appstrate-mcp-runner-*` images from `ghcr.io/appstrate`. A missing MCP runner image fails the integration that needs it, because the sidecar never pulls images.
 - **Local integration refused under `process`.** A `source.kind: "local"` integration (for example `@appstrate/github-git`) does not start with `RUN_ADAPTER=process`. Set `INTEGRATION_RUNTIME_ADAPTER=docker` or use `RUN_ADAPTER=docker`.
 - **"Run never started executing".** The runner posted no event within `RUN_BOOT_DEADLINE_SECONDS` (default 300). Look for a slow image pull, a missing image or a container that exits at boot.
@@ -64,7 +64,7 @@ Two common causes:
 | `403` with `unauthorized_target` (platform credential proxy), or a sidecar refusal as `unauthorized` | The integration declares no `authorized_uris`, or the URL is outside them. An empty list authorizes nothing                                                             |
 | `502 Target host could not be resolved`                                                              | The sidecar could not resolve the host. It needs working DNS, even when it sends through `PROXY_URL`                                                                    |
 
-See [Isolation and Security](/docs/self-hosting/isolation-and-security#egress-rules).
+See [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
 
 ## Docker network pool exhausted
 
@@ -95,7 +95,7 @@ Requests that belong to an organization need an `X-Org-Id` header, and space-sco
 - **Sign-up is closed (`signup_disabled`).** The instance runs in closed mode. Ask for an invitation, or see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
 - **`/claim` answers 410.** The bootstrap token is only redeemable while the instance has no organization. If you set `AUTH_BOOTSTRAP_TOKEN` and it does nothing, check that your Compose file forwards the variable to the container (the files shipped before 1.0.0-beta.65 do not).
 - **The owner address cannot register.** An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` is not created by the plain sign-up form. Claim it at `/claim` while the instance has no organization (with `AUTH_BOOTSTRAP_OWNER_EMAIL` set, the claim accepts that address only), or use a magic link (SMTP required) or a Google or GitHub sign-in whose provider asserts the address as verified. The server log states the reason.
-- **A magic link or a Google or GitHub sign-in fails right after an upgrade.** Better Auth 1.7.7, shipped in 1.0.0-beta.65, changed how these in-flight values are stored. A link mailed before the restart is refused and a social sign-in started before it must be started again. Ask for a new link. See [Upgrading](/docs/self-hosting/upgrading#2-read-the-operator-notes-of-every-release-you-skip).
+- **A magic link or a Google or GitHub sign-in fails right after an upgrade.** Better Auth 1.7.7, shipped in 1.0.0-beta.65, changed how these in-flight values are stored. A link mailed before the restart is refused and a social sign-in started before it must be started again. Ask for a new link. See [Upgrading](/self-hosting/upgrading#2-read-the-operator-notes-of-every-release-you-skip).
 - **Redeem rate-limited.** `/api/auth/bootstrap/redeem` allows 5 attempts per minute per IP. Behind a proxy, set `TRUST_PROXY`.
 
 ## OAuth callback fails
@@ -119,7 +119,7 @@ Register the same redirect URI at the provider (Google, GitHub or an OIDC client
 
 - **`413` that Appstrate never logs.** The proxy's body limit is lower than your upload. Raise it to at least 100 MiB (nginx: `client_max_body_size 100m`).
 - **Chat or run logs arrive in one batch at the end.** The proxy buffers or compresses `text/event-stream`. Disable that for the Appstrate location.
-- **Everyone is rate-limited together.** `TRUST_PROXY` is not set to your proxy depth, so every caller shares the proxy's IP. See [Rate Limits](/docs/self-hosting/rate-limits).
+- **Everyone is rate-limited together.** `TRUST_PROXY` is not set to your proxy depth, so every caller shares the proxy's IP. See [Rate Limits](/self-hosting/rate-limits).
 
 ## Redis fallbacks
 
@@ -137,7 +137,7 @@ With Redis, keep its volume if you care about scheduled runs and queued webhook 
 
 ## Stored objects that will not delete
 
-Deleting a file, a run workspace, a space or an organization removes its database rows at once and queues the stored objects in a deletion outbox. A background worker purges them. Every `STORAGE_DELETION_WORKER_INTERVAL_MS` (default `60000`, see [Environment Variables](/docs/self-hosting/environment-variables)) it claims a batch of due jobs and deletes the objects. A failed job is retried later, with a delay that doubles after each attempt (about one minute at first, capped at 6 hours, with up to 10% jitter). A job is never abandoned: deletion is retried for as long as it takes.
+Deleting a file, a run workspace, a space or an organization removes its database rows at once and queues the stored objects in a deletion outbox. A background worker purges them. Every `STORAGE_DELETION_WORKER_INTERVAL_MS` (default `60000`, see [Environment Variables](/self-hosting/environment-variables)) it claims a batch of due jobs and deletes the objects. A failed job is retried later, with a delay that doubles after each attempt (about one minute at first, capped at 6 hours, with up to 10% jitter). A job is never abandoned: deletion is retried for as long as it takes.
 
 After 8 attempts a job that is still pending is called a **dead letter**. The threshold only makes the job visible, it does not stop the retries. Dead letters are what to look at when disk or bucket usage does not go down after deletions. With the `@appstrate/module-observability` module, the gauges `appstrate.storage_deletion.backlog`, `appstrate.storage_deletion.oldest_pending_age_seconds` and `appstrate.storage_deletion.dead_letters` report the same state.
 
@@ -175,7 +175,7 @@ These two routes need no `X-Org-Id`, so an operator who belongs to no organizati
 
 ## Rate limit hits (`429`)
 
-Check `Retry-After` and the `RateLimit` headers. Per-endpoint limits and the organization-wide run limits are in [Rate Limits](/docs/self-hosting/rate-limits). An organization at its concurrent run cap gets `org_run_concurrency_exceeded`.
+Check `Retry-After` and the `RateLimit` headers. Per-endpoint limits and the organization-wide run limits are in [Rate Limits](/self-hosting/rate-limits). An organization at its concurrent run cap gets `org_run_concurrency_exceeded`.
 
 ## Port 3000 is already in use
 

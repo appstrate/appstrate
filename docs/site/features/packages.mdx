@@ -3,18 +3,18 @@ title: AFPS Packages
 description: The four package types, drafts and versions, importing and exporting, and system packages.
 ---
 
-Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/docs/resources/afps-specification).
+Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/resources/afps-specification).
 
 ## Package types
 
-| Type          | What it is                                                                                                                   | Content file                               |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/docs/features/agents).                               | `prompt.md`                                |
-| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/docs/features/skills).                                       | `SKILL.md`                                 |
-| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/docs/integrations/overview). | `manifest.json`, optional `INTEGRATION.md` |
-| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                                   | Server entry point                         |
+| Type          | What it is                                                                                                              | Content file                               |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                               | `prompt.md`                                |
+| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                       | `SKILL.md`                                 |
+| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/integrations/overview). | `manifest.json`, optional `INTEGRATION.md` |
+| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                              | Server entry point                         |
 
-Earlier versions also had `tool` and `provider` types. They were replaced by [runtime tools](/docs/features/tools) and integrations.
+Earlier versions also had `tool` and `provider` types. They were replaced by [runtime tools](/features/tools) and integrations.
 
 Package ids are scoped names, `@scope/name`. The scope defaults to your organization's slug. Packages shipped with the platform use `@appstrate/`.
 
@@ -97,15 +97,15 @@ curl -X POST https://your-instance/api/packages/import-github \
 - `GET /api/packages/{scope}/{name}/{version}/download` returns one package as a ZIP. `version` can be a version, a dist-tag, a range or `draft` (authors only).
 - `GET /api/packages/{scope}/{name}/files` lists the files of a package and returns small text files inline.
 
-If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills and system packages are exempt. See [Organizations](/docs/features/organizations#organization-settings).
+If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills and system packages are exempt. See [Organizations](/features/organizations#organization-settings).
 
 ## Working from a folder
 
-The [CLI](/docs/using-appstrate/cli) edits packages as local folders: `appstrate packages pull` writes a package's draft (or a published version) to a folder, `status` shows what would change, `push` writes the folder back to the draft atomically, and `publish` cuts a version.
+The [CLI](/using-appstrate/cli) edits packages as local folders: `appstrate packages pull` writes a package's draft (or a published version) to a folder, `status` shows what would change, `push` writes the folder back to the draft atomically, and `publish` cuts a version.
 
 ## Ownership, sharing and activation
 
-A package belongs to the organization and has a **home space**. Other spaces get it through **shares** and run it once they **activate** it. Moving a home, sharing, and the library views are in [Library and sharing](/docs/features/library).
+A package belongs to the organization and has a **home space**. Other spaces get it through **shares** and run it once they **activate** it. Moving a home, sharing, and the library views are in [Library and sharing](/features/library).
 
 Creating a package needs the type's `write` permission (`agents:write`, `skills:write`, `integrations:write`, `mcp-servers:write`) in the space you create it from, which becomes its home. `DELETE /api/packages/{type}/{scope}/{name}` removes a package, and is refused while it is in use.
 
@@ -115,4 +115,4 @@ Creating a package needs the type's `write` permission (`agents:write`, `skills:
 
 ## System packages
 
-The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/docs/integrations/overview).
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/overview).

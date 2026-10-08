@@ -1,0 +1,60 @@
+# Cloudflare Pages redirects (https://developers.cloudflare.com/pages/configuration/redirects/).
+# First match wins; static rules go above the ones with placeholders or a splat.
+# Limits: 2,000 static and 100 dynamic rules.
+# Renaming or removing a page under docs/site? Add `/old-path /new-path 301` in the first block.
+
+/ /get-started/introduction 302
+
+# Pages removed before the docs moved to this repository. Until then the site
+# lived under /docs on appstrate.com, so the old URLs keep that prefix.
+/docs/api/agents/deleteAgentMemory /api/agents 301
+/docs/api/agents/deleteAllAgentMemories /api/agents 301
+/docs/api/agents/getAgentProviderProfiles /api/agents 301
+/docs/api/agents/listAgentMemories /api/agents 301
+/docs/api/agents/removeAgentProviderProfile /api/agents 301
+/docs/api/agents/saveAgentConfig /api/agents 301
+/docs/api/agents/setAgentOrgProfile /api/agents 301
+/docs/api/agents/setAgentProviderProfile /api/agents 301
+/docs/api/agents/updateAgentSkills /api/agents 301
+/docs/api/agents/updateAgentTools /api/agents 301
+/docs/api/internal/getProviderCredentials /api/internal 301
+/docs/api/notifications/listRuns /api/notifications 301
+/docs/api/organizations/addOrInviteMember /api/organizations 301
+/docs/api/packages/createProviderPackage /api/packages 301
+/docs/api/packages/createProviderPackageVersion /api/packages 301
+/docs/api/packages/createTool /api/packages 301
+/docs/api/packages/createToolVersion /api/packages 301
+/docs/api/packages/deleteProviderPackage /api/packages 301
+/docs/api/packages/deleteProviderPackageVersion /api/packages 301
+/docs/api/packages/deleteTool /api/packages 301
+/docs/api/packages/deleteToolVersion /api/packages 301
+/docs/api/packages/getProviderPackage /api/packages 301
+/docs/api/packages/getProviderPackageVersionDetail /api/packages 301
+/docs/api/packages/getProviderPackageVersionInfo /api/packages 301
+/docs/api/packages/getTool /api/packages 301
+/docs/api/packages/getToolVersionDetail /api/packages 301
+/docs/api/packages/getToolVersionInfo /api/packages 301
+/docs/api/packages/listProviderPackageVersions /api/packages 301
+/docs/api/packages/listProviderPackages /api/packages 301
+/docs/api/packages/listToolVersions /api/packages 301
+/docs/api/packages/listTools /api/packages 301
+/docs/api/packages/restoreProviderPackageVersion /api/packages 301
+/docs/api/packages/restoreToolVersion /api/packages 301
+/docs/api/packages/updateProviderPackage /api/packages 301
+/docs/api/packages/updateTool /api/packages 301
+/docs/features/applications /features/spaces 301
+/docs/integrations/providers/trello /integrations/catalog 301
+/docs/resources/compare /resources/why-appstrate 301
+/docs/integrations/providers /integrations/catalog 301
+/docs/integrations/custom-providers /integrations/custom-integrations 301
+/docs/community /resources/community 301
+/docs /get-started/introduction 301
+/docs/api/applications/:operation /api/spaces 301
+/docs/api/connection-profiles/:operation /api/integrations 301
+/docs/api/connections/:operation /api/integrations 301
+/docs/api/providers/:operation /api/integrations 301
+/docs/api/provider-keys/:operation /api/model-provider-credentials 301
+/docs/integrations/providers/:integration /integrations/catalog/:integration 301
+
+# Every other page kept its path, minus the /docs prefix.
+/docs/* /:splat 301

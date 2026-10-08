@@ -22,13 +22,13 @@ Organization (UUID)
 └── Personal space of each member (private)
 ```
 
-| Level            | What it is                                                             | Page                                                          |
-| ---------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
-| **Organization** | Membership, billing and shared infrastructure boundary.                | [Organizations](/docs/features/organizations)                 |
-| **Space**        | Where agents run. Scoping and access boundary inside the organization. | [Spaces](/docs/features/spaces)                               |
-| **Member**       | A person with an organization role and, per space, a space role.       | [Roles and permissions](/docs/features/roles-and-permissions) |
-| **End-user**     | An identity from your own product, scoped to a space.                  | [End-Users](/docs/features/end-users)                         |
-| **API key**      | A headless credential bound to one space.                              | [API Keys](/docs/features/api-keys)                           |
+| Level            | What it is                                                             | Page                                                     |
+| ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
+| **Organization** | Membership, billing and shared infrastructure boundary.                | [Organizations](/features/organizations)                 |
+| **Space**        | Where agents run. Scoping and access boundary inside the organization. | [Spaces](/features/spaces)                               |
+| **Member**       | A person with an organization role and, per space, a space role.       | [Roles and permissions](/features/roles-and-permissions) |
+| **End-user**     | An identity from your own product, scoped to a space.                  | [End-Users](/features/end-users)                         |
+| **API key**      | A headless credential bound to one space.                              | [API Keys](/features/api-keys)                           |
 
 The platform does not use row-level security in the database. Isolation is enforced by the application: every query filters by organization, and by space for space-scoped resources. There is no query that crosses tenants implicitly.
 
@@ -42,11 +42,11 @@ Each authenticated request goes through the same steps, in order:
 4. **Space context.** For space-scoped routes (agents, runs, schedules, end-users, API keys, notifications, packages, integrations, files, uploads), the space comes from the key, or from `X-Space-Id` for a session. An `X-Space-Id` that contradicts the key is a `403`. The caller's role **in that space** is resolved and the effective permissions become `(organization ∪ space) ∩ ceiling`. No role in the space is a `403 not_a_space_member`, or a `404` for a private space.
 5. **API version and idempotency**, then the route handler.
 
-Routes of the `/api/orgs/{orgId}` family carry the organization in the path instead of a header. Webhooks name their own space in the body or query. See [Spaces](/docs/features/spaces#space-ids-and-the-header) for the transports.
+Routes of the `/api/orgs/{orgId}` family carry the organization in the path instead of a header. Webhooks name their own space in the body or query. See [Spaces](/features/spaces#space-ids-and-the-header) for the transports.
 
 ## Acting for an end-user
 
-Send `Appstrate-User: eu_xxx` with an API key to act as one of your own customers. The call is then attributed to the end-user, uses its connections and memory, and only sees its runs. It is refused for cookie sessions and for end-users of another space. See [End-Users](/docs/features/end-users).
+Send `Appstrate-User: eu_xxx` with an API key to act as one of your own customers. The call is then attributed to the end-user, uses its connections and memory, and only sees its runs. It is refused for cookie sessions and for end-users of another space. See [End-Users](/features/end-users).
 
 ## Realm isolation
 
@@ -54,13 +54,13 @@ Sessions carry a **realm**. Dashboard users have the realm `platform`. When the 
 
 ## Credential isolation
 
-Credentials (OAuth tokens, API keys, custom fields) are encrypted at rest with `CONNECTION_ENCRYPTION_KEY` and stay scoped to a space and to their owner, a member or an end-user. At run time the agent never receives a credential. The run's sidecar injects it on outbound requests (see [Sandbox and Sidecar](/docs/features/sandbox-and-sidecar)). A member's connection is theirs. Others in the space use it only when it is explicitly shared or pinned by an admin. The details are in [Isolation and Security](/docs/self-hosting/isolation-and-security).
+Credentials (OAuth tokens, API keys, custom fields) are encrypted at rest with `CONNECTION_ENCRYPTION_KEY` and stay scoped to a space and to their owner, a member or an end-user. At run time the agent never receives a credential. The run's sidecar injects it on outbound requests (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). A member's connection is theirs. Others in the space use it only when it is explicitly shared or pinned by an admin. The details are in [Isolation and Security](/self-hosting/isolation-and-security).
 
 ## Audit
 
 Three records answer "who did what":
 
-- **Run records.** Every run stores its organization, space, the key, member, end-user or schedule that launched it, and the model and proxy it used. See [Runs](/docs/features/runs).
+- **Run records.** Every run stores its organization, space, the key, member, end-user or schedule that launched it, and the model and proxy it used. See [Runs](/features/runs).
 - **Structured logs.** Authentication decisions, permission denials and every `Appstrate-User` impersonation are emitted as JSON log lines.
 - **Audit table.** State-changing operations (organization, space, member, key, webhook, package and connection changes) are appended to an `audit_events` table with actor, resource, before and after values, IP and request id. Writes are best effort so that an audit failure never blocks a change. The table is not exposed through the API, so export it from the database or forward the logs for retention and tamper-evidence.
 

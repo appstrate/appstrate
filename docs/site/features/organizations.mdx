@@ -3,7 +3,7 @@ title: Organizations
 description: Create and manage organizations, invite members, assign roles and set organization-wide options.
 ---
 
-An **organization** is the top-level tenant: the membership, billing and administration boundary. It owns the infrastructure shared by everything inside it (models and provider credentials, proxies, the package catalog, custom roles) and contains one or more [spaces](/docs/features/spaces), where the work happens.
+An **organization** is the top-level tenant: the membership, billing and administration boundary. It owns the infrastructure shared by everything inside it (models and provider credentials, proxies, the package catalog, custom roles) and contains one or more [spaces](/features/spaces), where the work happens.
 
 Organization ids are bare UUIDs, with no prefix. Each organization also has a unique slug, which becomes the default scope of the packages it authors (`@<slug>/<name>`).
 
@@ -22,7 +22,7 @@ curl -X POST https://your-instance/api/orgs \
 
 A new organization gets a **default space** and a starter agent activated in it. It is also pinned to the current API version.
 
-An operator can close organization creation on an instance, so that only platform admins can create organizations and everyone else waits for an invitation (`403 org_creation_disabled`). See [Environment Variables](/docs/self-hosting/environment-variables). `GET /api/profile` answers `can_create_org`, which says whether `POST /api/orgs` would accept you.
+An operator can close organization creation on an instance, so that only platform admins can create organizations and everyone else waits for an invitation (`403 org_creation_disabled`). See [Environment Variables](/self-hosting/environment-variables). `GET /api/profile` answers `can_create_org`, which says whether `POST /api/orgs` would accept you.
 
 ## Roles
 
@@ -33,7 +33,7 @@ An operator can close organization creation on an instance, so that only platfor
 | `member` | Day-to-day use. Sees the open spaces, and the spaces they were added to.                                                                         |
 | `guest`  | A restricted identity with no implicit access to any space. Sees only the spaces they were added to.                                             |
 
-An organization can have several owners and always keeps at least one. What each role can do in detail, and how space roles combine with it, is in [Roles and permissions](/docs/features/roles-and-permissions).
+An organization can have several owners and always keeps at least one. What each role can do in detail, and how space roles combine with it, is in [Roles and permissions](/features/roles-and-permissions).
 
 Who may change whose role:
 
@@ -90,11 +90,11 @@ In the web app, **Organization settings > Users** manages members and invitation
 
 `GET /api/orgs/{orgId}/settings` is readable by any member. `PATCH /api/orgs/{orgId}/settings` needs `org:settings` (owner or admin) and merges the keys you send:
 
-| Key                     | Effect                                                                                                                                                                                        |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                                         |
-| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the **Team SSO** tab. Default `false`. Requires the `oidc` module.                                                                          |
-| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/docs/features/packages). Skills and system packages are exempt. |
+| Key                     | Effect                                                                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                                    |
+| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the **Team SSO** tab. Default `false`. Requires the `oidc` module.                                                                     |
+| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/features/packages). Skills and system packages are exempt. |
 
 ## Deleting an organization
 
@@ -104,11 +104,11 @@ In the web app, **Organization settings > Users** manages members and invitation
 
 A browser session names the active organization with the `X-Org-Id` header. An API key is bound to one organization: the header is ignored with an API key, and only `X-Space-Id` is checked. `GET /api/orgs` lists the organizations of the caller.
 
-Each organization is also reachable as its own [MCP server](/docs/using-appstrate/mcp-clients) endpoint.
+Each organization is also reachable as its own [MCP server](/using-appstrate/mcp-clients) endpoint.
 
 ## What belongs to the organization
 
-- **Models and provider credentials**, **proxies** and the **default** of each. See [LLM Models](/docs/integrations/llm-models) and [Proxies](/docs/features/proxies).
-- The **package catalog**: agents, skills, integrations and MCP servers are owned by the organization and placed in spaces. See [Library and sharing](/docs/features/library).
+- **Models and provider credentials**, **proxies** and the **default** of each. See [LLM Models](/integrations/llm-models) and [Proxies](/features/proxies).
+- The **package catalog**: agents, skills, integrations and MCP servers are owned by the organization and placed in spaces. See [Library and sharing](/features/library).
 - **Custom roles** and the OAuth clients registered at the organization level.
 - **Organization-wide integration OAuth clients**, inherited by every space.

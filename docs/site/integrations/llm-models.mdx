@@ -15,7 +15,7 @@ Every agent needs a model. Models are not integrations: they are configured sepa
 
 ## Providers
 
-The providers available on your instance depend on the `MODULES` setting (see [Environment Variables](/docs/self-hosting/environment-variables)). The registry endpoint always returns the exact list.
+The providers available on your instance depend on the `MODULES` setting (see [Environment Variables](/self-hosting/environment-variables)). The registry endpoint always returns the exact list.
 
 ### API key providers (`core-providers`, loaded by default)
 
@@ -114,7 +114,7 @@ The dashboard also seeds a provider's featured models the first time you connect
 A provider's offer comes from the model registry that ships with your platform version, the one the agent engine (Pi) uses. Two things change what you see in it:
 
 - **A platform upgrade can change the offer.** A model the registry no longer records can no longer be added. A model you already added on it stays in your list with the values stored, but it loses the catalog defaults (label, limits, capabilities, price) and runs unpriced unless you set a `cost` on it. If the operator listed such a model in `SYSTEM_PROVIDER_KEYS`, the platform refuses to boot until it is removed, and `bun run verify:system-models` run before the deploy catches it. The release notes of each version say which providers lost models.
-- **A live catalog adds new models between releases.** Each API process reads a signed file from `get.appstrate.dev` when it starts and every hour, and holds it in memory. It lists models a newer registry records and your build can already serve, so a new vendor model becomes selectable without a platform release. It only adds: it never changes a model of the bundled registry, a system model or a featured model. The read sends nothing about your instance. Until a process has read the file (just after a restart, or while the channel is unreachable), a model added from it runs without its catalog defaults. An operator turns the read off with `MODEL_CATALOG_URL=off`, which leaves the bundled registry alone (see [Environment Variables](/docs/self-hosting/environment-variables)). The design is in [`MODEL_CATALOG.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
+- **A live catalog adds new models between releases.** Each API process reads a signed file from `get.appstrate.dev` when it starts and every hour, and holds it in memory. It lists models a newer registry records and your build can already serve, so a new vendor model becomes selectable without a platform release. It only adds: it never changes a model of the bundled registry, a system model or a featured model. The read sends nothing about your instance. Until a process has read the file (just after a restart, or while the channel is unreachable), a model added from it runs without its catalog defaults. An operator turns the read off with `MODEL_CATALOG_URL=off`, which leaves the bundled registry alone (see [Environment Variables](/self-hosting/environment-variables)). The design is in [`MODEL_CATALOG.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
 
 ## System models and organization models
 
@@ -161,7 +161,7 @@ Both are optional. Left unset they inherit, and an unset reasoning level resolve
 - **On an agent.** Open the agent, then the **Default settings** tab (it needs the `agents:configure` permission). The **Models** card has the model select, a **Temperature** slider, a **Reasoning level** selector and a **Save model settings** button. The values apply to every run of the agent in that space.
 - **For one run or one schedule.** The **Run with options** dialog and the schedule form carry the same two controls. Empty fields inherit the agent's defaults.
 - **In the chat.** The chat's model picker ("Model and generation") has the same controls.
-- **Through the API.** `generation` on `PATCH /api/agents/{scope}/{name}/model` and on the run request, and `generation_config_override` on schedules, each with `temperature` and `reasoning_level`. See [Agents](/docs/features/agents#model-proxy-and-generation-settings) and [Runs](/docs/features/runs).
+- **Through the API.** `generation` on `PATCH /api/agents/{scope}/{name}/model` and on the run request, and `generation_config_override` on schedules, each with `temperature` and `reasoning_level`. See [Agents](/features/agents#model-proxy-and-generation-settings) and [Runs](/features/runs).
 
 The model form on the Models page of the organization settings only declares whether a model reasons, with a **Reasoning** checkbox among its capabilities. It has no temperature or reasoning level control.
 

@@ -5,7 +5,7 @@ description: "Let the people who use your product sign in through Appstrate: reg
 
 The `oidc` module turns Appstrate into an OAuth 2.1 and OpenID Connect authorization server. Your product sends a person to Appstrate to sign in, and gets back a token. This page covers the two things you configure for that: **OAuth clients** (who may start a sign-in, and what the resulting token may do) and the **authentication settings of a space** (the email server and the Google and GitHub apps used by that space's sign-in pages).
 
-The module is loaded by default: the default value of `MODULES` includes `oidc`. The token types and how the API accepts them are in [Authentication](/docs/api/authentication#oidc-access-tokens). This page is about setting the clients up and embedding the flow.
+The module is loaded by default: the default value of `MODULES` includes `oidc`. The token types and how the API accepts them are in [Authentication](/api/authentication#oidc-access-tokens). This page is about setting the clients up and embedding the flow.
 
 ## The three client levels
 
@@ -88,7 +88,7 @@ A first-party client skips the consent screen. Use it for your own product, wher
 
 The platform's own closed mode applies on top. When the operator sets `AUTH_DISABLE_SIGNUP=true` or `AUTH_ALLOWED_SIGNUP_DOMAINS`, the platform gate is evaluated first for every new account, including the ones created on a space's hosted pages (see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md)). An open `allowSignup` does not override it.
 
-One email address belongs to one audience: an account created through a space is an end-user of that space only and cannot sign in to the dashboard, and the other way round. See [Multi-tenancy](/docs/features/multi-tenancy).
+One email address belongs to one audience: an account created through a space is an end-user of that space only and cannot sign in to the dashboard, and the other way round. See [Multi-tenancy](/features/multi-tenancy).
 
 #### Rotate, disable and delete
 
@@ -113,7 +113,7 @@ While Team SSO is off, creating or editing an organization client and rotating i
 
 ### Instance level
 
-An instance client is for a trusted app that lets a platform user choose an organization after signing in, like the dashboard itself and the `appstrate` CLI (both are created by the platform). No form and no admin endpoint creates one, on purpose. The operator declares extra ones in the `OIDC_INSTANCE_CLIENTS` environment variable (see [Environment Variables](/docs/self-hosting/environment-variables)), and the platform creates them at boot. Tools such as MCP clients that register themselves through dynamic client registration also receive an instance-level client, and their tokens are bound to a single resource. If a declared client later differs from the stored one in `name`, `redirectUris`, `postLogoutRedirectUris`, `scopes`, `skipConsent` or the secret, the boot fails instead of changing it silently. The format and the procedure for changing one are in the [module README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
+An instance client is for a trusted app that lets a platform user choose an organization after signing in, like the dashboard itself and the `appstrate` CLI (both are created by the platform). No form and no admin endpoint creates one, on purpose. The operator declares extra ones in the `OIDC_INSTANCE_CLIENTS` environment variable (see [Environment Variables](/self-hosting/environment-variables)), and the platform creates them at boot. Tools such as MCP clients that register themselves through dynamic client registration also receive an instance-level client, and their tokens are bound to a single resource. If a declared client later differs from the stored one in `name`, `redirectUris`, `postLogoutRedirectUris`, `scopes`, `skipConsent` or the secret, the boot fails instead of changing it silently. The format and the procedure for changing one are in the [module README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
 
 ## Embed the flow in your product
 
@@ -180,7 +180,7 @@ curl https://your-instance/api/agents \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
-The token is pinned to the space, so no `X-Space-Id` is needed. The granted scopes are the ceiling, and the person only sees their own runs. See [End-users](/docs/features/end-users) and [Authentication](/docs/api/authentication#oidc-access-tokens). To check a token yourself, verify its ES256 signature against the key set at `/api/auth/jwks`, and fetch the set again when a token names a `kid` you do not know.
+The token is pinned to the space, so no `X-Space-Id` is needed. The granted scopes are the ceiling, and the person only sees their own runs. See [End-users](/features/end-users) and [Authentication](/api/authentication#oidc-access-tokens). To check a token yourself, verify its ES256 signature against the key set at `/api/auth/jwks`, and fetch the set again when a token names a `kid` you do not know.
 
 ### Log the person out
 
@@ -202,9 +202,9 @@ These settings apply to **space-level clients only**, and only to the pages Apps
 
 - **Google and GitHub**: a space with no configuration does not fall back to the instance's `GOOGLE_CLIENT_ID` and `GITHUB_CLIENT_ID` apps. The button is hidden on its sign-in page.
 - **Mail**: a space with no configuration does not fall back to the instance's SMTP server for the magic link and password reset pages, which answer an error. Registration is the exception: if the instance has an SMTP server, the verification email of a new account still goes through it.
-- Organization and instance clients, and the dashboard sign-in, keep using the instance settings from [Environment Variables](/docs/self-hosting/environment-variables).
+- Organization and instance clients, and the dashboard sign-in, keep using the instance settings from [Environment Variables](/self-hosting/environment-variables).
 
-The calls below need a signed-in session (an API key cannot carry `space-settings:write`), so send the session cookie and `X-Org-Id`. See [Authentication](/docs/api/authentication#session-cookies).
+The calls below need a signed-in session (an API key cannot carry `space-settings:write`), so send the session cookie and `X-Org-Id`. See [Authentication](/api/authentication#session-cookies).
 
 ### Email
 
@@ -269,6 +269,6 @@ The provider is `google` or `github`, and `GET`, `PUT` and `DELETE` work as for 
 
 ### How the secrets are stored
 
-The SMTP password and the Google and GitHub client secrets are encrypted at rest with AES-256-GCM, using the platform's `CONNECTION_ENCRYPTION_KEY` and its rotation keyring. They are write-only: no endpoint and no screen returns them. If a stored secret can no longer be decrypted (a key removed from the keyring, for example), the configuration is treated as not configured instead of failing, and the space's pages behave as if it were absent until you save it again. For the key rotation procedure, see [Environment Variables](/docs/self-hosting/environment-variables), and [Production checklist](/docs/self-hosting/production-checklist) for the secrets you must keep.
+The SMTP password and the Google and GitHub client secrets are encrypted at rest with AES-256-GCM, using the platform's `CONNECTION_ENCRYPTION_KEY` and its rotation keyring. They are write-only: no endpoint and no screen returns them. If a stored secret can no longer be decrypted (a key removed from the keyring, for example), the configuration is treated as not configured instead of failing, and the space's pages behave as if it were absent until you save it again. For the key rotation procedure, see [Environment Variables](/self-hosting/environment-variables), and [Production checklist](/self-hosting/production-checklist) for the secrets you must keep.
 
 Saving or deleting a configuration refreshes the cache of the API instance that handled the call at once. Other instances are told through the platform's pub/sub, which uses Redis when `REDIS_URL` is set. Without Redis, an instance other than the one that handled the call keeps its cached answer for up to a minute.

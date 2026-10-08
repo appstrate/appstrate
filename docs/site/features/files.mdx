@@ -46,14 +46,14 @@ The agent's input schema marks a field as a file (`format: "uri"` with a `conten
 
 The byte count must match the declared `size`, and binary types are checked by magic-byte sniffing. Add `sha256` to the reservation to have the checksum enforced end to end. Each caller can hold 50 unused uploads at once (`UPLOAD_MAX_ACTIVE_PER_ACTOR`), and an organization 2 GiB of staged uploads (`UPLOAD_STAGING_MAX_BYTES_PER_ORG`).
 
-When the run starts, uploads are copied into durable files and the stored input is rewritten from `upload://` to `appfile://`. Files appear in the agent's workspace under `./files/` and are listed in its prompt. An [inline run](/docs/features/runs#inline-runs) can also mount existing files with `context_files`.
+When the run starts, uploads are copied into durable files and the stored input is rewritten from `upload://` to `appfile://`. Files appear in the agent's workspace under `./files/` and are listed in its prompt. An [inline run](/features/runs#inline-runs) can also mount existing files with `context_files`.
 
 ## Getting deliverables out
 
 An agent produces output files in two ways:
 
 - It writes them under **`./outputs/`**. At the end of the run, everything there is published automatically. Files and folders whose name starts with a dot are skipped.
-- It calls the **`publish_file`** [runtime tool](/docs/features/tools), when selected, to publish a file immediately and get its `appfile://` URI back, for example to cite it in its output.
+- It calls the **`publish_file`** [runtime tool](/features/tools), when selected, to publish a file immediately and get its `appfile://` URI back, for example to cite it in its output.
 
 The platform prompt asks agents to use a concise, descriptive file name, which is the name you see. The run reports what was stored: `file_counts` and an `artifacts` summary that lists any file that could not be saved.
 
@@ -69,7 +69,7 @@ On the run page, **Outcome** features the deliverable when the run produced exac
 | `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                     |
 | `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                     |
 
-Listing and downloading need `files:read`. Deleting or keeping a file needs `files:delete`, or being the file's creator on a credential that carries `files:delete`. `read` is held by all five preset space roles, `delete` by `admin` and `builder`. See [Roles and permissions](/docs/features/roles-and-permissions).
+Listing and downloading need `files:read`. Deleting or keeping a file needs `files:delete`, or being the file's creator on a credential that carries `files:delete`. `read` is held by all five preset space roles, `delete` by `admin` and `builder`. See [Roles and permissions](/features/roles-and-permissions).
 
 ## Chaining runs
 
@@ -77,7 +77,7 @@ An `appfile://` URI is stable for the file's life. Pass the output of run A as a
 
 ## Limits and retention
 
-All of these are operator settings, see [Environment Variables](/docs/self-hosting/environment-variables).
+All of these are operator settings, see [Environment Variables](/self-hosting/environment-variables).
 
 | Limit                                   | Default                                                                                 |
 | --------------------------------------- | --------------------------------------------------------------------------------------- |

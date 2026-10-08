@@ -38,7 +38,7 @@ A toggle in the composer controls whether the assistant may **create or edit age
 
 ### Skills
 
-[Skills](/docs/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:
+[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:
 
 | Mode                | Behaviour                                                                      |
 | ------------------- | ------------------------------------------------------------------------------ |
@@ -52,7 +52,7 @@ A space can also **require** skills on its chat. A person with `skills:write` in
 
 ## For administrators
 
-- Every chat turn runs inside the API process, on the Pi engine. `CHAT_PI_MAX_CONCURRENCY` (default 6) caps concurrent turns per API process, and a full instance answers new turns with `429`. Size it from measured capacity before opening chat to many users. The variables are in [Environment Variables](/docs/self-hosting/environment-variables).
+- Every chat turn runs inside the API process, on the Pi engine. `CHAT_PI_MAX_CONCURRENCY` (default 6) caps concurrent turns per API process, and a full instance answers new turns with `429`. Size it from measured capacity before opening chat to many users. The variables are in [Environment Variables](/self-hosting/environment-variables).
 - Inference goes through the platform's LLM proxy: the model's key is injected server-side and the usage is metered like any run. With the billing module, a chat can stop on an exhausted quota.
-- The assistant drives the platform through the same [MCP tools](/docs/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
-- Developers can reach the same surface over the API: `POST /api/chat` and `/api/chat/sessions`. See the [API reference](/docs/api/introduction).
+- The assistant drives the platform through the same [MCP tools](/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
+- Developers can reach the same surface over the API: `POST /api/chat` and `/api/chat/sessions`. See the [API reference](/api/introduction).

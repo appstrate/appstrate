@@ -11,43 +11,43 @@ import { Rocket, Key, Webhook, AlertTriangle, List } from "lucide-react";
     icon={<Rocket />}
     title="Quickstart"
     description="Create an API key and run an agent with curl."
-    href="/docs/api/quickstart"
+    href="/api/quickstart"
   />
   <Card
     icon={<Key />}
     title="Authentication"
     description="API keys, session cookies, OIDC tokens, and the context headers."
-    href="/docs/api/authentication"
+    href="/api/authentication"
   />
   <Card
     icon={<Webhook />}
     title="Webhooks"
     description="Subscribe to run events. Standard Webhooks spec, HMAC-signed."
-    href="/docs/api/webhooks-guide"
+    href="/api/webhooks-guide"
   />
   <Card
     icon={<AlertTriangle />}
     title="Errors"
     description="RFC 9457 problem details, stable error codes, request ids."
-    href="/docs/api/errors"
+    href="/api/errors"
   />
   <Card
     icon={<List />}
     title="Endpoint reference"
     description="Every operation, generated from the OpenAPI document."
-    href="/docs/api/agents/listAgents"
+    href="/api/agents/listAgents"
   />
 </Cards>
 
 ## What the API covers
 
-Everything the dashboard does is available over HTTP: agents, runs, schedules, packages (agents, skills, MCP servers, integrations), integration connections, models and proxies, spaces and roles, end-users, API keys, webhooks, files, and realtime streams. The dashboard and the [`appstrate` CLI](/docs/using-appstrate/cli) are clients of this same API.
+Everything the dashboard does is available over HTTP: agents, runs, schedules, packages (agents, skills, MCP servers, integrations), integration connections, models and proxies, spaces and roles, end-users, API keys, webhooks, files, and realtime streams. The dashboard and the [`appstrate` CLI](/using-appstrate/cli) are clients of this same API.
 
 The API is described by an [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document generated from the code. It is the source of truth for request and response schemas. This documentation covers the cross-cutting rules the schema cannot express well: authentication, context headers, errors, idempotency, pagination, rate limits, and webhooks.
 
 ## Model in one paragraph
 
-An **organization** contains **spaces**. A space is the unit that holds agents, runs, schedules, end-users, files, and API keys. An **API key** is created in one space and is pinned to it. **End-users** are your own customers, created through the API inside a space; you act on their behalf with the `Appstrate-User` header or let them sign in through the OIDC module. See [Multi-tenancy](/docs/features/multi-tenancy).
+An **organization** contains **spaces**. A space is the unit that holds agents, runs, schedules, end-users, files, and API keys. An **API key** is created in one space and is pinned to it. **End-users** are your own customers, created through the API inside a space; you act on their behalf with the `Appstrate-User` header or let them sign in through the OIDC module. See [Multi-tenancy](/features/multi-tenancy).
 
 ## Base URL
 
@@ -57,7 +57,7 @@ All endpoints live under `/api`. A local instance serves them at:
 http://localhost:3000/api
 ```
 
-Use your instance's `APP_URL` in production; Appstrate Cloud is `https://app.appstrate.com/api`. There is no version in the path. Versioning is a header, see [API Reference](/docs/api#versioning).
+Use your instance's `APP_URL` in production; Appstrate Cloud is `https://app.appstrate.com/api`. There is no version in the path. Versioning is a header, see [API Reference](/api#versioning).
 
 ## OpenAPI document
 
@@ -76,7 +76,7 @@ With the `mcp` module loaded (it is in the default `MODULES` set), the API is al
 
 ## Next
 
-- [Quickstart](/docs/api/quickstart): your first calls with curl.
-- [Authentication](/docs/api/authentication): keys, sessions, OIDC tokens, headers, scopes.
-- [API Reference](/docs/api): versioning, rate limits, pagination, realtime streams.
-- [Multi-tenancy](/docs/features/multi-tenancy): organizations, spaces, end-users, impersonation.
+- [Quickstart](/api/quickstart): your first calls with curl.
+- [Authentication](/api/authentication): keys, sessions, OIDC tokens, headers, scopes.
+- [API Reference](/api): versioning, rate limits, pagination, realtime streams.
+- [Multi-tenancy](/features/multi-tenancy): organizations, spaces, end-users, impersonation.
