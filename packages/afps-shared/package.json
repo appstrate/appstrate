@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/afps-shared",
-  "version": "0.10.1",
-  "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, delivery.http projection)",
+  "version": "0.11.0",
+  "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, authorized_uris rules, delivery.http projection)",
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
