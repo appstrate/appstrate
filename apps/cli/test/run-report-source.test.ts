@@ -300,4 +300,50 @@ describe("startReportSession — integration readiness", () => {
         "\n    @appstrate/clickup: must_choose_connection (must_choose_connection)",
     );
   });
+
+  it("summarises a refusal body longer than the raw-display cut", async () => {
+    const body = JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/missing-integration-connection",
+      title: "Missing integration connection",
+      status: 409,
+      detail: "The run cannot start: 2 integrations have no usable connection.",
+      instance: "/api/runs/remote",
+      code: "missing_integration_connection",
+      request_id: "req_0123456789abcdef0123456789abcdef",
+      errors: [
+        {
+          field: "integrations.@appstrate/gmail",
+          code: "required_integration_unbound",
+          message: "Integration '@appstrate/gmail' is required and bound to no connection",
+          auth_key: "oauth",
+          required_scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+          connect_url: "https://app.example.com/connect/cnx_offer_0123456789abcdef0123456789",
+        },
+        {
+          field: "integrations.@appstrate/clickup",
+          code: "must_choose_connection",
+          message: "Integration '@appstrate/clickup' has 2 usable connections; choose one",
+        },
+      ],
+    });
+    expect(body.length).toBeGreaterThan(512);
+    stub = installStubFetch(
+      () =>
+        new Response(body, {
+          status: 409,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+    );
+    const err = await session().catch((e: unknown) => e);
+    expect((err as ReportStartError).responseSnippet).toBe(
+      "@appstrate/gmail: Integration '@appstrate/gmail' is required and bound to no connection (required_integration_unbound)" +
+        "\n    @appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)",
+    );
+  });
+
+  it("cuts a long non-refusal body for raw display", async () => {
+    stub = installStubFetch(() => new Response("x".repeat(600), { status: 500 }));
+    const err = await session().catch((e: unknown) => e);
+    expect((err as ReportStartError).responseSnippet).toBe(`${"x".repeat(512)}…`);
+  });
 });

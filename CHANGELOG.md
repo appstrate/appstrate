@@ -23,8 +23,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      publish a version. Before the deploy, write it only through the
      manifest itself: the agent editor's JSON tab (apply, then save), or
      `PATCH /api/packages/agents/{scope}/{name}` with the whole manifest, then
-     `POST /api/packages/agents/{scope}/{name}/versions`. Both store the key
-     as given; the running release accepts it as an unknown key. Do not touch
+     `POST /api/packages/agents/{scope}/{name}/versions`. The `PATCH` requires
+     an `If-Match` header (`428 precondition_required` without it) carrying
+     the `ETag` that `GET /api/packages/agents/{scope}/{name}` (the draft)
+     answers; a `412` means the draft moved since, so read it again. Both
+     store the key as given; the running release accepts it as an unknown
+     key. Do not touch
      those agents' Integrations tab in the editor until the deploy: before
      this release it rewrites `integrations_configuration` and drops
      `required`.
@@ -51,11 +55,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     members share, carrying `auth_key` and `required_scopes`,
     `candidate_connections`, or `required_auth_key` and
     `available_auth_keys`, plus a `connect_url` when the caller sent
-    `X-Appstrate-Connect-Offers`; and when a cascade layer holds `[]` (below),
+    `X-Appstrate-Connect-Offers` (never stored with an idempotent response,
+    so a replay carries none; over MCP `run_and_wait`, only the in-app chat
+    receives it, and an external MCP client gets the warning and can call
+    `initiateIntegrationConnect`); and when a cascade layer holds `[]` (below),
     with a message naming that layer and no connect target, since the choice
     was deliberate;
   - `integration_not_active` when the integration is switched off in the
-    space.
+    space; the run's `integrations_unbound` lists it too.
 
   A `required` integration keeps the old behaviour: a
   `409 missing_integration_connection` with `not_connected`,
@@ -121,14 +128,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integration_unbound` warning that carries a `connect_url`, the CLI prints
   one `⚠` line per warning, and the MCP server instructions explain both.
 - **The run resource gains `integrations_unbound`** (#1830): the sorted ids of
-  the declared integrations the run bound to no connection (`[]` when none,
+  the declared integrations the run bound to no connection, those switched
+  off in the space included (`[]` when none,
   `null` when the run has no connection snapshot), which `connections_used`
   cannot carry.
 - **`appstrate run --report --json` announces the run** with an
   `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
   registration reported some), as `--remote --json` does with
   `appstrate.remote.triggered` (#1830). A refused launch prints its items one
-  per line.
+  per line. The locally executed agent is told which integrations the
+  platform bound to none, and their tools are not exposed to it.
+- **The agent detail's integrations carry `required` and `auth_key`** (#1830),
+  as the manifest's `integrations_configuration.<id>` declares them.
 
 ### Fixed
 

@@ -150,7 +150,7 @@ describe("full persona invariants", () => {
     expect(FULL).not.toMatch(/the 403 names the permission it required/);
   });
 
-  // #1830: a declared integration no longer blocks a run unless `required`.
+  // #1830: a declared integration blocks a run only when `required`.
   it("teaches `required` and how to read a run that started without an integration", () => {
     expect(FULL).toContain("`integrations_configuration.<id>.required: true`");
     expect(REDUCED).not.toContain("`integrations_configuration.<id>.required: true`");
