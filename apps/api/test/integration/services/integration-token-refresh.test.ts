@@ -614,6 +614,8 @@ describe("integration refresh-failure escalation", () => {
       .select({
         refreshFailureCount: integrationConnections.refreshFailureCount,
         needsReconnection: integrationConnections.needsReconnection,
+        credentialsEncrypted: integrationConnections.credentialsEncrypted,
+        expiresAt: integrationConnections.expiresAt,
       })
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId))
@@ -752,5 +754,92 @@ describe("integration refresh-failure escalation", () => {
     ).rejects.toThrow();
 
     expect((await readRow(connId)).refreshFailureCount).toBe(1);
+  });
+
+  // ── A successful exchange never clears a flag set before its write ──
+  //
+  // The write-back passes `needsReconnection: false`, and a write that clears the
+  // flag only matches an unflagged row (`persistCredentialBundle`, "Monotonic
+  // clear"). On a row already flagged — revoked, scopes below the floor, an
+  // escalated streak — it writes nothing and the refresh fails as transient: the
+  // flag holds until a reconnect, and the fresh token is discarded.
+  describe("on a connection already flagged needsReconnection", () => {
+    let connId: string;
+    let seeded: Awaited<ReturnType<typeof readRow>>;
+
+    beforeEach(async () => {
+      // Expired, so the freshness re-read could not answer even a proactive caller.
+      connId = await seedConn({
+        expiresAt: new Date(Date.now() - HOUR_MS),
+        needsReconnection: true,
+      });
+      seeded = await readRow(connId);
+      token.setResponse({ access_token: "fresh-access", expires_in: 3600 });
+    });
+
+    async function expectUntouched(): Promise<void> {
+      // The exchange did run: the flag held at the write, not before it.
+      expect(token.requests()).toBe(1);
+      const row = await readRow(connId);
+      expect(row.needsReconnection).toBe(true);
+      expect(row.credentialsEncrypted).toBe(seeded.credentialsEncrypted);
+      expect(row.expiresAt).toEqual(seeded.expiresAt);
+    }
+
+    it("forceRefreshIntegrationConnection rejects as transient and writes nothing", async () => {
+      const refused = forceRefreshIntegrationConnection(
+        await readTarget(connId),
+        PACKAGE_ID,
+        "primary",
+        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+      );
+      await expect(refused).rejects.toBeInstanceOf(RefreshError);
+      await expect(refused).rejects.toMatchObject({
+        kind: "transient",
+        message: expect.stringContaining("changed while its token was refreshed"),
+      });
+      await expectUntouched();
+    });
+
+    it("refreshConnectionCredential (forced) answers retry and writes nothing", async () => {
+      // A resolvable pinned client, so the refresh context builds.
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: PACKAGE_ID,
+          authKey: "primary",
+          clientId: "cid",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+        })
+        .returning({ id: integrationOauthClients.id });
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: client!.id })
+        .where(eq(integrationConnections.id, connId));
+      const [pkg] = await db
+        .select({ draftManifest: packages.draftManifest })
+        .from(packages)
+        .where(eq(packages.id, PACKAGE_ID));
+      const manifest = pkg!.draftManifest as unknown as IntegrationManifest;
+
+      const outcome = await refreshConnectionCredential({
+        connection: { ...(await readTarget(connId)), authKey: "primary" },
+        integrationId: PACKAGE_ID,
+        manifest,
+        authDef: { ...(manifest.auths!.primary as AfpsManifestAuth), token_endpoint: token.url },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        force: true,
+      });
+
+      expect(outcome).toMatchObject({
+        status: "retry",
+        reason: "token refresh failed upstream (transient)",
+        detail: expect.stringContaining("changed while its token was refreshed"),
+      });
+      await expectUntouched();
+    });
   });
 });
