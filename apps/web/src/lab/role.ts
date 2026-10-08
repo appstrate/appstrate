@@ -203,3 +203,59 @@ export function effectivePreset(): LabPreset {
 export function spacePermissionsForPreset(preset: LabPreset = effectivePreset()): string[] {
   return SPACE_PERMISSIONS[preset];
 }
+
+const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
+type LabPackageType = (typeof PACKAGE_TYPES)[number];
+
+function packageTypeOf(value: unknown): LabPackageType | null {
+  return (PACKAGE_TYPES as readonly unknown[]).includes(value) ? (value as LabPackageType) : null;
+}
+
+/** The type a package URL names (`/api/packages/agents/…`, `/api/skills/…`), for a body that does not. */
+function packageTypeOfUrl(pathname: string): LabPackageType | null {
+  const segment = pathname.match(
+    /^\/api\/(?:packages\/)?(agents|skills|mcp-servers|integrations)\//,
+  )?.[1];
+  return segment ? packageTypeOf(segment.replace(/s$/, "")) : null;
+}
+
+/**
+ * The server answers `home_writable`, `home_deletable` and `home_shareable` FOR THE CALLER
+ * (`homeWireForCaller`): whether they hold the type's write, delete or share in the
+ * package's home. Fixtures hard-code `true`, which handed every persona the owner's
+ * menus. Rewritten here, on the way out, from the persona's own permissions; a fixture
+ * that says `false` (a system package) stays false. The projected `definition` follows.
+ */
+export function asCaller(body: unknown, pathname: string): unknown {
+  const held = new Set(spacePermissionsForPreset());
+  const urlType = packageTypeOfUrl(pathname);
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(walk);
+    if (!value || typeof value !== "object") return value;
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(record)) out[key] = walk(child);
+    if ("home_writable" in record) {
+      const type = packageTypeOf(record.type) ?? urlType;
+      if (type) {
+        const plural = `${type}s`;
+        for (const [field, action] of [
+          ["home_writable", "write"],
+          ["home_deletable", "delete"],
+          ["home_shareable", "share"],
+        ] as const) {
+          if (field in record)
+            out[field] = record[field] === true && held.has(`${plural}:${action}`);
+        }
+        // With no selector the server projects the draft for a caller who may
+        // write the package, and the latest published version for everyone
+        // else (`defaultDefinitionSelector`). Fixtures author the draft only.
+        if (record.definition === "draft" && out.home_writable === false && record.version) {
+          out.definition = "published";
+        }
+      }
+    }
+    return out;
+  };
+  return walk(body);
+}

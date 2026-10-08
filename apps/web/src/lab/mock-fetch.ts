@@ -25,6 +25,7 @@
  */
 import { getScenario } from "./scenario";
 import { resolveHandler } from "./handlers";
+import { asCaller } from "./role";
 
 // Read the statics off the unbound value (`typeof fetch` carries `preconnect`),
 // but call through a bound copy — a detached `fetch` throws "Illegal invocation".
@@ -123,7 +124,7 @@ export function installLabFetch(): void {
         headers: { ...handled.headers, "content-type": handled.contentType },
       });
     }
-    return Response.json(handled.body, {
+    return Response.json(asCaller(handled.body, url.pathname), {
       status: handled.status,
       headers: {
         ...handled.headers,

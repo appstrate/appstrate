@@ -1116,6 +1116,35 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 204, body: null }),
   },
   {
+    // A role change sticks for the session, so the table and the user detail
+    // read it back the way they would from the server.
+    method: "PUT",
+    pattern: /^\/api\/orgs\/[^/]+\/members\/[^/]+$/,
+    handler: (url, _scenario, _headers, body) => {
+      const userId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      const role = (body as { role?: unknown } | null)?.role;
+      const member = f.orgDetail.members?.find((m) => m.userId === userId);
+      if (!member) return { status: 404, body: {} };
+      if (role !== "owner" && role !== "admin" && role !== "member" && role !== "guest") {
+        return { status: 400, body: { code: "validation_error", detail: "role" } };
+      }
+      member.role = role;
+      return { status: 200, body: member };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/orgs\/[^/]+\/members\/[^/]+$/,
+    handler: (url) => {
+      const userId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      const members = f.orgDetail.members ?? [];
+      const index = members.findIndex((m) => m.userId === userId);
+      if (index === -1) return { status: 404, body: {} };
+      members.splice(index, 1);
+      return { status: 204, body: null };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/spaces\/[^/]+$/,
     handler: () => ({ status: 200, body: f.spaces.data[0] }),
