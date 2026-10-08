@@ -205,12 +205,8 @@ export interface RealmResolutionContext {
   query: Record<string, unknown> | null;
 }
 
-/**
- * Parameter type of the exported `setRealmResolver` injection slot; the OIDC
- * module passes a function literal and never names the type, so this is part
- * of that function's contract rather than an independent export.
- */
-export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
+/** What `setRealmResolver` installs; the OIDC module passes a function literal. */
+type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
 const realmResolver = hookSlot<RealmResolver>();
 
