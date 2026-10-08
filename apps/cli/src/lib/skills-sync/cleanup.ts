@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { shellArg } from "../shell.ts";
 import { loginFix, setupNotice, writeNotice } from "./notice.ts";
 import { getNoticePath, readSyncState, writeSyncState } from "./state.ts";
 import {
@@ -29,7 +30,7 @@ export async function cleanupProfileSkills(
       ],
     };
   const failures: string[] = [];
-  const retry = `Retry appstrate logout --profile ${profileName}.`;
+  const retry = `Retry appstrate logout --profile ${shellArg(profileName)}.`;
   let pluginReset = false;
   for (const target of SYNC_TARGETS) {
     const ledger = state.targets[target];

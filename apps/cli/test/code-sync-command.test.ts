@@ -1362,8 +1362,6 @@ describe("code sync — session notice", () => {
     const out = await hookOutput();
     expect(out.systemMessage).toContain("`appstrate login --profile nope --instance <url>`");
     expect(out.hookSpecificOutput.additionalContext).toContain("Appstrate instance URL");
-    // A no-TTY login pins no organization when the user has several.
-    expect(out.hookSpecificOutput.additionalContext).toContain("append `--org <id-or-slug>`");
   });
 
   it("tells the next session about a pin missing in a run without --print-path", async () => {
@@ -1400,6 +1398,19 @@ describe("code sync — session notice", () => {
     expect(await readText(join(pluginRoot(), "skills", "setup", "SKILL.md"))).toContain(
       "appstrate login --profile default --instance https://app.example.com",
     );
+  });
+
+  it("tells logout to retry a removal it could not finish", async () => {
+    createSkillServer(ONE_SKILL).install();
+    await codeSyncCommand({ target: ["codex"] }, createMemoryIO().io);
+    await rm(join(codexRoot(), "pdf-tools"), { recursive: true });
+    await writeFile(join(codexRoot(), "pdf-tools"), "blocks deletion");
+
+    const result = await cleanupProfileSkills("default");
+
+    expect(result.warnings).toEqual([
+      expect.stringContaining("Retry appstrate logout --profile default."),
+    ]);
   });
 
   it("quotes a remedy argument only when the shell would read it", () => {

@@ -44,7 +44,7 @@ import {
   updateProfile,
   getProfile,
 } from "../lib/config.ts";
-import { saveTokens } from "../lib/keyring.ts";
+import { deleteTokens, saveTokens } from "../lib/keyring.ts";
 import { withCredentialsLockForUser } from "../lib/api.ts";
 import { startDeviceFlow, pollDeviceFlow } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
@@ -270,15 +270,23 @@ async function runLogin(
   const sameUser =
     existingProfile?.userId === identity.userId &&
     normalizeInstance(existingProfile.instance) === instance;
+  // Only a profile on another instance can hold a pair this login must not sit beside.
+  const otherInstance =
+    existingProfile !== undefined && normalizeInstance(existingProfile.instance) !== instance;
   const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
   const preservedSpaceId =
     sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
   // Under the credentials lock, so a refresh in flight elsewhere cannot write
-  // the old session over this one; it re-reads and adopts the new pair. The
-  // profile goes first: a refresher that sees the new pair must also see its
-  // instance, or it would send that pair to the old one.
+  // the old session over this one; it re-reads and adopts the new pair.
+  // Order: delete → profile → pair, the delete only when an existing profile
+  // names another instance (a first login has no pair to clear).
+  // Readers check profile → pair → profile (`loadPairFor` in `api.ts`), so no
+  // pair is ever used beside an instance that did not issue it — not even when
+  // the save fails: the old pair is gone by then, which reads as "log in".
+  // Same instance, no delete: a failed save keeps the old, still valid session.
   await withCredentialsLockForUser(async () => {
+    if (otherInstance) await deleteTokens(profileName);
     await setProfile(profileName, {
       instance,
       userId: identity.userId,

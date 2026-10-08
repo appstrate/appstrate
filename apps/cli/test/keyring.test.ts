@@ -528,6 +528,14 @@ describe("deleteTokens", () => {
     await saveTokens("default", mkTokens({ accessToken: "wipe-me", expiresAt: futureMs() }));
     await deleteTokens("default");
     expect(FakeKeyring.store.has("default")).toBe(false);
+    // An expired pair too: `loadTokens` only reads it as absent.
+    const past = Date.now() - 1000;
+    FakeKeyring.store.set(
+      "expired",
+      mkTokensJson({ accessToken: "dead", expiresAt: past, refreshExpiresAt: past }),
+    );
+    await deleteTokens("expired");
+    expect(FakeKeyring.store.has("expired")).toBe(false);
     // And via the file path.
     FakeKeyring.shouldThrow = true;
     await saveTokens("filewipe", mkTokens({ accessToken: "wipe-me-too", expiresAt: futureMs() }));

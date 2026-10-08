@@ -294,8 +294,27 @@ function noCredentials(profileName: string, profile: Profile): AuthError {
   );
 }
 
-async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
+/**
+ * The stored pair, for a request bound to `profile.instance`. Login writes
+ * delete → profile → pair (the delete only when the instance changes), so a
+ * reader that goes profile → pair → profile and finds the same instance twice
+ * holds a pair issued by that instance: a newer pair is only ever stored after
+ * the profile naming its own instance. A changed instance stops the command,
+ * not as an `AuthError`, and deletes nothing.
+ */
+async function loadPairFor(profileName: string, profile: Profile): Promise<Tokens | null> {
   const tokens = await loadTokens(profileName);
+  const now = await getProfile(profileName);
+  if (now && now.instance !== profile.instance) {
+    throw new Error(
+      `Profile "${profileName}" changed instance during this command (now ${now.instance}); run it again.`,
+    );
+  }
+  return tokens;
+}
+
+async function resolveAccessToken(profileName: string, profile: Profile): Promise<string> {
+  const tokens = await loadPairFor(profileName, profile);
   if (!tokens) throw noCredentials(profileName, profile);
   const now = Date.now();
   const needsRefresh = tokens.expiresAt - now <= ACCESS_TOKEN_REFRESH_MARGIN_MS;
@@ -318,25 +337,13 @@ async function resolveAccessToken(profileName: string, profile: Profile): Promis
  * token. So the pair is re-read under the lock: nothing stored means a
  * logout landed meanwhile, and a refresh token other than `seen` means
  * another process rotated or logged in again — its access token is the
- * answer, with no call to the server.
- *
- * The profile is re-read there too: the caller sends the token to the instance
- * it read before the lock, so a login that moved the profile to another
- * instance meanwhile must not have its token adopted — that would hand one
- * instance's bearer to the other. Login writes the profile before the pair,
- * under this lock, so a new pair is never visible beside the old instance.
- * The run stops instead, credentials intact.
+ * answer, with no call to the server — once {@link loadPairFor} has checked
+ * that it was issued by the instance the caller will send it to.
  */
 function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens): Promise<string> {
   return dedupRefresh(profileName, () =>
     withCredentialsLock(async () => {
-      const now = await getProfile(profileName);
-      if (now && now.instance !== profile.instance) {
-        throw new Error(
-          `Profile "${profileName}" changed instance during this command (now ${now.instance}); run it again.`,
-        );
-      }
-      const current = await loadTokens(profileName);
+      const current = await loadPairFor(profileName, profile);
       if (!current) throw noCredentials(profileName, profile);
       if (current.refreshToken !== seen.refreshToken) return current.accessToken;
       return doRefresh(profileName, profile, current);
@@ -345,12 +352,6 @@ function refreshAccessToken(profileName: string, profile: Profile, seen: Tokens)
 }
 
 async function doRefresh(profileName: string, profile: Profile, tokens: Tokens): Promise<string> {
-  if (tokens.refreshExpiresAt <= Date.now()) {
-    await deleteTokens(profileName).catch(() => {});
-    throw new AuthError(
-      `Refresh token expired for profile "${profileName}". Run: ${loginRemedy(profileName, profile.instance)}`,
-    );
-  }
   try {
     const fresh = await refreshCliTokens(
       normalizeInstance(profile.instance),
@@ -464,7 +465,7 @@ export async function apiFetchRaw(
   // we computed it as fresh. Common causes: clock skew, the BA JWKS
   // rotated mid-request, or the server revoked the underlying session.
   // Try ONE rotation + retry; a second 401 is terminal.
-  const stored = await loadTokens(profileName);
+  const stored = await loadPairFor(profileName, profile);
   if (!stored) {
     return res;
   }

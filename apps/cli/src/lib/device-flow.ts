@@ -138,10 +138,7 @@ export async function startDeviceFlow(
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
-  }
+  if (!res.ok) throw await endpointError(res, "Device authorization endpoint");
   const json = (await res.json()) as {
     device_code: string;
     user_code: string;
@@ -285,13 +282,13 @@ export async function pollDeviceFlow(
       };
     }
 
-    const err = await parseErrorBody(res);
-    const code = err.error ?? "invalid_request";
-    if (code === "authorization_pending") {
+    const err = await endpointError(res, "Token endpoint");
+    if (!(err instanceof DeviceFlowError)) throw err;
+    if (err.code === "authorization_pending") {
       // Keep the current interval.
       continue;
     }
-    if (code === "slow_down") {
+    if (err.code === "slow_down") {
       // RFC 8628 §3.5 — bump by at least 5 seconds. BA's plugin already
       // enforces the minimum server-side, so a fixed +5s bump here is
       // friendly to both sides.
@@ -299,7 +296,7 @@ export async function pollDeviceFlow(
       continue;
     }
     // Any other code is terminal.
-    throw new DeviceFlowError(code, err.error_description, res.status);
+    throw err;
   }
 
   throw new DeviceFlowError(
@@ -316,12 +313,9 @@ export async function pollDeviceFlow(
  * single-use — a second exchange of the same plaintext triggers the
  * server-side reuse-detection sweep that revokes the whole family).
  *
- * A non-2xx response carrying an OAuth error body throws
- * `DeviceFlowError(code, description, status)`; `invalid_grant` (refresh
+ * A non-2xx response throws as `endpointError` says; `invalid_grant` (refresh
  * token expired, revoked, or already rotated) means the CLI must clear local
- * credentials and prompt `appstrate login`. Any other non-2xx — a proxy's 502
- * page, say — throws a plain `Error` naming the status: it says nothing about
- * the session, so it must not read as an OAuth verdict.
+ * credentials and prompt `appstrate login`.
  *
  * `signal` bounds the whole exchange, body included; an abort rejects with
  * the signal's reason (a `TimeoutError` for `AbortSignal.timeout`), never a
@@ -347,13 +341,7 @@ export async function refreshCliTokens(
     body,
     signal,
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    if (typeof err.error !== "string") {
-      throw new Error(`Token endpoint returned HTTP ${res.status}`);
-    }
-    throw new DeviceFlowError(err.error, err.error_description, res.status);
-  }
+  if (!res.ok) throw await endpointError(res, "Token endpoint");
   const json = (await res.json()) as {
     access_token: string;
     refresh_token?: string;
@@ -376,8 +364,8 @@ export async function refreshCliTokens(
  * Server-side revocation of a refresh-token family. Called on
  * `appstrate logout` before local credential cleanup.
  *
- * Contract: throws `DeviceFlowError` on any non-2xx response (network
- * error, 4xx, 5xx). Callers that want best-effort revocation (e.g.
+ * Contract: throws on a network error or any non-2xx response (see
+ * `endpointError`). Callers that want best-effort revocation (e.g.
  * `logout.ts`) MUST wrap the call in try/catch and proceed with local
  * cleanup on failure — revocation state is advisory from the client's
  * perspective, but surfacing the error at the call site lets the
@@ -405,10 +393,19 @@ export async function revokeCliRefreshToken(
     },
     body,
   });
-  if (!res.ok) {
-    const err = await parseErrorBody(res);
-    throw new DeviceFlowError(err.error ?? "invalid_request", err.error_description, res.status);
-  }
+  if (!res.ok) throw await endpointError(res, "Revocation endpoint");
+}
+
+/**
+ * A non-2xx answer from an OAuth endpoint: its OAuth error body as a
+ * `DeviceFlowError`, or, with no OAuth `error` code in it (a proxy's 502
+ * page, say), a plain `Error` naming the status. That one says nothing about
+ * the grant, so it must never read as an OAuth verdict like `invalid_request`.
+ */
+async function endpointError(res: Response, endpoint: string): Promise<Error> {
+  const err = await parseErrorBody(res);
+  if (typeof err.error !== "string") return new Error(`${endpoint} returned HTTP ${res.status}`);
+  return new DeviceFlowError(err.error, err.error_description, res.status);
 }
 
 async function parseErrorBody(res: Response): Promise<RawErrorBody> {

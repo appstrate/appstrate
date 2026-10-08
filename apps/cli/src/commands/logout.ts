@@ -24,6 +24,7 @@ import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import { cleanupProfileSkills } from "../lib/skills-sync/cleanup.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { shellArg } from "../lib/shell.ts";
 
 interface LogoutOptions {
   profile?: string;
@@ -99,7 +100,7 @@ export async function logoutCommand(
     );
   } catch (err) {
     io.stderr.write(
-      `warning: could not complete skills cleanup (${formatError(err)}). Retry appstrate logout --profile ${profileName}.\n`,
+      `warning: could not complete skills cleanup (${formatError(err)}). Retry appstrate logout --profile ${shellArg(profileName)}.\n`,
     );
   } finally {
     // A lock failure cannot keep the user signed in. An in-flight sync checks

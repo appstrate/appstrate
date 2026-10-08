@@ -29,7 +29,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
+import { loadTokens, saveTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts";
+import { apiFetchRaw } from "../src/lib/api.ts";
 import { getConfigDir, readConfig, setProfile, updateProfile } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
@@ -215,6 +216,31 @@ describe("login credentials write", () => {
     expect((await loadTokens("default"))?.refreshToken).toBe("rt-xyz");
   });
 
+  it("a first login deletes nothing from the keyring", async () => {
+    installDefaultResponders();
+    let deletes = 0;
+    _setKeyringFactoryForTesting((profile) => ({
+      setPassword(value: string): void {
+        keyring.store.set(profile, value);
+      },
+      getPassword(): string | null {
+        return keyring.store.get(profile) ?? null;
+      },
+      deletePassword(): void {
+        deletes += 1;
+        keyring.store.delete(profile);
+      },
+    }));
+
+    await loginCommand(
+      { profile: "default", instance: "https://app.example.com", noOrg: true },
+      createMemoryIO().io,
+    );
+
+    expect(deletes).toBe(0);
+    expect((await loadTokens("default"))?.refreshToken).toBe("rt-xyz");
+  });
+
   it("names the new instance on the profile before the new pair becomes visible", async () => {
     // A refresher that adopts the new pair sends it to the profile's
     // instance: it must never see that pair beside the old instance.
@@ -245,6 +271,77 @@ describe("login credentials write", () => {
     );
 
     expect(instanceAtSave).toEqual(["https://app.example.com"]);
+  });
+
+  describe("when the keyring refuses the new pair", () => {
+    // Opted into plaintext, a refused keyring save would land in the file.
+    let optIn: string | undefined;
+    beforeEach(() => {
+      optIn = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+      delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    });
+    afterEach(() => {
+      if (optIn === undefined) delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+      else process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = optIn;
+    });
+
+    const oldPair = {
+      accessToken: "old-access",
+      expiresAt: Date.now() + 15 * 60 * 1000,
+      refreshToken: "old-refresh",
+      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    };
+
+    /** A stored session on `instance`, then a keyring that refuses every save. */
+    async function seedThenRefuseSaves(instance: string): Promise<void> {
+      await setProfile("default", { instance, userId: "u_test", email: "alice@example.com" });
+      await saveTokens("default", oldPair);
+      _setKeyringFactoryForTesting((profile) => ({
+        setPassword(): void {
+          throw new Error("User canceled the operation.");
+        },
+        getPassword(): string | null {
+          return keyring.store.get(profile) ?? null;
+        },
+        deletePassword(): void {
+          keyring.store.delete(profile);
+        },
+      }));
+    }
+
+    async function loginFails(): Promise<void> {
+      installDefaultResponders();
+      const outcome = await loginCommand(
+        { profile: "default", instance: "https://app.example.com", noOrg: true },
+        createMemoryIO().io,
+      ).then(
+        () => "logged in",
+        () => "failed",
+      );
+      expect(outcome).toBe("failed");
+    }
+
+    it("to another instance: leaves no pair beside the new instance, so nothing is sent there", async () => {
+      await seedThenRefuseSaves("https://previous.example.com");
+
+      await loginFails();
+
+      expect(await loadTokens("default")).toBeNull();
+      fetchCalls = [];
+      await expect(apiFetchRaw("default", "/api/data")).rejects.toMatchObject({
+        name: "AuthError",
+        message: expect.stringContaining("No credentials"),
+      });
+      expect(fetchCalls).toHaveLength(0);
+    });
+
+    it("to the same instance: keeps the old, still valid session", async () => {
+      await seedThenRefuseSaves("https://app.example.com");
+
+      await loginFails();
+
+      expect((await loadTokens("default"))?.refreshToken).toBe("old-refresh");
+    });
   });
 
   it("saves the approved pair anyway, with a warning, when the lock stays held past its wait", async () => {

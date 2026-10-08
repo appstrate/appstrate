@@ -39,11 +39,8 @@ export interface Actionable {
   check?: string;
 }
 
-// A first login on a machine: without a TTY, `login` pins no organization when
-// the user has several, so the question covers that too, saving a second round.
 const INSTANCE_QUESTION =
-  "their Appstrate instance URL (`https://app.appstrate.com` for the hosted service) and, " +
-  "if they belong to several organizations, which one to use (append `--org <id-or-slug>`)";
+  "their Appstrate instance URL (`https://app.appstrate.com` for the hosted service)";
 
 /** The re-login the API errors name, plus how to tell it is already done. */
 export function loginFix(problem: string, profileName: string, instance?: string): Actionable {
