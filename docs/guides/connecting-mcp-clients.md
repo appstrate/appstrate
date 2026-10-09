@@ -111,7 +111,9 @@ What happens under the hood:
 > To confine a client to one space, use the space's URL,
 > `/api/mcp/o/<org>/s/<spc_…>`. It must name a space of the org where you hold
 > a role: the connection is then pinned, `space_id` is not declared, and every
-> call runs in that space. The URL needs no other setup — it is the same OAuth
+> call enters that space. An operation whose path names another space
+> (`updateSpace`, member management) still reaches it when your role there
+> allows it, exactly as over REST. The URL needs no other setup — it is the same OAuth
 > resource and token as the organization's endpoint — and any client can use
 > it, a header-less one (a claude.ai connector) included. Settings → General →
 > "MCP connection" builds both URLs. The MCP endpoint reads no `X-Space-Id`: a

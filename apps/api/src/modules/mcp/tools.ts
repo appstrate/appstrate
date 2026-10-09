@@ -341,6 +341,9 @@ function describePayload(
     // Asked of a delegated credential's scopes only, never of the role.
     ceiling_permissions: op.requirement.ceilingRequirements,
     granted: operationGranted(op, ctx.permissions, ctx.ceiling),
+    ...(ctx.orgSpaces && !operationGranted(op, ctx.permissions, ctx.ceiling)
+      ? { hint: NO_FALLBACK_HINT }
+      : {}),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -1217,7 +1220,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      return jsonResult(launched.step.payload, true);
+      const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
+      return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
     // Any caller of this handler (an agent run included) may persist what it returns; the

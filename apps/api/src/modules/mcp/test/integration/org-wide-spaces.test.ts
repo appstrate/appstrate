@@ -7,7 +7,11 @@
  * so an operation allowed in one space is refused in another.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { and, eq } from "drizzle-orm";
+import { spaceMembers } from "@appstrate/db/schema";
+import * as spacesService from "../../../../services/spaces.ts";
+import { db } from "../../../../../test/helpers/db.ts";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../test/helpers/db.ts";
 import { createTestContext, memberContext } from "../../../../../test/helpers/auth.ts";
@@ -150,6 +154,7 @@ describe("mcp org-wide connection", () => {
     );
     expect(described.data.granted).toBe(false);
     expect(described.data.granted_in).toEqual(["Gestion"]);
+    expect(described.data.hint as string).toContain(NO_FALLBACK_FRAGMENT);
 
     const refused = payload(
       await call("invoke_operation", {
@@ -189,6 +194,32 @@ describe("mcp org-wide connection", () => {
     expect(launched.isError).toBe(true);
     expect(JSON.stringify(launched.data)).not.toContain("space_id");
     expect(launched.data.status).toBe(404);
+    // A failed launch names its space too: the model must not look for the agent elsewhere unasked.
+    expect((launched.data.space as { id: string }).id).toBe(gestion.id);
+  });
+
+  it("applies the role the admission read, not the listing's, to the tool's own grant", async () => {
+    // Demoted to viewer between the listing and the admission of this request.
+    const listSpaces = spacesService.listSpacesForPrincipal;
+    const spy = spyOn(spacesService, "listSpacesForPrincipal").mockImplementation(
+      async (...args) => {
+        const listed = await listSpaces(...args);
+        await db
+          .update(spaceMembers)
+          .set({ presetRole: "viewer" })
+          .where(and(eq(spaceMembers.spaceId, gestion.id), eq(spaceMembers.userId, callerId)));
+        return listed;
+      },
+    );
+    try {
+      const res = payload(
+        await call("invoke_operation", { operation_id: "listAgents", space_id: gestion.id }),
+      );
+      expect(res.isError).toBe(true);
+      expect(res.data.error as string).toContain("Gestion");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("re-checks the tool's own grant in the space named: a viewer cannot invoke", async () => {

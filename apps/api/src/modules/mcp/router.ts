@@ -96,6 +96,7 @@ import {
   type McpSpace,
   type OrgWideSpaces,
 } from "./spaces.ts";
+import { toSpaceRoleWire } from "../../lib/space-role.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -508,12 +509,24 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       surface: deriveMcpSurface(space.permissions, ceiling, actor),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
-    const current = reachable.find((s) => s.id === requested) ?? reachable[0];
-    if (!current) {
+    const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
+    if (!chosen) {
       throw forbidden("You hold no role with MCP access in any space of this organization.");
     }
-    await enterSpaceById(c, current.id, orgId);
-    c.set("mcpOrgSpaces", { reachable, current });
+    await enterSpaceById(c, chosen.id, orgId);
+    // The admission's read is the one the guards apply: a role changed since
+    // the listing must not leave the tools a wider surface than the routes.
+    const permissions = c.get("permissions")!;
+    const current = {
+      ...chosen,
+      role: toSpaceRoleWire(c.get("spaceRole") ?? null)?.name ?? chosen.role,
+      permissions,
+      surface: deriveMcpSurface(permissions, ceiling, actor),
+    };
+    c.set("mcpOrgSpaces", {
+      reachable: reachable.map((s) => (s.id === current.id ? current : s)),
+      current,
+    });
     return next();
   };
   for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
