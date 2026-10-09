@@ -34,13 +34,24 @@ stays the rule); changing any route guard; per-space OAuth consent.
 
 ### 1. Two modes, decided once per request
 
-| Mode     | When                                                                                   | Behaviour                      |
-| -------- | -------------------------------------------------------------------------------------- | ------------------------------ |
-| pinned   | a strategy pins a space (API key, end-user token), or the request carries `X-Space-Id` | one space                      |
-| org-wide | anything else                                                                          | every space the caller reaches |
+| Mode     | When                                                                                                                     | Behaviour                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
+| pinned   | a strategy pins a space (API key, end-user token), the URL names one (`…/s/:space`), or the request carries `X-Space-Id` | one space                      |
+| org-wide | anything else                                                                                                            | every space the caller reaches |
 
-An end-user token always pins its space (RBAC spec §3.6). A pin stays the way
-to give a delegated client least privilege.
+An end-user token always pins its space (RBAC spec §3.6). Sources that
+disagree are a 403.
+
+The URL form, `/api/mcp/o/:org/s/:space`, is for clients that send no custom
+header (claude.ai connectors): without it they could not be confined to a
+space at all. It is the same OAuth resource: `deriveOrgResourceUri` reads the
+org segment only, so the org's token is valid there, and the PRM served at
+`/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` is the org's
+document. An MCP client accepts a PRM `resource` that is a path prefix of the
+server URL (`checkResourceAllowed` in the SDK) and requests that resource, so
+a token obtained through either URL is valid on both. A URL pin
+confines the connection, not the token: real least privilege for a delegated
+client is still a space API key.
 
 ### 2. Discovering the spaces
 
@@ -156,7 +167,8 @@ admission read, the same one the header costs. No new table, no cache.
 
 ## Compatibility
 
-- Pinned clients (`X-Space-Id`, API keys, end-user tokens): no change.
+- Pinned clients (`X-Space-Id`, API keys, end-user tokens): no change, except
+  the 403 detail when two sources disagree.
 - Unpinned clients that relied on the default space pass `space_id` on every
   call. The refusal lists the spaces, so a model recovers in one turn. No flag
   and no compatibility branch (`docs/NO_TRANSITIONAL_CODE.md`).

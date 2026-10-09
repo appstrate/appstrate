@@ -1,15 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { CopyBlock } from "../copy-block";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
+import { spaceLabel } from "../../lib/space-label";
+import { useSpaces } from "../../hooks/use-spaces";
+import { isSpaceEnterable } from "../../hooks/use-current-space";
 
 interface McpClientConnectProps {
-  serverName: string;
-  url: string;
+  orgId: string;
+  orgSlug: string;
+}
+
+/** The value of the "every space" scope; any other value is a space id. */
+const ALL_SPACES = "all";
+
+/** A space label as a server-name suffix: lowercase ASCII words joined by `-`. */
+function slugify(label: string): string {
+  return label
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 /** A row pairing a one-click deeplink button with its JSON fallback. */
@@ -32,14 +56,49 @@ function DeeplinkTab({ label, href, fallback }: { label: string; href: string; f
 /**
  * Multi-client connection block for an organization's MCP server. Surfaces the
  * raw endpoint plus copy-paste / one-click snippets for every common client —
- * not just the Claude Code CLI.
+ * not just the Claude Code CLI. The scope picks the endpoint: the org's URL
+ * reaches every space the caller holds a role in (each call names its space),
+ * a space's URL (`…/s/<space>`) pins the connection to that one space — the
+ * only way to confine a client that cannot send an `X-Space-Id` header.
  */
-export function McpClientConnect({ serverName, url }: McpClientConnectProps) {
+export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
   const { t } = useTranslation("settings");
-  const cfg = buildMcpClientConfig(serverName, url);
+  const { data: spaces = [] } = useSpaces();
+  const [scope, setScope] = useState(ALL_SPACES);
+  const enterable = spaces.filter(isSpaceEnterable);
+  const space = enterable.find((s) => s.id === scope);
+  const base = `${window.location.origin}/api/mcp/o/${orgId}`;
+  const cfg = space
+    ? buildMcpClientConfig(
+        `appstrate-${orgSlug}-${slugify(spaceLabel(space, t)) || "space"}`,
+        `${base}/s/${space.id}`,
+      )
+    : buildMcpClientConfig(`appstrate-${orgSlug}`, base);
 
   return (
     <div className="space-y-4">
+      <div>
+        <p className="text-muted-foreground mb-1 text-xs font-medium">
+          {t("orgSettings.mcpScopeLabel")}
+        </p>
+        <Select value={space ? space.id : ALL_SPACES} onValueChange={setScope}>
+          <SelectTrigger className="w-full sm:w-72" data-testid="mcp-scope-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_SPACES}>{t("orgSettings.mcpScopeAll")}</SelectItem>
+            {enterable.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {spaceLabel(s, t)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {space ? t("orgSettings.mcpScopeSpaceHint") : t("orgSettings.mcpScopeAllHint")}
+        </p>
+      </div>
+
       {/* Tier 1: the raw endpoint works in any spec-compliant client. */}
       <div>
         <p className="text-muted-foreground mb-1 text-xs font-medium">

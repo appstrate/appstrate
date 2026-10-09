@@ -92,7 +92,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `createAgent [gestion]` in the operation index, `granted_in`), a refusal
   forbids redoing the action in another space, and `get_me` lists the spaces.
   A connection pinned by `X-Space-Id`, an API key or an end-user token is
-  unchanged. A caller who reaches no space is refused with a `403` instead of
+  unchanged, and a new URL form pins one too: `/api/mcp/o/<org>/s/<space>`,
+  for clients that cannot send headers (claude.ai), with the same OAuth token.
+  The organization settings' "MCP connection" block picks between "All my
+  spaces" and one space and builds the URL and client snippets for it. A caller who reaches no space is refused with a `403` instead of
   landing on the default space, and no request lands on the default space by
   omission any more: the in-process re-entry fallback is gone.
 

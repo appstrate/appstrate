@@ -86,6 +86,7 @@ import { skillReaderFor } from "./skill-tools.ts";
 import {
   isPinnedConnection,
   listReachableSpaces,
+  pinnedSpaceIds,
   pickSpace,
   requestedSpaceId,
   NO_FALLBACK_HINT,
@@ -99,6 +100,13 @@ const MCP_PREFIX = "/api/mcp/o";
 /** The per-org POST endpoint, parameterised on the org id. */
 const MCP_PATH = `${MCP_PREFIX}/:org`;
 /**
+ * The same endpoint pinned to one space by its URL — the form for a client
+ * that cannot send `X-Space-Id` (a claude.ai connector). Same resource, same
+ * token: the audience is the org's (`deriveOrgResourceUri` ignores sub-paths),
+ * and a client accepts it since the PRM `resource` is a path prefix of the URL.
+ */
+const MCP_SPACE_PATH = `${MCP_PATH}/s/:space`;
+/**
  * RFC 9728 §3.1 path-insertion well-known for the per-org resource: the
  * metadata URL is built by inserting the well-known segment BEFORE the
  * resource's path, so a strict client probes `…/oauth-protected-resource` +
@@ -106,6 +114,7 @@ const MCP_PATH = `${MCP_PREFIX}/:org`;
  */
 const PRM_PATH_PREFIX = "/.well-known/oauth-protected-resource";
 const PRM_PATH = `${PRM_PATH_PREFIX}${MCP_PATH}`;
+const PRM_SPACE_PATH = `${PRM_PATH_PREFIX}${MCP_SPACE_PATH}`;
 /** Scopes this resource accepts — advertised in PRM + the 401/403 challenge. */
 const MCP_SCOPES = ["mcp:read", "mcp:invoke"] as const;
 
@@ -316,12 +325,11 @@ function forwardAuthHeaders(src: Headers): Headers {
  * header, validated to belong to the org. Same rule as `requireSpaceContext`.
  */
 async function enterPinnedSpace(c: Context<AppEnv>, orgId: string): Promise<void> {
-  const pinned = c.get("spaceId");
-  const headerSpace = c.req.header("X-Space-Id");
-  if (pinned && headerSpace && headerSpace !== pinned) {
-    throw forbidden("X-Space-Id does not match authenticated space");
+  const named = pinnedSpaceIds(c);
+  if (new Set(named).size > 1) {
+    throw forbidden("The space in the URL, X-Space-Id and the credential's space disagree");
   }
-  await enterSpaceById(c, (pinned ?? headerSpace)!, orgId);
+  await enterSpaceById(c, named[0]!, orgId);
 }
 
 /** The org-wide spaces of a request, set by the space-entry middleware. */
@@ -400,7 +408,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // identifier it started from; advertising the bare origin here made strict
   // clients (the claude.ai connector) reject discovery on issuer mismatch and
   // fail the whole OAuth handshake. Point at the real issuer.
-  app.get(PRM_PATH, (c: Context<AppEnv>) => {
+  const describeResource = (c: Context<AppEnv>) => {
     const org = c.req.param("org");
     // The route only matches with an `:org` segment present, but Hono types the
     // param as optional — guard so the resource URI is never built from a
@@ -414,7 +422,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       bearer_methods_supported: ["header"],
       resource_documentation: `${appBase}/api/docs`,
     });
-  });
+  };
+  // A space-pinned URL is described by the org's document: same resource.
+  app.get(PRM_PATH, describeResource);
+  app.get(PRM_SPACE_PATH, describeResource);
 
   // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
   // scope) the generic responder attaches this so a spec-compliant client
@@ -452,7 +463,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // in the global pipeline, so the identity is already resolved here and an
   // audience-mismatched token was already rejected. Applied to the per-org
   // POST path.
-  app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+  for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
+    app.use(path, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+  }
 
   // `mcp` is a SPACE-level resource, and `/api/mcp` is not in
   // `SPACE_SCOPED_PREFIXES` — this endpoint pins an org, not a space. So it
@@ -464,7 +477,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // The org resolved by the pipeline is the one used, never the `:org` path
   // param: the handler's own guard is what rejects a mismatch, and resolving
   // the caller's own space here leaves that answer unchanged.
-  app.use(MCP_PATH, async (c, next) => {
+  const enterSpace = async (c: Context<McpEnv>, next: () => Promise<void>) => {
     const orgId = c.get("orgId");
     if (!orgId) return next();
     if (isPinnedConnection(c)) {
@@ -488,10 +501,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     await enterSpaceById(c, current.id, orgId);
     c.set("mcpOrgSpaces", { reachable, current });
     return next();
-  });
-  app.use(MCP_PATH, requireModulePermission("mcp", "read"));
+  };
+  for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
+    app.use(path, enterSpace);
+    app.use(path, requireModulePermission("mcp", "read"));
+  }
 
-  app.post(MCP_PATH, async (c) => {
+  const serveMcp = async (c: Context<McpEnv>) => {
     // Org guard. By here the global pipeline has resolved the caller's org into
     // `c.get("orgId")`: for a Bearer caller it was pinned from the token's
     // per-org audience (and the audience check already rejected a token for a
@@ -648,7 +664,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // Any audit insert the tool layer triggered is already tracked (see
     // `observe` above) and flushed at shutdown, not here.
     return serveStatelessPost(server, transport, forwarded, post);
-  });
+  };
+  app.post(MCP_PATH, serveMcp);
+  app.post(MCP_SPACE_PATH, serveMcp);
 
   // The stateless transport serves no standalone server→client SSE stream
   // (GET) and has no session to terminate (DELETE), so POST is the only
@@ -656,9 +674,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // than letting the SDK open a dangling GET SSE stream that never receives a
   // message. Auth still runs first (global pipeline), so an unauthenticated
   // request of any verb is rejected with 401 before reaching here.
-  app.all(MCP_PATH, () => {
+  const notAllowed = () => {
     throw methodNotAllowed(["POST"]);
-  });
+  };
+  app.all(MCP_PATH, notAllowed);
+  app.all(MCP_SPACE_PATH, notAllowed);
 
   return app;
 }

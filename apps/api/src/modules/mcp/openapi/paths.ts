@@ -64,147 +64,195 @@ const orgPathParameter = {
   schema: { type: "string" },
 } as const;
 
-export const mcpPaths = {
-  "/api/mcp/o/{org}": {
-    post: {
-      operationId: "mcpStreamableHttpPost",
-      tags: ["MCP"],
-      summary: "Per-organization MCP Streamable HTTP endpoint",
-      description:
-        "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
-        "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
-        "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-        "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
-        "`get_runtime_capabilities`, " +
-        "and `get_me` unless the client injects its own caller context) is always present, " +
-        "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
-        "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
-        "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
-        "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
-        "role. Together they let an MCP client discover and call platform API operations, " +
-        "plus launch and wait for agent runs, with the caller's own credentials and confined to " +
-        "the organization in the path. Each organization has its own endpoint: a " +
-        "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
-        "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
-        "organizations, configure one MCP server entry per organization. Requires the `mcp:read` " +
-        "permission (and `mcp:invoke` to call operations).",
-      security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
-      parameters: [orgPathParameter],
-      requestBody: jsonRpcRequestBody,
-      responses: {
-        "200": {
-          description:
-            "JSON-RPC response. Served as `text/event-stream` when a request carries " +
-            "`params._meta.progressToken`: its progress notifications, then its result, as SSE " +
-            "events; as `application/json` otherwise.",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                additionalProperties: true,
-                properties: {
-                  result: {
-                    type: "object",
-                    additionalProperties: true,
-                    properties: {
-                      structuredContent: {
-                        type: "object",
-                        description:
-                          "A `tools/call` result's structured payload, matching the tool's " +
-                          "`outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult).",
-                      },
+const spacePathParameter = {
+  name: "space",
+  in: "path",
+  required: true,
+  description: "Space id (`spc_…`) of the organization, where the caller holds a role.",
+  schema: { type: "string" },
+} as const;
+
+const orgEndpoint = {
+  post: {
+    operationId: "mcpStreamableHttpPost",
+    tags: ["MCP"],
+    summary: "Per-organization MCP Streamable HTTP endpoint",
+    description:
+      "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
+      "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
+      "declares follow the caller's permissions: the read-only set (`search_operations`, " +
+      "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
+      "`get_runtime_capabilities`, " +
+      "and `get_me` unless the client injects its own caller context) is always present, " +
+      "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
+      "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
+      "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
+      "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
+      "role. Together they let an MCP client discover and call platform API operations, " +
+      "plus launch and wait for agent runs, with the caller's own credentials and confined to " +
+      "the organization in the path. Each organization has its own endpoint: a " +
+      "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
+      "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
+      "organizations, configure one MCP server entry per organization. Without a pinned space " +
+      "(no `X-Space-Id`, no space-bound credential, no `/s/{space}` in the URL) the connection " +
+      "reaches every space where the caller holds a role, and every tool that acts in a space " +
+      "requires a `space_id` argument whose schema lists them. Requires the `mcp:read` " +
+      "permission (and `mcp:invoke` to call operations).",
+    security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
+    parameters: [orgPathParameter],
+    requestBody: jsonRpcRequestBody,
+    responses: {
+      "200": {
+        description:
+          "JSON-RPC response. Served as `text/event-stream` when a request carries " +
+          "`params._meta.progressToken`: its progress notifications, then its result, as SSE " +
+          "events; as `application/json` otherwise.",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                result: {
+                  type: "object",
+                  additionalProperties: true,
+                  properties: {
+                    structuredContent: {
+                      type: "object",
+                      description:
+                        "A `tools/call` result's structured payload, matching the tool's " +
+                        "`outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult).",
                     },
                   },
                 },
               },
             },
-            "text/event-stream": { schema: { type: "string" } },
           },
+          "text/event-stream": { schema: { type: "string" } },
         },
-        "400": {
-          description:
-            "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON " +
-            "(`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an " +
-            "unsupported `MCP-Protocol-Version` header (`-32000`).",
-          content: {
-            ...jsonRpcTransportError("").content,
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "406": jsonRpcTransportError(
-          "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
-        ),
-        "413": {
-          description:
-            "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
-            "(enforced by the body-limit middleware, before the MCP transport).",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
-        },
-        "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
       },
+      "400": {
+        description:
+          "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON " +
+          "(`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an " +
+          "unsupported `MCP-Protocol-Version` header (`-32000`).",
+        content: {
+          ...jsonRpcTransportError("").content,
+          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+        },
+      },
+      "401": { $ref: "#/components/responses/Unauthorized" },
+      "403": { $ref: "#/components/responses/Forbidden" },
+      "406": jsonRpcTransportError(
+        "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+      ),
+      "413": {
+        description:
+          "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap " +
+          "(enforced by the body-limit middleware, before the MCP transport).",
+        content: {
+          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+        },
+      },
+      "415": jsonRpcTransportError("`Content-Type` is not `application/json` (`-32000`)."),
     },
-    get: {
-      operationId: "mcpStreamableHttpGet",
-      tags: ["MCP"],
-      summary: "Per-organization MCP Streamable HTTP (GET)",
-      description:
-        "The GET channel of the per-organization MCP Streamable HTTP transport. This server runs " +
-        "in stateless mode (no standalone server-initiated SSE stream), so GET returns 405; " +
-        "clients POST JSON-RPC messages instead. Requires the `mcp:read` permission.",
-      security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
-      parameters: [orgPathParameter],
-      responses: {
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "405": {
-          description:
-            "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
-          headers: { Allow: { schema: { type: "string", example: "POST" } } },
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+  },
+  get: {
+    operationId: "mcpStreamableHttpGet",
+    tags: ["MCP"],
+    summary: "Per-organization MCP Streamable HTTP (GET)",
+    description:
+      "The GET channel of the per-organization MCP Streamable HTTP transport. This server runs " +
+      "in stateless mode (no standalone server-initiated SSE stream), so GET returns 405; " +
+      "clients POST JSON-RPC messages instead. Requires the `mcp:read` permission.",
+    security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
+    parameters: [orgPathParameter],
+    responses: {
+      "401": { $ref: "#/components/responses/Unauthorized" },
+      "403": { $ref: "#/components/responses/Forbidden" },
+      "405": {
+        description:
+          "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+        headers: { Allow: { schema: { type: "string", example: "POST" } } },
+        content: {
+          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
         },
       },
     },
   },
-  "/.well-known/oauth-protected-resource/api/mcp/o/{org}": {
-    get: {
-      operationId: "mcpProtectedResourceMetadata",
-      tags: ["MCP"],
-      summary: "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
-      description:
-        "Public discovery document advertising the authorization server that protects the " +
-        "per-organization MCP endpoint, so spec-compliant MCP clients can complete an OAuth flow " +
-        "without manual configuration. The advertised `resource` is the per-org URI " +
-        "`<APP_URL>/api/mcp/o/{org}`, which tokens are audience-bound to (RFC 8707).",
-      parameters: [orgPathParameter],
-      responses: {
-        "200": {
-          description: "Protected resource metadata.",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  resource: { type: "string", format: "uri" },
-                  authorization_servers: {
-                    type: "array",
-                    items: { type: "string", format: "uri" },
-                  },
-                  scopes_supported: { type: "array", items: { type: "string" } },
-                  bearer_methods_supported: { type: "array", items: { type: "string" } },
-                  resource_documentation: { type: "string", format: "uri" },
+};
+
+const orgMetadata = {
+  get: {
+    operationId: "mcpProtectedResourceMetadata",
+    tags: ["MCP"],
+    summary: "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
+    description:
+      "Public discovery document advertising the authorization server that protects the " +
+      "per-organization MCP endpoint, so spec-compliant MCP clients can complete an OAuth flow " +
+      "without manual configuration. The advertised `resource` is the per-org URI " +
+      "`<APP_URL>/api/mcp/o/{org}`, which tokens are audience-bound to (RFC 8707).",
+    parameters: [orgPathParameter],
+    responses: {
+      "200": {
+        description: "Protected resource metadata.",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                resource: { type: "string", format: "uri" },
+                authorization_servers: {
+                  type: "array",
+                  items: { type: "string", format: "uri" },
                 },
-                required: ["resource", "authorization_servers"],
+                scopes_supported: { type: "array", items: { type: "string" } },
+                bearer_methods_supported: { type: "array", items: { type: "string" } },
+                resource_documentation: { type: "string", format: "uri" },
               },
+              required: ["resource", "authorization_servers"],
             },
           },
         },
       },
     },
   },
+} as const;
+
+/**
+ * The same endpoint pinned to one space by its URL: every operation keeps its
+ * shape, gains the `space` path parameter and its own operationId. Its PRM is
+ * the org's document — same resource, same token audience.
+ */
+function pinnedToSpace<
+  T extends Record<string, { operationId: string; parameters: readonly unknown[] }>,
+>(endpoint: T, note: string): T {
+  return Object.fromEntries(
+    Object.entries(endpoint).map(([method, op]) => [
+      method,
+      {
+        ...op,
+        operationId: `${op.operationId}InSpace`,
+        description: `${note} ${(op as { description?: string }).description ?? ""}`.trim(),
+        parameters: [...op.parameters, spacePathParameter],
+      },
+    ]),
+  ) as unknown as T;
+}
+
+export const mcpPaths = {
+  "/api/mcp/o/{org}": orgEndpoint,
+  "/api/mcp/o/{org}/s/{space}": pinnedToSpace(
+    orgEndpoint,
+    "The per-organization MCP endpoint pinned to one space by its URL — for a client that " +
+      "cannot send `X-Space-Id`. Every call acts in `{space}`, tools take no `space_id`, and an " +
+      "`X-Space-Id` or space-bound credential naming another space is a 403. Same token as the " +
+      "organization's endpoint.",
+  ),
+  "/.well-known/oauth-protected-resource/api/mcp/o/{org}": orgMetadata,
+  "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": pinnedToSpace(
+    orgMetadata,
+    "The space-pinned endpoint's metadata: the organization's document, `resource` included " +
+      "(a path prefix of the endpoint URL, which MCP clients accept).",
+  ),
 } as const;

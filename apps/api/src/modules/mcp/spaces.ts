@@ -53,11 +53,19 @@ export interface OrgWideSpaces {
 }
 
 /**
- * Pinned: a strategy fixed the space (API key, end-user token) or the client
- * sent `X-Space-Id`. Every other connection is org-wide.
+ * The spaces a request is pinned to, in precedence order: the credential's
+ * (API key, end-user token), the URL's (`/api/mcp/o/:org/s/:space`), the
+ * `X-Space-Id` header. Several that disagree are refused by the caller.
  */
+export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
+  return [c.get("spaceId"), c.req.param("space"), c.req.header("X-Space-Id")].filter(
+    (id): id is string => Boolean(id),
+  );
+}
+
+/** Pinned: some source fixed the space. Every other connection is org-wide. */
 export function isPinnedConnection(c: Context<AppEnv>): boolean {
-  return Boolean(c.get("spaceId") || c.req.header("X-Space-Id"));
+  return pinnedSpaceIds(c).length > 0;
 }
 
 /**

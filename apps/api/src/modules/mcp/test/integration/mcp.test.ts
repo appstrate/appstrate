@@ -261,7 +261,7 @@ describe("mcp discovery + auth gate", () => {
     const spoofed = await initializeAs({ ...headers, "X-Space-Id": sibling.id });
     expect(spoofed.status).toBe(403);
     expect(((await spoofed.json()) as { detail: string }).detail).toBe(
-      "X-Space-Id does not match authenticated space",
+      "The space in the URL, X-Space-Id and the credential's space disagree",
     );
   });
 

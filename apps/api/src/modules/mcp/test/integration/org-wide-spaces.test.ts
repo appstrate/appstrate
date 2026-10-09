@@ -11,8 +11,8 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../test/helpers/db.ts";
 import { createTestContext, memberContext } from "../../../../../test/helpers/auth.ts";
-import { seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
-import { mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
+import { MCP_ACCEPT, mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 
 const app = getTestApp();
@@ -33,11 +33,13 @@ describe("mcp org-wide connection", () => {
   let gestion: { id: string };
   let lecture: { id: string };
   let foreign: { id: string };
+  let callerId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const owner = await createTestContext();
     const caller = await memberContext(owner, "member", "operator");
+    callerId = caller.user.id;
     defaultSpaceId = owner.defaultSpaceId;
     gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
     lecture = await seedSpace({ orgId: owner.orgId, name: "Lecture", visibility: "closed" });
@@ -294,6 +296,87 @@ describe("mcp org-wide connection", () => {
     );
     expect(res.error?.code).toBe(-32602);
     expect(res.error?.message).toContain("Unknown argument(s): space_id");
+  });
+
+  /** POST to the space-pinned URL `/api/mcp/o/:org/s/:space`. */
+  const atUrl = async (space: string, message: Record<string, unknown>, h = headers) => {
+    const res = await app.request(`/api/mcp/o/${h["X-Org-Id"]}/s/${space}`, {
+      method: "POST",
+      headers: { ...h, "content-type": "application/json", Accept: MCP_ACCEPT },
+      body: JSON.stringify(message),
+    });
+    const text = await res.text();
+    return { status: res.status, envelope: (text ? JSON.parse(text) : {}) as JsonRpcEnvelope };
+  };
+  const listAgents = { name: "invoke_operation", arguments: { operation_id: "listAgents" } };
+
+  it("pins a connection by its URL: no space_id, every call in that space", async () => {
+    const listed = await atUrl(gestion.id, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const invoke = (
+      listed.envelope.result?.tools as Array<{
+        name: string;
+        inputSchema: { properties?: Record<string, unknown> };
+      }>
+    ).find((t) => t.name === "invoke_operation");
+    expect(invoke?.inputSchema.properties?.space_id).toBeUndefined();
+
+    // Operator in the default space, admin in Gestion: the URL decides.
+    const { envelope } = await atUrl(gestion.id, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "invoke_operation", arguments: { operation_id: "createAgent", body: {} } },
+    });
+    expect(payload(envelope).data.status).not.toBe(403);
+  });
+
+  it("refuses a URL naming a space the caller holds no role in", async () => {
+    const { status } = await atUrl(foreign.id, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: listAgents,
+    });
+    expect(status).toBe(403);
+  });
+
+  it("refuses a URL space that disagrees with X-Space-Id or the API key's space", async () => {
+    const both = await atUrl(
+      gestion.id,
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: listAgents },
+      { ...headers, "X-Space-Id": lecture.id },
+    );
+    expect(both.status).toBe(403);
+
+    const key = await seedApiKey({
+      orgId: headers["X-Org-Id"]!,
+      spaceId: defaultSpaceId,
+      createdBy: callerId,
+      scopes: ["mcp:read", "mcp:invoke", "agents:read"],
+    });
+    const keyHeaders = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": headers["X-Org-Id"]! };
+    const agree = await atUrl(
+      defaultSpaceId,
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: listAgents },
+      keyHeaders,
+    );
+    expect(payload(agree.envelope).data.status).toBe(200);
+    const disagree = await atUrl(
+      gestion.id,
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: listAgents },
+      keyHeaders,
+    );
+    expect(disagree.status).toBe(403);
+  });
+
+  it("describes the space-pinned URL with the org's resource metadata", async () => {
+    const org = headers["X-Org-Id"]!;
+    const res = await app.request(
+      `/.well-known/oauth-protected-resource/api/mcp/o/${org}/s/${gestion.id}`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { resource: string };
+    expect(body.resource.endsWith(`/api/mcp/o/${org}`)).toBe(true);
   });
 });
 
