@@ -25,6 +25,7 @@
 import { resolveAuthContext } from "../../lib/api.ts";
 import { EXIT_TIMEOUT, classifyNetworkError, labelForExitCode } from "../../lib/http-classify.ts";
 import { loginRemedy } from "../../lib/remedy.ts";
+import { onShutdown } from "../../lib/shutdown.ts";
 import { resolveApiAuth } from "./auth.ts";
 import { buildHeaders } from "./headers.ts";
 import { isHttpMethod } from "./method.ts";
@@ -148,6 +149,16 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
   // `--max-time` bounds the whole batch: what is not sent by then is reported, not sent.
   const ac = new AbortController();
   io.onSigint?.(() => ac.abort());
+  // The shutdown coordinator exits right after its hooks settle, and `process.exit` drops
+  // what a pipe has not taken yet (#1824): on Ctrl-C it waits for the batch to account for
+  // every line (the unsent ones come back as errors) and for the output to be flushed.
+  let batchDone!: () => void;
+  const batchSettled = new Promise<void>((resolve) => (batchDone = resolve));
+  const unregisterShutdown = onShutdown(async () => {
+    ac.abort();
+    await batchSettled;
+    await io.flush?.();
+  });
   const timeout =
     typeof opts.maxTime === "number" && opts.maxTime > 0
       ? setTimeout(
@@ -241,6 +252,8 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
     if (timeout) clearTimeout(timeout);
     restoreTls?.();
     await sink?.end();
+    batchDone();
+    unregisterShutdown();
   }
 
   const done = results as BatchResult[];
