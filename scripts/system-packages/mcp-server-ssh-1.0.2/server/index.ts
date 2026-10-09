@@ -226,11 +226,16 @@ export function buildSftpArgs(cfg: SshConfig, paths: SessionPaths): string[] {
   ];
 }
 
-export function buildMasterExitArgs(cfg: SshConfig, paths: SessionPaths): string[] {
+/** `ssh -O check|exit`: asks the master over its socket, never the target. */
+export function buildControlArgs(
+  cfg: SshConfig,
+  paths: SessionPaths,
+  command: "check" | "exit",
+): string[] {
   return [
     ...buildSshOptions(cfg, paths),
     "-O",
-    "exit",
+    command,
     "-p",
     String(cfg.port),
     "--",
@@ -614,7 +619,7 @@ function endSession(): void {
   if (!sessionDir) return;
   const paths = sessionPaths(sessionDir);
   if (cachedConfig && existsSync(paths.controlPath)) {
-    Bun.spawnSync(["ssh", ...buildMasterExitArgs(cachedConfig, paths)], {
+    Bun.spawnSync(["ssh", ...buildControlArgs(cachedConfig, paths, "exit")], {
       env: { ...process.env },
       stdin: "ignore",
       stdout: "ignore",
@@ -911,9 +916,15 @@ async function stopRemote(
 
 /**
  * sftp passes `ControlMaster=no` ahead of our options, so it never becomes the
- * master: an `ssh -N` goes first, instant through a live master, else it opens one.
+ * master: one is opened with `ssh -N` when `-O check` finds none. Never `-N`
+ * through a live master — before OpenSSH 10 that opens a login-shell session.
  */
 async function ensureMaster({ cfg, paths, run }: Session): Promise<void> {
+  if (
+    (await run(["ssh", ...buildControlArgs(cfg, paths, "check")], { ceilingMs: 5_000 })).code === 0
+  ) {
+    return;
+  }
   const res = await run(["ssh", ...buildSshArgs(cfg, paths, undefined, { noSession: true })], {
     ceilingMs: 20_000,
   });

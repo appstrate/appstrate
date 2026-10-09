@@ -24,7 +24,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, createServer, type Server } from "node:net";
 
@@ -45,7 +45,7 @@ const {
   renderKnownHosts,
   buildSshArgs,
   buildSftpArgs,
-  buildMasterExitArgs,
+  buildControlArgs,
   sessionPaths,
   takePidMarker,
   stopScript,
@@ -109,12 +109,14 @@ type Answer = {
 };
 
 /**
- * The `ssh -N` each sftp batch is preceded by, to make sure a master runs
- * (sftp never becomes one). Distinct from the probe's `-N`, which dials its own
- * connection and so carries no `ControlMaster`.
+ * What each sftp batch is preceded by: `ssh -O check` on the master, and the
+ * `ssh -N` that opens one when the check fails (sftp never becomes a master).
+ * Distinct from the probe's `-N`, which carries no `ControlMaster`.
  */
 const isMasterCheck = (argv: string[]) =>
-  argv[0] === "ssh" && argv.includes("-N") && argv.includes("ControlMaster=auto");
+  argv[0] === "ssh" &&
+  ((argv.includes("-O") && argv[argv.indexOf("-O") + 1] === "check") ||
+    (argv.includes("-N") && argv.includes("ControlMaster=auto")));
 
 /** The pid marker `ssh_exec` prefixes its command with, read back off the argv. */
 const markerOf = (argv: string[]) =>
@@ -504,11 +506,11 @@ describe("buildSshArgs — the connection policy", () => {
     for (const args of [
       buildSshArgs(cfg, PATHS, "hostname"),
       buildSftpArgs(cfg, PATHS),
-      buildMasterExitArgs(cfg, PATHS),
+      buildControlArgs(cfg, PATHS, "exit"),
     ]) {
       expect(opts(args)).toEqual(expect.arrayContaining(mux));
     }
-    const exit = buildMasterExitArgs(cfg, PATHS);
+    const exit = buildControlArgs(cfg, PATHS, "exit");
     expect(exit.slice(exit.indexOf("-O"), exit.indexOf("-O") + 2)).toEqual(["-O", "exit"]);
     expect(exit.indexOf("-O")).toBeLessThan(exit.indexOf("--"));
     const probe = opts(buildSshArgs(cfg, PATHS, undefined, { noSession: true, dedicated: true }));
@@ -1195,7 +1197,7 @@ describe("the shared master", () => {
   // sftp passes `ControlMaster=no` ahead of our options, so it never becomes
   // the master itself: without the `ssh -N` first, a run made only of SFTP
   // tools would still dial once per batch.
-  it("precedes every sftp batch with an `ssh -N` on the same master", async () => {
+  it("checks the master before every sftp batch", async () => {
     restoreEnv = withEnv(ENV);
     const host = fakeHost({ files: { "/etc/app.conf": "a\n" } });
     await callTool(
@@ -1207,6 +1209,24 @@ describe("the shared master", () => {
     expect(host.masterChecks()).toBe(3);
   });
 
+  // Through a live master, `ssh -N` opens a login-shell session on OpenSSH 9.6
+  // (Ubuntu 24.04) and exits with the profile's status: it is sent only when
+  // the check finds no master.
+  it.each([
+    [0, ["check", "sftp"]],
+    [255, ["check", "-N", "sftp"]],
+  ])("opens a master only when `-O check` fails (check exits %p)", async (check, sequence) => {
+    restoreEnv = withEnv(ENV);
+    const seen: string[] = [];
+    const run = async (argv: string[]) => {
+      seen.push(argv[0] === "sftp" ? "sftp" : argv.includes("-N") ? "-N" : "check");
+      const code = argv.includes("check") ? check : 0;
+      return { stdout: argv[0] === "sftp" ? 'sftp> ls -la "/d"\n' : "", stderr: "", code };
+    };
+    await callTool("ssh_read", { path: "/d" }, { run, sessionDir: scratch });
+    expect(seen).toEqual(sequence);
+  });
+
   it("reports a master that cannot be opened as the ssh failure it is, before any sftp", async () => {
     restoreEnv = withEnv(ENV);
     const calls: string[][] = [];
@@ -1215,8 +1235,12 @@ describe("the shared master", () => {
       return { stdout: "", stderr: "Host key verification failed.\n", code: 255 };
     };
     const res = await callTool("ssh_read", { path: "/etc" }, { run, sessionDir: scratch });
-    expect(calls.map((a) => a[0])).toEqual(["ssh"]);
-    expect(isMasterCheck(calls[0]!)).toBe(true);
+    // The check fails, so a master is dialled — and that dial's failure is reported.
+    expect(calls.map((a) => a.slice(a.indexOf("-O"), a.indexOf("-O") + 2))).toEqual([
+      ["-O", "check"],
+      [],
+    ]);
+    expect(calls[1]!).toContain("-N");
     expect(res.text).toContain("ssh failed (exit 255): Host key verification failed.");
     expect(res.meta).toEqual({
       "dev.appstrate/credential": { status: "rejected", reason: "host_key_mismatch" },
@@ -1650,8 +1674,10 @@ describe("proxy-connect as a ProxyCommand subprocess", () => {
 // this server, and an in-process test never reaches it.
 describe("session directory", () => {
   it("is removed when the process ends", async () => {
-    // Under /tmp: a HOME too deep for the control socket is passed over.
+    // Under /tmp: a HOME too deep for the control socket is passed over. Bun
+    // and macOS add entries of their own (`.bun`, `Library`), left alone.
     const home = await mkdtemp("/tmp/ssh-mcp-home-");
+    const sessions = (names: string[]) => names.filter((n) => n.startsWith(".appstrate-ssh-"));
     const child = Bun.spawn(
       [
         "bun",
@@ -1675,9 +1701,10 @@ describe("session directory", () => {
     const whileRunning = JSON.parse((await new Response(child.stdout).text()).trim());
     await child.exited;
 
-    expect(whileRunning).toEqual([expect.stringMatching(/^\.appstrate-ssh-/)]);
-    expect(await readdir(home)).toEqual([]);
+    const after = await readdir(home);
     await rm(home, { recursive: true, force: true });
+    expect(sessions(whileRunning)).toHaveLength(1);
+    expect(sessions(after)).toEqual([]);
   });
 });
 
@@ -1844,7 +1871,8 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
     restoreEnv = withEnv({
       SSH_HOST: "127.0.0.1",
       SSH_PORT: String(port),
-      SSH_USER: userInfo().username,
+      // `os.userInfo()` reads USER, unset in some containers.
+      SSH_USER: Bun.spawnSync(["id", "-un"]).stdout.toString().trim(),
       SSH_PRIVATE_KEY_PATH: join(dir, "client"),
       SSH_HOST_KEY: hostKey,
     });
@@ -1874,7 +1902,7 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
       expect(log.match(/Accepted publickey/g)).toHaveLength(1);
     } finally {
       const cfg = loadConfig(process.env);
-      Bun.spawnSync(["ssh", ...buildMasterExitArgs(cfg, sessionPaths(session))], {
+      Bun.spawnSync(["ssh", ...buildControlArgs(cfg, sessionPaths(session), "exit")], {
         timeout: 5_000,
       });
     }
