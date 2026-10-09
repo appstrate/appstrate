@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { MissingIntegrationConnectionCode } from "@appstrate/core/integration";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 import { integrationIdOfField, type MissingIntegrationFieldError } from "./connection-choice";
@@ -84,7 +85,10 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
 }
 
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
+const OWN_PICK_REFUSALS: ReadonlySet<string> = new Set([
+  "override_outranked",
+  "override_connection_unavailable",
+] satisfies MissingIntegrationConnectionCode[]);
 
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the

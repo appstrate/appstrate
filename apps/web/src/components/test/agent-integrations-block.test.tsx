@@ -50,19 +50,23 @@ function candidate(isOwn: boolean): Candidate {
   };
 }
 
+type Warning = NonNullable<Resolution["warning"]>;
+
+function warning(code: Warning["code"], over: Partial<Warning> = {}): Warning {
+  return { field: `integrations.${GMAIL}`, code, message: "server prose", ...over };
+}
+
 /** Nothing binds and nothing refuses: the run starts without Gmail. */
 function unbound(over: Partial<Resolution> = {}): Resolution {
   return {
     source: null,
     error_code: null,
-    warning_code: "integration_unbound",
-    required_auth_key: null,
-    available_auth_keys: [],
+    warning: warning("not_connected"),
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
     member_pinned_connection_ids: null,
-    org_default_connection_ids: [],
+    org_default_connection_ids: null,
     org_default_enforced: false,
     can_add_connection: true,
     candidates: [],
@@ -120,14 +124,19 @@ function renderCard(
   );
 }
 
-const label = (key: string) => i18n.t(`agents:detail.${key}`);
+const label = (key: string, options?: Record<string, string>) =>
+  i18n.t(`agents:detail.${key}`, options);
+const by = (key: string) => ({ by: i18n.t(`agents:noneChosenBy.${key}`) });
 
 describe("AgentIntegrationsBlock — required", () => {
   it("badges an integration the agent requires, and only that one", () => {
-    const blocked = renderCard(unbound({ error_code: "required_integration_unbound" }), {
-      required: true,
-      blocking: true,
-    });
+    const blocked = renderCard(
+      unbound({ error_code: "required_integration_unbound", warning: null }),
+      {
+        required: true,
+        blocking: true,
+      },
+    );
     expect(blocked).toContain(`integration-required-${GMAIL}`);
     expect(blocked).toContain(label("integrationRequiredBadge"));
     // A refused run is no unbound state: the picker's warning says it.
@@ -143,19 +152,18 @@ describe("AgentIntegrationsBlock — required", () => {
   });
 
   it("explains a stored none on a required integration: the launch is blocked, and whose choice", () => {
-    const refused = { error_code: "required_integration_unbound" as const, warning_code: null };
+    const refused = { error_code: "required_integration_unbound" as const, warning: null };
     const required = { required: true, blocking: true };
-    const admin = renderCard(unbound({ ...refused, admin_pinned_connection_ids: [] }), required);
-    expect(admin).toContain(label("integrationRequiredNoneAdmin"));
+    const admin = renderCard(unbound({ ...refused, source: "admin_pin" }), required);
+    expect(admin).toContain(label("integrationRequiredNoneBy", by("adminPin")));
     // The subtitle itself takes the picker's warning tone.
     expect(admin).toContain(`${AMBER_TEXT} mt-0.5`);
-    expect(admin).not.toContain(label("integrationUnboundAdminNone"));
+    expect(admin).not.toContain(label("integrationUnboundNoneBy", by("adminPin")));
     expect(admin).toContain(`member-picker-${GMAIL}`);
 
-    const member = renderCard(unbound({ ...refused, member_pinned_connection_ids: [] }), required);
-    expect(member).toContain(label("integrationRequiredNoneMember"));
+    const member = renderCard(unbound({ ...refused, source: "member_pin" }), required);
+    expect(member).toContain(label("integrationRequiredNoneBy", by("memberPin")));
     expect(member).toContain(`${AMBER_TEXT} mt-0.5`);
-    expect(member).not.toContain(label("integrationUnboundMemberNone"));
     expect(member).toContain(`member-picker-${GMAIL}`);
   });
 });
@@ -168,7 +176,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
   });
 
   it("switched off in the space: the activation card, no picker", () => {
-    const html = renderCard(unbound({ warning_code: "integration_not_active" }));
+    const html = renderCard(unbound({ warning: warning("integration_not_active") }));
     expect(html).toContain(label("integrationUnboundInactive"));
     expect(html).toContain(`integration-activate-${GMAIL}`);
     expect(html).not.toContain(`member-picker-${GMAIL}`);
@@ -176,7 +184,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
   });
 
   it("off in the space per the list: blocking only when the agent requires it", () => {
-    const optional = renderCard(unbound({ warning_code: "integration_not_active" }), {
+    const optional = renderCard(unbound({ warning: warning("integration_not_active") }), {
       active: false,
     });
     expect(optional).toContain(label("integrationUnboundInactive"));
@@ -190,29 +198,38 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     expect(required).toContain(`integration-activate-${GMAIL}`);
   });
 
-  it("an admin's pin to none, over a member's", () => {
-    const html = renderCard(
-      unbound({ admin_pinned_connection_ids: [], member_pinned_connection_ids: [] }),
+  it("a pin to none names whose choice it was, from the warning's source", () => {
+    const admin = renderCard(
+      unbound({ warning: warning("integration_unbound", { source: "admin_pin" }) }),
     );
-    expect(html).toContain(label("integrationUnboundAdminNone"));
-    expect(html).not.toContain(label("integrationUnbound"));
-    expect(html).not.toContain(`${AMBER_TEXT} mt-0.5`);
-  });
-
-  it("the member's own pin to none", () => {
-    expect(renderCard(unbound({ member_pinned_connection_ids: [] }))).toContain(
-      label("integrationUnboundMemberNone"),
-    );
+    expect(admin).toContain(label("integrationUnboundNoneBy", by("adminPin")));
+    expect(admin).not.toContain(label("integrationUnbound"));
+    expect(admin).not.toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(
+      renderCard(unbound({ warning: warning("integration_unbound", { source: "member_pin" }) })),
+    ).toContain(label("integrationUnboundNoneBy", by("memberPin")));
   });
 
   it("only other members' shared connections: an invitation to pick one", () => {
-    const html = renderCard(unbound({ candidates: [candidate(false)] }));
+    const html = renderCard(
+      unbound({
+        warning: warning("must_choose_connection"),
+        candidates: [candidate(false)],
+      }),
+    );
     expect(html).toContain(label("integrationUnboundSharedOnly"));
     expect(html).not.toContain(label("integrationUnbound"));
   });
 
   it("connections on another auth method: the agent runs without them", () => {
-    const html = renderCard(unbound({ required_auth_key: "oauth", available_auth_keys: ["pat"] }));
+    const html = renderCard(
+      unbound({
+        warning: warning("auth_key_mismatch", {
+          required_auth_key: "oauth",
+          available_auth_keys: ["pat"],
+        }),
+      }),
+    );
     expect(html).toContain(label("integrationUnboundOtherAuth"));
     expect(html).not.toContain(label("integrationUnbound"));
   });
@@ -221,15 +238,14 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     const html = renderCard(
       unbound({
         source: "fallback_auto",
-        warning_code: null,
+        warning: null,
         resolved_connection_ids: [candidate(true).id],
         candidates: [candidate(true)],
       }),
     );
     for (const key of [
       "integrationUnbound",
-      "integrationUnboundAdminNone",
-      "integrationUnboundMemberNone",
+      "integrationUnboundNone",
       "integrationUnboundOtherAuth",
       "integrationUnboundSharedOnly",
       "integrationUnboundInactive",

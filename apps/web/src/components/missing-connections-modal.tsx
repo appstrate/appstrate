@@ -8,7 +8,7 @@ import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { unboundReason, UNBOUND_LABEL_KEYS } from "./integration-connect/integration-run-readiness";
+import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationReadinessEntry } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
 import {
@@ -150,7 +150,7 @@ export function MissingRow({
 
   // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
   const resolved = !!verdict && !verdict.run_blocking;
-  const unbound = verdict ? unboundReason(verdict) : null;
+  const unbound = unboundLabel(verdict?.resolution.warning ?? null);
   // The picker needs the manifest + first verdict to render fully wired; hold
   // a spinner until both land (non-structural rows with the agent in context).
   // Both reads gate on `integrations:read`: without it neither lands, so the
@@ -183,11 +183,7 @@ export function MissingRow({
                   behind `integration_invalid_manifest`), and a cause clipped at
                   the row width is a cause the user never reads. */}
               <span className="truncate" title={resolved ? undefined : message}>
-                {unbound
-                  ? t(UNBOUND_LABEL_KEYS[unbound])
-                  : resolved
-                    ? t("missingConnections.resolved")
-                    : message}
+                {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
               </span>
             </div>
           </div>

@@ -1509,6 +1509,26 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
 
+/** Why a declared integration's manifest could not be loaded: a readiness error, before resolution. */
+export const INTEGRATION_MANIFEST_FAILURE_CODES = [
+  "integration_not_found",
+  "integration_wrong_type",
+  "integration_invalid_manifest",
+] as const;
+
+/**
+ * Every code an `errors[]` item of a `409 missing_integration_connection` carries: a resolution
+ * error, a manifest failure, or the remote runner's one connection per integration.
+ */
+export const MISSING_INTEGRATION_CONNECTION_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  ...INTEGRATION_MANIFEST_FAILURE_CODES,
+  "remote_binds_one_connection",
+] as const;
+
+export type MissingIntegrationConnectionCode =
+  (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
+
 /**
  * One connection carried by `must_choose_connection`.
  *

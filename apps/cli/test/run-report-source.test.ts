@@ -198,7 +198,7 @@ describe("startReportSession — integration readiness", () => {
   const SOURCE: ReportSource = { kind: "inline", bundle: makeBundle() };
   const WARNING = {
     field: "integrations.@appstrate/gmail",
-    code: "integration_unbound",
+    code: "not_connected" as const,
     message: "Integration '@appstrate/gmail' is not connected",
   };
   let stub: ReturnType<typeof installStubFetch>;
@@ -263,7 +263,30 @@ describe("startReportSession — integration readiness", () => {
     expect(out.stdout).toBe("");
     expect(out.stderr).toBe(
       `→ running @scope/agent@1.0.0 (reporting to ${REPORT_CTX.instance} as ${SUCCESS_BODY.id})\n` +
-        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (integration_unbound)\n",
+        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n",
+    );
+  });
+
+  it("names the layer that chose no connection, and drops items outside the warning contract", async () => {
+    const chosenNone = {
+      field: "integrations.@appstrate/notion",
+      code: "integration_unbound" as const,
+      source: "member_pin" as const,
+      message: "Integration '@appstrate/notion' is bound to no connection by your pin",
+    };
+    const stray = [
+      { field: "integrations.@appstrate/slack", code: "something_else", message: "x" },
+      { field: "integrations.@appstrate/slack", code: "not_connected", source: "nowhere" },
+      { code: "not_connected", message: "no field" },
+      "not an item",
+    ];
+    stub = installStubFetch(() =>
+      ok({ ...SUCCESS_BODY, warnings: [WARNING, chosenNone, ...stray] }),
+    );
+    const live = await session();
+    expect(live.warnings).toEqual([WARNING, chosenNone]);
+    expect(announce(live, false).stderr).toContain(
+      "⚠ @appstrate/notion: Integration '@appstrate/notion' is bound to no connection by your pin (integration_unbound via member_pin)\n",
     );
   });
 

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  INTEGRATION_MANIFEST_FAILURE_CODES,
+  type MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
 import { type ActorValue, sameActor } from "./schedule-payload";
@@ -23,7 +27,7 @@ const SCHEDULE_CHOICE_CODES = [
   "auth_serves_no_selected_tool",
   "override_outranked",
   "required_integration_unbound",
-] as const;
+] as const satisfies readonly MissingIntegrationConnectionCode[];
 
 /**
  * An integration a schedule write was refused over. `candidates` are those the caller may
@@ -132,14 +136,14 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
 export type ConnectionOverridesMap = Record<string, string[]>;
 
 /** Verdicts raised before any account is looked at: no pick fixes them. */
+const STRUCTURAL_CODES: ReadonlySet<string> = new Set([
+  "integration_not_active",
+  "auth_key_serves_no_selected_tool",
+  ...INTEGRATION_MANIFEST_FAILURE_CODES,
+] satisfies MissingIntegrationConnectionCode[]);
+
 export function isStructuralCode(code: string): boolean {
-  return (
-    code === "integration_not_active" ||
-    code === "integration_not_found" ||
-    code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest" ||
-    code === "auth_key_serves_no_selected_tool"
-  );
+  return STRUCTURAL_CODES.has(code);
 }
 
 /** Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), others don't. */

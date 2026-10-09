@@ -68,14 +68,12 @@ function resolution(overrides: Partial<Resolution>): Resolution {
   return {
     source: "member_pin",
     error_code: null,
-    warning_code: null,
-    required_auth_key: null,
-    available_auth_keys: [],
+    warning: null,
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
     member_pinned_connection_ids: null,
-    org_default_connection_ids: [],
+    org_default_connection_ids: null,
     org_default_enforced: false,
     can_add_connection: true,
     candidates: [candidate(WEB, "web"), candidate(DB, "db")],
@@ -464,19 +462,24 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       );
       return pickers[0]?.authKeys;
     };
-    const unbound = {
-      source: null,
-      warning_code: "integration_unbound" as const,
-      resolved_connection_ids: [],
-      candidates: [],
-    };
+    const unbound = { source: null, resolved_connection_ids: [], candidates: [] };
+    const field = `integrations.${INTEGRATION}`;
     const otherAuth = resolution({
       ...unbound,
-      required_auth_key: "primary",
-      available_auth_keys: ["token"],
+      warning: {
+        field,
+        code: "auth_key_mismatch",
+        message: "other auth",
+        required_auth_key: "primary",
+        available_auth_keys: ["token"],
+      },
     });
     expect(authKeysFor(otherAuth)).toEqual(["primary"]);
-    expect(authKeysFor(resolution(unbound))).toEqual(["primary", "token"]);
+    const notConnected = resolution({
+      ...unbound,
+      warning: { field, code: "not_connected", message: "not connected" },
+    });
+    expect(authKeysFor(notConnected)).toEqual(["primary", "token"]);
   });
 
   it("persists [] for 'no connection' and null for inherit, as two different overrides", async () => {

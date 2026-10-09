@@ -26,6 +26,7 @@ import {
   treeIntegrity,
   type AgentLaunchView,
 } from "../src/lib/skills-sync/materialize.ts";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { launchRunAndWait } from "@appstrate/core/run-and-wait-client";
 import { pluginTool } from "../src/lib/skills-sync/targets.ts";
 
@@ -436,7 +437,10 @@ describe("materializeAgent", () => {
     expect(body).toContain("`no_published_version`");
     expect(body).toContain(`never call \`${pluginTool("run_and_wait")}\` again`);
     expect(body).toContain("Never call `getRun` on a finished run.");
-    expect(body).toContain("`warnings` items (`integration_unbound`, `integration_not_active`)");
+    expect(body).toContain(
+      `\`warnings\` items (${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")})`,
+    );
+    expect(body).toContain("its `source` says by whom");
     // MCP warnings never carry a link: connecting is minted on request.
     expect(body).toContain("They carry no link");
     expect(body).toContain("`initiateIntegrationConnect`");

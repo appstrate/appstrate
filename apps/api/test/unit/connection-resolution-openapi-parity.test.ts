@@ -11,6 +11,8 @@ import Ajv from "ajv";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_WARNING_CODES,
+  INTEGRATION_MANIFEST_FAILURE_CODES,
+  MISSING_INTEGRATION_CONNECTION_CODES,
 } from "@appstrate/core/integration";
 import { buildOpenApiSpec } from "../../src/openapi/index.ts";
 import { createOpenApiValidator } from "../helpers/openapi-validator.ts";
@@ -30,11 +32,15 @@ describe("connection-resolution components ↔ core tuples", () => {
     expect(validate(item("needs_reconnection"))).toBe(false);
   });
 
-  it("a 409 item takes exactly the error codes and the remote runner's one", () => {
+  it("a 409 item takes the resolution, manifest-failure and remote-runner codes, and no other", () => {
     const validate = component("ConnectionResolutionItem");
-    for (const code of [...CONNECTION_RESOLUTION_ERROR_CODES, "remote_binds_one_connection"]) {
+    expect(MISSING_INTEGRATION_CONNECTION_CODES).toEqual([
+      ...CONNECTION_RESOLUTION_ERROR_CODES,
+      ...INTEGRATION_MANIFEST_FAILURE_CODES,
+      "remote_binds_one_connection",
+    ]);
+    for (const code of MISSING_INTEGRATION_CONNECTION_CODES)
       expect(validate(item(code))).toBe(true);
-    }
     expect(validate(item("integration_unbound"))).toBe(false);
   });
 

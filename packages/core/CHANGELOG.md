@@ -15,13 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to run. Read by `parseManifestIntegrations`, written by
   `writeManifestIntegrations`. Unrelated to an integration auth's
   `_meta["dev.appstrate/auth"].required`. (#1830)
-- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`integration_unbound`,
-  `integration_not_active`), **`ConnectionResolutionWarningCode`** and
-  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a declared,
-  non-required integration the run starts without — nothing usable to bind or
-  a layer bound none, or switched off in the space — with the same
-  `authKey`, `requiredScopes`, `requiredAuthKey`, `availableAuthKeys` and
-  `candidateConnections` an error carries. (#1830)
+- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`not_connected`,
+  `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`,
+  `integration_unbound`), **`ConnectionResolutionWarningCode`** and
+  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a
+  declared, non-required integration the run starts without carries the code
+  the same state raises as an error on a `required` integration, with the same
+  fields. Only `integration_unbound` has no error twin: a cascade layer
+  (`source`) chose `[]`. (#1830, #1848)
+- **`CONNECT_FLOW_CODES`** and **`ConnectFlowCode`**
+  (`@appstrate/core/integration`): the codes a connect flow can resolve, the
+  ones carrying `auth_key` and `required_scopes`. (#1848)
+- **`INTEGRATION_MANIFEST_FAILURE_CODES`**,
+  **`MISSING_INTEGRATION_CONNECTION_CODES`** and
+  **`MissingIntegrationConnectionCode`** (`@appstrate/core/integration`): every
+  code an `errors[]` item of a `409 missing_integration_connection` carries —
+  resolution errors, manifest failures and `remote_binds_one_connection`.
+  (#1848)
 - **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
   the launch's `warnings`** onto every payload it returns (preliminary,
   terminal and timed out) when the launch reported some; absent otherwise.
@@ -73,11 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
   configuration onto the one already in the manifest**: keys it does not
   model (`_meta`, extensions) are kept instead of dropped. (#1830)
-- **`ResolutionFieldError` (`@appstrate/core/api-errors`) also describes a
-  launch response's `warnings` items**: `auth_key`, `required_scopes`,
-  `required_auth_key`, `available_auth_keys`, `candidate_connections` and
-  `connect_url` may ride an `integration_unbound` warning. Documentation only:
-  the type is unchanged. (#1830)
+- **`ResolutionFieldError` (`@appstrate/core/api-errors`) gains `source?`**,
+  the cascade layer concerned, and also describes a launch response's
+  `warnings` items. (#1830, #1848)
 
 - **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) validates
   the optional `tiers` of a `TokenUsage` (`@appstrate/afps-shared`

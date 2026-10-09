@@ -21,9 +21,8 @@ import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
-  requiredNoneReason,
-  REQUIRED_NONE_LABEL_KEYS,
-  unboundReason,
+  requiredNoneLabel,
+  unboundLabel,
   UNBOUND_LABEL_KEYS,
 } from "../integration-connect/integration-run-readiness";
 import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
@@ -189,12 +188,11 @@ function ManagedIntegrationCard({
     resolution && describeResolution(resolution).resolved
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
-  const unbound = entry ? unboundReason(entry) : null;
-  const requiredNone = resolution ? requiredNoneReason(resolution) : null;
+  const requiredNone = resolution ? requiredNoneLabel(resolution) : null;
 
   // The verdict can know it is off when the list did not; an `inactive` verdict is a warning,
   // so the run starts without it.
-  if (unbound === "inactive") {
+  if (resolution?.warning?.code === "integration_not_active") {
     return (
       <InactiveIntegrationCard packageId={packageId} displayName={displayName} required={false} />
     );
@@ -204,13 +202,7 @@ function ManagedIntegrationCard({
     <CardShell
       title={displayName}
       subtitle={packageId}
-      extraSubtitle={
-        requiredNone
-          ? t(REQUIRED_NONE_LABEL_KEYS[requiredNone])
-          : unbound
-            ? t(UNBOUND_LABEL_KEYS[unbound])
-            : reuseInfo
-      }
+      extraSubtitle={requiredNone ?? unboundLabel(resolution?.warning ?? null) ?? reuseInfo}
       extraSubtitleAlert={requiredNone !== null}
       badge={entry?.required ? <RequiredBadge packageId={packageId} /> : null}
     >
@@ -255,7 +247,7 @@ function InactiveIntegrationCard({
           className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-xs sm:text-right`}
           data-testid={`integration-inactive-${packageId}`}
         >
-          {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.inactive)}
+          {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
         </span>
         {/* The sentence asks for an activation; without this the reader had to
             go find the integration page to perform it. Somebody the route

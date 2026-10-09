@@ -10,8 +10,11 @@ import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
 import {
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  UNAVAILABLE_INTEGRATION_REASONS,
   type Bundle,
 } from "@appstrate/afps-runtime/bundle";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { parseLaunchWarnings } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
 
 const GMAIL = "@appstrate/gmail";
@@ -63,10 +66,10 @@ function makeBundle(): Bundle {
   } as unknown as Bundle;
 }
 
-const WARNINGS = [
-  { field: `integrations.${GMAIL}`, code: "integration_unbound", message: "not connected" },
+const WARNINGS = parseLaunchWarnings([
+  { field: `integrations.${GMAIL}`, code: "not_connected", message: "not connected" },
   { field: "run", code: "something_else", message: "ignored" },
-];
+]);
 
 /** Tool names the bridge registers for `bundle`, one resolved tool per requested ref. */
 async function exposedTools(bundle: Bundle): Promise<string[]> {

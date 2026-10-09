@@ -323,15 +323,31 @@ describe("errorMessage", () => {
     );
   });
 
-  it("says what to change for a refused connection choice, not the server's English", async () => {
+  it("says what to change for an undeclared connection choice, not the server's English", async () => {
     await i18n.changeLanguage("fr");
-    const detail =
-      '`connection_overrides["@acme/crm"]` is empty, but the agent marks it `required`';
+    const detail = '`connection_overrides["@acme/crm"]` is not a declared integration dependency';
     const err = await problem({ code: "invalid_request", detail, param: "connection_overrides" });
     expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
     // Control: the same code blaming another member keeps the generic lead.
     const other = await problem({ code: "invalid_request", detail, param: "input" });
     expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
+  });
+
+  it("words a 'no connection' override on a required integration as the pin's refusal", async () => {
+    await i18n.changeLanguage("fr");
+    const err = await problem({
+      code: "validation_failed",
+      detail: "connection_overrides.@acme/crm: …",
+      errors: [
+        {
+          field: "connection_overrides.@acme/crm",
+          code: "required_integration_unbound",
+          message: "The agent marks @acme/crm `required`, so its set cannot be empty",
+        },
+      ],
+    });
+    expect(errorMessage(err)).toBe(agentsFr["error.requiredIntegrationUnbound"]);
+    expect(errorField(err)).toBe("connection_overrides.@acme/crm");
   });
 
   it("names the field of a validation failure, keeps its reason and counts the rest", async () => {

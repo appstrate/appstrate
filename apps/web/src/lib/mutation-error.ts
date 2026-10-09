@@ -2,6 +2,10 @@
 
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type {
+  INTEGRATION_MANIFEST_FAILURE_CODES,
+  MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
 import i18n from "../i18n";
 import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
@@ -15,6 +19,30 @@ export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
 };
 
+/** Item codes whose sentence is `common:apiError.<code>`, or the server's own message. */
+type CommonSentenceCode =
+  | "integration_not_active"
+  | (typeof INTEGRATION_MANIFEST_FAILURE_CODES)[number]
+  | "remote_binds_one_connection";
+
+/**
+ * Every other `409 missing_integration_connection` item code, and the `required_integration_unbound`
+ * item of a `connection_overrides` 400.
+ */
+const RESOLUTION_ERROR_KEYS = {
+  pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
+  override_connection_unavailable: "error.overrideConnectionUnavailable",
+  needs_reconnection: "error.needsReconnection",
+  must_choose_connection: "error.mustChooseConnection",
+  not_connected: "error.notConnected",
+  insufficient_scopes: "error.insufficientScopes",
+  auth_key_mismatch: "error.authKeyMismatch",
+  auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
+  auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
+  override_outranked: "error.overrideOutranked",
+  required_integration_unbound: "error.requiredIntegrationUnbound",
+} as const satisfies Record<Exclude<MissingIntegrationConnectionCode, CommonSentenceCode>, string>;
+
 /**
  * Refusals whose sentence is `agents:*` copy other components reuse; the lock codes interpolate
  * the field named in `param`. Every other code resolves to `common:apiError.<code>`.
@@ -27,23 +55,14 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
   end_user_connection_not_shareable: "error.endUserConnectionNotShareable",
-  pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
-  override_connection_unavailable: "error.overrideConnectionUnavailable",
-  needs_reconnection: "error.needsReconnection",
-  must_choose_connection: "error.mustChooseConnection",
-  not_connected: "error.notConnected",
-  insufficient_scopes: "error.insufficientScopes",
-  auth_key_mismatch: "error.authKeyMismatch",
-  auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
-  auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
-  override_outranked: "error.overrideOutranked",
-  required_integration_unbound: "error.requiredIntegrationUnbound",
+  ...RESOLUTION_ERROR_KEYS,
   ...PACKAGE_PATH_ERROR_KEYS,
   ...SKILL_FRONTMATTER_ERROR_KEYS,
 };
 
 /** Generic refusals made precise by the member they blame: `<code>:<param>` → `agents` key. */
 const PARAM_REFUSAL_KEYS: Record<string, string> = {
+  // An override key the launched version does not declare.
   "invalid_request:connection_overrides": "error.connectionOverridesRefused",
 };
 

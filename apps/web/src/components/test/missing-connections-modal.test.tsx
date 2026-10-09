@@ -37,14 +37,12 @@ function resolution(overrides: Partial<Resolution>): Resolution {
   return {
     source: null,
     error_code: null,
-    warning_code: null,
-    required_auth_key: null,
-    available_auth_keys: [],
+    warning: null,
     resolved_connection_ids: [],
     resolved_missing_scopes: [],
     admin_pinned_connection_ids: null,
     member_pinned_connection_ids: null,
-    org_default_connection_ids: [],
+    org_default_connection_ids: null,
     org_default_enforced: false,
     can_add_connection: true,
     candidates: [],
@@ -74,7 +72,15 @@ const readiness = (res: Resolution, runBlocking: boolean) => ({
   ],
 });
 
-const UNBOUND = resolution({ warning_code: "integration_unbound" });
+type Warning = NonNullable<Resolution["warning"]>;
+const warning = (code: Warning["code"], over: Partial<Warning> = {}): Warning => ({
+  field: `integrations.${INTEGRATION}`,
+  code,
+  message: code,
+  ...over,
+});
+
+const UNBOUND = resolution({ warning: warning("not_connected") });
 const BLOCKED = resolution({ error_code: "must_choose_connection" });
 const label = (key: string) => i18n.t(`agents:${key}`);
 
@@ -111,12 +117,19 @@ describe("MissingRow", () => {
     qc.setQueryData(
       readinessKey(),
       readiness(
-        resolution({ warning_code: "integration_unbound", member_pinned_connection_ids: [] }),
+        resolution({
+          warning: warning("integration_unbound", { source: "member_pin" }),
+          member_pinned_connection_ids: [],
+        }),
         false,
       ),
     );
     const html = renderRow(qc);
-    expect(html).toContain(label("detail.integrationUnboundMemberNone"));
+    expect(html).toContain(
+      i18n.t("agents:detail.integrationUnboundNoneBy", {
+        by: label("noneChosenBy.memberPin"),
+      }),
+    );
     expect(html).not.toContain(label("missingConnections.resolved"));
   });
 

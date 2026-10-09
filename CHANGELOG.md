@@ -58,26 +58,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **BREAKING (API): a declared integration blocks a run only when the agent
-  marks it `required`** (#1830, afps-spec#28). A non-required integration
-  binds 0..N connections and never blocks for lack of one; the run starts
-  without it and the launch answers a `warnings[]` item naming it (`field`
-  `integrations.<id>`):
-  - `integration_unbound` when the fallback finds nothing usable (today's
-    `not_connected` and `auth_key_mismatch`) or only connections other
-    members share, carrying `auth_key` and `required_scopes`,
-    `candidate_connections`, or `required_auth_key` and
-    `available_auth_keys`, plus a `connect_url` when the caller sent
-    `X-Appstrate-Connect-Offers` (never stored with an idempotent response,
-    the `201` or a `409`, so a replay carries none; MCP `run_and_wait` warnings
-    carry no connect link, so an MCP client gets the warning and can call
-    `initiateIntegrationConnect`, and the in-app chat gets them through its own
-    launcher); and when a cascade layer holds `[]` (below),
-    with a message naming that layer and no connect target, since the choice
-    was deliberate;
+  marks it `required`** (#1830, #1848, afps-spec#28). A non-required
+  integration binds 0..N connections and never blocks for lack of one; the
+  run starts without it and the launch (run, inline run, remote run, schedule
+  write) answers a `warnings[]` item naming it (`field` `integrations.<id>`)
+  with the code the same state raises as a `409` item on a `required`
+  integration, and the same fields:
+  - `not_connected` (`auth_key`, `required_scopes`, plus a `connect_url` on
+    an agent-run or inline-run launch that sent `X-Appstrate-Connect-Offers`;
+    never stored with an idempotent response, the `201` or a `409`, so a
+    replay carries none; MCP `run_and_wait` warnings carry no connect link,
+    so an MCP client gets the warning and can call
+    `initiateIntegrationConnect`, and the in-app chat gets them through its
+    own launcher);
+  - `must_choose_connection` when only connections other members share
+    serve (`candidate_connections`);
+  - `auth_key_mismatch` (`required_auth_key`, `available_auth_keys`);
   - `integration_not_active` when the integration is switched off in the
-    space; the run's `integrations_unbound` lists it too. An inert one
-    (selecting no tool or scope, needing no auth) is skipped first and
-    yields nothing, as the run would not start it anyway.
+    space; the run's `integrations_unbound` lists it too;
+  - `integration_unbound` only when a cascade layer holds `[]` (below),
+    named by the item's new `source` field, with no connect target since the
+    choice was deliberate.
+
+  An inert integration (selecting no tool or scope, needing no auth) is
+  skipped first and yields nothing, as the run would not start it anyway.
 
   A `required` integration keeps the old behaviour: a
   `409 missing_integration_connection` with `not_connected`,
@@ -102,11 +106,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pins, member pins, run and schedule `connection_overrides`, and MCP
   `run_and_wait`'s `connection_overrides`. A layer holding `[]` wins and stops
   the cascade: the integration starts with no connection, with an
-  `integration_unbound` warning, and the agent is told it runs without it
-  whatever its tool selection. `[]` in `connection_overrides` for an
-  integration the launched manifest marks `required` is refused
-  (`400 invalid_request`, `param` `connection_overrides`) at a run launch and
-  at a schedule write. A pin accepts `[]` whatever the manifest says; a run
+  `integration_unbound` warning whose `source` names that layer, and the
+  agent is told it runs without it whatever its tool selection. `[]` in
+  `connection_overrides` for an integration the launched manifest marks
+  `required` is refused at a run launch and at a schedule write:
+  `400 validation_failed` with an item
+  `{ field: "connection_overrides.<id>", code: "required_integration_unbound" }`
+  (#1848). A pin accepts `[]` whatever the manifest says; a run
   whose version marks the integration `required` then fails with a new `409`
   item `required_integration_unbound`. Org defaults stay `1..20`. A layer
   with no row or no key is still absent and passes to the next, as is a
@@ -116,12 +122,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`GET /api/agents/{scope}/{name}/connection-readiness`) gains `required`
   per integration, and `admin_pinned_connection_ids` /
   `member_pinned_connection_ids` become `string[] | null` (`null` = no pin,
-  `[]` = pinned to none). It also gains `warning_code` per integration: the
-  code of the launch's `warnings[]` item (`integration_unbound` or
-  `integration_not_active`), `null` when the run binds the integration, is
+  `[]` = pinned to none), and `org_default_connection_ids` is `null` when no
+  org default exists. Per integration, `resolution.warning` is the launch's
+  `warnings[]` item itself, replacing `required_auth_key` and
+  `available_auth_keys`; `null` when the run binds the integration, is
   refused over it, or never needed it. A non-required integration the run
   starts without reads `run_blocking: false`, `error_code: null`,
-  `resolved_connection_ids: []` and a non-null `warning_code` (#1830).
+  `resolved_connection_ids: []` and a non-null `resolution.warning` (#1830,
+  #1848).
 - **BREAKING (API): integration status reads an auth's
   `_meta["dev.appstrate/auth"].required` as absent = `false`** (#1830), like
   the rest of the platform, instead of absent = `true`: `auths[].required` on
@@ -132,6 +140,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integrations_configuration.<id>.required` as a boolean (afps-spec#28): an
   agent manifest whose `required` is not a boolean is now refused at publish,
   import and inline launch (#1830).
+- **The launch and schedule `409`s type `errors[].code`**
+  (`MissingIntegrationConnectionProblem`), and connection-id sets declare
+  `uniqueItems` in OpenAPI (#1848).
 
 ### Added
 
@@ -143,9 +154,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The agent is told which declared integrations it runs without** (#1830):
   its system prompt lists each integration unavailable in the run and why,
   and tells it not to claim results from them. A run started without one
-  shows it on the run page; the chat renders a connect card from an
-  `integration_unbound` warning that carries a `connect_url`, the CLI prints
-  one `⚠` line per warning, and the MCP server instructions explain both.
+  shows it on the run page; the chat renders a connect card from a warning
+  that carries a `connect_url`, the CLI prints one `⚠` line per warning with
+  `(code via source)` (refusal lines too), and the MCP server instructions
+  explain both. The launch toast and the agent's Connections tab say who
+  chose "no connection": you, an admin, the space default, this run or the
+  schedule (#1848).
 - **The run resource gains `integrations_unbound`** (#1830): the sorted ids of
   the declared integrations the run bound to no connection, those switched
   off in the space included (`[]` when none,
