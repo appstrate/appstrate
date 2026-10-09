@@ -21,7 +21,7 @@ import {
   LockedInputFieldError,
 } from "../src/commands/run/input.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 
 /**
  * Minimal Bundle fixture — `resolveLocalInput` only reads the root
@@ -182,7 +182,7 @@ describe("resolveLocalInput — stored input layer (remote package)", () => {
  * `validateLocalInput` exits the process on failure, so every test here
  * injects its own `createMemoryIO()` sink: no global stream or
  * `process.exit` is touched (the pattern issue #1180 retired), and the exit
- * arrives as the shared `ExitError` carrying the code.
+ * arrives as the shared `CommandExit` carrying the code.
  */
 describe("validateLocalInput", () => {
   const REQUIRED_BUNDLE = makeBundle({
@@ -212,8 +212,8 @@ describe("validateLocalInput", () => {
       validateLocalInput(REQUIRED_BUNDLE, resolved, io);
       throw new Error("expected validateLocalInput to exit");
     } catch (err) {
-      expect(err).toBeInstanceOf(ExitError);
-      expect((err as ExitError).code).toBe(1);
+      expect(err).toBeInstanceOf(CommandExit);
+      expect((err as CommandExit).code).toBe(1);
     }
     expect(stdout()).toContain("topic");
   });
@@ -230,8 +230,8 @@ describe("validateLocalInput", () => {
       validateLocalInput(bundle, { tone: "shouty" }, io);
       throw new Error("expected validateLocalInput to exit");
     } catch (err) {
-      expect(err).toBeInstanceOf(ExitError);
-      expect((err as ExitError).code).toBe(1);
+      expect(err).toBeInstanceOf(CommandExit);
+      expect((err as CommandExit).code).toBe(1);
     }
     expect(stdout()).toContain("tone");
   });

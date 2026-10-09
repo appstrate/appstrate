@@ -228,6 +228,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps retrying. A `dev` platform or locally built artifacts
   (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
 
+- **Every `appstrate` command ends through one handler** (#1858): it sets the
+  exit code instead of calling `process.exit`, so no command has to drain
+  stdout itself.
+
 - **An internal error during an integration credential refresh is no longer
   reported as a transient upstream failure** (#1847). A database fault or an
   incoherent OAuth client configuration makes the sidecar refresh endpoint
@@ -251,12 +255,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it.
 
 - **`appstrate api` no longer cuts a response piped into a slower reader**
-  (#1824). Piped into `jq` or a script's `capture_output`, the body stopped at
-  the pipe capacity (64 KiB on macOS) because the CLI exited with bytes still
-  queued; `-o <file>` was unaffected. The CLI now exits only once stdout and
-  stderr have taken everything, the `-w` line included, and so does the
-  failure report of `appstrate code sync`. A reader that stops reading now
-  makes the CLI wait, as curl does, instead of losing the tail.
+  (#1824, #1858). Piped into `jq` or a script's `capture_output`, the body
+  stopped at the pipe capacity (64 KiB on macOS) because the CLI exited with
+  bytes still queued; `-o <file>` was unaffected. The CLI no longer calls
+  `process.exit` at the end of a command: it sets the exit code and lets the
+  process end on its own, so stdout and stderr are drained first — for every
+  command and exit code, including clack's error banners and the
+  `appstrate code sync` failure report. A reader that stops reading now makes
+  the CLI wait, as curl does, instead of losing the tail.
 
 - **The model settings and the chat model picker name `off` from the
   server's `reasoning.off`** (#1774). They used to guess it from the API shape

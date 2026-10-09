@@ -28,6 +28,7 @@
 import { rm } from "node:fs/promises";
 import { confirm, exitWithError, logWarn, EXIT_CANCELLED } from "../lib/ui.ts";
 import { runCommand } from "../lib/install/os.ts";
+import { DEFAULT_IO } from "../lib/io.ts";
 import { resolveInstall } from "../lib/install/project.ts";
 import { reportRunning, resolveRunningUrls } from "../lib/install/report.ts";
 
@@ -80,15 +81,14 @@ async function runCompose(dir: string, projectName: string, args: string[]): Pro
   });
   if (res.ok) return;
   // SIGINT (130) / SIGTERM (143) are graceful Ctrl-C exits — surface
-  // them as a clean process exit with the same code rather than a
-  // thrown error. Without this, `appstrate logs -f` followed by Ctrl-C
-  // would render "docker compose logs failed with exit code 130" via
-  // `exitWithError`, masking the fact that the user intentionally
-  // ended the stream. The CLI's own shutdown coordinator
-  // (lib/shutdown.ts) also calls `process.exit(130)` on SIGINT, so
+  // them as a clean exit with the same code rather than a rendered
+  // error. Without this, `appstrate logs -f` followed by Ctrl-C would
+  // render "docker compose logs failed with exit code 130", masking the
+  // fact that the user intentionally ended the stream. The CLI's own
+  // shutdown coordinator (lib/shutdown.ts) also exits 130 on SIGINT, so
   // picking the same code here keeps shell pipelines coherent.
   if (res.exitCode === 130 || res.exitCode === 143) {
-    process.exit(res.exitCode);
+    DEFAULT_IO.exit(res.exitCode);
   }
   throw new Error(`docker compose ${args.join(" ")} failed with exit code ${res.exitCode}`);
 }

@@ -28,7 +28,7 @@
  *     seam over the same bytes, not a unification. Its `commands/run/*`
  *     helpers are not covered by that reasoning one way or the other:
  *     `run/input.ts` takes an optional `io?: CommandIO` because
- *     `validateLocalInput` exits the process and a test asserting that needs
+ *     `validateLocalInput` ends the command and a test asserting that needs
  *     its own sink.
  *   - `commands/runner.ts` and `commands/lifecycle.ts` are host-level
  *     installers whose user-visible output already goes through `lib/ui.ts`;
@@ -44,15 +44,11 @@
  * migrated onto it — `sink.ts` and `commands/run/remote-runner.ts` each still
  * declare their own writer pair, for the bridge reason above.
  *
- * Four members plus an optional `flush`, deliberately — no colour, TTY or
- * logger abstraction. A command awaits `flush` before a tail `exit` that may
- * follow more output than a pipe holds: `exit` cannot flush itself, because
- * non-tail `io.exit` callers rely on `never` and a sync write to a pipe fails
- * with EAGAIN (#1824). A command that needs more than "write bytes, exit"
- * keeps that logic in the command; widening the seam would put it in
- * everyone's way. (The one TTY decision the CLI does make — repaint or plain
- * lines — lives in `lib/ui.ts`'s `spinner`, which reads
- * `process.stdout.isTTY` directly.)
+ * Four members, deliberately — no colour, TTY or logger abstraction. A
+ * command that needs more than "write bytes, exit" keeps that logic in the
+ * command; widening the seam would put it in everyone's way. (The one TTY
+ * decision the CLI does make — repaint or plain lines — lives in `lib/ui.ts`'s
+ * `spinner`, which reads `process.stdout.isTTY` directly.)
  */
 
 import * as clack from "@clack/prompts";
@@ -60,7 +56,7 @@ import * as clack from "@clack/prompts";
 export interface CommandIO {
   stdout: { write(chunk: string | Uint8Array): void };
   stderr: { write(chunk: string | Uint8Array): void };
-  /** Hook so tests assert exit codes without terminating the runner. */
+  /** Ends the command with `code` by throwing; nothing after it runs. */
   exit: (code: number) => never;
   /**
    * Terminal-error renderer. Production uses `clack.cancel` so the message
@@ -70,15 +66,20 @@ export interface CommandIO {
    * that nothing but its own test could reach.
    */
   cancel: (message: string) => void;
-  /** Settles once earlier writes are out, or failed on a closed reader (#1824). */
-  flush?: () => Promise<void>;
 }
 
-// Bun queues what a pipe cannot take yet and `process.exit` drops that queue
-// (#1824). On success write callbacks fire in order, so the latest one settles
-// last; on a closed reader they all settle with an error, and nobody reads.
-let stdoutFlushed: Promise<void> = Promise.resolve();
-let stderrFlushed: Promise<void> = Promise.resolve();
+/**
+ * What `DEFAULT_IO.exit` throws. `cli.ts` turns it into `process.exitCode` and
+ * lets the process end on its own: Bun drains stdio on a natural exit, whereas
+ * `process.exit` drops whatever a pipe has not taken yet (#1824). A `catch`
+ * that can see one must rethrow it.
+ */
+export class CommandExit extends Error {
+  constructor(readonly code: number) {
+    super(`exit ${code}`);
+    this.name = "CommandExit";
+  }
+}
 
 /**
  * Production wiring — what every command gets when the caller injects
@@ -90,19 +91,10 @@ let stderrFlushed: Promise<void> = Promise.resolve();
  * `exitWithError` needs no special case for its own default.
  */
 export const DEFAULT_IO: CommandIO = {
-  stdout: {
-    write(chunk) {
-      stdoutFlushed = new Promise((resolve) => process.stdout.write(chunk, () => resolve()));
-    },
-  },
-  stderr: {
-    write(chunk) {
-      stderrFlushed = new Promise((resolve) => process.stderr.write(chunk, () => resolve()));
-    },
-  },
-  exit: (code) => process.exit(code),
-  flush: async () => {
-    await Promise.all([stdoutFlushed, stderrFlushed]);
+  stdout: { write: (chunk) => void process.stdout.write(chunk) },
+  stderr: { write: (chunk) => void process.stderr.write(chunk) },
+  exit: (code) => {
+    throw new CommandExit(code);
   },
   // Wrapped rather than passed by reference so the seam pins the one-argument
   // form regardless of what else clack's export carries.

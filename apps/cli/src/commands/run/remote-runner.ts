@@ -278,10 +278,7 @@ export async function runRemote(
   // ─── 1. Trigger the run ────────────────────────────────────────────
   const { runId, warnings } = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
 
-  // Match the local path's preamble verbatim so the user sees the same
-  // "→ running ... (reporting to ... as run_xxx)" line in both modes.
-  // The local path emits this on stderr from runCommandLocal:534 — see
-  // also `runCommand.ts` for the source of the format string.
+  // Same helper as the local path, so both modes print the same preamble.
   announceLaunch({
     type: "appstrate.remote.triggered",
     json: opts.json,

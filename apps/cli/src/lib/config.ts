@@ -354,9 +354,9 @@ export async function resolveActiveProfileOrNull(
  *
  * Takes the caller's `io` so the "not configured" branch lands in the same
  * sink as the rest of the command. A test that injects a memory sink into
- * `orgListCommand` would otherwise still hit the real `process.exit` here
- * and kill the test worker (issue #1180). `models.ts` and any other caller
- * that passes nothing keeps the production wiring via the default.
+ * `orgListCommand` would otherwise see the remedy land on the real stderr
+ * (issue #1180). `models.ts` and any other caller that passes nothing keeps
+ * the production wiring via the default.
  */
 export function requireLoggedIn(
   profileName: string,
