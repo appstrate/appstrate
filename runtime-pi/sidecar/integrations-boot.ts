@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
-import { isOperatorTrustedEgressHost } from "./ssrf.ts";
+import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -50,10 +50,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
-import {
-  compileEgressPolicy,
-  matchesAuthorizedUriSpec,
-} from "@appstrate/afps-shared/authorized-uris";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -851,7 +848,9 @@ async function spawnAndConnectLocalIntegration(params: {
   //   - neither          → null: the runner has no egress route.
   // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
   let egressCtx: RuntimeEgressContext | null = null;
-  const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
+  const policy = compileRunnerEgressPolicy(
+    spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
+  );
   const attribute = adapter.peerAttribution();
   const isPeerAllowed: PeerCheck = async (peer) => (await attribute(peer)) === runnerKeyOf(spec);
   // The MITM listener is mounted only when this integration wants MITM, a CA
@@ -1273,20 +1272,13 @@ export async function bootIntegrations(
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
 
-  // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
-  // need a stable identifier for labelling integration containers
-  // (lets the orphan reaper match containers back to their run if the
-  // sidecar dies mid-shutdown). NEVER derive this from RUN_TOKEN: even
-  // a 12-char slice of the signed token would leak ~72 bits of secret
-  // entropy via `docker inspect` (labels are visible to anyone who can
-  // talk to the daemon). Fall back to an opaque random id when RUN_ID
-  // isn't available — orphan-cleanup is best-effort either way.
+  // RUN_ID labels docker runner containers for the orphan reaper; a process-mode sidecar lacks
+  // it. NEVER derive it from RUN_TOKEN: labels are readable by anyone who can reach the daemon.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
-  // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`
-  // (the launching orchestrator pins it to mirror `RUN_ADAPTER` — no probing).
-  // The selection logic is in {@link selectIntegrationRuntimeAdapter}; adding a
-  // new backend (firecracker, podman) means dropping a new
+  // Pick the runtime backend from `INTEGRATION_RUNTIME_ADAPTER`, pinned by the
+  // launching orchestrator — no probing. The selection logic is in
+  // {@link selectIntegrationRuntimeAdapter}; a new backend (podman, say) is a new
   // `integration-runtime-adapter-*.ts` module that calls
   // `registerIntegrationRuntimeAdapter()`.
   let adapter: IntegrationRuntimeAdapter;

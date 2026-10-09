@@ -324,18 +324,26 @@ function probeIntegrations(aliasIp: string, platformPort: number): IntegrationSp
         PROBE_DIRECT_PATH: DIRECT_PATH,
         PROBE_AGENT_PROXY_PORT: String(GUEST_FORWARD_PROXY_PORT),
       },
-      egress: { authorizedUris: ["https://example.com"], allowAllUris: false },
+      egress: {
+        authorizedUris: ["https://example.com"],
+        declaredUris: ["https://example.com"],
+        allowAllUris: false,
+      },
     }),
     probeIntegration(INTEGRATION_OF.r2, "runner_egress_cross", {
       spawnEnv: { ...env("r2", "cross"), PROBE_PEER_ID: "r1" },
-      egress: { authorizedUris: ["https://example.org"], allowAllUris: false },
+      egress: {
+        authorizedUris: ["https://example.org"],
+        declaredUris: ["https://example.org"],
+        allowAllUris: false,
+      },
       // Opt-in: the positive control for the `workspace` group and the
       // /workspace listing (r1/mitm must lack both).
       workspaceMount: { mount: "/workspace", access: "rw" },
     }),
     probeIntegration(INTEGRATION_OF.mitm, "runner_egress_mitm", {
       spawnEnv: env("mitm", "mitm"),
-      egress: { authorizedUris: MITM_URIS, allowAllUris: false },
+      egress: { authorizedUris: MITM_URIS, declaredUris: MITM_URIS, allowAllUris: false },
       httpDeliveryAuths: {
         [MITM_AUTH_KEY]: {
           authType: "api_key",

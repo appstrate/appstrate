@@ -80,8 +80,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
+- **Remove `INTEGRATION_RUNTIME_ADAPTER` from the environment** (#1819). It
+  is retired and now ignored: each orchestrator pins its sidecar's runtime.
+  Local integrations run under `RUN_ADAPTER=docker` or `firecracker`; under
+  `RUN_ADAPTER=process` they are refused at spawn, as before.
+
+- **Before the deploy, review `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). Every
+  listed host that is not loopback becomes reachable by the local
+  integration runners of every organization, over raw TCP, on any port a
+  declared `authorized_uris` entry names literally: keep only hosts every
+  organization may reach. That includes `host.docker.internal`, often listed
+  for a local model: it is not loopback, so it now opens the Docker host's
+  declared ports to every organization's runners. Loopback (`localhost`,
+  `127.0.0.1`) and the sidecar's own addresses, or a listed name resolving to
+  one, stay refused to runners;
+  listed, it still serves `api_call` and model calls. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
+
+- **On `RUN_ADAPTER=firecracker`, narrow the runner host's
+  `FIRECRACKER_EGRESS_DENY_CIDRS` to reach a listed private host** (#1819).
+  Its default drops RFC1918, CGNAT `100.64.0.0/10` (Tailscale included),
+  link-local and other reserved ranges, so a run never reaches such a host
+  until the list leaves its range out. The cost: the list is the runner
+  host's forward chain for every guest, so narrowing a range removes its L3
+  backstop for every run on that host, leaving only the sidecar's app-layer
+  floor. The exemption ships in this release's Firecracker rootfs: pin the
+  runner's artifacts to this release.
+
 ### Changed
 
+- **A local integration runner can reach a host listed in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
+  transparent listeners refused every private, loopback or link-local
+  address whatever the list said. They now exempt a listed host on a port a
+  declared, untemplated `authorized_uris` entry names (a known scheme's
+  default port when it names none), with `allow_all_uris` off. Never
+  loopback nor the sidecar's own addresses, literal or resolved, on every
+  path; a host from a connection value or a wildcard is never exempt; the
+  runner's allowlist still applies. An `api_call` keeps its per-host rule. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
+- **BREAKING (operators): `INTEGRATION_RUNTIME_ADAPTER` is retired and
+  ignored** (#1819); see Operators.
 - **BREAKING (agents): a Gmail connection no longer gets write access by
   default** (#1871). `@appstrate/gmail` 1.1.7 drops `gmail.send` and
   `@appstrate/gmail-mcp` 2.3.6 drops `gmail.compose` from `default_scopes`,
@@ -379,6 +418,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A proxy-aware local runner reaches `http://` targets through its egress
+  listener** (#1819). The listener of a runner with nothing to inject
+  answered 405 to the absolute-form `http://` request such a client sends to
+  `HTTP_PROXY`. It now vets each one like a `CONNECT` and forwards it with
+  the URL authority as `Host` and hop-by-hop headers stripped both ways, on
+  upstream connections no other runner shares; an upstream `101` answers
+  `502`. Origin-form and `https://` absolute-form requests answer 405; the
+  listener that injects credentials still refuses plain HTTP. The listener
+  now parses the `CONNECT` head with Bun's HTTP parser: an HTTP/1.1
+  `CONNECT` must carry `Host` (the SSH `ProxyCommand` does).
+- **Sidecar tunnels and proxies close cleanly** (#1819). On every tunnel
+  (runner egress `CONNECT`, transparent plane, the agent's forward proxy) a
+  clean close flushes what is queued for the other side first, a client
+  gone during the dial takes the upstream down, and the idle timeout closes
+  both sides. On the runner egress listener and the forward proxy, a
+  `CONNECT` port outside 1–65535 answers `400` instead of crashing the
+  sidecar, and a relayed `http://` request whose upstream times out answers
+  `502` instead of leaving the client waiting. A header value the sidecar's
+  HTTP client refuses (a `0x7f` byte) answers `502` and can no longer crash
+  the sidecar through the forward proxy. The forward proxy also strips
+  response hop-by-hop headers.
 - **A login connection that reports no identity is no longer just
   `Connexion N`** (#1818): a `connect.login` or `connect.tool` connection is
   named, as a pasted credential already is, after its one non-secret required

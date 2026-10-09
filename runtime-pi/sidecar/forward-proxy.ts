@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import type { Socket } from "node:net";
 import type {
   IncomingMessage,
@@ -11,7 +11,6 @@ import type {
 import {
   isBlockedHost,
   resolveAndCheckHost,
-  API_CALL_TIMEOUT_MS,
   peerAddress,
   peerAdmitted,
   type HostResolver,
@@ -19,14 +18,15 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  forwardHttpRequest,
   parseConnectTarget,
   netConnectWithTimeout,
   relaySockets,
-  TUNNEL_IDLE_TIMEOUT_MS,
+  tieSockets,
+  withoutHopByHop,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
 import { redactUrlForLog } from "./redact.ts";
-import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -100,32 +100,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     }
   }
 
-  // Tunnel parsing / connect-with-timeout / relay live in connect-tunnel.ts —
-  // shared verbatim with the per-connection egress listener (#543). Local
-  // alias keeps the call sites below unchanged.
-  const relay = (s1: Socket, s2: Socket) => relaySockets(s1, s2, TUNNEL_IDLE_TIMEOUT_MS);
-
-  /** Strip hop-by-hop headers + Connection-listed headers from incoming request. */
-  function forwardHeaders(
-    raw: IncomingMessage["headers"],
-  ): Record<string, string | string[] | undefined> {
-    // Collect any extra hop-by-hop names declared in the Connection header
-    const connectionExtra = new Set(
-      (typeof raw.connection === "string" ? raw.connection : "")
-        .split(",")
-        .map((h) => h.trim().toLowerCase())
-        .filter(Boolean),
-    );
-
-    const out: Record<string, string | string[] | undefined> = {};
-    for (const [key, value] of Object.entries(raw)) {
-      const lower = key.toLowerCase();
-      if (HOP_BY_HOP_HEADERS.has(lower) || connectionExtra.has(lower)) continue;
-      out[key] = value;
-    }
-    return out;
-  }
-
   // The platform API is a trusted destination: the agent can only send
   // HMAC-signed messages there (the run secret is scoped to a single run).
   // In local dev the platform URL resolves to `host.docker.internal`, which
@@ -167,6 +141,14 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return check.blocked ? null : check.pinnedAddress;
   }
 
+  // One bad request must never become an unhandled rejection: Bun would exit.
+  const crashed = (destroy: () => void) => (err: unknown) => {
+    logger.error("Forward proxy handler error", {
+      error: err instanceof Error ? err.name : "unknown",
+    });
+    destroy();
+  };
+
   function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Regular HTTP requests (non-CONNECT) — forward through upstream or direct
     const targetUrl = req.url;
@@ -198,37 +180,15 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
     const upstream = getUpstreamProxy(parsed.hostname, targetPort);
 
-    const cleaned = forwardHeaders(req.headers);
+    const cleaned = withoutHopByHop(req.headers);
 
-    const forward = (options: RequestOptions) => {
-      const proxyReq = httpRequest(options, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-        proxyRes.pipe(res);
-      });
-
-      // Timeout — abort if the target or upstream proxy hangs
-      proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
-        proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
-      });
-
-      // Clean up if either side breaks
-      req.on("error", () => {
-        proxyReq.destroy();
-      });
-      res.on("error", () => {
-        proxyReq.destroy();
-      });
-      proxyReq.on("error", (err) => {
+    const forward = (options: RequestOptions) =>
+      forwardHttpRequest(req, res, options, (err) =>
         logger.error("Forward proxy HTTP error", {
           target: redactUrlForLog(targetUrl),
           error: err.message,
-        });
-        if (!res.headersSent) res.writeHead(502);
-        res.end("Proxy error");
-      });
-
-      req.pipe(proxyReq);
-    };
+        }),
+      );
 
     if (upstream) {
       // Chained: the upstream proxy resolves the target remotely — no local
@@ -250,20 +210,22 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // Direct: resolve-and-pin to close the DNS-rebind gap — the literal
     // isAllowedTarget() check above does not resolve names. The Host header
     // keeps the original name; only the TCP target is pinned.
-    void pinDirectTarget(parsed.hostname, targetPort).then((pinned) => {
-      if (pinned === null) {
-        res.writeHead(403);
-        res.end("Blocked: internal network");
-        return;
-      }
-      forward({
-        hostname: pinned,
-        port: targetPort,
-        path: parsed.pathname + parsed.search,
-        method: req.method,
-        headers: { ...cleaned, host: parsed.host },
-      });
-    });
+    void pinDirectTarget(parsed.hostname, targetPort)
+      .then((pinned) => {
+        if (pinned === null) {
+          res.writeHead(403);
+          res.end("Blocked: internal network");
+          return;
+        }
+        forward({
+          hostname: pinned,
+          port: targetPort,
+          path: parsed.pathname + parsed.search,
+          method: req.method,
+          headers: { ...cleaned, host: parsed.host },
+        });
+      })
+      .catch(crashed(() => res.destroy()));
   }
 
   function handleConnect(req: IncomingMessage, clientSocket: Socket, head: Buffer) {
@@ -332,7 +294,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           const remaining = combined.subarray(headerEnd + 4);
           if (remaining.length) clientSocket.write(remaining);
           if (head.length) proxySocket.write(head);
-          relay(clientSocket, proxySocket);
+          relaySockets(clientSocket, proxySocket);
         } else {
           logger.warn("Upstream CONNECT rejected", { target, status });
           clientSocket.write(`HTTP/1.1 ${status} Upstream Rejected\r\n\r\n`);
@@ -348,39 +310,41 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         }
         clientSocket.destroy();
       });
-      clientSocket.on("error", () => proxySocket.destroy());
+      tieSockets(clientSocket, proxySocket);
     } else {
       // Direct connection (pass-through). Resolve-and-pin to close the
       // DNS-rebind gap — the literal isAllowedTarget() check above does not
       // resolve names. Pinning is safe: this is a blind CONNECT tunnel (no
       // TLS termination here), the client's own handshake carries SNI/Host
       // for the original name. The platform endpoint keeps a name-based connect.
-      void pinDirectTarget(host, port).then((pinned) => {
-        if (clientSocket.destroyed) return; // client gave up during resolution
-        if (pinned === null) {
-          clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-          clientSocket.destroy();
-          return;
-        }
-        let established = false;
-        const targetSocket = netConnectWithTimeout(port, pinned, () => {
-          established = true;
-          clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          if (head.length) targetSocket.write(head);
-          relay(clientSocket, targetSocket);
-        });
-        targetSocket.on("error", (err) => {
-          logger.error("CONNECT direct error", { target, error: err.message });
-          // Surface a 502 to the waiting client before tearing down — but only
-          // pre-tunnel. Once established, writing into the relayed stream would
-          // corrupt it, so just destroy.
-          if (!established && !clientSocket.destroyed) {
-            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      void pinDirectTarget(host, port)
+        .then((pinned) => {
+          if (clientSocket.destroyed) return; // client gave up during resolution
+          if (pinned === null) {
+            clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            clientSocket.destroy();
+            return;
           }
-          clientSocket.destroy();
-        });
-        clientSocket.on("error", () => targetSocket.destroy());
-      });
+          let established = false;
+          const targetSocket = netConnectWithTimeout(port, pinned, () => {
+            established = true;
+            clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            if (head.length) targetSocket.write(head);
+            relaySockets(clientSocket, targetSocket);
+          });
+          targetSocket.on("error", (err) => {
+            logger.error("CONNECT direct error", { target, error: err.message });
+            // Surface a 502 to the waiting client before tearing down — but only
+            // pre-tunnel. Once established, writing into the relayed stream would
+            // corrupt it, so just destroy.
+            if (!established && !clientSocket.destroyed) {
+              clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+            }
+            clientSocket.destroy();
+          });
+          tieSockets(clientSocket, targetSocket);
+        })
+        .catch(crashed(() => clientSocket.destroy()));
     }
   }
 
@@ -395,21 +359,25 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       peer: peerAddress(socket),
     });
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
-      if (ok) return handleRequest(req, res);
-      // The absolute target may carry a secret in its query: origin + path only.
-      refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
-      res.writeHead(403);
-      res.end("Blocked: peer not allowed");
-    });
+    peerAdmitted(req.socket, deps.isPeerAllowed)
+      .then((ok) => {
+        if (ok) return handleRequest(req, res);
+        // The absolute target may carry a secret in its query: origin + path only.
+        refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
+        res.writeHead(403);
+        res.end("Blocked: peer not allowed");
+      })
+      .catch(crashed(() => res.destroy()));
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
-    void peerAdmitted(clientSocket, deps.isPeerAllowed).then((ok) => {
-      if (ok) return handleConnect(req, clientSocket, head);
-      refusePeer("tunnel-refused", req.url ?? "", clientSocket);
-      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-      clientSocket.destroy();
-    });
+    peerAdmitted(clientSocket, deps.isPeerAllowed)
+      .then((ok) => {
+        if (ok) return handleConnect(req, clientSocket, head);
+        refusePeer("tunnel-refused", req.url ?? "", clientSocket);
+        clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        clientSocket.destroy();
+      })
+      .catch(crashed(() => clientSocket.destroy()));
   });
 
   server.on("error", (err) => {
