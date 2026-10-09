@@ -311,7 +311,7 @@ describe("/mcp — progress relay over SSE, end to end", () => {
     });
     // The agent's real HTTP client, routed into the in-process app.
     const agent = await createMcpHttpClient("http://localhost/mcp", {
-      fetch: ((input: URL | RequestInfo, init?: RequestInit) => {
+      fetch: ((input: URL | Request | string, init?: RequestInit) => {
         const headers = new Headers(init?.headers);
         headers.set("Host", "localhost");
         return app.request(new URL(String(input)).pathname, { ...init, headers });
