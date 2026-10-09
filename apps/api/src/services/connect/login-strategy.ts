@@ -71,7 +71,7 @@ function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
     case "upstream_failed":
       return badGateway("The service could not complete the login. Try again later.");
     case "timeout":
-      return loginTimedOut(err.timeoutMs);
+      return loginTimedOut(err.timeoutMs!);
     default:
       return err;
   }

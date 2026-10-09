@@ -144,23 +144,21 @@ export function loginInputRefused(field: string): ApiError {
   );
 }
 
-/** A submitted value put the login URL's host somewhere the auth's `authorized_uris` refuse. */
+/** Submitted values that put the login URL's host somewhere the auth's `authorized_uris` refuse. */
 export function loginUrlRefused(fields: readonly string[]): ApiError {
-  const one = fields.length === 1;
   return invalidRequest(
-    `The ${one ? "value" : "values"} of ${fields.map((f) => `'${f}'`).join(", ")} ${one ? "does" : "do"} not give an address this login may reach.`,
-    one ? `credentials.${fields[0]}` : "credentials",
+    `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`,
+    fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
   );
 }
 
 /** A login the service did not finish in time: not a server bug, retrying is the remedy. */
-export function loginTimedOut(timeoutMs?: number): ApiError {
-  const after = timeoutMs === undefined ? "" : ` after ${timeoutMs}ms`;
+export function loginTimedOut(timeoutMs: number): ApiError {
   return new ApiError({
     status: 504,
     code: "timeout",
     title: "Gateway Timeout",
-    detail: `The connection attempt timed out${after} — the login did not complete in time. Please try again.`,
+    detail: `The connection attempt timed out after ${timeoutMs}ms — the login did not complete in time. Please try again.`,
   });
 }
 
