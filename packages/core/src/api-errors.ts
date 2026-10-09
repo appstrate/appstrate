@@ -68,21 +68,21 @@ export interface ResolutionFieldError extends ValidationFieldError {
     owned_by_actor: boolean;
     needs_reconnection: boolean;
   }[];
-  /** `needs_reconnection` / `insufficient_scopes`: the row to UPDATE in place; `auth_serves_no_selected_tool`: the member to remove. */
+  /** `needs_reconnection`: the row to reconnect in place; `insufficient_scopes`: the under-scoped row; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
   /**
-   * The connect-flow codes (`CONNECT_FLOW_CODES`) — OAuth scopes the run's selected tools require
-   * on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.
+   * The connect-flow codes (`CONNECT_FLOW_CODES`) except `needs_reconnection` — OAuth scopes the
+   * run's selected tools require on `auth_key`. Forward as `scopes` when starting a new connection.
    */
   required_scopes?: string[];
   /** The connect-flow codes — the auth the connect flow must target (`/auths/{authKey}/connect/...`). */
   auth_key?: string;
   /**
-   * `insufficient_scopes` / `needs_reconnection` — true when the connection to
-   * repair belongs to the calling actor. Both remedies re-consent that row, so
-   * a foreign-owned one is a read-only error.
+   * `insufficient_scopes` / `needs_reconnection` — true when the connection
+   * belongs to the calling actor. Only its owner may re-consent that row
+   * (reconnect, or a chosen upgrade); a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
   /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the dep's `auth_key` (AFPS §4.1). */

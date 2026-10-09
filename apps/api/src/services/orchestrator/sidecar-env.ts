@@ -15,9 +15,8 @@
  *     `SidecarLaunchSpec` whose semantics are identical across topologies.
  *
  * Deliberately NOT covered here (orchestrator-local, semantics differ):
- *   - `INTEGRATION_RUNTIME_ADAPTER` — docker unconditionally overrides,
- *     process conditionally falls back, firecracker hardcodes "process";
- *     each orchestrator layers it after the base build.
+ *   - `INTEGRATION_RUNTIME_ADAPTER` — docker pins "docker", process and
+ *     firecracker pin "process"; each layers it after the base build.
  */
 
 import type { SidecarLaunchSpec } from "@appstrate/core/sidecar-types";

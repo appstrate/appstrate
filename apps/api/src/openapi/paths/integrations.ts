@@ -547,13 +547,13 @@ const connectKickoffRelayProperties = {
     type: "array",
     items: { type: "string" },
     description:
-      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+      "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
   connection_id: {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -612,7 +612,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -961,7 +961,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
+                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -1310,7 +1310,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1358,7 +1358,9 @@ export const integrationsPaths = {
         "schedules are untouched. " +
         "A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
-        "with 409 `connection_label_taken`.",
+        "with 409 `connection_label_taken`. " +
+        "Scopes are not edited here: for an agent that needs more scopes, create a new connection " +
+        "with them rather than reconnecting a shared one, which widens every agent that uses it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1546,6 +1548,8 @@ export const integrationsPaths = {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
       summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
+      description:
+        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1614,7 +1618,7 @@ export const integrationsPaths = {
     get: {
       operationId: "getIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Get the org-wide default connection for this integration",
+      summary: "Get the space default connection for this integration",
       description:
         "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
@@ -1646,12 +1650,15 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Set the org-wide default connection for this integration (admin)",
+      summary: "Set the space default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
         "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
         "`enforce` included. Selecting connections of a different auth type replaces " +
-        "the current default rather than adding a second one.",
+        "the current default rather than adding a second one. Every consuming agent gets the " +
+        "default's scopes: bind an agent that needs more to its own connection rather than " +
+        "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
+        "overrides an enforced one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1699,7 +1706,7 @@ export const integrationsPaths = {
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Remove the org-wide default connection (admin)",
+      summary: "Remove the space default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

@@ -39,6 +39,7 @@ const NONE = "none";
 interface AgentIntegrationRef {
   id: string;
   tools?: string[] | "*";
+  scopes?: string[];
 }
 
 interface RunOverridesPanelProps {
@@ -363,7 +364,7 @@ function IntegrationOverrideRow({
         manifest={detail.manifest}
         authStatuses={detail.auths}
         agentTools={integration.tools}
-        agentScopes={undefined}
+        agentScopes={integration.scopes}
         persistence={{ mode: "override", value, onChange }}
         version={version}
       />

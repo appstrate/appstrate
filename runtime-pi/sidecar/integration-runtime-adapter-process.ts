@@ -32,9 +32,8 @@ import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
-import type { Endpoint, Peer } from "./helpers.ts";
+import type { Endpoint, Peer, RunnerEgressPolicy } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
@@ -169,12 +168,10 @@ async function requireRunnerIsolation(
         `APPSTRATE_RUNNER_UIDS pool (${why}). On the sidecar's uid the runner could read the ` +
         `sidecar's environment — platform API key, run token, proxy credentials, every ` +
         `connected integration's decrypted tokens — straight out of /proc; on a shared uid ` +
-        `the egress listeners could not tell it from another runner. Remedies, cheapest ` +
-        `first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep the run itself in process ` +
-        `mode while each integration runner gets its own container; or run under ` +
-        `RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, whose guest supervisor ` +
-        `provides both. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
-        `and are unaffected.`,
+        `the egress listeners could not tell it from another runner. Remedies: run under ` +
+        `RUN_ADAPTER=docker, where each integration runner gets its own container; ` +
+        `or under RUN_ADAPTER=firecracker, whose guest supervisor provides both. Integrations ` +
+        `whose source.kind is "remote" or "none" spawn nothing and are unaffected.`,
     );
   };
   if (!wrapper) refuse("no APPSTRATE_RUNNER_EXEC wrapper");
@@ -423,7 +420,7 @@ export function createProcessIntegrationRuntimeAdapter({
   const runnersByUid = new Map<number, string>();
   let allocatedUids = 0;
   /** {@link runnerKeyOf} → policy the transparent plane serves that runner. */
-  const transparentPolicies = new Map<string, EgressPolicy>();
+  const transparentPolicies = new Map<string, RunnerEgressPolicy>();
   let plane: Promise<TransparentEgressPlane | null> | null = null;
   /** Set by `shutdown()`: a plane started after it would have no one to close it. */
   let shutDown = false;

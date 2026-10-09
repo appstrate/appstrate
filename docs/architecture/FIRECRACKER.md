@@ -344,11 +344,16 @@ The platform is reachable from every guest at the **loopback alias**
 returns it, the host nft `input` chain only accepts that destination from
 `afc*`, everything else guest→host is dropped (guests must never reach Redis,
 the Docker socket, etc.). Guest→guest is dropped; guest egress to cloud
-metadata (169.254.0.0/16) and RFC1918 ranges is dropped in the host `forward`
-chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — "egress" means the internet, never
-the host's private neighbourhood. Everything else guest→internet is
-masqueraded and reserved, inside the guest, to the sidecar uid
-(default-deny `output` chain; IPv6 is disabled in the guest entirely).
+metadata (169.254.0.0/16), RFC1918 and the other non-public ranges is dropped
+in the host `forward` chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — by default
+"egress" means the internet, never the host's private neighbourhood. An
+operator who lists a private host in `EGRESS_ALLOW_INTERNAL_HOSTS` must also
+leave its range out of `FIRECRACKER_EGRESS_DENY_CIDRS`; that list is the
+runner host's `forward` chain for every guest, so narrowing it removes the L3
+backstop for that range on every run, leaving only the sidecar's app-layer
+floor (`SIDECAR.md` → "Runner egress allowlist"). Everything else
+guest→internet is masqueraded and reserved, inside the guest, to the sidecar
+uid (default-deny `output` chain; IPv6 is disabled in the guest entirely).
 
 **Guest firewall** (`guest/firewall.ts`, applied by the supervisor before
 any workload starts): the `output` chain drops MMDS for every uid, then
@@ -743,7 +748,7 @@ boots on a bare KVM host with only these variables.
 | `FIRECRACKER_ROOTFS_PATH`        | `./data/firecracker/rootfs.ext4` | shared read-only rootfs                                                                                                                             |
 | `FIRECRACKER_DATA_DIR`           | `./data/firecracker/runs`        | per-run state (tmpfs recommended — jailer mode then needs the artifacts on the same tmpfs, see _Requirements_)                                      |
 | `FIRECRACKER_SUBNET_CIDR`        | `10.231.0.0/16`                  | /16 pool → per-run /30                                                                                                                              |
-| `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                    |
+| `FIRECRACKER_EGRESS_DENY_CIDRS`  | non-public IPv4 ranges           | forward-path destinations guests may never reach: `169.254.0.0/16`, RFC1918, `100.64.0.0/10`, `198.18.0.0/15`, `192.0.0.0/24`, `224.0.0.0/3`        |
 | `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                       |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                 |
 | `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present. A released platform refuses artifacts of another release (_Version contract_)                     |

@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-drive",
-  "version": "1.0.5",
+  "name": "@appstrate/google-contacts",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Google Drive (API)",
-  "description": "Cloud file storage and synchronization",
-  "keywords": ["storage", "productivity"],
+  "display_name": "Google Contacts (API)",
+  "description": "Contact management service by Google",
+  "keywords": ["contacts", "productivity"],
   "license": "Apache-2.0",
-  "icon": "logos:google-drive",
+  "icon": "logos:google",
   "source": {
     "kind": "none"
   },
@@ -32,7 +32,12 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/drive.file"],
+      "default_scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/contacts.readonly"
+      ],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -61,34 +66,27 @@
           "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.file",
-          "label": "Per-file access (recommended)"
+          "value": "https://www.googleapis.com/auth/contacts.readonly",
+          "label": "Read contacts"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.readonly",
-          "label": "Read-only access"
+          "value": "https://www.googleapis.com/auth/contacts",
+          "label": "Read and write contacts"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive",
-          "label": "Full access"
+          "value": "https://www.googleapis.com/auth/contacts.other.readonly",
+          "label": "Read 'Other contacts' (auto-suggested)"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.metadata.readonly",
-          "label": "Read metadata only"
+          "value": "https://www.googleapis.com/auth/directory.readonly",
+          "label": "Read organization directory (Google Workspace)"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.appdata",
-          "label": "App data folder"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/drive.photos.readonly",
-          "label": "Read photos/videos"
+          "value": "https://www.googleapis.com/auth/userinfo.profile",
+          "label": "Read user profile info"
         }
       ],
-      "authorized_uris": [
-        "https://www.googleapis.com/drive/**",
-        "https://www.googleapis.com/upload/drive/**"
-      ],
+      "authorized_uris": ["https://people.googleapis.com/**"],
       "delivery": {
         "http": {
           "in": "header",
@@ -113,9 +111,7 @@
     },
     "dev.appstrate/api": {
       "auths": {
-        "primary": {
-          "upload_protocols": ["google-resumable"]
-        }
+        "primary": {}
       }
     }
   }

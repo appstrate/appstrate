@@ -3,9 +3,9 @@
 /**
  * The three writes that start runs — a launch, a schedule create, a schedule
  * update — each toast the `warnings` of their success body once (`null`, a
- * schedule write that judged nothing, says nothing), naming each integration
- * by the display name the integration list holds: the cached list, else the
- * list fetched once through the same query — the id when it cannot be read.
+ * schedule write that judged nothing, says nothing), naming each warned
+ * integration by the display name its own detail holds: the cached detail, else
+ * the detail fetched once through the same query — the id when it cannot be read.
  *
  * No DOM: a probe captures each hook's mutation during a static render, the
  * typed client's verb is stubbed, and the mutation is driven by hand.
@@ -36,19 +36,16 @@ const EXPECTED = "Ce run s'exécute sans l'intégration Gmail";
 const EXPECTED_SCHEDULE = "Les déclenchements s'exécuteront sans l'intégration Gmail";
 
 const header = { "X-Org-Id": undefined, "X-Space-Id": undefined };
-const LIST = {
-  object: "list",
-  data: [{ id: "@acme/gmail", manifest: { display_name: "Gmail" } }],
-  hasMore: false,
-};
+const GMAIL_DETAIL = { manifest: { display_name: "Gmail" }, auths: [] };
+const detailKey = (packageId: string) =>
+  $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: { path: { packageId }, header },
+  }).queryKey;
 
-/** The integration list as the SPA caches it — the toast reads names from here. */
+/** Gmail's detail as the SPA caches it — the toast reads its name from here. */
 function cachedClient(): QueryClient {
   const qc = new QueryClient();
-  qc.setQueryData(
-    $api.queryOptions("get", "/api/integrations", { params: { header } }).queryKey,
-    LIST,
-  );
+  qc.setQueryData(detailKey("@acme/gmail"), GMAIL_DETAIL);
   return qc;
 }
 
@@ -91,7 +88,7 @@ describe("launch warnings, wired", () => {
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED);
   });
 
-  it("names the integration by its id when the list is neither cached nor readable", async () => {
+  it("names the integration by its id when its detail is neither cached nor readable", async () => {
     stubs.push(
       spyOn(client, "POST").mockResolvedValue({
         data: { id: "run_1", warnings: WARNINGS },
@@ -168,41 +165,53 @@ describe("schedule writes — the toast follows the server's verdict", () => {
 
 describe("loadIntegrationNames", () => {
   const readable = { header, enabled: true };
-  const listResponse = () => ({ data: LIST, error: undefined, response: new Response(null) });
+  const GMAIL = ["@acme/gmail"];
+  const detailResponse = () => ({
+    data: GMAIL_DETAIL,
+    error: undefined,
+    response: new Response(null),
+  });
 
-  it("reads a cached list without a request", async () => {
+  it("reads a cached detail without a request", async () => {
     const get = spyOn(client, "GET");
     stubs.push(get);
-    const nameOf = await loadIntegrationNames(cachedClient(), readable);
+    const nameOf = await loadIntegrationNames(cachedClient(), readable, GMAIL);
     expect(nameOf("@acme/gmail")).toBe("Gmail");
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("fetches an uncached list once, through the query the list hook caches", async () => {
-    const get = spyOn(client, "GET").mockResolvedValue(listResponse());
+  it("fetches only the warned integrations, once, through the query the detail hook caches", async () => {
+    const get = spyOn(client, "GET").mockResolvedValue(detailResponse());
     stubs.push(get);
     const qc = new QueryClient();
-    expect((await loadIntegrationNames(qc, readable))("@acme/gmail")).toBe("Gmail");
-    expect((await loadIntegrationNames(qc, readable))("@acme/slack")).toBe("@acme/slack");
-    expect((get.mock.calls as unknown[][]).map(([path]) => path)).toEqual(["/api/integrations"]);
+    expect((await loadIntegrationNames(qc, readable, GMAIL))("@acme/gmail")).toBe("Gmail");
+    expect((await loadIntegrationNames(qc, readable, GMAIL))("@acme/gmail")).toBe("Gmail");
+    // An id it was not asked for is not looked up.
+    expect((await loadIntegrationNames(qc, readable, GMAIL))("@acme/slack")).toBe("@acme/slack");
+    expect(get.mock.calls as unknown[][]).toHaveLength(1);
+    const [path, init] = get.mock.calls[0] as unknown as [string, { params: { path: unknown } }];
+    expect(path).toBe("/api/integrations/{packageId}");
+    expect(init.params.path).toEqual({ packageId: "@acme/gmail" });
   });
 
   it("falls back to the id when the fetch fails", async () => {
     stubs.push(spyOn(client, "GET").mockRejectedValue(new Error("offline")));
-    expect((await loadIntegrationNames(new QueryClient(), readable))("@acme/gmail")).toBe(
+    expect((await loadIntegrationNames(new QueryClient(), readable, GMAIL))("@acme/gmail")).toBe(
       "@acme/gmail",
     );
   });
 
-  it("never requests a list the caller may not read", async () => {
+  it("never requests a detail the caller may not read", async () => {
     const get = spyOn(client, "GET");
     stubs.push(get);
     const unreadable = { header, enabled: false };
-    expect((await loadIntegrationNames(new QueryClient(), unreadable))("@acme/gmail")).toBe(
+    expect((await loadIntegrationNames(new QueryClient(), unreadable, GMAIL))("@acme/gmail")).toBe(
       "@acme/gmail",
     );
-    // Control: a list already cached still names it.
-    expect((await loadIntegrationNames(cachedClient(), unreadable))("@acme/gmail")).toBe("Gmail");
+    // Control: a detail already cached still names it.
+    expect((await loadIntegrationNames(cachedClient(), unreadable, GMAIL))("@acme/gmail")).toBe(
+      "Gmail",
+    );
     expect(get).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,7 @@ import {
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { AMBER_TEXT } from "./connection-picker-states";
 import { NoConnectionLabel } from "./no-connection-label";
+import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
 /** What the closed trigger shows, first match wins. */
@@ -90,6 +91,10 @@ export function PickerMenu({
     canApply,
     ownerLabel,
     setLabel,
+    scopeFitOf,
+    manifest,
+    missingScopeLabels,
+    connectsWithAgentScopes,
     open,
     setOpen,
     onOpenChange,
@@ -97,10 +102,24 @@ export function PickerMenu({
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
   } = picker;
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
+  };
+  // A fresh connect requests the agent's scopes: saying so is what makes it the safe choice
+  // over upgrading a shared connection.
+  const addLabel = (authKey: string): string => {
+    const tl = authKeys.length > 1 ? typeLabel(authKey) : null;
+    if (connectsWithAgentScopes(authKey)) {
+      return tl
+        ? t("detail.integrationMemberPicker.newWithAgentScopesVia", { label: tl })
+        : t("detail.integrationMemberPicker.newWithAgentScopes");
+    }
+    return tl
+      ? t("detail.integrationMemberPicker.addVia", { label: tl })
+      : t("detail.integrationMemberPicker.addConnection");
   };
   const trigger = triggerKind(picker);
   const triggerLabel = {
@@ -149,6 +168,8 @@ export function PickerMenu({
         </DropdownMenuLabel>
         {candidates.map((c) => {
           const tl = typeLabel(c.auth_key);
+          const fit = scopeFitOf(c);
+          const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
             explicitIds === null &&
@@ -188,7 +209,10 @@ export function PickerMenu({
               )}
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate font-medium">{c.label}</span>
+                  {/* An incompatible row is muted on its name; its reason stays legible. */}
+                  <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
+                    {c.label}
+                  </span>
                   {tl && (
                     <Badge variant="outline" className="text-[0.6rem]">
                       {tl}
@@ -197,11 +221,6 @@ export function PickerMenu({
                   {c.shared_with_org && (
                     <Badge variant="secondary" className="text-[0.6rem]">
                       {t("detail.integrationMemberPicker.sharedBadge")}
-                    </Badge>
-                  )}
-                  {c.missing_scopes.length > 0 && (
-                    <Badge variant="destructive" className="text-[0.6rem]">
-                      {t("detail.integrationMemberPicker.missingScopesBadge")}
                     </Badge>
                   )}
                   {isDefault && (
@@ -215,6 +234,26 @@ export function PickerMenu({
                   {c.needs_reconnection &&
                     ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                 </span>
+                {fit === "missing" ? (
+                  <span
+                    className={`truncate text-[0.65rem] ${AMBER_TEXT}`}
+                    title={c.missing_scopes.join(" ")}
+                  >
+                    {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
+                  </span>
+                ) : (
+                  <ScopeSummaryText
+                    manifest={manifest}
+                    authKey={c.auth_key}
+                    scopes={c.scopes_granted}
+                    className="text-muted-foreground truncate text-[0.65rem]"
+                  />
+                )}
+                {fit === "broader" && (
+                  <span className="text-muted-foreground truncate text-[0.65rem] italic">
+                    {t("detail.integrationMemberPicker.broaderThanAgent")}
+                  </span>
+                )}
               </div>
               {canRenew && (
                 <Button
@@ -227,7 +266,7 @@ export function PickerMenu({
                     // click doesn't also toggle the dead row.
                     e.preventDefault();
                     e.stopPropagation();
-                    void triggerConnect(c.auth_key, { connectionId: c.id });
+                    void renewConnection(c);
                   }}
                   data-testid={`member-pick-renew-${c.id}`}
                   aria-label={t("detail.integrationMemberPicker.renew")}
@@ -315,23 +354,16 @@ export function PickerMenu({
         )}
         {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
         {canAddConnection &&
-          authKeys.map((k) => {
-            const tl = typeLabel(k);
-            return (
-              <DropdownMenuItem
-                key={`add-${k}`}
-                onSelect={() => void triggerConnect(k)}
-                data-testid={`member-pick-add-${integrationId}-${k}`}
-              >
-                <Plus className="size-3.5" />
-                <span>
-                  {authKeys.length > 1 && tl
-                    ? t("detail.integrationMemberPicker.addVia", { label: tl })
-                    : t("detail.integrationMemberPicker.addConnection")}
-                </span>
-              </DropdownMenuItem>
-            );
-          })}
+          authKeys.map((k) => (
+            <DropdownMenuItem
+              key={`add-${k}`}
+              onSelect={() => void triggerConnect(k)}
+              data-testid={`member-pick-add-${integrationId}-${k}`}
+            >
+              <Plus className="size-3.5" />
+              <span>{addLabel(k)}</span>
+            </DropdownMenuItem>
+          ))}
         {/* Escape hatch to the integration page for the full connection
             management surface (rename, share-with-org, delete, OAuth client). */}
         {canOpenIntegration && (

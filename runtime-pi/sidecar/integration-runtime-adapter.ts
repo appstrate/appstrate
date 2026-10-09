@@ -20,9 +20,9 @@ import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import type { PeerAttribution } from "./runner-peers.ts";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 
 /**
  * Per-run network + CA delivery context returned by
@@ -69,7 +69,7 @@ export interface RuntimeEgressContext {
    */
   readonly caCertHostPath: string | null;
   /** The runner's compiled egress policy, enforced by its listener. */
-  readonly policy: EgressPolicy;
+  readonly policy: RunnerEgressPolicy;
 }
 
 export interface SpawnIntegrationOptions {
@@ -118,7 +118,7 @@ export interface SpawnedIntegration {
 }
 
 export interface IntegrationRuntimeAdapter {
-  /** Stable identifier used by logs and the `INTEGRATION_RUNTIME_ADAPTER` opt-in. */
+  /** Stable identifier used by logs and `INTEGRATION_RUNTIME_ADAPTER`. */
   readonly id: string;
   /** Per-run context — called once at boot, before any `spawn()`. */
   prepare(runId: string): Promise<RuntimeAdapterRunContext>;
@@ -137,9 +137,8 @@ export interface IntegrationRuntimeAdapter {
 /**
  * Factory entry keyed by `id`. Selection is purely by `id` — the platform
  * orchestrator that launches the sidecar sets `INTEGRATION_RUNTIME_ADAPTER`
- * to mirror its own `RUN_ADAPTER`, so the integration runtime always matches
- * the run runtime. There is NO availability probing / auto-detection: the
- * sidecar never guesses its backend.
+ * (docker pins "docker", process and firecracker pin "process"). There is NO
+ * availability probing / auto-detection: the sidecar never guesses its backend.
  */
 interface IntegrationRuntimeAdapterEntry {
   readonly id: string;
@@ -157,11 +156,10 @@ export function registerIntegrationRuntimeAdapter(entry: IntegrationRuntimeAdapt
 
 /**
  * Pick the adapter for this sidecar process by `INTEGRATION_RUNTIME_ADAPTER`.
- * The platform orchestrator that launched the sidecar sets it to mirror its
- * own `RUN_ADAPTER` (docker-orchestrator → `docker`, process-orchestrator →
- * `process`), so the integration runtime deterministically matches the run
- * runtime — no probing, no guessing. The id MUST be registered. Throws when
- * the var is unset or unknown (a fail-fast, since every launch path sets it).
+ * The platform orchestrator that launched the sidecar sets it (docker pins
+ * "docker", process and firecracker pin "process") — no probing, no guessing.
+ * The id MUST be registered. Throws when the var is unset or unknown (a
+ * fail-fast, since every launch path sets it).
  */
 export function selectIntegrationRuntimeAdapter(
   env: NodeJS.ProcessEnv = process.env,
@@ -175,7 +173,7 @@ export function selectIntegrationRuntimeAdapter(
   const available = REGISTRY.map((e) => e.id).join(", ");
   if (!requested) {
     throw new Error(
-      `INTEGRATION_RUNTIME_ADAPTER is not set — the launching orchestrator must pin it to match RUN_ADAPTER. Available: ${available}`,
+      `INTEGRATION_RUNTIME_ADAPTER is not set — the launching orchestrator must pin it. Available: ${available}`,
     );
   }
   const entry = REGISTRY.find((e) => e.id === requested);

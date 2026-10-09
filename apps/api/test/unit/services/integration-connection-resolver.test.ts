@@ -15,7 +15,8 @@
  *   4. integration_pins (user_id = actor.id)     → member preference
  *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto, two or more = must_choose; no own row =
+ *      → exactly one OWN = auto, two or more = must_choose (one known account:
+ *        the least-privileged that covers the agent); no own row =
  *        not_connected / must_choose when `required`, else bound to none + warning
  *
  * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
@@ -920,6 +921,191 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
   });
 });
 
+// #1871: a new connection for least privilege must not break the fallback of the actor's other
+// agents. Own connections of ONE known account differ by scopes only: no account is chosen.
+describe("resolveConnections — fallback among own connections of one account", () => {
+  const narrow = () => conn({ label: "lecture", scopesGranted: ["read"] });
+  const broad = () => conn({ label: "écriture", scopesGranted: ["read", "write"] });
+  const fallback = (rows: ConnectionRow[], agentScopes: string[]) =>
+    resolveConnections({
+      requirements: [req(oauth2Manifest(), [], agentScopes)],
+      accessibleConnections: rows,
+      pins: [],
+    });
+
+  it("binds the narrow one when it covers the agent", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([b, n], ["read"]);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: n.id, source: "fallback_auto" }]);
+  });
+
+  it("binds the broad one when only it covers the agent", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([n, b], ["write"]);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: b.id }]);
+  });
+
+  it("binds the closest when none covers, which then answers insufficient_scopes", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([n, b], ["read", "write", "admin"]);
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]).toMatchObject({
+      code: "insufficient_scopes",
+      connectionId: b.id,
+      missingScopes: ["admin"],
+      source: "fallback_auto",
+    });
+  });
+
+  /** `oauth2Manifest()` whose oauth auth carries `defaults` and, optionally, a catalog. */
+  function withDefaults(defaults: string[], catalog?: object[]): IntegrationManifest {
+    const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
+    m.auths.oauth.default_scopes = defaults;
+    if (catalog) m.auths.oauth.scope_catalog = catalog;
+    return m as unknown as IntegrationManifest;
+  }
+  const bind = (manifest: IntegrationManifest, rows: ConnectionRow[], agentScopes: string[]) =>
+    resolveConnections({
+      requirements: [req(manifest, [], agentScopes)],
+      accessibleConnections: rows,
+      pins: [],
+    });
+
+  it("judges an agent declaring no scope on the auth's default_scopes", () => {
+    // Without the defaults the narrower `lacking` row would win on breadth.
+    const lacking = conn({ scopesGranted: ["read"] });
+    const baseline = conn({ scopesGranted: ["base", "read"] });
+    const result = bind(withDefaults(["base"]), [lacking, baseline], []);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: baseline.id }]);
+  });
+
+  it("never trades a narrow row short of a newer default for a write-capable one", () => {
+    const narrowRow = conn({ scopesGranted: ["read"] });
+    const writeRow = conn({ scopesGranted: ["base", "read", "write"] });
+    for (const rows of [
+      [narrowRow, writeRow],
+      [writeRow, narrowRow],
+    ]) {
+      const result = bind(withDefaults(["base"]), rows, ["read"]);
+      expect(result.resolved[INTEG]).toMatchObject([{ connectionId: narrowRow.id }]);
+    }
+  });
+
+  it("prefers covering the agent over covering the defaults", () => {
+    const missesAgent = conn({ scopesGranted: ["base", "read"] });
+    const missesDefault = conn({ scopesGranted: ["write"] });
+    const result = bind(withDefaults(["base"]), [missesAgent, missesDefault], ["write"]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: missesDefault.id }]);
+  });
+
+  // #1871: an expiry must not elevate a read-only agent onto the write-capable row.
+  it("binds a dead narrow row over a live broad one, which answers needs_reconnection", () => {
+    const deadNarrow = conn({ scopesGranted: ["read"], needsReconnection: true });
+    const liveBroad = conn({ scopesGranted: ["read", "write"] });
+    for (const rows of [
+      [deadNarrow, liveBroad],
+      [liveBroad, deadNarrow],
+    ]) {
+      const result = fallback(rows, ["read"]);
+      expect(result.errors[0]).toMatchObject({
+        code: "needs_reconnection",
+        connectionId: deadNarrow.id,
+      });
+    }
+  });
+
+  it("expands `implies` when judging breadth: an umbrella is never narrower", () => {
+    const manifest = withDefaults(
+      [],
+      [
+        { value: "public_repo", label: "Public repos" },
+        { value: "repo", label: "Repos", implies: ["public_repo"] },
+      ],
+    );
+    // Older, so it would win a raw-count tie.
+    const umbrella = conn({ scopesGranted: ["repo"], createdAt: new Date(1) });
+    const exact = conn({ scopesGranted: ["public_repo"], createdAt: new Date(2) });
+    const result = bind(manifest, [umbrella, exact], ["public_repo"]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: exact.id }]);
+  });
+
+  it("still asks without an agent selection (a credential-proxy call)", () => {
+    const result = resolveConnections({
+      requirements: [{ ...req(oauth2Manifest()), noAgentSelection: true }],
+      accessibleConnections: [narrow(), broad()],
+      pins: [],
+    });
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks across auths of one account", () => {
+    const result = fallback([narrow(), conn({ authKey: "pat" })], ["read"]);
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks across instances of one account (connection variables)", () => {
+    const result = fallback(
+      [
+        conn({ scopesGranted: ["read"], variables: { host: "gitlab.com" } }),
+        conn({ scopesGranted: ["read"], variables: { host: "gitlab.corp" } }),
+      ],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("judges breadth on catalog scopes, not on the IdP's echoed ones", () => {
+    const manifest = oauth2Manifest() as unknown as {
+      auths: { oauth: Record<string, unknown> };
+    };
+    manifest.auths.oauth.scope_catalog = [
+      { value: "read", label: "Read" },
+      { value: "write", label: "Write" },
+    ];
+    const echoed = conn({ scopesGranted: ["read", "openid", "profile", "email"] });
+    const wide = conn({ scopesGranted: ["read", "write"] });
+    const result = resolveConnections({
+      requirements: [req(manifest as unknown as IntegrationManifest, [], ["read"])],
+      accessibleConnections: [wide, echoed],
+      pins: [],
+    });
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: echoed.id }]);
+  });
+
+  it("breaks a tie on the live row, whatever the input order", () => {
+    const dead = conn({ scopesGranted: ["read"], needsReconnection: true });
+    const live = conn({ scopesGranted: ["read"] });
+    for (const rows of [
+      [dead, live],
+      [live, dead],
+    ]) {
+      expect(fallback(rows, ["read"]).resolved[INTEG]).toMatchObject([{ connectionId: live.id }]);
+    }
+  });
+
+  it("still asks across two accounts", () => {
+    const result = fallback(
+      [narrow(), conn({ accountId: "acc_y", scopesGranted: ["read"] })],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks when an identity is unknown", () => {
+    const result = fallback(
+      [
+        conn({ accountId: "default", scopesGranted: ["read"] }),
+        conn({ accountId: "default", scopesGranted: ["read", "write"] }),
+      ],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+});
+
 describe("resolveConnections — insufficient scopes on resolved connection", () => {
   // Manifest where tool `t1` requires the `repo` scope on the oauth auth.
   function scopedManifest(): IntegrationManifest {
@@ -1504,9 +1690,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     expect(err.missingScopes).toEqual(["user"]);
     // …and the snake_case projection the 409 envelope carries. `owned_by_actor`
-    // is what the connect-offer mint gates on: a scope upgrade re-consents THIS
-    // row, so minting for a foreign owner would re-consent someone else's
-    // account.
+    // tells the caller whether upgrading THIS row is theirs to choose.
     expect(translateResolutionError(err)).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "insufficient_scopes",
@@ -1678,9 +1862,9 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(result.errors[0]).toMatchObject({ code: "not_connected", authKey: "oauth" });
   });
 
-  it("needs_reconnection carries the dead connection's auth_key and the full required set", () => {
-    // A reconnect is a connect flow too: one consent that already covers the
-    // selection, instead of reconnect → insufficient_scopes → upgrade.
+  it("needs_reconnection carries the dead connection's auth_key and NO required set", () => {
+    // #1871: the reconnect re-consents what the row holds; carrying this agent's
+    // scopes would widen every other agent bound to it.
     const c = conn({ authKey: "oauth", scopesGranted: ["repo"], needsReconnection: true });
     const result = resolveConnections({
       requirements: [req(scopedManifest(), ["t1", "t2"], ["user"])],
@@ -1692,17 +1876,18 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.code).toBe("needs_reconnection");
     expect(err.connectionId).toBe(c.id);
     expect(err.authKey).toBe("oauth");
-    expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
-    expect(translateResolutionError(err)).toMatchObject({
+    expect(err.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(err);
+    expect(field).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "needs_reconnection",
       connection_id: c.id,
       auth_key: "oauth",
-      required_scopes: ["repo", "admin:repo", "user"],
-      // Same gate as insufficient_scopes: repairing the row in place is the
-      // owner's to do, and the connect-offer mint reads this field.
+      // Repairing the row in place is the owner's to do, and the connect-offer
+      // mint reads this field.
       owned_by_actor: true,
     });
+    expect(field).not.toHaveProperty("required_scopes");
   });
 
   it("needs_reconnection on an api_key auth carries auth_key only", () => {

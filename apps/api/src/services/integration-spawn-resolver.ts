@@ -57,11 +57,8 @@ import {
   EncryptionKeyUnavailableError,
 } from "../lib/stored-credential.ts";
 import type { Actor } from "../lib/actor.ts";
-import {
-  displayAccountId,
-  isIntegrationActive,
-  loadAccessibleConnectionById,
-} from "./integration-connections.ts";
+import { isIntegrationActive, loadAccessibleConnectionById } from "./integration-connections.ts";
+import { displayAccountId } from "../lib/connection-identity.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,

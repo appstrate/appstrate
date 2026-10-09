@@ -422,8 +422,9 @@ export interface IntegrationSpawnSpec {
    * Local runner egress policy (#1458), enforced by the one listener (MITM or
    * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
    * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
+   * `declaredUris`: the manifest's own list; only a host it names literally skips the floor.
    */
-  egress?: { authorizedUris: string[]; allowAllUris: boolean };
+  egress?: { authorizedUris: string[]; declaredUris: string[]; allowAllUris: boolean };
   /**
    * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already
