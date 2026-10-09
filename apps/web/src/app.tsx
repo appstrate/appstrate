@@ -194,6 +194,9 @@ const PreferencesConnectionsPage = lazy(() =>
     default: m.PreferencesConnectionsPage,
   })),
 );
+const PreferencesMemoryPage = lazy(() =>
+  import("./pages/preferences/memory").then((m) => ({ default: m.PreferencesMemoryPage })),
+);
 const PreferencesDevicesPage = lazy(() =>
   import("./pages/preferences/devices").then((m) => ({ default: m.PreferencesDevicesPage })),
 );
@@ -353,6 +356,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/preferences/security": <PreferencesSecurityPage />,
   "/preferences/devices": <PreferencesDevicesPage />,
   "/preferences/connections": <PreferencesConnectionsPage />,
+  "/preferences/memory": <PreferencesMemoryPage />,
   "/webhooks": (
     <LazyRoute>
       <WebhooksPage />

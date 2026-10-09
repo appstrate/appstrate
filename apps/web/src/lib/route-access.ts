@@ -96,6 +96,8 @@ export const ROUTE_ACCESS = {
   "/preferences/security": OWN_ACCOUNT,
   "/preferences/devices": OWN_ACCOUNT,
   "/preferences/connections": OWN_ACCOUNT,
+  // The assistant's memory is the chat's: no chat module, no page.
+  "/preferences/memory": { ...OWN_ACCOUNT, feature: "chat" },
 
   // Both levels; the detail's guard is the row's level, resolved in its handler.
   "/webhooks": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["listWebhooks"] },

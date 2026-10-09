@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { User, Palette, Shield, Plug, Laptop } from "lucide-react";
+import { User, Palette, Shield, Plug, Laptop, Brain } from "lucide-react";
 import { SettingsLayout } from "../../components/settings-layout";
+import { useAppConfig } from "../../hooks/use-app-config";
 
 export function PreferencesLayout() {
   const { t } = useTranslation(["settings", "common"]);
+  const { features } = useAppConfig();
 
   return (
     <SettingsLayout
@@ -35,6 +37,12 @@ export function PreferencesLayout() {
               to: "/preferences/connections",
               icon: Plug,
               label: t("preferences.tabConnections"),
+            },
+            {
+              to: "/preferences/memory",
+              icon: Brain,
+              label: t("preferences.tabMemory"),
+              show: Boolean(features.chat),
             },
           ],
         },
