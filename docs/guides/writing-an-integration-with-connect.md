@@ -581,6 +581,11 @@ Referencing a bootstrap login secret like `{$credential.password}` directly in
 `delivery.http.value` is a manifest error — the platform decouples acquisition from
 delivery.
 
+A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
+like a pasted credential, by the one required string field of `credentials.schema` that
+is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
+`Connexion N`. Mark the password field as a secret so the username names the connection.
+
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
 

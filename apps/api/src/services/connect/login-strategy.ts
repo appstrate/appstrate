@@ -39,6 +39,7 @@ import {
   requireNonEmptyCredentials,
 } from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
+import { maskCredentialLabel } from "./mask-label.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 /** A login failure the submitter can act on, as its 4xx/5xx; any other stays the caller's 500. */
@@ -117,6 +118,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       expiresAt: expiresAt ? new Date(expiresAt) : null,
       actor: ctx.actor,
       variables,
+      labelHint: maskCredentialLabel(auth.credentials?.schema, credentials),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
     });
   }
