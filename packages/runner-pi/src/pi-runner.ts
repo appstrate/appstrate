@@ -38,6 +38,8 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { piSkillsDir } from "./bundle-extensions.ts";
+import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
@@ -677,17 +679,17 @@ export class PiRunner {
               });
             },
           ];
-    const resourceLoader = new DefaultResourceLoader({
+    // The run sees the platform's resources only: the skills the bundle
+    // materialised under `<cwd>/.pi/skills`, never the host's.
+    const resourceLoader = await createIsolatedResourceLoader({
+      DefaultResourceLoader,
+      SettingsManager,
       cwd,
       agentDir,
-      settingsManager: SettingsManager.inMemory(),
-      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
-      noExtensions: (this.opts.extensionFactories ?? []).length + temperatureExtension.length === 0,
-      noPromptTemplates: true,
-      noThemes: true,
       systemPrompt,
+      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
+      skillPaths: [piSkillsDir(cwd)],
     });
-    await resourceLoader.reload();
 
     const { session } = await createAgentSession({
       cwd,
