@@ -560,16 +560,23 @@ export async function updateConnection(input: UpdateConnectionInput): Promise<Co
       if (!row) throw notFound(`Connection '${connectionId}' not found`);
       authorizeConnectionEdit(input, row);
       const current = row.sharedSpaceIds;
-      const next =
-        targets === undefined ? current : isOwner ? targets : current.filter((id) => id !== here);
-      const added = next.filter((id) => !current.includes(id));
-      const removed = current.filter((id) => !next.includes(id));
+      // A credential bound to a space reads that space only, so its set edits that space alone.
       const bound = viewer.boundSpaceId;
-      if (bound !== null && [...added, ...removed].some((id) => id !== bound)) {
+      if (bound !== null && targets?.some((id) => id !== bound)) {
         throw forbidden(
           `A credential bound to space '${bound}' can only share into it or withdraw it`,
         );
       }
+      const next =
+        targets === undefined
+          ? current
+          : !isOwner
+            ? current.filter((id) => id !== here)
+            : bound !== null
+              ? [...current.filter((id) => id !== bound), ...targets]
+              : targets;
+      const added = next.filter((id) => !current.includes(id));
+      const removed = current.filter((id) => !next.includes(id));
       const blockedAdd = added.find((id) => ungoverned.has(id));
       if (blockedAdd) {
         throw new ApiError({

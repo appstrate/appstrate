@@ -1228,18 +1228,26 @@ describe("integration-pins-service — DB access/ownership", () => {
         userId: memberId,
         sharedSpaceIds: [other],
       });
+      // Its set is read as its own space's share: `other` is neither named nor touched.
       const add = await updateConnection({
         connectionId: orgRow,
         viewer: bound,
-        sharedSpaceIds: [other, scope.spaceId],
+        sharedSpaceIds: [scope.spaceId],
       });
       expect(add).toMatchObject({ added: [scope.spaceId], removed: [] });
-      for (const edit of [{ sharedSpaceIds: [scope.spaceId] }, { label: "renamed" }]) {
+      for (const edit of [{ sharedSpaceIds: [other] }, { label: "renamed" }]) {
         await expect(
           updateConnection({ connectionId: orgRow, viewer: bound, ...edit }),
         ).rejects.toMatchObject({ status: 403 });
       }
       expect([...(await sharesOf(orgRow))].sort()).toEqual([other, scope.spaceId].sort());
+      const withdraw = await updateConnection({
+        connectionId: orgRow,
+        viewer: bound,
+        sharedSpaceIds: [],
+      });
+      expect(withdraw).toMatchObject({ added: [], removed: [scope.spaceId] });
+      expect(await sharesOf(orgRow)).toEqual([other]);
       const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
       const { connection } = await updateConnection({
         connectionId: spaceRow,

@@ -770,16 +770,21 @@ describe("Me API (/api/me)", () => {
       });
       const bearer = { Authorization: `Bearer ${key.rawKey}` };
 
-      // Withdrawing B — another space's share — is refused, and so is any edit touching it.
-      expect((await patch(id, bearer, { shared_space_ids: [] })).status).toBe(403);
+      const sharesNow = async () =>
+        (
+          await db
+            .select({ sharedSpaceIds: integrationConnections.sharedSpaceIds })
+            .from(integrationConnections)
+            .where(eq(integrationConnections.id, id))
+        )[0]?.sharedSpaceIds;
+      // The key's set edits its own space only: B's share is neither read nor touched.
+      expect((await patch(id, bearer, { shared_space_ids: [spaceB.id] })).status).toBe(403);
       expect((await patch(id, bearer, { shared_space_ids: [ctx.defaultSpaceId] })).status).toBe(
-        403,
+        200,
       );
-      const [row] = await db
-        .select({ sharedSpaceIds: integrationConnections.sharedSpaceIds })
-        .from(integrationConnections)
-        .where(eq(integrationConnections.id, id));
-      expect(row?.sharedSpaceIds).toEqual([spaceB.id]);
+      expect(await sharesNow()).toEqual([spaceB.id, ctx.defaultSpaceId]);
+      expect((await patch(id, bearer, { shared_space_ids: [] })).status).toBe(200);
+      expect(await sharesNow()).toEqual([spaceB.id]);
     });
 
     it("refuses a member sharing into a space that blocks user connections, not its governor", async () => {

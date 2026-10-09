@@ -641,8 +641,9 @@ export const connectionUpdateDescription =
   "with its own OAuth client for the integration (unless connected from there), a space-scoped one only into " +
   "its own space. Every target space must still be reached by the owning member, and one that blocks user " +
   "connections for the integration takes a sharer holding `integrations:configure` there (403 " +
-  "`connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) adds or " +
-  "removes that space only, and renames only a connection scoped to it. Sharing an end user's connection " +
+  "`connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
+  "and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay " +
+  "untouched, and it renames only a connection scoped to it. Sharing an end user's connection " +
   "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
   "`connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin " +
   "does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
