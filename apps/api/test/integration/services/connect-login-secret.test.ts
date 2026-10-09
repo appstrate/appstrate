@@ -104,6 +104,28 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
     expect(summary.scopes_granted).toEqual([]);
   });
 
+  it("names the connection after its one non-secret required field, masked", async () => {
+    const manifest = runStartManifest("@orga/wajax-rs3");
+    const auth = manifest.auths!.session as unknown as {
+      credentials: { schema: { properties: Record<string, Record<string, unknown>> } };
+    };
+    auth.credentials.schema.properties.mot_de_passe = { type: "string", format: "password" };
+    const pkg = await seedPackage({
+      id: "@orga/wajax-rs3",
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+
+    const summary = await new LoginSecretStrategy().complete(connectCtx(pkg.id), {
+      kind: "fields",
+      credentials: { identifiant: "user1@orga.fr", mot_de_passe: "s3cr3t" },
+    });
+
+    expect(summary.label).toBe("us****a.fr");
+  });
+
   it("rejects an empty credentials payload", async () => {
     const pkg = await seedPackage({
       id: "@orga/wajax-rs2",
