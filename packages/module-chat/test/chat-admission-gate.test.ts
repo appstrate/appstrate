@@ -316,12 +316,13 @@ describe("chat admission gate (handleChatStream)", () => {
     expect(res.status).toBe(402);
     expect((await res.json()) as { code: string }).toMatchObject({ code: "over_cap" });
 
-    // The only platform calls made were the preamble READS — the model list,
-    // and the caller-context block that overlaps it. No MCP hop: the Pi engine
-    // never started.
+    // The only platform calls made were the preamble READS: the model list, the
+    // caller-context block that overlaps it, and the memory core. No MCP hop:
+    // the Pi engine never started.
+    const preambleReads = new Set(["/api/models", "/api/me/context", "/api/me/memories/core"]);
     expect(dispatchPaths).toContain("/api/models");
     expect(dispatchPaths.some((p) => p.startsWith("/api/mcp"))).toBe(false);
-    expect(dispatchPaths.filter((p) => p !== "/api/models" && p !== "/api/me/context")).toEqual([]);
+    expect(dispatchPaths.filter((p) => !preambleReads.has(p))).toEqual([]);
     // No user message, no metered usage. (The session ROW shell is created
     // before the preamble on purpose — see the ai-sdk case above.)
     const messages = await db

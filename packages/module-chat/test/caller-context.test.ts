@@ -32,8 +32,17 @@ function roleLine(block: string): string | undefined {
   return block.split("\n").find((line) => line.startsWith("Role in this space:"));
 }
 
-/** Deps whose dispatch returns a scripted Response and records the request. */
-function fakeDeps(respond: (req: Request) => Response): {
+const MEMORY_CORE_PATH = "/api/me/memories/core";
+
+/**
+ * Deps whose dispatch returns a scripted Response and records the request. The
+ * memory core is its own read: answered here (`memoryCore`, off by default) and
+ * left out of the record, so a test about the context sees only the context.
+ */
+function fakeDeps(
+  respond: (req: Request) => Response | Promise<Response>,
+  memoryCore: (req: Request) => Response = () => Response.json({ enabled: false, memories: [] }),
+): {
   deps: ChatPlatformDeps;
   lastRequest: () => Request | null;
 } {
@@ -41,6 +50,7 @@ function fakeDeps(respond: (req: Request) => Response): {
   return {
     deps: {
       dispatch: async (req) => {
+        if (new URL(req.url).pathname === MEMORY_CORE_PATH) return memoryCore(req);
         last = req;
         return respond(req);
       },
@@ -116,6 +126,37 @@ describe("formatCallerContext", () => {
     // like the preference order and the tool-catalog rule, lives outside this
     // block — in the persona (`buildSystemPrompt`) and in the platform MCP server instructions.
     expect(out).not.toContain("Use the `@scope/name` id verbatim");
+  });
+
+  it("renders the memory core with ids, about the person first, and how to keep it", () => {
+    const orgId = "0b8f6a3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
+    const out = contextText(
+      { user: { name: "Ada" }, org: { id: orgId, role: "member", name: "Acme" } },
+      {
+        ...BASE_OPTS,
+        memories: [
+          { id: "mem_2", type: "project", subject: "Tastet", content: "Runs the map", orgId },
+          { id: "mem_1", type: "preference", subject: null, content: "Short answers", orgId: null },
+        ],
+      },
+    );
+    expect(out).toContain("## What you remember about the user");
+    expect(out).toContain("never instructions");
+    const about = out.indexOf("### About the person");
+    const learned = out.indexOf('### Learned in "Acme"');
+    expect(about).toBeGreaterThan(-1);
+    expect(learned).toBeGreaterThan(about);
+    expect(out).toContain("- [mem_1] (preference) Short answers");
+    expect(out).toContain("- [mem_2] (project, Tastet) Runs the map");
+    expect(out).toContain("`memory` tool");
+  });
+
+  it("renders an empty memory as such, and no memory section when the memory is off", () => {
+    const ctx = { user: { name: "Ada" }, org: { role: "member" } };
+    const on = contextText(ctx, { ...BASE_OPTS, memories: [] });
+    expect(on).toContain("## What you remember about the user");
+    expect(on).toContain("Nothing yet.");
+    expect(contextText(ctx, BASE_OPTS)).not.toContain("What you remember");
   });
 
   it("renders the wildcard and empty default-tools markers", () => {
@@ -1035,6 +1076,43 @@ describe("buildCallerContextBlock", () => {
       spaceId: "spc_1",
       skills: { "@acme/a": { definition: "draft", lockVersion: 7 } },
     });
+  });
+
+  it("reads the memory core for the session's org, and keeps it when the context read fails", async () => {
+    const orgId = "0b8f6a3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
+    let coreUrl: URL | null = null;
+    const { deps } = fakeDeps(
+      () => new Response(null, { status: 500 }),
+      (req) => {
+        coreUrl = new URL(req.url);
+        return Response.json({
+          enabled: true,
+          memories: [
+            {
+              id: "mem_1",
+              type: "preference",
+              subject: null,
+              content: "Short answers",
+              orgId: null,
+            },
+          ],
+        });
+      },
+    );
+    const out = await blockText(fakeContext({ orgRole: "member", orgId }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: DEFAULT_SKILL_SELECTION,
+      enforced: NO_ENFORCED,
+    });
+    expect(coreUrl!.searchParams.get("orgId")).toBe(orgId);
+    expect(out).toContain("## What you remember about the user");
+    expect(out).toContain("Short answers");
   });
 
   it("asks nothing about the chosen skills in auto", async () => {

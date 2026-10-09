@@ -180,5 +180,9 @@
   "skills.enforcedError": "The skills required by the space could not be loaded.",
   "skills.emptyBesidesEnforced": "No other skill is available in this space.",
   "skills.enforcedTitle": "Skills required by the space",
-  "skills.enforcedIndicator": "Skills required by the space: {{names}}"
+  "skills.enforcedIndicator": "Skills required by the space: {{names}}",
+  "tool.memory.add": "Remembered",
+  "tool.memory.replace": "Memory updated",
+  "tool.memory.remove": "Memory forgotten",
+  "tool.memory.read": "Checks its memory"
 }
