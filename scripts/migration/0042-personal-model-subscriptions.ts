@@ -1,0 +1,258 @@
+#!/usr/bin/env bun
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * 0042 — model subscriptions become personal:
+ *
+ *   set -a && . ./.env && set +a && \
+ *     bun scripts/migration/0042-personal-model-subscriptions.ts [--apply]
+ *
+ * A subscription (an `oauth` model credential) serves only the member who connected it, so the
+ * rows written before drizzle `0087` are re-homed: a subscription with a creator
+ * (`created_by`) becomes theirs (`owner_user_id`); one with no creator is an orphan, deleted with
+ * its pairings. Organization models bound to any subscription are unbound (`credential_id` NULL,
+ * `provider_id` kept), so each member now brings their own credential for them. Subscriptions are
+ * recognised by decrypting the blob (`kind === "oauth"`), never through the provider registry: the
+ * subscription modules are absent in production. A blob that does not decrypt is reported and left
+ * as it is. Run after the deploy, app up, `pg_dump` first. Refuses an empty `DATABASE_URL`. One
+ * transaction per organization; dry run by default (each rolled back), `--apply` commits. Idempotent.
+ */
+
+import { parseArgs } from "node:util";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  modelProviderCredentials as c,
+  modelProviderPairings,
+  orgModels,
+  runs,
+  user,
+} from "@appstrate/db/schema";
+import { decryptCredentials } from "@appstrate/connect";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { decryptStoredCredential } from "../../apps/api/src/lib/stored-credential.ts";
+
+class DryRunRollback extends Error {}
+
+export interface OwnedSubscription {
+  id: string;
+  label: string;
+  ownerUserId: string;
+}
+
+export interface OrphanSubscription {
+  id: string;
+  label: string;
+}
+
+export interface OrgSubscriptionReport {
+  orgId: string;
+  owned: OwnedSubscription[];
+  orphans: OrphanSubscription[];
+  pairingsDeleted: number;
+  unboundModels: Array<{ id: string; label: string }>;
+  /** Members whose runs used a subscription they do not own (orphans count as not owned). */
+  usersOnOthersSubscriptions: Array<{ id: string; email: string }>;
+}
+
+export interface SubscriptionMigration {
+  orgs: OrgSubscriptionReport[];
+  unreadable: Array<{ id: string; orgId: string; label: string }>;
+}
+
+export async function runPersonalModelSubscriptions(options: {
+  apply: boolean;
+  out: (line: string) => void;
+}): Promise<SubscriptionMigration> {
+  const { apply, out } = options;
+  // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
+  const { db, toRows } = await import("@appstrate/db/client");
+  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
+    await db.execute(
+      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
+    ),
+  );
+  out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
+
+  /** Org-owned subscriptions by organization. Read-only; decrypts each org-owned blob once. */
+  async function scanOrgOwnedSubscriptions() {
+    const rows = await db
+      .select({
+        id: c.id,
+        orgId: c.orgId,
+        label: c.label,
+        createdBy: c.createdBy,
+        ciphertext: c.credentialsEncrypted,
+      })
+      .from(c)
+      .where(isNull(c.ownerUserId));
+    const subscriptions = new Map<string, Array<(typeof rows)[number]>>();
+    const unreadable: SubscriptionMigration["unreadable"] = [];
+    for (const row of rows) {
+      const blob = decryptStoredCredential(
+        () => decryptCredentials<{ kind?: unknown } | null>(row.ciphertext),
+        { credentialId: row.id },
+      );
+      if (blob === null) {
+        unreadable.push({ id: row.id, orgId: row.orgId, label: row.label });
+        continue;
+      }
+      if (blob?.kind !== "oauth") continue;
+      subscriptions.set(row.orgId, [...(subscriptions.get(row.orgId) ?? []), row]);
+    }
+    return { subscriptions, unreadable };
+  }
+
+  const scan = await scanOrgOwnedSubscriptions();
+  const toMigrate = [...scan.subscriptions.values()].reduce((sum, rows) => sum + rows.length, 0);
+  out(`to migrate: ${toMigrate}`);
+  for (const { id, label } of scan.unreadable) {
+    out(`unreadable, skipped (not deleted): ${id} ${JSON.stringify(label)}`);
+  }
+
+  const orgs: OrgSubscriptionReport[] = [];
+  for (const orgId of [...scan.subscriptions.keys()].sort()) {
+    const candidates = scan.subscriptions.get(orgId)!;
+    const captured: { report?: OrgSubscriptionReport } = {};
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute("SET LOCAL lock_timeout = '5s'");
+        await tx.execute("SET LOCAL statement_timeout = '300s'");
+        // Re-read under row locks: a subscription another writer re-homed since the scan is left alone.
+        const live = await tx
+          .select({ id: c.id, label: c.label, createdBy: c.createdBy })
+          .from(c)
+          .where(
+            and(
+              eq(c.orgId, orgId),
+              isNull(c.ownerUserId),
+              inArray(
+                c.id,
+                candidates.map((r) => r.id),
+              ),
+            ),
+          )
+          .for("update");
+        const owned = live.filter((r) => r.createdBy !== null);
+        const orphans = live.filter((r) => r.createdBy === null);
+        const liveIds = live.map((r) => r.id);
+        const orphanIds = orphans.map((r) => r.id);
+
+        // Before any delete: deleting a credential nulls `runs.model_credential_id`.
+        const usersOnOthers = liveIds.length
+          ? await tx
+              .selectDistinct({ id: user.id, email: user.email })
+              .from(runs)
+              .innerJoin(c, eq(runs.modelCredentialId, c.id))
+              .innerJoin(user, eq(user.id, runs.userId))
+              .where(
+                and(inArray(c.id, liveIds), sql`${runs.userId} IS DISTINCT FROM ${c.createdBy}`),
+              )
+              .orderBy(user.id)
+          : [];
+
+        if (owned.length) {
+          await tx
+            .update(c)
+            .set({ ownerUserId: sql`${c.createdBy}` })
+            .where(
+              inArray(
+                c.id,
+                owned.map((r) => r.id),
+              ),
+            );
+        }
+        const unboundModels = liveIds.length
+          ? await tx
+              .update(orgModels)
+              .set({ credentialId: null, updatedAt: sql`now()` })
+              .where(and(eq(orgModels.orgId, orgId), inArray(orgModels.credentialId, liveIds)))
+              .returning({ id: orgModels.id, label: orgModels.label })
+          : [];
+        const pairings = orphanIds.length
+          ? await tx
+              .delete(modelProviderPairings)
+              .where(
+                and(
+                  eq(modelProviderPairings.orgId, orgId),
+                  inArray(modelProviderPairings.credentialId, orphanIds),
+                ),
+              )
+              .returning({ id: modelProviderPairings.id })
+          : [];
+        if (orphanIds.length) await tx.delete(c).where(inArray(c.id, orphanIds));
+
+        captured.report = {
+          orgId,
+          owned: owned.map((r) => ({ id: r.id, label: r.label, ownerUserId: r.createdBy! })),
+          orphans: orphans.map((r) => ({ id: r.id, label: r.label })),
+          pairingsDeleted: pairings.length,
+          unboundModels,
+          usersOnOthersSubscriptions: usersOnOthers,
+        };
+        if (!apply) throw new DryRunRollback();
+      });
+    } catch (error) {
+      if (!(error instanceof DryRunRollback)) throw error;
+    }
+    const done = captured.report;
+    if (!done) continue;
+    orgs.push(done);
+    const verb = apply ? "deleted" : "to delete";
+    out(
+      `org ${orgId}: owned ${done.owned.length}, orphans ${done.orphans.length} (${verb}), pairings ${done.pairingsDeleted}, models unbound ${done.unboundModels.length}`,
+    );
+    for (const r of done.owned)
+      out(`  owner ${r.id} ${JSON.stringify(r.label)} → ${r.ownerUserId}`);
+    for (const r of done.orphans) out(`  orphan ${r.id} ${JSON.stringify(r.label)}`);
+    for (const m of done.unboundModels) out(`  unbound model ${m.id} ${JSON.stringify(m.label)}`);
+    const others = done.usersOnOthersSubscriptions.map((u) => `${u.email} (${u.id})`);
+    out(`  users on subscriptions they do not own: ${others.join(", ") || "none"}`);
+  }
+
+  const distinctUsers = new Map<string, string>();
+  for (const org of orgs) {
+    for (const u of org.usersOnOthersSubscriptions) distinctUsers.set(u.id, u.email);
+  }
+  out(
+    `summary: owned ${orgs.reduce((n, o) => n + o.owned.length, 0)}, orphans ${orgs.reduce((n, o) => n + o.orphans.length, 0)}, pairings ${orgs.reduce((n, o) => n + o.pairingsDeleted, 0)}, models unbound ${orgs.reduce((n, o) => n + o.unboundModels.length, 0)}, unreadable skipped ${scan.unreadable.length}, users on subscriptions they do not own ${distinctUsers.size}`,
+  );
+
+  if (!apply) {
+    out("0042: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
+    return { orgs, unreadable: scan.unreadable };
+  }
+  const left = await scanOrgOwnedSubscriptions();
+  const leftCount = [...left.subscriptions.values()].reduce((sum, rows) => sum + rows.length, 0);
+  out(`left to migrate: ${leftCount}`);
+  if (leftCount !== 0) throw new Error("subscriptions are left org-owned");
+  out("0042: APPLIED — committed.");
+  return { orgs, unreadable: scan.unreadable };
+}
+
+if (import.meta.main) {
+  let code = 1;
+  let closeDb: (() => Promise<void>) | undefined;
+  try {
+    const { values } = parseArgs({
+      args: process.argv.slice(2),
+      options: { apply: { type: "boolean" } },
+      strict: true,
+    });
+    const apply = values.apply === true;
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
+    }
+    ({ closeDb } = await import("@appstrate/db/client"));
+    const out = (line: string) => process.stdout.write(`${line}\n`);
+    out(`0042 — ${apply ? "APPLY" : "DRY RUN"}`);
+    await runPersonalModelSubscriptions({ apply, out });
+    code = 0;
+  } catch (error) {
+    process.stdout.write(
+      `0042: FAILED — ${getErrorMessage(error)}. The failing organization is rolled back; with --apply, those before it stay committed and a re-run migrates what is left.\n`,
+    );
+  } finally {
+    await closeDb?.();
+  }
+  process.exit(code);
+}

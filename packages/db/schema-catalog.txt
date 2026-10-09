@@ -178,6 +178,7 @@ column llm_usage.cache_write_tokens integer
 column llm_usage.chat_session_id text
 column llm_usage.cost_usd double precision not null default 0
 column llm_usage.created_at timestamp with time zone not null default now()
+column llm_usage.credential_id uuid
 column llm_usage.credential_source credential_source
 column llm_usage.duration_ms integer
 column llm_usage.id bigint not null default nextval('llm_usage_id_seq'::regclass)
@@ -199,6 +200,7 @@ column model_provider_credentials.expires_at timestamp with time zone
 column model_provider_credentials.id uuid not null default gen_random_uuid()
 column model_provider_credentials.label text not null
 column model_provider_credentials.org_id uuid not null
+column model_provider_credentials.owner_user_id text
 column model_provider_credentials.provider_id text not null
 column model_provider_credentials.refresh_failure_count integer not null default 0
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
@@ -355,7 +357,7 @@ column org_models.context_window integer
 column org_models.cost jsonb
 column org_models.created_at timestamp with time zone not null default now()
 column org_models.created_by text
-column org_models.credential_id uuid not null
+column org_models.credential_id uuid
 column org_models.enabled boolean not null default true
 column org_models.id uuid not null default gen_random_uuid()
 column org_models.input jsonb
@@ -363,6 +365,7 @@ column org_models.label text not null
 column org_models.max_tokens integer
 column org_models.model_id text not null
 column org_models.org_id uuid not null
+column org_models.provider_id text not null
 column org_models.reasoning boolean
 column org_models.source text not null default 'custom'::text
 column org_models.updated_at timestamp with time zone not null default now()
@@ -739,6 +742,7 @@ constraint llm_usage llm_usage_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES
 constraint llm_usage llm_usage_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
 constraint model_provider_credentials model_provider_credentials_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint model_provider_credentials model_provider_credentials_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_credentials model_provider_credentials_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
 constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -965,6 +969,7 @@ index CREATE INDEX idx_llm_usage_user_id ON public.llm_usage USING btree (user_i
 index CREATE INDEX idx_model_provider_credentials_created_by ON public.model_provider_credentials USING btree (created_by)
 index CREATE INDEX idx_model_provider_credentials_expires_at_oauth ON public.model_provider_credentials USING btree (expires_at) WHERE (expires_at IS NOT NULL)
 index CREATE INDEX idx_model_provider_credentials_org_provider ON public.model_provider_credentials USING btree (org_id, provider_id)
+index CREATE INDEX idx_model_provider_credentials_owner ON public.model_provider_credentials USING btree (owner_user_id)
 index CREATE INDEX idx_model_provider_pairings_org_id ON public.model_provider_pairings USING btree (org_id)
 index CREATE INDEX idx_notifications_recipient ON public.notifications USING btree (org_id, recipient_type, recipient_id, space_id)
 index CREATE INDEX idx_notifications_run ON public.notifications USING btree (run_id)
