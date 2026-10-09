@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Migration `0084` only relaxes the `integration_pins` cardinality CHECK to
   `0..20`; it rewrites no data.
 
+- **Webhook consumers relying on `run.connection_missing` should read
+  `run.started`'s `integrationsUnbound`** (#1849). `run.connection_missing`
+  does not fire for a non-required integration that has no connection: that
+  run starts, and its `run.started` delivery carries `integrationsUnbound`.
+
 - **Before the deploy, run
   `DATABASE_URL=<platform> bun scripts/migration/0040-report-token-usage-shape.ts`**
   (#1846), read-only. It lists the runs whose stored `token_usage` the
@@ -160,11 +165,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   explain both. The launch toast and the agent's Connections tab say who
   chose "no connection": you, an admin, the space default, this run or the
   schedule (#1848).
-- **The run resource gains `integrations_unbound`** (#1830): the sorted ids of
-  the declared integrations the run bound to no connection, those switched
-  off in the space included (`[]` when none,
-  `null` when the run has no connection snapshot), which `connections_used`
-  cannot carry.
+- **A run records why it started without an integration** (#1830, #1849):
+  the run resource's `integrations_unbound` is
+  `[{ integration_package_id, code, source }] | null`, one item per declared
+  integration the run bound to no connection, those switched off in the space
+  included. `code` is the launch warning code, `source` the layer that chose
+  none on `integration_unbound` (else `null`). It is stored at creation for
+  manual, scheduled, inline and remote runs (new nullable column
+  `runs.integrations_unbound`, migration `0085`); runs created before read
+  `null`. The codes are visible to the run's actor and to `runs:read-all`
+  holders (`SECURITY.md`).
+- **The `run.started` webhook and module event carry `integrationsUnbound`**
+  (#1849).
 - **`appstrate run --report --json` announces the run** with an
   `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
   registration reported some), as `--remote --json` does with
@@ -242,6 +254,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps retrying. A `dev` platform or locally built artifacts
   (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
 
+- **The `integration_dropped` run log is `warn`** unless a layer chose no
+  connection (`info`), and names the code; the agent prompt's reason for a
+  switched-off integration reads "it is switched off" (#1849).
 - **Every `appstrate` command ends through one handler** (#1858): it sets the
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.

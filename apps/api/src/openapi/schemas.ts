@@ -1449,8 +1449,25 @@ export const schemas = {
       integrations_unbound: {
         type: ["array", "null"],
         description:
-          "Declared integrations this run started without — bound to no connection (an explicit none, a non-required integration nothing served, or one switched off in the space). Sorted ids; empty when every one was bound; null when the run has no connection snapshot.",
-        items: { type: "string" },
+          "Declared integrations this run started without, and why — the launch `warnings` recorded at kickoff, without their candidate or auth detail. In declaration order; empty when every one was bound; null when the run recorded none (no connection resolution ran, or the run predates the record).",
+        items: {
+          type: "object",
+          required: ["integration_package_id", "code", "source"],
+          properties: {
+            integration_package_id: { type: "string" },
+            code: {
+              type: "string",
+              enum: [...CONNECTION_RESOLUTION_WARNING_CODES],
+              description: "The launch warning's code (see ConnectionResolutionWarning).",
+            },
+            source: {
+              type: ["string", "null"],
+              enum: [...CONNECTION_RESOLUTION_SOURCES, null],
+              description:
+                "The cascade layer that chose no connection, on `integration_unbound`; null otherwise.",
+            },
+          },
+        },
       },
     },
   },

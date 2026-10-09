@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CredentialSource } from "@appstrate/db/schema";
+import type { RunIntegrationUnbound } from "@appstrate/core/integration";
 import { logger } from "../../lib/logger.ts";
 import type { LoadedPackage } from "../../types/index.ts";
 import { updateRun, appendRunLog } from "../state/runs.ts";
@@ -30,6 +31,8 @@ export interface ExecuteAgentInBackgroundInput {
   modelSource?: CredentialSource;
   /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
   sinkCredentials: SinkCredentials;
+  /** `runs.integrations_unbound`, forwarded on the `started` event; omitted when not recorded. */
+  integrationsUnbound?: RunIntegrationUnbound[];
   /**
    * Injectable orchestrator — production leaves this unset and the
    * global singleton drives Docker. Tests inject a fake orchestrator to
@@ -136,6 +139,7 @@ async function executeAgentInBackgroundImpl(input: ExecuteAgentInBackgroundInput
       status: "started",
       packageEphemeral,
       ...(modelSource ? { modelSource } : {}),
+      ...(input.integrationsUnbound ? { integrationsUnbound: input.integrationsUnbound } : {}),
     });
 
     const runPlan: AppstrateRunPlan = {

@@ -35,6 +35,7 @@ import {
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
+import type { RunStatusChangeParams } from "@appstrate/core/module";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
@@ -882,26 +883,30 @@ export async function shutdownWebhookWorker(): Promise<void> {
   deliveryQueue = null;
 }
 
-/**
- * Fire-and-forget webhook dispatch for run status changes.
- * Shared by the run route (POST /run) and the scheduler (triggerScheduledRun).
- */
-export function dispatchRunWebhook(
-  scope: SpaceScope,
-  status: string,
-  runId: string,
-  packageId: string | null,
-  extra?: Record<string, unknown>,
-): void {
-  const eventType = `run.${status}` as WebhookEventType;
-  dispatchWebhookEvents(scope, eventType, {
-    id: runId,
-    packageId,
-    status,
-    ...extra,
-  }).catch((err) => {
+/** A run status change as the `run.*` delivery's inner object. */
+export function runStatusWebhookObject(params: RunStatusChangeParams): Record<string, unknown> {
+  return {
+    id: params.runId,
+    packageId: params.packageId,
+    status: params.status,
+    ...params.extra,
+    ...(params.duration != null ? { duration: params.duration } : {}),
+    // Absent on classic runs: receivers treat missing as `false`.
+    ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
+    ...(params.integrationsUnbound ? { integrationsUnbound: params.integrationsUnbound } : {}),
+  };
+}
+
+/** Fire-and-forget webhook dispatch for a run status change. */
+export function dispatchRunWebhook(params: RunStatusChangeParams): void {
+  const eventType = `run.${params.status}` as WebhookEventType;
+  dispatchWebhookEvents(
+    { orgId: params.orgId, spaceId: params.spaceId },
+    eventType,
+    runStatusWebhookObject(params),
+  ).catch((err) => {
     logger.warn("Webhook dispatch failed", {
-      runId,
+      runId: params.runId,
       error: getErrorMessage(err),
     });
   });

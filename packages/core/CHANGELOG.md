@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code an `errors[]` item of a `409 missing_integration_connection` carries —
   resolution errors, manifest failures and `remote_binds_one_connection`.
   (#1848)
+- **`RunIntegrationUnbound`** (`{ integrationId, code, source? }`) and
+  **`runIntegrationsUnboundSchema`** (`@appstrate/core/integration`): every
+  read of `runs.integrations_unbound` parses with it. (#1849)
+- **`RunStatusChangeParams.integrationsUnbound?: RunIntegrationUnbound[]`**,
+  set on `started` when the run recorded its connection resolution. (#1849)
 - **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
   the launch's `warnings`** onto every payload it returns (preliminary,
   terminal and timed out) when the launch reported some; absent otherwise.

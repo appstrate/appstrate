@@ -54,6 +54,7 @@ import {
   computeRunSpend,
   readLastEmittedOutput,
   runAgentIdentity,
+  getRunIntegrationsUnbound,
 } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
@@ -1144,19 +1145,30 @@ async function persistEventAndAdvance(
   // excluded here to avoid a duplicate. Remote runs no longer emit at
   // row-insert time (run-creation.ts) — that fired before the DB
   // transition and never again when it actually happened.
-  if (firstEvent && run.runOrigin === "remote") {
-    void emitEvent("onRunStatusChange", {
-      orgId: run.orgId,
-      runId: run.id,
-      packageId: run.packageId,
-      spaceId: run.spaceId,
-      status: "started",
-      packageEphemeral: isInlineShadowPackageId(run.packageId),
-      ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
-    });
-  }
+  if (firstEvent && run.runOrigin === "remote") void emitRemoteRunStarted(run);
 
   return "claimed";
+}
+
+/** Off the ingestion path: a failed read must not 500 a POST whose event is already persisted. */
+async function emitRemoteRunStarted(run: RunSinkContext): Promise<void> {
+  const integrationsUnbound = await getRunIntegrationsUnbound(run.id).catch((err) => {
+    logger.warn("run.started: integrations_unbound read failed; emitting without it", {
+      runId: run.id,
+      err: getErrorMessage(err),
+    });
+    return null;
+  });
+  await emitEvent("onRunStatusChange", {
+    orgId: run.orgId,
+    runId: run.id,
+    packageId: run.packageId,
+    spaceId: run.spaceId,
+    status: "started",
+    packageEphemeral: isInlineShadowPackageId(run.packageId),
+    ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
+    ...(integrationsUnbound ? { integrationsUnbound } : {}),
+  });
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {

@@ -35,6 +35,12 @@ function makeRun(overrides: Partial<EnrichedRun>): EnrichedRun {
   } as unknown as EnrichedRun;
 }
 
+const SLACK_UNBOUND = {
+  integration_package_id: "@acme/slack",
+  code: "not_connected",
+  source: null,
+} as const;
+
 const GMAIL_USED = {
   integration_package_id: "@acme/gmail",
   label: "Travail",
@@ -48,7 +54,7 @@ describe("RunConfigurationTab — connections", () => {
       <RunConfigurationTab
         run={makeRun({
           connections_used: [GMAIL_USED] as EnrichedRun["connections_used"],
-          integrations_unbound: ["@acme/slack"],
+          integrations_unbound: [SLACK_UNBOUND],
         })}
       />,
     );
@@ -61,7 +67,7 @@ describe("RunConfigurationTab — connections", () => {
 
   it("shows the card for a run that bound nothing but started without an integration", () => {
     const html = render(
-      <RunConfigurationTab run={makeRun({ integrations_unbound: ["@acme/slack"] })} />,
+      <RunConfigurationTab run={makeRun({ integrations_unbound: [SLACK_UNBOUND] })} />,
     );
     expect(html).toContain(i18n.t("agents:run.infoConnections"));
     expect(html).toContain("run-integration-unbound-@acme/slack");

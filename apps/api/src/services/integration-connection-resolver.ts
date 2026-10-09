@@ -56,6 +56,7 @@ import {
   type ConnectionResolutionWarningCode,
   type ResolvedConnection,
   type ResolvedConnectionMap,
+  type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -766,9 +767,18 @@ export function missingIntegrationConnection(errors: ValidationFieldError[]): Ap
 }
 
 type ResolveRunConnectionsOutcome =
-  { ok: true; resolved: ResolvedConnectionMap | null } | { ok: false; error: ApiError };
+  | {
+      ok: true;
+      resolved: ResolvedConnectionMap | null;
+      /** One per `[]` of `resolved`: its warning as the run records it. */
+      integrationsUnbound: RunIntegrationUnbound[];
+    }
+  | { ok: false; error: ApiError };
 
-/** The run's connection snapshot (`null` when empty, all-`[]` kept), else the kickoff 409. */
+/**
+ * The run's connection snapshot (`null` when empty, all-`[]` kept) and why each `[]` is unbound,
+ * else the kickoff 409.
+ */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
 ): Promise<ResolveRunConnectionsOutcome> {
@@ -780,7 +790,12 @@ export async function resolveRunConnectionsOrError(
     };
   }
   const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
-  return { ok: true, resolved };
+  const integrationsUnbound = resolution.warnings.map(({ integrationId, code, source }) => ({
+    integrationId,
+    code,
+    ...(source ? { source } : {}),
+  }));
+  return { ok: true, resolved, integrationsUnbound };
 }
 
 type ResolutionItem = ConnectionResolutionError | ConnectionResolutionWarning;

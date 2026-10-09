@@ -434,7 +434,8 @@ describe("buildEnrichedPrompt — unavailable integrations", () => {
       "- **@org/ssh**: connection 'db': the connection's credentials cannot be delivered; " +
         "connection 'prod': another connection bound with it failed to start",
     );
-    expect(prompt).toContain("- **@org/drive**: it is switched off in this space");
+    // Host-neutral: the shared table names no Appstrate concept.
+    expect(prompt).toMatch(/^- \*\*@org\/drive\*\*: it is switched off$/m);
     expect(prompt).not.toMatch(/no_delivery|not_active|bound_set_incomplete/);
     expect(prompt).toContain("report them as unavailable in this run");
   });

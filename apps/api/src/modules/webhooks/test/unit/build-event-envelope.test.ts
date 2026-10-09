@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEventEnvelope } from "../../service.ts";
+import { buildEventEnvelope, runStatusWebhookObject } from "../../service.ts";
 import { CURRENT_API_VERSION } from "../../../../lib/api-versions.ts";
 
 describe("buildEventEnvelope", () => {
@@ -115,5 +115,40 @@ describe("buildEventEnvelope", () => {
 
     const data = payload.data as { object: Record<string, unknown> };
     expect(data.object.object).toBe("run");
+  });
+});
+
+describe("runStatusWebhookObject", () => {
+  const started = {
+    orgId: "org_1",
+    runId: "run_123",
+    packageId: "@acme/agent",
+    spaceId: "spc_1",
+    status: "started" as const,
+  };
+
+  it("carries the integrations a run.started run starts without, as the module event has them", () => {
+    const integrationsUnbound = [
+      { integrationId: "@acme/slack", code: "not_connected" as const },
+      {
+        integrationId: "@acme/notion",
+        code: "integration_unbound" as const,
+        source: "admin_pin" as const,
+      },
+    ];
+    expect(runStatusWebhookObject({ ...started, integrationsUnbound })).toEqual({
+      id: "run_123",
+      packageId: "@acme/agent",
+      status: "started",
+      integrationsUnbound,
+    });
+  });
+
+  it("keeps `[]` (recorded, all bound) apart from absent (not recorded)", () => {
+    expect(runStatusWebhookObject({ ...started, integrationsUnbound: [] })).toHaveProperty(
+      "integrationsUnbound",
+      [],
+    );
+    expect(runStatusWebhookObject(started)).not.toHaveProperty("integrationsUnbound");
   });
 });

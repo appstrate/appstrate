@@ -6601,8 +6601,20 @@ export interface components {
                  */
                 source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             }[] | null;
-            /** @description Declared integrations this run started without — bound to no connection (an explicit none, a non-required integration nothing served, or one switched off in the space). Sorted ids; empty when every one was bound; null when the run has no connection snapshot. */
-            integrations_unbound: string[] | null;
+            /** @description Declared integrations this run started without, and why — the launch `warnings` recorded at kickoff, without their candidate or auth detail. In declaration order; empty when every one was bound; null when the run recorded none (no connection resolution ran, or the run predates the record). */
+            integrations_unbound: {
+                integration_package_id: string;
+                /**
+                 * @description The launch warning's code (see ConnectionResolutionWarning).
+                 * @enum {string}
+                 */
+                code: "not_connected" | "must_choose_connection" | "auth_key_mismatch" | "integration_not_active" | "integration_unbound";
+                /**
+                 * @description The cascade layer that chose no connection, on `integration_unbound`; null otherwise.
+                 * @enum {string|null}
+                 */
+                source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
+            }[] | null;
         };
         RunLog: {
             /** Format: int64 */

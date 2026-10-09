@@ -420,21 +420,35 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
     expect(second!.message).toContain("boom");
   });
 
-  it("words an `unbound` drop as a missing binding, not a failure to start", async () => {
+  it("words an `unbound` drop as a missing binding, at `info` only when a layer chose none", async () => {
     const runId = await seedPendingRun();
+    const chosen = "@droporg/chosen";
 
-    await recordDroppedIntegrations({ orgId: ctx.orgId }, runId, [
-      { integrationId: INTEG, reason: "unbound" },
-    ]);
+    await recordDroppedIntegrations(
+      { orgId: ctx.orgId },
+      runId,
+      [
+        { integrationId: INTEG, reason: "unbound" },
+        { integrationId: chosen, reason: "unbound" },
+      ],
+      [
+        { integrationId: INTEG, code: "must_choose_connection" },
+        { integrationId: chosen, code: "integration_unbound", source: "admin_pin" },
+      ],
+    );
 
-    const [row] = await db
+    const rows = await db
       .select()
       .from(runLogs)
       .where(and(eq(runLogs.runId, runId), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
-    expect(row!.level).toBe("info");
-    expect(row!.data!.reason).toBe("unbound");
-    expect(row!.message).toBe(
-      `integration '${INTEG}' has no connection bound to this run — its tools are unavailable to this run`,
+    const byId = new Map(rows.map((r) => [r.data?.integrationId, r]));
+    expect(byId.get(INTEG)!.level).toBe("warn");
+    expect(byId.get(INTEG)!.data!.code).toBe("must_choose_connection");
+    expect(byId.get(INTEG)!.message).toBe(
+      `integration '${INTEG}' has no connection bound to this run (must_choose_connection) — its tools are unavailable to this run`,
     );
+    expect(byId.get(chosen)!.level).toBe("info");
+    expect(byId.get(chosen)!.data!.reason).toBe("unbound");
+    expect(byId.get(chosen)!.data!.code).toBe("integration_unbound");
   });
 });

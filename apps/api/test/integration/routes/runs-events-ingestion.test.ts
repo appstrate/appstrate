@@ -2108,7 +2108,9 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     return started();
   }
 
-  async function seedPendingRemoteRun(): Promise<string> {
+  async function seedPendingRemoteRun(
+    extra: Partial<typeof runs.$inferInsert> = {},
+  ): Promise<string> {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await db.insert(runs).values({
       id: runId,
@@ -2121,9 +2123,47 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       sinkExpiresAt: new Date(Date.now() + 3600_000),
       startedAt: new Date(),
       tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+      ...extra,
     });
     return runId;
   }
+
+  async function firstEvent(runId: string): Promise<void> {
+    const res = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "first", timestamp: Date.now() }, 1),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  it("carries the integrations the run recorded starting without", async () => {
+    const { started } = await captureStartedEvents();
+    const integrationsUnbound = [
+      { integrationId: "@acme/slack", code: "not_connected" as const },
+      {
+        integrationId: "@acme/notion",
+        code: "integration_unbound" as const,
+        source: "member_pin" as const,
+      },
+    ];
+    const runId = await seedPendingRemoteRun({ integrationsUnbound });
+
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event!.integrationsUnbound).toEqual(integrationsUnbound);
+  });
+
+  it("omits integrationsUnbound when the run recorded none", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun();
+
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event).toBeDefined();
+    expect(event).not.toHaveProperty("integrationsUnbound");
+  });
 
   it("does not fire run.started for a remote run until the first event is ingested", async () => {
     const { started } = await captureStartedEvents();

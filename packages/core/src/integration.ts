@@ -1653,6 +1653,27 @@ export interface ConnectionResolutionWarning extends Pick<
 }
 
 /**
+ * A {@link ConnectionResolutionWarning} as the run records it, persisted on
+ * `runs.integrations_unbound`: why the run started without that integration. No candidate
+ * connections or auth detail — the run is readable by more members than its launcher.
+ */
+export interface RunIntegrationUnbound {
+  integrationId: string;
+  code: ConnectionResolutionWarningCode;
+  /** The layer that chose `[]`, on `integration_unbound` only. */
+  source?: ConnectionResolutionSource;
+}
+
+/** Parsed wherever `runs.integrations_unbound` is read back, like {@link resolvedConnectionMapSchema}. */
+export const runIntegrationsUnboundSchema: z.ZodType<RunIntegrationUnbound[]> = z.array(
+  z.object({
+    integrationId: z.string(),
+    code: z.enum(CONNECTION_RESOLUTION_WARNING_CODES),
+    source: z.enum(CONNECTION_RESOLUTION_SOURCES).optional(),
+  }),
+);
+
+/**
  * The resolution codes a connect flow can clear — a first connect, a reconnect in place, a scope
  * upgrade — and so the ones that carry the `auth_key` + `required_scopes` relay.
  */

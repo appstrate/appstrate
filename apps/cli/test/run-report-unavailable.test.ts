@@ -105,8 +105,23 @@ describe("--report local run — integrations bound to none", () => {
       ]),
     ).toEqual([
       { id: GMAIL, reason: "no connection is bound to this run" },
-      { id: NOTION, reason: "it is switched off in this space" },
+      { id: NOTION, reason: "it is switched off" },
     ]);
+  });
+
+  it("words every warning code: a switched-off integration, else nothing bound", () => {
+    const reasons = CONNECTION_RESOLUTION_WARNING_CODES.map(
+      (code) =>
+        unavailableIntegrations([{ field: `integrations.${GMAIL}`, code, message: code }])[0]
+          ?.reason,
+    );
+    expect(reasons).toEqual(
+      CONNECTION_RESOLUTION_WARNING_CODES.map((code) =>
+        code === "integration_not_active"
+          ? UNAVAILABLE_INTEGRATION_REASONS.not_active
+          : UNAVAILABLE_INTEGRATION_REASONS.unbound,
+      ),
+    );
   });
 
   it("tells the agent which integrations it runs without", () => {

@@ -62,8 +62,10 @@ import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import {
   resolvedConnectionMapSchema,
+  runIntegrationsUnboundSchema,
   type ConnectionOverrides,
   type ResolvedConnectionMap,
+  type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
@@ -74,6 +76,7 @@ import type {
   RunWireDto,
   EnrichedRun,
   RunConnectionUsed,
+  RunIntegrationUnboundWire,
   ListEnvelope,
 } from "@appstrate/shared-types";
 
@@ -191,6 +194,7 @@ const enrichedRunColumns = {
   connectionOverrides: runs.connectionOverrides,
   dependencyOverrides: runs.dependencyOverrides,
   resolvedConnections: runs.resolvedConnections,
+  integrationsUnbound: runs.integrationsUnbound,
 } as const;
 
 /** Row shape produced by `enrichedRunColumns` — a strict subset of a `runs` row. */
@@ -351,18 +355,36 @@ function projectConnectionsUsed(
   return used.length > 0 ? used : null;
 }
 
-/** Integrations the run started without — the snapshot's `[]` entries; null with no snapshot. */
-function projectIntegrationsUnbound(snapshot: ResolvedConnectionMap | null): string[] | null {
-  if (!snapshot) return null;
-  return Object.entries(snapshot)
-    .filter(([, bound]) => bound.length === 0)
-    .map(([integrationId]) => integrationId)
-    .sort();
-}
-
 /** `runs.resolved_connections` as read back from jsonb — parsed, never trusted as typed. */
 export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | null {
   return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
+}
+
+/** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
+function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
+  return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
+}
+
+function projectIntegrationsUnbound(raw: unknown): RunIntegrationUnboundWire[] | null {
+  return (
+    readIntegrationsUnbound(raw)?.map((u) => ({
+      integration_package_id: u.integrationId,
+      code: u.code,
+      source: u.source ?? null,
+    })) ?? null
+  );
+}
+
+/** The run's `runs.integrations_unbound`, for the `started` module event of a remote run. */
+export async function getRunIntegrationsUnbound(
+  runId: string,
+): Promise<RunIntegrationUnbound[] | null> {
+  const [row] = await db
+    .select({ integrationsUnbound: runs.integrationsUnbound })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  return readIntegrationsUnbound(row?.integrationsUnbound);
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
@@ -379,7 +401,7 @@ function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): Enriched
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
     connections_used: projectConnectionsUsed(snapshot),
-    integrations_unbound: projectIntegrationsUnbound(snapshot),
+    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
     // INPUT = distinct `appfile://` ids referenced in the run's persisted
@@ -635,6 +657,8 @@ interface CreateRunParams {
    */
   connectionOverrides?: ConnectionOverrides | null;
   resolvedConnections?: ResolvedConnectionMap | null;
+  /** Why each `[]` of {@link resolvedConnections} is unbound; omit when no resolution ran. */
+  integrationsUnbound?: RunIntegrationUnbound[];
   /**
    * Snapshot of each declared integration's resolved manifest version at
    * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
@@ -758,6 +782,9 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
         : {}),
       ...(params.resolvedConnections !== undefined
         ? { resolvedConnections: params.resolvedConnections }
+        : {}),
+      ...(params.integrationsUnbound !== undefined
+        ? { integrationsUnbound: params.integrationsUnbound }
         : {}),
       ...(params.resolvedIntegrationVersions !== undefined
         ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }

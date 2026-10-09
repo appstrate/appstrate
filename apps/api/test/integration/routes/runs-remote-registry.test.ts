@@ -152,6 +152,13 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
   }
 
+  /** `integrations_unbound` as `GET /api/runs/{id}` serves it. */
+  async function unboundOnRun(runId: string): Promise<unknown> {
+    const res = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { integrations_unbound: unknown }).integrations_unbound;
+  }
+
   it("creates a run attributed to the published version (no shadow row)", async () => {
     await seedPublishedAgent(ctx, "1.2.3");
 
@@ -773,6 +780,9 @@ describe("POST /api/runs/remote — kind: registry", () => {
       const { id } = (await res.json()) as { id: string };
       const [run] = await db.select().from(runs).where(eq(runs.id, id));
       expect(run!.resolvedConnections).toEqual({ [INTEG]: [] });
+      expect(await unboundOnRun(id)).toEqual([
+        { integration_package_id: INTEG, code: "integration_unbound", source: "member_pin" },
+      ]);
     });
   });
 
@@ -812,6 +822,9 @@ describe("POST /api/runs/remote — kind: registry", () => {
       ]);
       const [run] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(run!.resolvedConnections).toEqual({ [INTEG]: [] });
+      expect(await unboundOnRun(body.id)).toEqual([
+        { integration_package_id: INTEG, code: "not_connected", source: null },
+      ]);
     });
   });
 

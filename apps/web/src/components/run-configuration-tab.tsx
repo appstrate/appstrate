@@ -36,7 +36,7 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
   const { t } = useTranslation(["agents", "settings"]);
   const connectionRows = groupByIntegration(
     run.connections_used ?? [],
-    run.integrations_unbound ?? [],
+    (run.integrations_unbound ?? []).map((u) => u.integration_package_id),
   );
   const isInline = run.package_ephemeral;
   // Source agent deleted (FK SET NULL after migration 0017): the run row

@@ -63,11 +63,15 @@ describe("run launch — dropped-integration marker in run_logs", () => {
   // failing assertion cannot leave background writes racing the next truncate.
   afterEach(waitForRunPipelineSettled);
 
-  async function launch() {
+  async function launch(extra: Record<string, unknown> = {}) {
     return app.request("/api/runs/inline", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ manifest: inlineManifest([INTEGRATION]), prompt: "do the thing" }),
+      body: JSON.stringify({
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+        ...extra,
+      }),
     });
   }
 
@@ -94,7 +98,7 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     expect(rows[0]!.message).toContain(INTEGRATION);
   });
 
-  it("records an `unbound` marker when a non-required integration has no connection", async () => {
+  it("records a warn `unbound` marker, with its cause, when a non-required integration has no connection", async () => {
     // Absence degrades: the cascade binds `[]`, the run launches, and the
     // spawn resolver drops the integration as unbound rather than erroring.
     await seedConnectionTestIntegration(ctx, INTEGRATION);
@@ -110,7 +114,27 @@ describe("run launch — dropped-integration marker in run_logs", () => {
       .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.data?.reason).toBe("unbound");
-    expect(rows[0]!.message).toContain("has no connection bound to this run");
+    expect(rows[0]!.data?.code).toBe("not_connected");
+    expect(rows[0]!.message).toContain("has no connection bound to this run (not_connected)");
+    // Nothing served the actor: a degradation, not a choice.
+    expect(rows[0]!.level).toBe("warn");
+  });
+
+  it("records an info `unbound` marker when the launch chose no connection", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+
+    const res = await launch({ connection_overrides: { [INTEGRATION]: [] } });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const rows = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data?.code).toBe("integration_unbound");
     // A chosen absence, not a failure to start.
     expect(rows[0]!.level).toBe("info");
   });

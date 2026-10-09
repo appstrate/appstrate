@@ -30,7 +30,7 @@ import {
   resolveRunConnectionsOrError,
 } from "./integration-connection-resolver.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
 import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 
@@ -167,6 +167,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     admin pin), and it answers the same 409 `missing_integration_connection`
   //     the readiness check does.
   let resolvedConnections: ResolvedConnectionMap | null = null;
+  let integrationsUnbound: RunIntegrationUnbound[] | undefined;
   if (actor) {
     const outcome = await resolveRunConnectionsOrError({
       agentManifest: agent.manifest as Record<string, unknown>,
@@ -180,6 +181,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     });
     if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
+    integrationsUnbound = outcome.integrationsUnbound;
     // The remote api_call tool takes no argument addressing a set member.
     const multi = Object.entries(resolvedConnections ?? {})
       .filter(([, set]) => set.length > 1)
@@ -245,6 +247,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       // Always null on this path — see the readiness comment above.
       connectionOverrides: null,
       resolvedConnections,
+      integrationsUnbound,
       dependencyOverrides: input.dependencyOverrides ?? null,
       resolvedIntegrationVersions,
       ...(overrideVersionLabel

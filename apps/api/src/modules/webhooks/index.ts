@@ -128,22 +128,7 @@ const webhooksModule: AppstrateModule = {
   ],
 
   events: {
-    onRunStatusChange: (params: RunStatusChangeParams) => {
-      dispatchRunWebhook(
-        { orgId: params.orgId, spaceId: params.spaceId },
-        params.status,
-        params.runId,
-        params.packageId,
-        {
-          ...params.extra,
-          ...(params.duration != null ? { duration: params.duration } : {}),
-          // Surface the inline flag so downstream consumers can branch
-          // without an extra DB round-trip. Absent in classic runs —
-          // receivers treat missing as `false`.
-          ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
-        },
-      );
-    },
+    onRunStatusChange: (params: RunStatusChangeParams) => dispatchRunWebhook(params),
     onRunConnectionMissing: (params: RunConnectionMissingParams) => {
       dispatchRunConnectionMissingWebhook(
         { orgId: params.orgId, spaceId: params.spaceId },
