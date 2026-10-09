@@ -447,7 +447,10 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
       .where(eq(integrationConnections.id, connId));
     token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
 
-    expect(await refreshOf(ctx, token, target)).toMatchObject({ status: "retry" });
+    expect(await refreshOf(ctx, token, target)).toMatchObject({
+      status: "retry",
+      cause: "connection_changed",
+    });
     expect(token.requests()).toBe(0);
     expect(await fetchEncrypted(connId)).toBe(reconnected);
   });
@@ -465,10 +468,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
         .where(eq(integrationConnections.id, connId));
     });
 
-    expect(await refresh(connId)).toMatchObject({
-      status: "retry",
-      detail: expect.stringContaining("changed while its token was refreshed"),
-    });
+    expect(await refresh(connId)).toMatchObject({ status: "retry", cause: "connection_changed" });
     expect(token.requests()).toBe(1);
     expect(await fetchEncrypted(connId)).toBe(reconnected);
   });
@@ -652,6 +652,7 @@ describe("integration refresh-failure escalation", () => {
 
     expect(await refresh(connId)).toMatchObject({
       status: "retry",
+      cause: "upstream_transient",
       detail: expect.stringMatching(/HTTP 200 without access_token/),
     });
 
@@ -669,10 +670,7 @@ describe("integration refresh-failure escalation", () => {
     });
     token.setResponse({ error: "invalid_grant" }, 200);
 
-    expect(await refresh(connId)).toMatchObject({
-      status: "dead",
-      reason: "refresh token revoked",
-    });
+    expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "refresh_token_revoked" });
 
     const row = await readRow(connId);
     expect(row.needsReconnection).toBe(true);
@@ -683,9 +681,32 @@ describe("integration refresh-failure escalation", () => {
     const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
     token.setResponse({ error: "temporarily_unavailable" }, 503); // 5xx → transient
 
-    expect(await refresh(connId)).toMatchObject({ status: "retry" });
+    expect(await refresh(connId)).toMatchObject({ status: "retry", cause: "upstream_transient" });
     expect((await readRow(connId)).refreshFailureCount).toBe(1);
   });
+
+  // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
+  // even on a token expired past the grace window with a streak one short of the threshold.
+  it.each(["invalid_client", "unauthorized_client"])(
+    "a refused client (%s) answers retry without counting toward the streak",
+    async (error) => {
+      const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+        getEnv();
+      const connId = await seedConn({
+        expiresAt: new Date(Date.now() - (grace + 3600) * 1000),
+        refreshFailureCount: max - 1,
+      });
+      token.setResponse({ error }, 401);
+
+      expect(await refresh(connId)).toMatchObject({
+        status: "retry",
+        cause: "oauth_client_rejected",
+      });
+      const row = await readRow(connId);
+      expect(row.refreshFailureCount).toBe(max - 1);
+      expect(row.needsReconnection).toBe(false);
+    },
+  );
 
   it("the transient failure that escalates the streak answers dead", async () => {
     const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
@@ -698,7 +719,8 @@ describe("integration refresh-failure escalation", () => {
 
     expect(await refresh(connId)).toMatchObject({
       status: "dead",
-      reason: `token refresh failed ${max} consecutive times and the token has expired`,
+      cause: "refresh_failures_exhausted",
+      detail: expect.stringContaining("HTTP 503"),
     });
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(max);
@@ -735,15 +757,15 @@ describe("integration refresh-failure escalation", () => {
     }
 
     it("a rejection answers dead without an exchange", async () => {
-      expect(await refresh(connId)).toMatchObject({
-        status: "dead",
-        reason: "the connection is flagged needsReconnection",
-      });
+      expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "connection_flagged" });
       await expectUntouched();
     });
 
     it("an expiring trigger keeps the stored credential without an exchange", async () => {
-      expect(await refresh(connId, EXPIRING)).toMatchObject({ status: "kept" });
+      expect(await refresh(connId, EXPIRING)).toMatchObject({
+        status: "kept",
+        cause: "connection_flagged",
+      });
       await expectUntouched();
     });
   });
@@ -759,7 +781,7 @@ describe("integration refresh-failure escalation", () => {
         .where(eq(integrationConnections.id, connId));
     });
 
-    expect(await refresh(connId)).toMatchObject({ status: "dead" });
+    expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "connection_flagged" });
     expect(token.requests()).toBe(1);
     const row = await readRow(connId);
     expect(row.needsReconnection).toBe(true);

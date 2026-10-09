@@ -515,8 +515,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     });
 
     expect(res.status).toBe(410);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    const body = (await res.json()) as { code?: string; detail?: string; cause?: string };
+    expect(body.code).toBe("integration_connection_needs_reconnection");
+    expect(body.cause).toBe("credentials_undecryptable");
     expect(body.detail).toMatch(/could not be decrypted/i);
 
     const [row] = await db
@@ -722,7 +723,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         headers: { Authorization: `Bearer ${token}` },
       });
     for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
-      expect((await refresh()).status).toBe(502);
+      const retry = await refresh();
+      expect(retry.status).toBe(502);
+      expect(await retry.json()).toMatchObject({ code: "bad_gateway", cause: "unrefreshable" });
     }
     const [before] = await db.select().from(runs).where(eq(runs.id, runId));
     const beforeMeta = before!.metadata as { degraded_integrations?: string[] } | null;
@@ -730,6 +733,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     const res = await refresh();
     expect(res.status).toBe(410);
+    expect(await res.json()).toMatchObject({
+      code: "integration_connection_needs_reconnection",
+      cause: "unrefreshable",
+    });
 
     const [row] = await db
       .select()

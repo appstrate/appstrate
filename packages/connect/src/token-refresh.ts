@@ -8,6 +8,7 @@ import {
   buildTokenBody,
   assertClientAuthCoherent,
   type ParsedTokenResponse,
+  type TokenErrorKind,
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { oauthEgressFetch } from "./oauth-egress.ts";
@@ -40,7 +41,7 @@ export interface RefreshContext {
 /**
  * Error thrown by performRefreshTokenExchange when the OAuth token refresh call fails.
  *
- * `kind` discriminates between two cases that callers MUST treat differently:
+ * `kind` discriminates between three cases that callers MUST treat differently:
  *
  * - `"revoked"`: the OAuth server answered `{ "error": "invalid_grant" }`
  *   (RFC 6749 §5.2) on `HTTP 400`, `HTTP 401` (mandated by §5.2 when client
@@ -57,11 +58,16 @@ export interface RefreshContext {
  *   false positives that force users to reconnect unnecessarily, especially
  *   when the initial 401 that triggered the refresh came from a malformed
  *   agent request (wrong header name, wrong auth scheme, wrong endpoint).
+ *
+ * - `"client_rejected"`: the server rejected the client itself (`invalid_client`
+ *   or `unauthorized_client`). The grant may be intact: callers MUST NOT flag
+ *   the connection nor count it as a transient failure — only fixing the client
+ *   registration helps.
  */
 export class RefreshError extends Error {
   constructor(
     message: string,
-    public readonly kind: "revoked" | "transient",
+    public readonly kind: TokenErrorKind,
     public readonly status?: number,
     public readonly body?: string,
     /**

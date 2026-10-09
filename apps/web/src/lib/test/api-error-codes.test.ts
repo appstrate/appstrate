@@ -57,8 +57,7 @@ const NOT_A_SOURCE = /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\//;
 /** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [
   /\bcode:\s*"([a-z][a-z0-9_]*)"/g,
-  // Either case: two `gone(…)` codes are UPPER_SNAKE on the wire.
-  /\b(?:conflict|gone)\(\s*"([A-Za-z][A-Za-z0-9_]*)"/g,
+  /\b(?:conflict|gone)\(\s*"([a-z][a-z0-9_]*)"/g,
   // The import routes forward these classes' codes as the problem code.
   /\bnew (?:GithubImportError|PackageZipError)\(\s*"([A-Z][A-Z_]*)"/g,
 ];
@@ -172,10 +171,12 @@ const NOT_SURFACED = new Set([
   "connect_run_no_refresh",
   "connection_not_in_run",
   "integration_auth_undeclared",
+  "integration_connection_needs_reconnection",
   "invalid_signature",
   "invalid_timestamp",
   "message_replayed",
   "missing_signature_headers",
+  "oauth_connection_needs_reconnection",
   "remote_binds_one_connection",
   "run_agent_deleted",
   "run_definition_gone",

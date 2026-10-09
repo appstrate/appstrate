@@ -33,7 +33,7 @@ import type { SpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { encryptionKeyUnavailable } from "../lib/stored-credential.ts";
-import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
+import { OAUTH_REFRESH_LEAD_MS, type CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
@@ -66,18 +66,19 @@ interface IntegrationRefreshResult {
 }
 
 /**
- * The connection's credential can never be used again, and the connection is flagged
- * `needsReconnection`. `flaggedBefore`: the flag was already set when the refresh took the lock.
- * `reason` is surfaced verbatim in the 410.
+ * What a refresh under the lock concluded, thrown out of `dedupedRefresh`: `dead` (the connection
+ * is flagged `needsReconnection`) or `retry` (it stays usable). `flaggedBefore`: the flag was
+ * already set when the refresh took the lock. `cause` (`ErrorOptions`) is the underlying failure.
  */
-class DeadCredentialError extends Error {
+class RefreshVerdictError extends Error {
   readonly flaggedBefore: boolean;
   constructor(
-    readonly reason: string,
+    readonly status: "retry" | "dead",
+    readonly failure: CredentialFailureCause,
     options: { flaggedBefore?: boolean; cause?: unknown } = {},
   ) {
-    super(reason, { cause: options.cause });
-    this.name = "DeadCredentialError";
+    super(`${status}: ${failure}`, { cause: options.cause });
+    this.name = "RefreshVerdictError";
     this.flaggedBefore = options.flaggedBefore ?? false;
   }
 }
@@ -96,8 +97,7 @@ export interface RefreshTarget {
 
 /**
  * Refresh the OAuth2 access token of a connection under `dedupedRefresh`, and write it back.
- * Throws {@link DeadCredentialError} (flagged), `RefreshError` (`revoked`: flagged; `transient`:
- * counted or untouched), or any other error as is.
+ * Throws a {@link RefreshVerdictError}, or any other error as is.
  *
  * `forced` (an upstream 401): the freshness short-circuit after the lock is skipped.
  */
@@ -131,19 +131,14 @@ async function refreshUnderLock(
         .limit(1);
       if (row?.needsReconnection) {
         // A flagged row's write-back cannot land: an exchange would only spend its refresh token.
-        throw new DeadCredentialError("the connection is flagged needsReconnection", {
-          flaggedBefore: true,
-        });
+        throw new RefreshVerdictError("dead", "connection_flagged", { flaggedBefore: true });
       }
       if (
         !row ||
         row.clientRef !== connection.clientRef ||
         row.oauthResource !== connection.oauthResource
       ) {
-        throw new RefreshError(
-          `Integration connection '${connectionId}' was reconnected or removed while its refresh waited (transient)`,
-          "transient",
-        );
+        throw new RefreshVerdictError("retry", "connection_changed");
       }
       // Read even when forced: the exchange must spend the freshest stored refresh_token.
       freshCiphertext = row.credentialsEncrypted;
@@ -192,7 +187,7 @@ async function doRefresh(
       },
     );
     await markIntegrationConnectionNeedsReconnection(connectionId);
-    throw new DeadCredentialError("no stored refresh_token");
+    throw new RefreshVerdictError("dead", "refresh_token_missing");
   }
 
   let parsed: RefreshExchangeResult["parsed"];
@@ -203,37 +198,16 @@ async function doRefresh(
     }));
   } catch (err) {
     if (err instanceof ClientAuthInvariantError) {
-      // A contradictory (method, secret) pair is a configuration/programming
-      // fault, not an upstream blip. Counting it toward the transient-failure
-      // streak would spend a healthy connection's budget and eventually flag it
-      // `needs_reconnection` — user-visible damage from a code bug, with the
-      // real cause buried in the logs. Surface it and leave the row alone.
+      // A configuration/programming fault: it is never counted against the connection.
       logger.error("Integration refresh aborted — incoherent client auth", {
         packageId,
         authKey,
         connectionId,
         err: String(err),
       });
-    } else if (err instanceof RefreshError && err.kind === "revoked") {
-      await markIntegrationConnectionNeedsReconnection(connectionId);
-    } else {
-      // A single transient failure is not terminal — the cached token may still be valid. A
-      // streak past the threshold on a token expired past the grace window is: the row would
-      // otherwise look healthy while every call fails.
-      const env = getEnv();
-      const counted = await recordIntegrationRefreshFailure(
-        connectionId,
-        env.INTEGRATION_REFRESH_MAX_FAILURES,
-        { graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS },
-      );
-      if (counted?.needsReconnection) {
-        throw new DeadCredentialError(
-          `token refresh failed ${counted.failures} consecutive times and the token has expired`,
-          { cause: err },
-        );
-      }
     }
-    throw err;
+    if (!(err instanceof RefreshError)) throw err;
+    throw await exchangeFailureVerdict(err, { packageId, authKey, connectionId });
   }
 
   // `parseTokenResponse` may return `undefined` for refreshToken on flows
@@ -288,18 +262,45 @@ async function doRefresh(
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connectionId))
       .limit(1);
-    if (row?.needsReconnection) {
-      throw new DeadCredentialError(
-        "the connection was flagged needsReconnection during the refresh",
-      );
-    }
-    throw new RefreshError(
-      `Integration connection '${connectionId}' changed while its token was refreshed (transient)`,
-      "transient",
-    );
+    throw row?.needsReconnection
+      ? new RefreshVerdictError("dead", "connection_flagged")
+      : new RefreshVerdictError("retry", "connection_changed");
   }
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
+}
+
+/**
+ * Record what a failed token exchange says about the connection, and conclude. `revoked` flags it;
+ * `client_rejected` blames the client registration, which a reconnect cannot fix, so it is never
+ * counted; `transient` counts toward the streak that flags a token expired past the grace window.
+ */
+async function exchangeFailureVerdict(
+  err: RefreshError,
+  log: { packageId: string; authKey: string; connectionId: string },
+): Promise<RefreshVerdictError> {
+  switch (err.kind) {
+    case "revoked":
+      await markIntegrationConnectionNeedsReconnection(log.connectionId);
+      return new RefreshVerdictError("dead", "refresh_token_revoked", { cause: err });
+    case "client_rejected":
+      logger.error("Integration refresh refused — the token endpoint rejected the OAuth client", {
+        ...log,
+        error: err.message,
+      });
+      return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
+    case "transient": {
+      const env = getEnv();
+      const counted = await recordIntegrationRefreshFailure(
+        log.connectionId,
+        env.INTEGRATION_REFRESH_MAX_FAILURES,
+        { graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS },
+      );
+      return counted?.needsReconnection
+        ? new RefreshVerdictError("dead", "refresh_failures_exhausted", { cause: err })
+        : new RefreshVerdictError("retry", "upstream_transient", { cause: err });
+    }
+  }
 }
 
 /**
@@ -311,26 +312,25 @@ async function doRefresh(
  *   was read back. If the refresh narrowed the grant below the space's required scopes, the
  *   connection is already flagged `needsReconnection`; the credential is still served.
  * - `kept`: nothing concluded against the stored credential, which stands — a proactive refresh
- *   that was not due or could not run (already flagged, no refresh client, a non-oauth2 auth, a
- *   transient token-endpoint discovery failure), or a rejection of a credential the connection no
- *   longer holds.
- * - `retry`: not refreshed now, the connection stays usable — a transient failure (discovery,
- *   network, upstream 5xx, parse, a row reconnected meanwhile), or an upstream rejection of an
- *   unrefreshable auth counted below `INTEGRATION_REFRESH_MAX_FAILURES`. `reason` completes
- *   "Integration 'x' auth 'y' …".
+ *   that was not due, or could not run (`cause` says why), or a rejection of a credential the
+ *   connection no longer holds.
+ * - `retry`: not refreshed now, the connection stays usable. `rejections`: the count of an
+ *   unrefreshable auth's rejections, below `INTEGRATION_REFRESH_MAX_FAILURES`.
  * - `dead`: the credential can never be used again and the connection is flagged
- *   `needsReconnection` — already flagged, refresh token revoked upstream (RFC 6749 §5.2
- *   `invalid_grant`), no stored `refresh_token`, transient failures escalated past the threshold,
- *   or an unrefreshable auth rejected up to the threshold. `reason` names the cause, never blaming
- *   a revocation that did not happen.
+ *   `needsReconnection`.
  *
  * `detail` carries the underlying error, for logs only.
  */
 type ConnectionRefreshOutcome =
   | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
-  | { status: "kept"; reason: string; detail?: string }
-  | { status: "retry"; reason: string; detail?: string }
-  | { status: "dead"; reason: string; detail?: string };
+  | { status: "kept"; cause?: CredentialFailureCause; detail?: string }
+  | {
+      status: "retry";
+      cause: CredentialFailureCause;
+      detail?: string;
+      rejections?: { failures: number; maxFailures: number };
+    }
+  | { status: "dead"; cause: CredentialFailureCause; detail?: string };
 
 /** Why a caller asks for a connection's credential to be refreshed. */
 export type RefreshTrigger =
@@ -377,28 +377,23 @@ export async function refreshConnectionCredential(input: {
   const forced =
     trigger.kind === "rejected" &&
     (trigger.revision === null || trigger.revision === connection.credentialRevision);
-  if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) {
-    return { status: "kept", reason: "not due for refresh" };
-  }
+  if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) return { status: "kept" };
 
   // One 401 can be a transient upstream fault, or a permission error the agent provoked, so a
   // forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
-  const unrefreshable = async (why: string): Promise<ConnectionRefreshOutcome> => {
-    if (!forced) return { status: "kept", reason: why };
+  const unrefreshable = async (detail: string): Promise<ConnectionRefreshOutcome> => {
+    const cause = "unrefreshable";
+    if (!forced) return { status: "kept", cause, detail };
     const counted = await recordUnrefreshableRejection(
       connection.id,
       integrationId,
       { spaceId: scope.spaceId, actor },
       connection.credentialRevision,
     );
-    if (!counted) return { status: "kept", reason: "the rejected credential was replaced" };
-    if (counted.needsReconnection) return { status: "dead", reason: why };
-    return {
-      status: "retry",
-      reason:
-        `was rejected upstream (${why}); ` +
-        `${counted.failures}/${counted.maxFailures} consecutive upstream rejections before it is flagged`,
-    };
+    if (!counted) return { status: "kept" };
+    if (counted.needsReconnection) return { status: "dead", cause, detail };
+    const { failures, maxFailures } = counted;
+    return { status: "retry", cause, detail, rejections: { failures, maxFailures } };
   };
 
   if (authDef.type !== "oauth2") {
@@ -418,11 +413,7 @@ export async function refreshConnectionCredential(input: {
     if (!(err instanceof RefreshError && err.kind === "transient")) throw err;
     // Never terminal: the row stays untouched and the next attempt re-discovers. A proactive
     // refresh has no evidence against the stored token, so it keeps serving it.
-    return {
-      status: forced ? "retry" : "kept",
-      reason: "token endpoint discovery failed (transient)",
-      detail: err.message,
-    };
+    return { status: forced ? "retry" : "kept", cause: "discovery_transient", detail: err.message };
   }
   if (!refreshContext) return unrefreshable("no OAuth client or token endpoint");
 
@@ -430,23 +421,13 @@ export async function refreshConnectionCredential(input: {
   try {
     refreshed = await refreshUnderLock(connection, integrationId, authKey, refreshContext, forced);
   } catch (err) {
-    if (err instanceof DeadCredentialError) {
+    if (err instanceof RefreshVerdictError) {
       // A proactive refresh has no evidence against the token a flag set elsewhere left in place.
-      if (err.flaggedBefore && !forced) return { status: "kept", reason: err.reason };
+      if (err.flaggedBefore && !forced) return { status: "kept", cause: err.failure };
       return {
-        status: "dead",
-        reason: err.reason,
+        status: err.status,
+        cause: err.failure,
         ...(err.cause !== undefined ? { detail: getErrorMessage(err.cause) } : {}),
-      };
-    }
-    if (err instanceof RefreshError) {
-      if (err.kind === "revoked") {
-        return { status: "dead", reason: "refresh token revoked", detail: err.message };
-      }
-      return {
-        status: "retry",
-        reason: "token refresh failed upstream (transient)",
-        detail: err.message,
       };
     }
     if (err instanceof UnknownKeyIdError) {

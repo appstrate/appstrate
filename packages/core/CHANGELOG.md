@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read of `runs.integrations_unbound` parses with it. (#1849)
 - **`RunStatusChangeParams.integrationsUnbound?: RunIntegrationUnbound[]`**,
   set on `started` when the run recorded its connection resolution. (#1849)
+- **`CREDENTIAL_FAILURE_CAUSES`** and **`CredentialFailureCause`**
+  (`@appstrate/core/sidecar-types`): why the platform did not return a
+  refreshed credential, carried as the RFC 9457 `cause` extension member of the
+  internal credential `410`/`502`. (#1853)
 - **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
   the launch's `warnings`** onto every payload it returns (preliminary,
   terminal and timed out) when the launch reported some; absent otherwise.
@@ -91,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ResolutionFieldError` (`@appstrate/core/api-errors`) gains `source?`**,
   the cascade layer concerned, and also describes a launch response's
   `warnings` items. (#1830, #1848)
+- **`gone()`** and **`badGateway()`** (`@appstrate/core/api-errors`) take an
+  optional `extensions` argument, like `conflict()`. (#1853)
 
 - **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) validates
   the optional `tiers` of a `TokenUsage` (`@appstrate/afps-shared`

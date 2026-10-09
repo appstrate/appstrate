@@ -201,7 +201,7 @@ export async function forceRefreshIntegrationProxyCredentials(
         authKey: connection.authKey,
         connectionId: connection.id,
         outcome: outcome.status,
-        reason: outcome.reason,
+        cause: outcome.cause,
         detail: outcome.detail,
       });
       return null;

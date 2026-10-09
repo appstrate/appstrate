@@ -29,7 +29,9 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
+import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import { logger } from "../lib/logger.ts";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../lib/credential-failure.ts";
 import { decryptStoredCredential } from "../lib/stored-credential.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -66,19 +68,15 @@ interface MutableCredentialsWire {
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
  *     be valid under another version, so it is NOT flagged.
- *   - 410: the credential is dead and the connection is flagged
- *     `needsReconnection` — a rejected credential of a connection already
- *     flagged, refresh token revoked upstream, transient refresh failures past
- *     the threshold, an unrefreshable auth whose rejections reached it, or
- *     stored credentials that cannot be decrypted. The sidecar propagates it as a
- *     401 to the integration so the LLM sees a clean "please re-connect"
+ *   - 410 `integration_connection_needs_reconnection`: the credential is dead
+ *     and the connection is flagged `needsReconnection`. The sidecar propagates
+ *     it as a 401 to the integration so the LLM sees a clean "please re-connect"
  *     surface, and stops retrying.
- *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
- *     an unrefreshable auth rejected fewer times than the failure threshold
- *     (consecutive, see `clearReachableUpstreamRejections`).
- *     The cached credential may still be valid; the sidecar treats it as
- *     retry-later and the listener's `refreshOnUnauthorized` cooldown
- *     keeps a flapping upstream from hammering this endpoint.
+ *   - 502: not refreshed now, the connection stays usable — the cached
+ *     credential may still be valid; the sidecar treats it as retry-later and
+ *     the listener's `refreshOnUnauthorized` cooldown keeps a flapping upstream
+ *     from hammering this endpoint.
+ *   Both carry the `CredentialFailureCause` as the `cause` extension member.
  *   - 503 `encryption_key_unavailable`: a stored credential or client secret
  *     it needs is under a key id the keyring lacks — operator config, NOT flagged.
  */
@@ -183,21 +181,22 @@ export async function resolveLiveIntegrationCredentials(
 
   // Terminally unusable, and already flagged by whoever concluded it: surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
-  const throwTerminal = (reason: string, detail?: string): never => {
+  const throwTerminal = (cause: CredentialFailureCause, detail?: string): never => {
     logger.warn("Integration credential terminally unusable — flagged needsReconnection", {
       runId: context.runId,
       integrationId,
       authKey,
       connectionId: connection.id,
       trigger: trigger.kind,
-      reason,
+      cause,
       detail,
     });
     throw gone(
-      "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-      `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
-        `the connection has been flagged as needing re-connection. Re-connect ` +
-        `'${integrationId}' and relaunch the run.`,
+      "integration_connection_needs_reconnection",
+      `Integration '${integrationId}' auth '${authKey}' is unusable ` +
+        `(${CREDENTIAL_FAILURE_SENTENCES[cause]}) — the connection has been flagged as needing ` +
+        `re-connection. Re-connect '${integrationId}' and relaunch the run.`,
+      { cause },
     );
   };
 
@@ -212,7 +211,7 @@ export async function resolveLiveIntegrationCredentials(
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
     await markIntegrationConnectionNeedsReconnection(connection.id);
-    return throwTerminal("stored credentials could not be decrypted");
+    return throwTerminal("credentials_undecryptable");
   }
 
   let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
@@ -229,26 +228,35 @@ export async function resolveLiveIntegrationCredentials(
   });
   switch (outcome.status) {
     case "dead":
-      return throwTerminal(outcome.reason, outcome.detail);
-    case "retry":
+      return throwTerminal(outcome.cause, outcome.detail);
+    case "retry": {
       // The cached credential may still be usable: 502 lets the sidecar's
       // `refreshOnUnauthorized` cooldown back off without poisoning the row.
+      const { cause, detail, rejections } = outcome;
       logger.warn("Integration credential not refreshed — retry later", {
         runId: context.runId,
         integrationId,
         authKey,
         connectionId: connection.id,
-        reason: outcome.reason,
-        detail: outcome.detail,
+        cause,
+        detail,
       });
-      throw badGateway(`Integration '${integrationId}' auth '${authKey}' ${outcome.reason}`);
+      const streak = rejections
+        ? ` (${rejections.failures}/${rejections.maxFailures} consecutive upstream rejections before it is flagged)`
+        : "";
+      throw badGateway(
+        `Integration '${integrationId}' auth '${authKey}' was not refreshed: ` +
+          `${CREDENTIAL_FAILURE_SENTENCES[cause]}${streak}`,
+        { cause },
+      );
+    }
     case "kept":
       logger.debug("Integration credential not refreshed — serving the stored one", {
         runId: context.runId,
         integrationId,
         authKey,
         connectionId: connection.id,
-        reason: outcome.reason,
+        cause: outcome.cause,
         detail: outcome.detail,
       });
       break;

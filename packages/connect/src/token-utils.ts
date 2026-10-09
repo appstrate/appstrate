@@ -64,16 +64,23 @@ export interface ParsedTokenResponse {
  * error object (some IdPs answer `200 {"error":"invalid_grant"}`).
  *
  * A dead authorization code or refresh token is signaled by
- * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). Any other failure (network,
- * 5xx, non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
- * `access_token` nor `error`) is treated as transient because the credential
- * might still be valid.
+ * `{ "error": "invalid_grant" }` (RFC 6749 §5.2), a client the server refuses
+ * by `invalid_client` / `unauthorized_client` (`"client_rejected"`). Any other
+ * failure (network, 5xx, non-JSON body, other 4xx, other OAuth error codes, a
+ * 2xx with neither `access_token` nor `error`) is treated as transient because
+ * the credential might still be valid.
  *
  * Both the initial token exchange (token-exchange.ts) and the refresh flow
  * (token-refresh.ts) read the response through {@link readTokenResponse} so
  * that revocation handling stays symmetric.
  */
-export type TokenErrorKind = "revoked" | "transient";
+export type TokenErrorKind = "revoked" | "client_rejected" | "transient";
+
+/** RFC 6749 §5.2 codes that blame the client registration, never the grant. */
+const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_client",
+  "unauthorized_client",
+]);
 
 interface TokenErrorClassification {
   kind: TokenErrorKind;
@@ -109,12 +116,12 @@ function redactErrorDescription(description: string): string {
  *
  * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
  * refresh token, where retrying is pointless and the stored PKCE state should
- * be dropped. Every other code (`invalid_client`, provider-specific ones such
- * as GitHub's `bad_refresh_token`) and a body with no string `error` stay
- * `"transient"`: an ambiguous signal never declares a credential dead.
- * `invalid_client` in particular leaves the grant untouched — it is the client
- * credentials that are wrong, and an operator fixing the registration makes
- * the same attempt work.
+ * be dropped. `invalid_client` and `unauthorized_client` map to
+ * `"client_rejected"`: the grant is untouched, the client registration is
+ * wrong, and only an operator fixing it makes the same attempt work. Every
+ * other code (provider-specific ones such as GitHub's `bad_refresh_token`) and
+ * a body with no string `error` stay `"transient"`: an ambiguous signal never
+ * declares a credential dead.
  *
  * `error_description` is redacted here, at the source, so every consumer that
  * folds it into `Error.message` gets the sanitized value.
@@ -129,7 +136,13 @@ export function classifyTokenErrorBody(body: unknown): TokenErrorClassification 
     typeof parsed.error_description === "string"
       ? redactErrorDescription(parsed.error_description)
       : undefined;
-  return { kind: error === "invalid_grant" ? "revoked" : "transient", error, errorDescription };
+  const kind: TokenErrorKind =
+    error === "invalid_grant"
+      ? "revoked"
+      : error !== undefined && CLIENT_REJECTED_ERRORS.has(error)
+        ? "client_rejected"
+        : "transient";
+  return { kind, error, errorDescription };
 }
 
 /**
@@ -292,11 +305,9 @@ export function parseTokenResponse(
  * A client-authentication pair that cannot be correct — thrown by
  * {@link assertClientAuthCoherent}.
  *
- * A distinct type because the refresh path classifies anything that is not a
- * `RefreshError` as a transient upstream failure and counts it toward the
- * streak that eventually flags a connection `needs_reconnection`. A
- * configuration/programming fault must not spend a user's connection health
- * budget, and must not read in the logs like someone else's outage.
+ * A distinct type so a configuration/programming fault never reads like an
+ * upstream failure: the refresh path counts only a `RefreshError` toward the
+ * streak that flags a connection `needs_reconnection`, and rethrows this one.
  */
 export class ClientAuthInvariantError extends Error {
   constructor(message: string) {

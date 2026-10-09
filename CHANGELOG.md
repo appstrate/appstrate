@@ -257,6 +257,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The `integration_dropped` run log is `warn`** unless a layer chose no
   connection (`info`), and names the code; the agent prompt's reason for a
   switched-off integration reads "it is switched off" (#1849).
+- **Credential refresh failures speak one vocabulary** (#1853; sidecar
+  protocol: the platform and the images ship together). The
+  integration-credentials `410` code `INTEGRATION_CONNECTION_NEEDS_RECONNECTION`
+  becomes `integration_connection_needs_reconnection`; the OAuth model-token
+  codes `OAUTH_REFRESH_REVOKED`, `OAUTH_REFRESH_TOKEN_MISSING` and
+  `OAUTH_CONNECTION_NEEDS_RECONNECTION` become one
+  `oauth_connection_needs_reconnection`; every `410`/`502` carries a `cause`.
+  The sidecar reads only the status.
+- **A failed model-token refresh answers `502`** with a `cause` (was `500`)
+  (#1853).
 - **Every `appstrate` command ends through one handler** (#1858): it sets the
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.
@@ -323,6 +333,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refreshes, or counts a rejection against, a credential replaced during the
   call** (#1847): a refresh by a peer, a reconnect or an API-key rotation. It
   replays the call once with the connection's current credential.
+- **The model refresh worker no longer logs a missing refresh token as a
+  failure** (#1853).
+- **`invalid_client` / `unauthorized_client` on a token refresh no longer
+  counts toward the failure streak** (#1853), so a broken client registration
+  no longer ends with the connection flagged for reconnection: it answers
+  `502` with cause `oauth_client_rejected`, and the connect popup names it.
 
 ### Security
 

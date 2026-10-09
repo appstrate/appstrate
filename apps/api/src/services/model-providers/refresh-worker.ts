@@ -42,6 +42,7 @@ import { inArray, and, lte, asc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
+import type { Logger } from "@appstrate/core/logger";
 import { createQueue, type JobQueue, type QueueJob } from "../../infra/queue/index.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError } from "../../lib/errors.ts";
@@ -179,40 +180,40 @@ async function handleScanJob(_job: QueueJob<ScanJobData>): Promise<void> {
   }
 }
 
-async function handleRefreshJob(job: QueueJob<RefreshJobData>): Promise<void> {
+/**
+ * Refresh one credential and log the verdict. A 410 is the resolver's own conclusion — the
+ * credential is flagged, by this refresh or before it — so it warns; anything else failed.
+ * `log` is injectable for tests.
+ */
+export async function handleRefreshJob(
+  job: Pick<QueueJob<RefreshJobData>, "data">,
+  log: Logger = logger,
+): Promise<void> {
   const { credentialId, providerId } = job.data;
   const startedAt = Date.now();
   try {
     await forceRefreshOAuthModelProviderToken(credentialId);
-    logger.info("oauth_model_refresh_ok", {
+    log.info("oauth_model_refresh_ok", {
       credentialId,
       providerId,
       durationMs: Date.now() - startedAt,
     });
   } catch (err) {
-    if (err instanceof ApiError && err.code === "OAUTH_REFRESH_REVOKED") {
-      // token-resolver already flipped needsReconnection=true.
-      logger.warn("oauth_model_refresh_revoked", {
-        credentialId,
-        providerId,
-        durationMs: Date.now() - startedAt,
-      });
+    const cause = err instanceof ApiError ? err.extensions?.cause : undefined;
+    if (err instanceof ApiError && err.status === 410) {
+      log.warn(
+        cause === "connection_flagged"
+          ? "oauth_model_refresh_skipped_already_flagged"
+          : "oauth_model_refresh_needs_reconnection",
+        { credentialId, providerId, cause, durationMs: Date.now() - startedAt },
+      );
       return;
     }
-    if (err instanceof ApiError && err.code === "OAUTH_CONNECTION_NEEDS_RECONNECTION") {
-      logger.warn("oauth_model_refresh_skipped_already_flagged", {
-        credentialId,
-        providerId,
-      });
-      return;
-    }
-    // Transient failure — `doRefresh` (token-resolver) has already recorded
-    // it via `recordModelCredentialRefreshFailure`, which escalates to
-    // `needsReconnection` once the streak crosses the threshold AND the token
-    // is expired past the grace window. Nothing more to do here than log.
-    logger.error("oauth_model_refresh_failed", {
+    // Already recorded by the resolver, whose streak escalates to `needsReconnection`.
+    log.error("oauth_model_refresh_failed", {
       credentialId,
       providerId,
+      cause,
       error: getErrorMessage(err),
       durationMs: Date.now() - startedAt,
     });

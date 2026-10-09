@@ -273,14 +273,13 @@ describe("resolveLiveIntegrationCredentials", () => {
     // RFC 6749 §5.2 revocation.
     token.setResponse({ error: "invalid_grant", error_description: "token revoked" }, 400);
 
-    let status: number | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-    }
-    expect(status).toBe(410);
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({
+      status: 410,
+      code: "integration_connection_needs_reconnection",
+      extensions: { cause: "refresh_token_revoked" },
+    });
     expect(await needsReconnection(connId)).toBe(true);
   });
 
@@ -288,14 +287,9 @@ describe("resolveLiveIntegrationCredentials", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "temporarily_unavailable" }, 500);
 
-    let status: number | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-    }
-    expect(status).toBe(502);
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({ status: 502, extensions: { cause: "upstream_transient" } });
     expect(await needsReconnection(connId)).toBe(false);
   });
 
@@ -317,7 +311,10 @@ describe("resolveLiveIntegrationCredentials", () => {
       resolverContext(connId),
       REJECTED,
     );
-    await expect(refused).rejects.toMatchObject({ status: 410 });
+    await expect(refused).rejects.toMatchObject({
+      status: 410,
+      extensions: { cause: "refresh_failures_exhausted" },
+    });
     expect(await needsReconnection(connId)).toBe(true);
   });
 
@@ -678,7 +675,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     );
     // The count restarts from the reconnect, and the 502 says so.
     const afterReconnect = await forced();
-    expect(afterReconnect?.status).toBe(502);
+    expect(afterReconnect).toMatchObject({ status: 502, extensions: { cause: "unrefreshable" } });
     expect(afterReconnect?.message).toContain(
       `1/${max} consecutive upstream rejections before it is flagged`,
     );
@@ -740,7 +737,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       const { connId, forced } = await apiKeyConnection();
       const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
       for (let run = 1; run < max; run++) expect((await forced())?.status).toBe(502);
-      expect((await forced())?.status).toBe(410);
+      expect(await forced()).toMatchObject({ status: 410, extensions: { cause: "unrefreshable" } });
       expect(await needsReconnection(connId)).toBe(true);
     });
 
@@ -901,19 +898,11 @@ describe("resolveLiveIntegrationCredentials", () => {
     // the missing refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    let status: number | undefined;
-    let message: string | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-      message = (err as Error).message;
-    }
-    expect(status).toBe(410);
-    // Named for what it is — not "refresh token revoked", which would send an
-    // operator hunting upstream for a revocation that never happened.
-    expect(message).toContain("no stored refresh_token");
+    // Named for what it is — not a revocation, which would send an operator
+    // hunting upstream for one that never happened.
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({ status: 410, extensions: { cause: "refresh_token_missing" } });
     expect(await needsReconnection(connId)).toBe(true);
   });
 
@@ -945,13 +934,10 @@ describe("resolveLiveIntegrationCredentials", () => {
         .where(eq(packages.id, INTEGRATION_ID));
       const connId = await seedConnection({ userId: ctx.user.id });
 
-      let status: number | undefined;
-      try {
-        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
-      } catch (err) {
-        status = (err as { status?: number }).status;
-      }
-      expect(status).toBe(502); // transient — NOT 410
+      // transient — NOT 410
+      await expect(
+        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+      ).rejects.toMatchObject({ status: 502, extensions: { cause: "discovery_transient" } });
       expect(await needsReconnection(connId)).toBe(false); // row untouched
     } finally {
       failing.stop();

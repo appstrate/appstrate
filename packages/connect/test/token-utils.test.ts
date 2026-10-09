@@ -93,10 +93,16 @@ describe("parseTokenErrorResponse", () => {
     expect(result.errorDescription).toBe("Token has been revoked");
   });
 
-  it("classifies HTTP 400 + other OAuth error codes as 'transient'", () => {
+  it("classifies HTTP 400 + invalid_client as 'client_rejected'", () => {
     const result = parseTokenErrorResponse(400, JSON.stringify({ error: "invalid_client" }));
-    expect(result.kind).toBe("transient");
+    expect(result.kind).toBe("client_rejected");
     expect(result.error).toBe("invalid_client");
+  });
+
+  it("classifies HTTP 400 + other OAuth error codes as 'transient'", () => {
+    const result = parseTokenErrorResponse(400, JSON.stringify({ error: "invalid_scope" }));
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBe("invalid_scope");
   });
 
   it("classifies HTTP 400 + non-JSON body as 'transient'", () => {
@@ -127,7 +133,7 @@ describe("parseTokenErrorResponse", () => {
         error_description: "Client authentication failed",
       }),
     );
-    expect(result.kind).toBe("transient");
+    expect(result.kind).toBe("client_rejected");
     expect(result.error).toBe("invalid_client");
     expect(result.errorDescription).toBe("Client authentication failed");
   });
@@ -156,12 +162,14 @@ describe("parseTokenErrorResponse", () => {
 });
 
 describe("classifyTokenErrorBody", () => {
-  it("classifies invalid_grant as 'revoked'", () => {
-    expect(classifyTokenErrorBody({ error: "invalid_grant" })).toEqual({
-      kind: "revoked",
-      error: "invalid_grant",
-      errorDescription: undefined,
-    });
+  it.each([
+    ["invalid_grant", "revoked"],
+    ["invalid_client", "client_rejected"],
+    ["unauthorized_client", "client_rejected"],
+    ["invalid_request", "transient"],
+    ["temporarily_unavailable", "transient"],
+  ])("classifies %s as '%s'", (error, kind) => {
+    expect(classifyTokenErrorBody({ error })).toEqual({ kind, error, errorDescription: undefined });
   });
 
   // No provider-specific list: only the standard code declares a credential dead.

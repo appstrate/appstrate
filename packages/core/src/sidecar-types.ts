@@ -730,6 +730,38 @@ export interface OAuthTokenResponse {
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
 
 /**
+ * Why the platform did not hand back a refreshed credential — an integration connection's
+ * or an OAuth model provider credential's. Carried as the `cause` extension member (RFC 9457
+ * §3.2) of the 410 that means "reconnect" and of the 502 that means "retry later".
+ *
+ * - `connection_flagged`: the connection is already flagged as needing re-connection.
+ * - `refresh_token_revoked`: the token endpoint answered `invalid_grant` (RFC 6749 §5.2).
+ * - `refresh_token_missing`: no refresh token is stored, so nothing can refresh.
+ * - `refresh_failures_exhausted`: transient failures reached the threshold on an expired token.
+ * - `unrefreshable`: the auth cannot be refreshed (not OAuth2, no client or token endpoint).
+ * - `credentials_undecryptable`: the stored credentials cannot be decrypted.
+ * - `upstream_transient`: network error, upstream 5xx, unreadable response.
+ * - `discovery_transient`: the token endpoint could not be discovered.
+ * - `connection_changed`: the connection was reconnected or changed during the refresh.
+ * - `oauth_client_rejected`: the token endpoint rejected the OAuth client itself
+ *   (`invalid_client` / `unauthorized_client`): a reconnect cannot fix the registration.
+ */
+export const CREDENTIAL_FAILURE_CAUSES = [
+  "connection_flagged",
+  "refresh_token_revoked",
+  "refresh_token_missing",
+  "refresh_failures_exhausted",
+  "unrefreshable",
+  "credentials_undecryptable",
+  "upstream_transient",
+  "discovery_transient",
+  "connection_changed",
+  "oauth_client_rejected",
+] as const;
+
+export type CredentialFailureCause = (typeof CREDENTIAL_FAILURE_CAUSES)[number];
+
+/**
  * Prefix the sidecar's connect-login puts on the ONE error class written for
  * the person logging in: an `isError: true` CallToolResult from the
  * integration's own login tool ("wrong password", "MFA required", "captcha").

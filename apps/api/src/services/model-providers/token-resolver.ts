@@ -29,10 +29,29 @@ import {
   type OAuthToken,
 } from "./credentials.ts";
 import { getEnv } from "@appstrate/env";
-import { gone, notFound } from "../../lib/errors.ts";
+import { badGateway, gone, notFound, type ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { dedupedRefresh } from "../../lib/deduped-refresh.ts";
-import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
+import { OAUTH_REFRESH_LEAD_MS, type CredentialFailureCause } from "@appstrate/core/sidecar-types";
+
+/** 410: the credential is flagged `needsReconnection`; the sidecar answers the agent a 401. */
+function needsReconnection(credentialId: string, cause: CredentialFailureCause): ApiError {
+  return gone(
+    "oauth_connection_needs_reconnection",
+    `OAuth credential ${credentialId} needs reconnection: ${CREDENTIAL_FAILURE_SENTENCES[cause]}`,
+    { cause },
+  );
+}
+
+/** 502: not refreshed now, the credential stays usable. `err.message` never holds the IdP body. */
+function notRefreshed(credentialId: string, cause: CredentialFailureCause, err: Error): ApiError {
+  return badGateway(
+    `OAuth credential ${credentialId} was not refreshed: ` +
+      `${CREDENTIAL_FAILURE_SENTENCES[cause]} (${err.message})`,
+    { cause },
+  );
+}
 
 /** Credential row + decrypted blob + registry overlay. Internal helper return shape. */
 interface CredentialState {
@@ -102,8 +121,8 @@ function buildResolvedToken(state: CredentialState): OAuthToken {
  * `expectedOrgId` is forwarded to {@link loadCredentialState} as
  * defense-in-depth — see that function's comment.
  *
- * Throws `gone(needsReconnection: true)` when the credential is flagged as
- * needing reconnection — sidecar surfaces this as 401 to the agent.
+ * Throws the 410 `oauth_connection_needs_reconnection` when the credential is
+ * flagged as needing reconnection — sidecar surfaces this as 401 to the agent.
  */
 export async function resolveOAuthTokenForSidecar(
   credentialId: string,
@@ -111,10 +130,7 @@ export async function resolveOAuthTokenForSidecar(
 ): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
-    throw gone(
-      "OAUTH_CONNECTION_NEEDS_RECONNECTION",
-      `OAuth credential ${credentialId} needs reconnection`,
-    );
+    throw needsReconnection(credentialId, "connection_flagged");
   }
 
   const expiresInMs = state.blob.expiresAt ? state.blob.expiresAt - Date.now() : 0;
@@ -151,7 +167,8 @@ export async function resolveOAuthTokenForSidecar(
  * in-process singleflight is sufficient and the lock is skipped.
  *
  * On `invalid_grant` (refresh token revoked), flips `needsReconnection=true`
- * on the row and throws `gone()`.
+ * on the row and throws the 410; a failure that leaves it usable throws a 502.
+ * Both carry the `CredentialFailureCause` as the `cause` extension member.
  *
  * `options.force` defaults to TRUE — "regardless of expiry" is the contract
  * this function's name promises, and the sidecar calls it precisely because it
@@ -178,10 +195,7 @@ export async function forceRefreshOAuthModelProviderToken(
     reReadFreshness: async ({ force }) => {
       const state = await loadCredentialState(credentialId, expectedOrgId);
       if (state.blob.needsReconnection) {
-        throw gone(
-          "OAUTH_CONNECTION_NEEDS_RECONNECTION",
-          `OAuth credential ${credentialId} needs reconnection`,
-        );
+        throw needsReconnection(credentialId, "connection_flagged");
       }
       // Forced: the caller has upstream evidence this token is dead, so an
       // unexpired `expiresAt` must not send it back down to the sidecar.
@@ -198,17 +212,11 @@ export async function forceRefreshOAuthModelProviderToken(
 async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
   if (state.blob.needsReconnection) {
-    throw gone(
-      "OAUTH_CONNECTION_NEEDS_RECONNECTION",
-      `OAuth credential ${credentialId} needs reconnection`,
-    );
+    throw needsReconnection(credentialId, "connection_flagged");
   }
   if (!state.blob.refreshToken) {
     await markCredentialNeedsReconnection(state.orgId, credentialId);
-    throw gone(
-      "OAUTH_REFRESH_TOKEN_MISSING",
-      `OAuth credential ${credentialId} has no refresh_token — cannot refresh`,
-    );
+    throw needsReconnection(credentialId, "refresh_token_missing");
   }
 
   // Model providers (Anthropic/OpenAI) are public OAuth clients — the RFC 7591
@@ -230,34 +238,33 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
       { label: `Token refresh for '${state.config.providerId}' (${credentialId})` },
     ));
   } catch (err) {
-    // Flip needsReconnection + surface `gone(OAUTH_REFRESH_REVOKED)` on a
-    // revoked refresh token; transient failures rethrow as a generic Error.
-    if (err instanceof RefreshError && err.kind === "revoked") {
-      await markCredentialNeedsReconnection(state.orgId, credentialId);
-      // `err.message` carries only the classified error summary; the raw IdP
-      // body (`err.body`) may echo tokens and never goes into a message.
-      throw gone("OAUTH_REFRESH_REVOKED", `OAuth refresh revoked: ${err.message}`);
+    if (!(err instanceof RefreshError)) throw err;
+    switch (err.kind) {
+      case "revoked":
+        await markCredentialNeedsReconnection(state.orgId, credentialId);
+        throw needsReconnection(credentialId, "refresh_token_revoked");
+      case "client_rejected":
+        // A broken client registration: a reconnect cannot fix it, so it is never counted.
+        logger.error("oauth model provider: token endpoint rejected the OAuth client", {
+          credentialId,
+          providerId: state.config.providerId,
+          error: err.message,
+        });
+        throw notRefreshed(credentialId, "oauth_client_rejected", err);
+      case "transient": {
+        // Not terminal — the cached token may still be valid. The streak escalates to
+        // needsReconnection only past the threshold on a token expired past the grace window: the
+        // same platform-wide policy as integrations (#596).
+        const env = getEnv();
+        await recordModelCredentialRefreshFailure(
+          state.orgId,
+          credentialId,
+          env.INTEGRATION_REFRESH_MAX_FAILURES,
+          env.INTEGRATION_REFRESH_GRACE_SECONDS,
+        );
+        throw notRefreshed(credentialId, "upstream_transient", err);
+      }
     }
-    // Transient failure (network / 5xx / parse). A single transient error is
-    // NOT terminal — the cached token may still be valid. But a token that is
-    // already expired AND keeps failing refresh is silently dead while the
-    // row still looks healthy (same failure mode as the Gmail integration
-    // scheduled-run incident, #596). Record the failure;
-    // `recordModelCredentialRefreshFailure` escalates to needsReconnection
-    // only once the streak crosses the threshold AND the token is expired
-    // past the grace window, so a transient upstream blip on a still-valid
-    // token never bricks the credential. Same knobs as integrations — one
-    // platform-wide policy for "how dead does an OAuth credential have to be".
-    const env = getEnv();
-    await recordModelCredentialRefreshFailure(
-      state.orgId,
-      credentialId,
-      env.INTEGRATION_REFRESH_MAX_FAILURES,
-      env.INTEGRATION_REFRESH_GRACE_SECONDS,
-    );
-    throw err instanceof Error
-      ? err
-      : new Error(`Token refresh failed for '${state.config.providerId}': ${String(err)}`);
   }
 
   // Re-extract identity from the freshly-issued access token. Providers

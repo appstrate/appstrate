@@ -321,12 +321,17 @@ export function conflict(
   });
 }
 
-export function gone(code: string, detail: string): ApiError {
+export function gone(
+  code: string,
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 410,
     code,
     title: "Gone",
     detail,
+    extensions,
   });
 }
 
@@ -410,12 +415,16 @@ export function internalError(): ApiError {
   });
 }
 
-export function badGateway(detail: string): ApiError {
+export function badGateway(
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 502,
     code: "bad_gateway",
     title: "Bad Gateway",
     detail,
+    extensions,
   });
 }
 
