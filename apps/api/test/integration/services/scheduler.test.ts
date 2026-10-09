@@ -1331,7 +1331,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
         spaceId: scope.spaceId,
         governs: false,
         boundSpaceId: null,
-        governsIn: async () => false,
+        permissionsIn: async () => new Set(),
       },
       sharedSpaceIds: [],
     });

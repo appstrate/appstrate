@@ -35,7 +35,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 const INTEGRATION = "@offers/svc";
 const ACTOR: Actor = { type: "user", id: "user-1" };
 const SCOPE = { orgId: "org-1", spaceId: "spc_1" };
-const CONNECT: ConnectOfferPolicy = { canConnect: true, canConfigure: false };
+const CONNECT: ConnectOfferPolicy = { canConnect: true, canConfigure: false, delegated: false };
 
 function authManifest(type: string): IntegrationManifest {
   return {
@@ -187,7 +187,7 @@ describe("attachConnectOffers", () => {
       errors,
       scope: SCOPE,
       actor: ACTOR,
-      policy: { canConnect: false, canConfigure: false },
+      policy: { canConnect: false, canConfigure: false, delegated: false },
       manifestCache: cache,
     });
     expect(out).toEqual(errors);

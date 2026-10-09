@@ -667,6 +667,7 @@ async function beginHostedOAuth(
       {
         ...ctx,
         ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
         ...(variables ? { variables } : {}),
       },
       { scopes, forceAccountSelect: claims.force_account_select ?? false },
@@ -827,6 +828,7 @@ export function createIntegrationsRouter() {
         integrationId: result.packageId,
         authKey: result.authKey,
         ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        ...(result.delegated ? { delegated: true } : {}),
         ...(result.variables ? { variables: result.variables } : {}),
       };
       const { audit } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
@@ -932,13 +934,14 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, importConnectionSchema);
       // A reconnect target must be the caller's own connection in this space —
       // otherwise the credential write below would overwrite an arbitrary
       // (possibly another actor's) connection (IDOR).
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -966,6 +969,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -993,12 +997,13 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // carried into the OAuth state and honored at callback-time write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -1027,6 +1032,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1053,12 +1059,13 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // minted into the hosted-connect capability token and honored at write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -1072,6 +1079,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
@@ -1282,6 +1290,7 @@ export function createIntegrationsRouter() {
         integrationId: claims.package_id,
         authKey: claims.auth_key,
         ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
       };
       const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1526,7 +1535,7 @@ function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
 export async function applyConnectionUpdate(
   c: Context<AppEnv>,
   orgId: string,
-  viewer: Omit<ConnectionViewer, "governsIn">,
+  viewer: Omit<ConnectionViewer, "permissionsIn">,
   connectionId: string,
   body: z.infer<typeof updateConnectionSchema>,
 ): Promise<IntegrationConnection> {
@@ -1534,8 +1543,7 @@ export async function applyConnectionUpdate(
     connectionId,
     viewer: {
       ...viewer,
-      governsIn: async (spaceId) =>
-        (await callerPermissionsInSpace(c, spaceId, orgId)).has("integrations:configure"),
+      permissionsIn: (spaceId) => callerPermissionsInSpace(c, spaceId, orgId),
     },
     ...(body.label !== undefined ? { label: body.label } : {}),
     ...(body.shared_space_ids !== undefined ? { sharedSpaceIds: body.shared_space_ids } : {}),

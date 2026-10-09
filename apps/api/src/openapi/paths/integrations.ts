@@ -184,7 +184,7 @@ export const connectionScopeSchema = {
   type: "string",
   enum: ["org", "space"],
   description:
-    "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org that registers no manual OAuth client of its own for that auth (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.",
+    "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.",
 } as const;
 
 /** The projection every non-owner reads: the current space only, and only when shared into it. */
@@ -638,10 +638,10 @@ export const connectionUpdateDescription =
   "in the space the request is made from) may rename a space-scoped connection of that space, and withdraw " +
   "any connection from that space by sending the projection it reads without it (`[]`); nothing else. " +
   "A connection may be shared into a space of its org it serves: an org-scoped one into any space but one " +
-  "with its own OAuth client for the integration (unless connected from there), a space-scoped one only into " +
-  "its own space. Every target space must still be reached by the owning member, and one that blocks user " +
-  "connections for the integration takes a sharer holding `integrations:configure` there (403 " +
-  "`connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
+  "whose default OAuth client for the integration is its own (unless connected from there), a space-scoped " +
+  "one only into its own space. Every target space must still be reached by the owning member, an added one " +
+  "takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the " +
+  "integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
   "and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay " +
   "untouched, and it renames only a connection scoped to it. Sharing an end user's connection " +
   "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
@@ -688,7 +688,7 @@ export const connectionUpdateRequestBody = {
 } as const;
 
 export const connectionUpdateRefusals400 =
-  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space with its own OAuth client for an org-scoped one (`invalid_share_target`).";
+  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`).";
 
 export const connectionUpdateConflicts = {
   description:
@@ -1417,7 +1417,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and org-scoped ones unless the space registers a manual OAuth client for their auth, except in the space they were connected from), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and org-scoped ones unless the space's default OAuth client for their auth is a manual one of its own, except in the space they were connected from), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

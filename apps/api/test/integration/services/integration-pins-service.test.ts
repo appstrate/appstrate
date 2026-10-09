@@ -39,6 +39,7 @@ import {
   schedules,
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
+import type { Permission } from "../../../src/lib/permissions.ts";
 import {
   validatePinTargets,
   listAccessibleConnections,
@@ -104,6 +105,12 @@ async function sharesOf(id: string): Promise<string[]> {
   return row!.sharedSpaceIds;
 }
 
+const CONNECT: ReadonlySet<Permission> = new Set<Permission>(["integrations:connect"]);
+const GOVERN: ReadonlySet<Permission> = new Set<Permission>([
+  "integrations:connect",
+  "integrations:configure",
+]);
+
 describe("integration-pins-service — DB access/ownership", () => {
   let ctx: TestContext;
   let scope: SpaceScope;
@@ -130,7 +137,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     spaceId: scope.spaceId,
     governs,
     boundSpaceId: null,
-    governsIn: async () => false,
+    permissionsIn: async () => CONNECT,
   });
   const authority = () => ({ kind: "bound" as const, orgId: scope.orgId, spaceId: scope.spaceId });
 
@@ -1066,7 +1073,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           spaceId,
           governs: false,
           boundSpaceId: null,
-          governsIn: async () => false,
+          permissionsIn: async () => CONNECT,
         },
         sharedSpaceIds,
       });
@@ -1129,9 +1136,9 @@ describe("integration-pins-service — DB access/ownership", () => {
       const governor: ConnectionViewer = {
         ...viewer(memberId),
         spaceId: null,
-        governsIn: async (spaceId) => {
+        permissionsIn: async (spaceId) => {
           asked.push(spaceId);
-          return spaceId === other;
+          return spaceId === other ? GOVERN : CONNECT;
         },
       };
       const update = await updateConnection({
@@ -1140,8 +1147,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         sharedSpaceIds: [other, scope.spaceId],
       });
       expect([...update.added].sort()).toEqual([other, scope.spaceId].sort());
-      // Only a blocked target is asked about.
-      expect(asked).toEqual([other]);
+      expect(asked.toSorted()).toEqual([other, scope.spaceId].toSorted());
       // Keeping a share there does not: only an addition is judged.
       const kept = await ownerEdit(id, [other]);
       expect(kept.added).toEqual([]);
@@ -1162,6 +1168,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         authKey: "google",
         clientId: "byo-app",
         clientSecretEncrypted: "x",
+        isDefault: true,
       });
       const update = await updateConnection({
         connectionId: id,
@@ -1172,7 +1179,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(await sharesOf(id)).toEqual([]);
     });
 
-    it("refuses a target the row does not serve: one with its own OAuth client, unless made there (400)", async () => {
+    it("refuses a target the row does not serve: one defaulting to its own OAuth client, unless made there (400)", async () => {
       await db.insert(integrationOauthClients).values({
         orgId: ctx.orgId,
         spaceId: other,
@@ -1180,6 +1187,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         authKey: "google",
         clientId: "byo-app",
         clientSecretEncrypted: "x",
+        isDefault: true,
       });
       const madeHere = await seedConnection({
         spaceId: scope.spaceId,
@@ -1196,8 +1204,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("refuses a target deleted after the edit was read, under the lock (400)", async () => {
       const doomed = (await seedSpace({ orgId: ctx.orgId, name: "Doomed" })).id;
-      // Blocked, so the edit asks about it before its transaction: the space goes in between.
-      await seedPlacedPackage(doomed, INTEGRATION, { blockUserConnections: true });
+      // The edit asks about it before its transaction: the space goes in between.
       const id = await seedConnection({ spaceId: scope.spaceId, orgScope: true, userId: memberId });
       await expect(
         updateConnection({
@@ -1205,9 +1212,9 @@ describe("integration-pins-service — DB access/ownership", () => {
           viewer: {
             ...viewer(memberId),
             spaceId: null,
-            governsIn: async (spaceId) => {
+            permissionsIn: async (spaceId) => {
               await deleteSpace(ctx.orgId, spaceId);
-              return true;
+              return GOVERN;
             },
           },
           sharedSpaceIds: [doomed],

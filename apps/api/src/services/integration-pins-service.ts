@@ -47,6 +47,7 @@ import {
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
+import type { Permission } from "../lib/permissions.ts";
 import { actorFilter, actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
@@ -483,8 +484,8 @@ export interface ConnectionViewer {
   governs: boolean;
   /** The space a delegated credential is bound to, confining its edits to that space; `null`: none. */
   boundSpaceId: string | null;
-  /** Holds `integrations:configure` in `spaceId` — asked of a target blocking user connections. */
-  governsIn: (spaceId: string) => Promise<boolean>;
+  /** The viewer's permissions in `spaceId` — asked of each share target. */
+  permissionsIn: (spaceId: string) => Promise<ReadonlySet<Permission>>;
 }
 
 interface UpdateConnectionInput {
@@ -529,13 +530,27 @@ export async function updateConnection(input: UpdateConnectionInput): Promise<Co
   const isOwner = actorOwns(viewer.actor, read);
   const targets = input.sharedSpaceIds && [...new Set(input.sharedSpaceIds)];
   // Roles resolve outside the transaction; only a target this edit ADDS is refused (under the lock).
-  const ungoverned = new Set<string>();
+  const refusals = new Map<string, ApiError>();
   for (const spaceId of isOwner && targets ? targets : []) {
-    if (
-      (await isUserConnectionCreationBlocked(spaceId, read.integrationId)) &&
-      !(await viewer.governsIn(spaceId))
+    const permissions = await viewer.permissionsIn(spaceId);
+    if (!permissions.has("integrations:connect")) {
+      refusals.set(
+        spaceId,
+        forbidden(`Sharing into space '${spaceId}' requires integrations:connect there`),
+      );
+    } else if (
+      !permissions.has("integrations:configure") &&
+      (await isUserConnectionCreationBlocked(spaceId, read.integrationId))
     ) {
-      ungoverned.add(spaceId);
+      refusals.set(
+        spaceId,
+        new ApiError({
+          status: 403,
+          code: "connection_blocked_by_admin",
+          title: "Connection Blocked by Admin",
+          detail: `Personal connections to '${read.integrationId}' are disabled in space '${spaceId}': only a principal with integrations:configure there may share one into it.`,
+        }),
+      );
     }
   }
 
@@ -577,15 +592,8 @@ export async function updateConnection(input: UpdateConnectionInput): Promise<Co
               : targets;
       const added = next.filter((id) => !current.includes(id));
       const removed = current.filter((id) => !next.includes(id));
-      const blockedAdd = added.find((id) => ungoverned.has(id));
-      if (blockedAdd) {
-        throw new ApiError({
-          status: 403,
-          code: "connection_blocked_by_admin",
-          title: "Connection Blocked by Admin",
-          detail: `Personal connections to '${row.integrationId}' are disabled in space '${blockedAdd}': only a principal with integrations:configure there may share one into it.`,
-        });
-      }
+      const refused = added.find((id) => refusals.has(id));
+      if (refused) throw refusals.get(refused)!;
       for (const spaceId of added) {
         const [serves] = await tx
           .select({ id: c.id })
@@ -593,7 +601,7 @@ export async function updateConnection(input: UpdateConnectionInput): Promise<Co
           .where(and(eq(c.id, connectionId), connectionInSpace(spaceId)));
         if (!serves) {
           throw invalidShareTarget(
-            `This connection cannot serve space '${spaceId}': it is confined to its own space, or that space has its own OAuth client for this integration`,
+            `This connection cannot serve space '${spaceId}': it is confined to its own space, or that space's default OAuth client for this integration is its own`,
           );
         }
       }

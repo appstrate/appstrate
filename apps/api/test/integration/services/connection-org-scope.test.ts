@@ -2,8 +2,8 @@
 
 /**
  * #1870 — a connection's scope is its minting client's tier. An org-scope row (system or org
- * client, or no client) serves every space of its org, except a space with its own MANUAL OAuth
- * client for its auth, unless the row was connected from there. A space-scoped row serves its
+ * client, or no client) serves every space of its org, except a space whose default OAuth client
+ * for its auth is its own MANUAL one, unless the row was connected from there. A space-scoped row serves its
  * space only. Within that reach an actor uses their own rows and the rows shared into the space;
  * `block_user_connections` narrows their own to the shared ones and those made in the space. The
  * picker, the pins, the resolver and the credential proxy all read the same reach.
@@ -111,7 +111,10 @@ describe("org-scope connections across spaces", () => {
     return row!.id;
   }
 
-  async function seedSpaceClient(spaceId: string, autoProvisioned = false): Promise<void> {
+  async function seedSpaceClient(
+    spaceId: string,
+    { autoProvisioned = false, isDefault = true } = {},
+  ): Promise<void> {
     await db.insert(integrationOauthClients).values({
       orgId: ctx.orgId,
       spaceId,
@@ -120,6 +123,7 @@ describe("org-scope connections across spaces", () => {
       clientId: autoProvisioned ? "dcr-client" : "byo-app",
       clientSecretEncrypted: "x",
       autoProvisioned,
+      isDefault,
     });
   }
 
@@ -175,7 +179,7 @@ describe("org-scope connections across spaces", () => {
     expect(await proxySelects(b, id)).toBeNull();
   });
 
-  it("a space with its own manual client uses no org row made elsewhere, but keeps its own", async () => {
+  it("a space defaulting to its own manual client uses no org row made elsewhere, but keeps its own", async () => {
     await seedSpaceClient(b);
     const fromA = await seedConnection({ owner: me, from: a, sharedSpaceIds: [b] });
     const fromB = await seedConnection({ owner: me, from: b });
@@ -187,9 +191,16 @@ describe("org-scope connections across spaces", () => {
   });
 
   it("a space's auto-provisioned (DCR) client excludes nothing", async () => {
-    await seedSpaceClient(b, true);
+    await seedSpaceClient(b, { autoProvisioned: true });
     const fromA = await seedConnection({ owner: me, from: a });
     expect(await listed(b)).toEqual([fromA]);
+  });
+
+  it("a space keeping a manual client but another default uses org rows made elsewhere", async () => {
+    await seedSpaceClient(b, { isDefault: false });
+    const fromA = await seedConnection({ owner: me, from: a });
+    expect(await listed(b)).toEqual([fromA]);
+    expect(await verdictIn(b)).toEqual([fromA]);
   });
 
   it("a row shared into A serves other members in A only", async () => {

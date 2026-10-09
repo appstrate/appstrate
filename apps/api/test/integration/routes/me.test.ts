@@ -26,6 +26,7 @@ import {
   seedPackage,
   seedPlacedPackage,
   seedSpace,
+  seedSpaceMember,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
@@ -831,6 +832,50 @@ describe("Me API (/api/me)", () => {
         { shared_space_ids: [blocked.id] },
       );
       expect(allowed.status).toBe(200);
+    });
+
+    it("refuses an owner sharing into a space where they cannot connect, on both doors", async () => {
+      const ctx = await createTestContext({ orgSlug: "mepatch-connect" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id);
+      const viewing = await seedSpace({ orgId: ctx.orgId, name: "Viewing" });
+      await seedSpaceMember({ spaceId: viewing.id, userId: member.id, presetRole: "viewer" });
+      const operating = await seedSpace({ orgId: ctx.orgId, name: "Operating" });
+      const integrationId = "@mepatch/connect";
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId,
+        userId: member.id,
+      });
+      const spaceDoor = (sharedSpaceIds: string[]) =>
+        app.request(`/api/integrations/${integrationId}/connections/${id}`, {
+          method: "PATCH",
+          headers: {
+            ...authHeaders({ ...ctx, cookie: member.cookie }),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ shared_space_ids: sharedSpaceIds }),
+        });
+
+      const refused = await patch(
+        id,
+        { Cookie: member.cookie },
+        { shared_space_ids: [viewing.id] },
+      );
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { detail: string }).detail).toContain(viewing.id);
+      expect((await spaceDoor([viewing.id])).status).toBe(403);
+      expect(
+        (await patch(id, { Cookie: member.cookie }, { shared_space_ids: [operating.id] })).status,
+      ).toBe(200);
+      expect((await spaceDoor([operating.id, ctx.defaultSpaceId])).status).toBe(200);
+      const [row] = await db
+        .select({ shares: integrationConnections.sharedSpaceIds })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id));
+      expect(row!.shares.toSorted()).toEqual([operating.id, ctx.defaultSpaceId].toSorted());
     });
   });
 

@@ -3,10 +3,10 @@
 /**
  * Where an `integration_connections` row may be used. A row's scope is the tier of the client that
  * minted it: `space_id` set serves that space only, `space_id` NULL serves every space of its org —
- * except a space with its own manual OAuth client for the row's auth, unless the row was connected
- * from there (`origin_space_id`). Within that reach, an actor uses their own rows and the rows
- * shared into the space; `block_user_connections` restricts their own rows to the shared ones and
- * those made in the space (which passed its creation gate, or predate the block).
+ * except a space whose default OAuth client for the row's auth is its own manual one, unless the
+ * row was connected from there (`origin_space_id`). Within that reach, an actor uses their own rows
+ * and the rows shared into the space; `block_user_connections` restricts their own rows to the
+ * shared ones and those made in the space (which passed its creation gate, or predate the block).
  *
  * Every predicate is over the unaliased `integration_connections` table.
  */
@@ -49,7 +49,7 @@ export function connectionInSpace(spaceId: string): SQL {
           eq(c.originSpaceId, spaceId),
           sql`NOT EXISTS (SELECT 1 FROM ${o} WHERE ${o.spaceId} = ${spaceId}
             AND ${o.integrationId} = ${c.integrationId} AND ${o.authKey} = ${c.authKey}
-            AND NOT ${o.autoProvisioned})`,
+            AND ${o.isDefault} AND NOT ${o.autoProvisioned})`,
         ),
       ),
     ),

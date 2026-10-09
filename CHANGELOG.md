@@ -80,9 +80,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
-- **After the deploy, run
-  `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
-  Drizzle `0086` adds `org_id` to `integration_connections`, makes
+- **`pg_dump` the platform database BEFORE deploying, then after the deploy
+  run `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
+  Migration `0086` is one-way at boot (`shared_with_org` dropped, `org_id`
+  NOT NULL): rolling back means restoring that dump. Drizzle `0086` adds `org_id` to `integration_connections`, makes
   `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
   leaving every row space-scoped with the reach it had. With the app up,
   take a `pg_dump`, run the dry run
@@ -133,9 +134,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `scope` (`"org"` | `"space"`), `shared_space_ids` (the full set for the
     owner; for anyone else the current space when shared into it, else
     `[]`) and `origin_space_id` (owner only). New refusals:
-    `400 invalid_share_target`, `403 connection_blocked_by_admin` on a share
-    into a space blocking user connections without `integrations:configure`
-    there, `403` on renaming an org-scoped connection one does not own.
+    `400 invalid_share_target`, `403` on a share into a space where the
+    owner lacks `integrations:connect`, `403 connection_blocked_by_admin` on
+    one into a space blocking user connections without
+    `integrations:configure` there, `403` on renaming an org-scoped
+    connection one does not own, and `403` on reconnecting one with an API
+    key or a third-party token.
   - New `PATCH /api/me/connections/{connectionId}` (owner,
     `integrations:connect` ceiling): label and `shared_space_ids`.
   - `GET /api/me/connections`: `space` is `null` for an org-scoped
@@ -143,8 +147,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - The realtime `connection_update` event adds `orgId`, and `spaceId` is
     `null` for an org-scoped connection, delivered to its owner in every
     space of the org.
-  - `409 connection_scope_narrowing` on a reconnect that would move an
-    org-scoped connection onto a space's own OAuth client;
+  - An org-scoped connection reconnects through an org or system OAuth
+    client, never a space's own: `409 connection_scope_narrowing` when
+    neither exists;
     `409 auto_client_exists_at_org` on promoting a DCR client to an org that
     already holds one for that server.
 
@@ -152,8 +157,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1870). Its scope is the tier of the OAuth client that minted it: the
   system client, an org client or none (API key, basic, fields) makes it
   usable by its owner in every space of the org; a space's own OAuth client,
-  or an end user, keeps it in that space. A space with its own OAuth client
-  for that auth uses only the org-wide connections connected from it. The
+  or an end user, keeps it in that space. A space whose default OAuth client
+  for that auth is its own uses only the org-wide connections connected from
+  it. The
   owner shares a connection with chosen spaces; losing access to a space
   withdraws that share only, and deleting a space withdraws it from every
   share. With several of their own connections, a member's run binds the one

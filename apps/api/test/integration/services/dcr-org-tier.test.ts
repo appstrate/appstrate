@@ -282,6 +282,10 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     await seedLegacySpaceClient(spaceB.spaceId);
     expect(await usableIds(spaceB.spaceId)).toEqual([conn]);
 
+    await db
+      .update(integrationOauthClients)
+      .set({ isDefault: false })
+      .where(eq(integrationOauthClients.spaceId, spaceB.spaceId));
     await db.insert(integrationOauthClients).values({
       orgId: ctx.orgId,
       spaceId: spaceB.spaceId,
@@ -290,6 +294,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       clientId: "manual",
       clientSecretEncrypted: "",
       tokenEndpointAuthMethod: "none",
+      isDefault: true,
     });
     expect(await usableIds(spaceB.spaceId)).toEqual([]);
     expect(await usableIds(spaceA.spaceId)).toEqual([conn]);

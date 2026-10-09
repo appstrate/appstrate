@@ -90,7 +90,7 @@ describe("attachConnectOffers — block_user_connections", () => {
         errors,
         scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         actor: ACTOR,
-        policy: { canConnect: true, canConfigure: false },
+        policy: { canConnect: true, canConfigure: false, delegated: false },
         manifestCache: manifestCache(),
       }),
     ).toEqual(errors);
@@ -103,7 +103,7 @@ describe("attachConnectOffers — block_user_connections", () => {
       errors: [notConnected()],
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       actor: ACTOR,
-      policy: { canConnect: true, canConfigure: true },
+      policy: { canConnect: true, canConfigure: true, delegated: false },
       manifestCache: manifestCache(),
     });
     expect(item!.connect_url).toStartWith("http");

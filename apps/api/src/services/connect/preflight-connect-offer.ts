@@ -153,6 +153,7 @@ export async function attachConnectOffers(params: {
             packageId: target.integrationId,
             authKey: target.authKey,
             ...(target.connectionId ? { connectionId: target.connectionId } : {}),
+            delegated: policy.delegated,
             scopes: target.scopes,
           }),
         );

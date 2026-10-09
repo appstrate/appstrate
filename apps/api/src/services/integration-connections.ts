@@ -273,13 +273,39 @@ export async function assertConnectionBelongsToActor(
   connectionId: string,
   spaceId: string,
   actor: Actor,
+  delegated: boolean,
 ): Promise<void> {
   const [owned] = await db
-    .select({ id: integrationConnections.id })
+    .select({ spaceId: integrationConnections.spaceId })
     .from(integrationConnections)
     .where(and(eq(integrationConnections.id, connectionId), ownRowInSpace(spaceId, actor)))
     .limit(1);
   if (!owned) throw notFound("Connection not found");
+  if (delegated && owned.spaceId !== spaceId) throw delegatedReconnectRefused();
+}
+
+/** A delegated credential (API key, third-party token) acts from its space only. */
+function delegatedReconnectRefused(): ApiError {
+  return forbidden(
+    "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+  );
+}
+
+function scopeNarrowingRefused(remedy: string): ApiError {
+  return conflict(
+    "connection_scope_narrowing",
+    `This connection serves the whole organization, and the OAuth client that would reconnect it belongs to one space only. ${remedy}`,
+  );
+}
+
+/** Whether `connectionId` serves its whole org: its reconnect resolves no space client. */
+export async function isOrgScopedConnection(connectionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row !== undefined && row.spaceId === null;
 }
 
 /**
@@ -1340,12 +1366,23 @@ export function resolveConnectClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   resolved: ResolvedOAuthConnect,
+  reconnectsOrgRow = false,
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
   const system = autoProvisioned ? null : getDefaultSystemIntegrationClient(integrationId, authKey);
-  const picked = pickDefault(resolved.spaceClients, resolved.orgClients, system);
+  // An org-scoped row is never narrowed onto a space client.
+  const picked = pickDefault(
+    reconnectsOrgRow ? [] : resolved.spaceClients,
+    resolved.orgClients,
+    system,
+  );
   if (picked) {
     return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
+  }
+  if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
+    throw scopeNarrowingRefused(
+      "Ask an administrator to register an organization OAuth client for it, or create a new connection here.",
+    );
   }
 
   if (autoProvisioned) {
@@ -2546,6 +2583,8 @@ interface StoreConnectionInput {
   /** See {@link PersistCredentialInput}. */
   variables?: Record<string, string> | null;
   oauthResource?: string;
+  /** See {@link PersistTarget}. */
+  delegated?: boolean;
 }
 
 /**
@@ -2576,6 +2615,8 @@ export type PersistTarget =
        * the WHERE so a mismatched `connectionId` matches zero rows. */
       packageId: string;
       authKey: string;
+      /** A delegated credential's write: the row must be scoped to `scope.spaceId`. */
+      delegated?: boolean;
     }
   | {
       kind: "update-by-id";
@@ -2940,11 +2981,11 @@ export async function persistCredentialBundle(
         .limit(1)
         .for("update");
       if (!existing) return undefined;
+      if (target.delegated && existing.spaceId !== target.scope.spaceId) {
+        throw delegatedReconnectRefused();
+      }
       if (clientSpace !== null && existing.spaceId !== clientSpace) {
-        throw conflict(
-          "connection_scope_narrowing",
-          "This connection serves the whole organization, and the OAuth client that would reconnect it belongs to one space only. Reconnect it from a space without its own OAuth client, or create a new connection here.",
-        );
+        throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
       if (
         checksAccount &&
@@ -3196,6 +3237,7 @@ export async function saveIntegrationConnection(
           connectionId: input.connectionId,
           packageId: input.packageId,
           authKey: input.authKey,
+          ...(input.delegated ? { delegated: true } : {}),
         },
         persistInput,
       )

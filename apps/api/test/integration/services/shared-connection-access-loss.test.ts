@@ -170,7 +170,7 @@ describe("unsharing on access loss", () => {
         spaceId: null,
         governs: false,
         boundSpaceId: null,
-        governsIn: async () => false,
+        permissionsIn: async () => presetPermissions("operator"),
       },
       sharedSpaceIds,
     });

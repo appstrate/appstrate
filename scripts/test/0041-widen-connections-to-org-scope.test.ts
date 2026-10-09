@@ -4,7 +4,8 @@
  * Migration `0041` against the test database: a user-owned connection of a system or org client,
  * or of none, becomes org-scoped with its origin space and shares kept; an end user's row and a
  * space client's row (a space-tier auto client's included) stay in their space; a label the owner
- * already holds at org scope is renamed; an admin pin in the origin space binds the same connection.
+ * already holds at org scope is renamed; every resolution layer (pins, defaults, overrides, fallback)
+ * binds the same connection in the origin space.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -13,6 +14,7 @@ import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
   integrationOauthClients,
+  integrationOrgDefaults,
   integrationPins,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -35,7 +37,10 @@ import {
   localIntegrationManifest,
 } from "../../apps/api/test/helpers/integration-manifests.ts";
 import { activatePackage } from "../../apps/api/src/services/space-packages.ts";
-import { resolveConnectionsForRun } from "../../apps/api/src/services/integration-connection-resolver.ts";
+import {
+  resolveConnectionsForRun,
+  type LaunchOverrides,
+} from "../../apps/api/src/services/integration-connection-resolver.ts";
 
 const INTEGRATION = "@mig0041/svc";
 const AGENT = "@mig0041/agent";
@@ -78,13 +83,14 @@ async function seedConnection(opts: {
   clientRef?: string | null;
   label?: string;
   shared?: boolean;
+  accountId?: string;
 }): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId: INTEGRATION,
       authKey: "primary",
-      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
       orgId: opts.orgId ?? ctx.orgId,
       spaceId: opts.spaceId,
       userId: opts.endUserId ? null : (opts.userId ?? ctx.user.id),
@@ -252,6 +258,106 @@ describe("0041 — connections widened to org scope", () => {
     await run(true);
     expect((await scopeOf(pinned)).spaceId).toBeNull();
     expect(await resolve()).toEqual([pinned]);
+  });
+
+  describe("each resolution layer binds the same connection in its origin space after the widening", () => {
+    let member: string;
+
+    beforeEach(async () => {
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest,
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      member = (await createTestUser()).id;
+      await addOrgMember(ctx.orgId, member, "member");
+    });
+
+    async function bound(
+      actorId: string,
+      spaceId = ctx.defaultSpaceId,
+      launchOverrides?: LaunchOverrides,
+    ): Promise<string[] | undefined> {
+      const { resolved, errors } = await resolveConnectionsForRun({
+        agentManifest,
+        packageId: AGENT,
+        actor: { type: "user", id: actorId },
+        scope: { orgId: ctx.orgId, spaceId },
+        ...(launchOverrides ? { launchOverrides } : {}),
+      });
+      expect(errors).toEqual([]);
+      return resolved[INTEGRATION]?.map((c) => c.connectionId);
+    }
+
+    /** What `actorId` binds in the origin space, before and after the widening: the same set. */
+    async function boundAcrossWidening(
+      actorId: string,
+      launchOverrides?: LaunchOverrides,
+    ): Promise<string[] | undefined> {
+      const before = await bound(actorId, ctx.defaultSpaceId, launchOverrides);
+      await run(true);
+      expect(await bound(actorId, ctx.defaultSpaceId, launchOverrides)).toEqual(before);
+      return before;
+    }
+
+    it("a member pin", async () => {
+      const pinned = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: member,
+        connectionIds: [pinned],
+      });
+      expect(await boundAcrossWidening(member)).toEqual([pinned]);
+    });
+
+    for (const enforce of [false, true]) {
+      it(`a space default (${enforce ? "enforced" : "soft"})`, async () => {
+        const shared = await seedConnection({
+          spaceId: ctx.defaultSpaceId,
+          userId: member,
+          shared: true,
+        });
+        await db.insert(integrationOrgDefaults).values({
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          connectionIds: [shared],
+          enforce,
+        });
+        expect(await boundAcrossWidening(ctx.user.id)).toEqual([shared]);
+      });
+    }
+
+    it("a schedule override", async () => {
+      await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      const chosen = await seedConnection({ spaceId: ctx.defaultSpaceId, userId: member });
+      expect(
+        await boundAcrossWidening(member, {
+          ids: { [INTEGRATION]: [chosen] },
+          source: "schedule_override",
+        }),
+      ).toEqual([chosen]);
+    });
+
+    it("the fallback, in each space an owner connected the same account from", async () => {
+      const other = await seedSpace({ orgId: ctx.orgId });
+      for (const id of [AGENT, INTEGRATION]) {
+        await activatePackage({ orgId: ctx.orgId, spaceId: other.id }, id, {
+          shareBy: ctx.user.id,
+        });
+      }
+      const here = await seedConnection({ spaceId: ctx.defaultSpaceId, accountId: "same" });
+      const there = await seedConnection({ spaceId: other.id, accountId: "same" });
+      const inEach = async () => [await bound(ctx.user.id), await bound(ctx.user.id, other.id)];
+      expect(await inEach()).toEqual([[here], [there]]);
+      await run(true);
+      expect(await inEach()).toEqual([[here], [there]]);
+    });
   });
 
   it("widens each organization in a transaction of its own, each rolled back on a dry run", async () => {

@@ -121,6 +121,8 @@ interface InitiateIntegrationOAuthInput {
    */
   connectionId?: string;
   /** Carried to the callback: see {@link OAuthStateRecord}. */
+  delegated?: boolean;
+  /** Carried to the callback: see {@link OAuthStateRecord}. */
   redirectTag?: string;
   variables?: Record<string, string>;
   /**
@@ -216,6 +218,7 @@ export async function initiateIntegrationOAuth(
       resource: input.resource,
       clientRef: input.clientRef,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      ...(input.delegated ? { delegated: true as const } : {}),
       ...(endpoints.issuer ? { issuer: endpoints.issuer } : {}),
       ...(endpoints.issuer && endpoints.authorizationResponseIssParameterSupported
         ? { issParameterSupported: true }
@@ -272,6 +275,8 @@ export interface IntegrationOAuthCallbackResult {
    * so the existing row is updated instead of a duplicate inserted.
    */
   connectionId?: string;
+  /** Pass-through: see {@link OAuthStateRecord}. */
+  delegated?: true;
   /**
    * Pass-through of the minting client id set at initiate time (system env id or
    * custom `integration_oauth_clients.id`). Stamped on the connection row so
@@ -420,6 +425,7 @@ export async function handleIntegrationOAuthCallback(
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
+    ...(integration.delegated ? { delegated: true as const } : {}),
     clientRef: integration.clientRef,
     ...(integration.issuer ? { issuer: integration.issuer } : {}),
     ...(integration.resource ? { resource: integration.resource } : {}),
