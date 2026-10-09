@@ -519,7 +519,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const permissions = c.get("permissions")!;
     const current = {
       ...chosen,
-      role: toSpaceRoleWire(c.get("spaceRole") ?? null)?.name ?? chosen.role,
+      role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
       surface: deriveMcpSurface(permissions, ceiling, actor),
     };

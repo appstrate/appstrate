@@ -325,6 +325,7 @@ function describePayload(
   componentSchemas: Record<string, unknown>,
   ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
 ): Record<string, unknown> {
+  const granted = operationGranted(op, ctx.permissions, ctx.ceiling);
   return {
     ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
     ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
@@ -340,10 +341,8 @@ function describePayload(
     target_space_permissions: op.requirement.targetSpaceRequirements,
     // Asked of a delegated credential's scopes only, never of the role.
     ceiling_permissions: op.requirement.ceilingRequirements,
-    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
-    ...(ctx.orgSpaces && !operationGranted(op, ctx.permissions, ctx.ceiling)
-      ? { hint: NO_FALLBACK_HINT }
-      : {}),
+    granted,
+    ...(ctx.orgSpaces && !granted ? { hint: NO_FALLBACK_HINT } : {}),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -1199,6 +1198,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
+    // Success or failure, the result names the space it was launched in.
+    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
     if (!launched.ok) {
       // A launch HTTP failure (payload carries a numeric `status`) reached the
       // route and it rejected the request (bad input, unconnected integration,
@@ -1220,7 +1221,6 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
       return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
@@ -1260,7 +1260,6 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     });
 
     const { step: final, files } = await enrichTerminalRunAndWaitStep(waited, waitOpts);
-    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
     const result = jsonResult({ ...final.payload, ...space }, final.isError);
     // Each published file is also an MCP `resource_link` block (spec 2025-06-18), read with
     // `resources/read` or chained by URI; a run still going gets its next step as text.
