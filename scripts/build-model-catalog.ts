@@ -21,6 +21,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isAliasBackingShape } from "@appstrate/core/model-swap";
+import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   type CatalogRecord,
   parseModelCatalog,
@@ -34,10 +36,16 @@ import {
   piReasoningLevels,
 } from "../packages/runner-pi/src/pi-model.ts";
 import { PI_SDK_VERSION } from "../packages/runner-pi/src/provider-map.ts";
-import { capturePayload, recordSpec } from "../packages/runner-pi/src/pi-payload.ts";
+import {
+  capturePayload,
+  observedReasoningOff,
+  recordSpec,
+} from "../packages/runner-pi/src/pi-payload.ts";
+import { piReasoningOff, piTakesReasoningOff } from "../packages/runner-pi/src/pi-reasoning-off.ts";
 import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";
+const SERVED_SHAPES: ReadonlySet<string> = new Set(MODEL_API_SHAPES.filter(isAliasBackingShape));
 
 /** A record of a Pi data file, as Pi wrote it. */
 interface SourceRecord extends Record<string, unknown> {
@@ -115,7 +123,8 @@ function toCatalogRecord(source: SourceRecord): CatalogRecord {
 /**
  * Why this checkout must not publish `source`, or null. On top of the
  * instance's own rules: a field or an endpoint no bundled sibling has may be
- * one the model needs, and the pinned code must build its request at every level.
+ * one the model needs, the pinned code must build its request at every level,
+ * and the `off` an instance derives must be what Pi sends.
  */
 async function recordRefusal(source: SourceRecord): Promise<string | null> {
   const known = new Set(listPiModelsOfApi(source.api).flatMap((record) => Object.keys(record)));
@@ -147,6 +156,15 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
       await capturePayload(built, level);
     } catch (err) {
       return `request not built at level ${level ?? "unset"}: ${getErrorMessage(err)}`;
+    }
+  }
+  // An instance serves the derived `off`: a record it would misreport is
+  // dropped. A shape no provider declares is never served, so neither is its `off`.
+  if (SERVED_SHAPES.has(built.api) && piTakesReasoningOff(built)) {
+    const derived = piReasoningOff(built);
+    const observed = await observedReasoningOff(built);
+    if (derived !== observed) {
+      return `reasoning off: derived "${derived ?? "none"}", observed "${observed}"`;
     }
   }
   return null;

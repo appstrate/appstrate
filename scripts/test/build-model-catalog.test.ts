@@ -115,6 +115,49 @@ describe("build-model-catalog", () => {
     });
   });
 
+  // An instance serves the `off` it derives: a record whose payloads say
+  // otherwise is dropped, not mislabelled. Under mid-conversation effort Pi
+  // sends adaptive thinking whatever the level, so the `off` payload equals a
+  // non-reasoning model's — observed "unsent" — while the rule derives "disables".
+  it("drops a record whose observed `off` differs from the derived one", async () => {
+    const { off: _off, ...offAllowed } = bundled.thinkingLevelMap!;
+    expect(bundled.compat).toMatchObject({ supportsMidConvoEffort: true });
+    withRecords([{ id: "claude-next" }, { id: "claude-off", thinkingLevelMap: offAllowed }]);
+    const { records, dropped } = await selectCatalogRecords(readChatRecords(dataDir));
+
+    expect(records.map((r) => r.id)).toEqual(["claude-next"]);
+    expect(dropped).toEqual([
+      {
+        provider: "anthropic",
+        id: "claude-off",
+        reason: 'reasoning off: derived "disables", observed "unsent"',
+      },
+    ]);
+  });
+
+  // The rule reads Baseten's format as a disable without looking at its
+  // chat-template arguments: a record without them sends nothing and is dropped.
+  it("drops a Baseten record whose `off` sends nothing the rule expects", async () => {
+    const kimi = getPiModel("baseten", "moonshotai/Kimi-K2.5", "openai-completions")!;
+    const { chatTemplateArgs: _args, ...compat } = kimi.compat as Record<string, unknown>;
+    expect(kimi.thinkingLevelMap?.off).toBe("off");
+    const source = (id: string, over: Record<string, unknown> = {}) =>
+      ({ ...kimi, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
+    const { records, dropped } = await selectCatalogRecords([
+      source("moonshotai/Kimi-Next"),
+      source("moonshotai/Kimi-No-Args", { compat }),
+    ]);
+
+    expect(records.map((r) => r.id)).toEqual(["moonshotai/Kimi-Next"]);
+    expect(dropped).toEqual([
+      {
+        provider: "baseten",
+        id: "moonshotai/Kimi-No-Args",
+        reason: 'reasoning off: derived "disables", observed "unsent"',
+      },
+    ]);
+  });
+
   it("signs a file an instance accepts whole", async () => {
     withRecords([{ id: "claude-next" }]);
     const built = await build({ now: () => 1_800_000_000_000 });
