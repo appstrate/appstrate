@@ -156,6 +156,8 @@ describe("MCP server instructions — run guidance", () => {
       "Shortcut —",
       "Connecting or reconnecting an integration before a run",
       "must_choose_connection",
+      // What a still-running run's result tells the model to do.
+      "`done: false`",
     ]) {
       expect(withRuns).toContain(marker);
       expect(without).not.toContain(marker);

@@ -2252,6 +2252,10 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "POST /activate/approve": "text/html",
   "POST /activate/deny": "text/html",
   "GET /api/integrations/connect/start": "text/html",
+  // The MCP SDK transport's own refusals: a JSON-RPC 2.0 error envelope, not an `ApiError`.
+  "POST /api/mcp/o/{org} 400": "application/json",
+  "POST /api/mcp/o/{org} 406": "application/json",
+  "POST /api/mcp/o/{org} 415": "application/json",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
   // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.

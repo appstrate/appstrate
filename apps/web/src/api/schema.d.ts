@@ -14739,7 +14739,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON-RPC response. */
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`: its progress notifications, then its result, as SSE events; as `application/json` otherwise. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14748,10 +14748,74 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Unparseable JSON (`-32700`) or an invalid JSON-RPC message or batch (`-32700`/`-32600`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
         };
     };
     listMyConnections: {
