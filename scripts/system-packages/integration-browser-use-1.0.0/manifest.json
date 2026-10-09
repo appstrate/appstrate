@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "Browser Use",
   "icon": "mdi:web",
-  "description": "Browser Use Cloud's hosted MCP server (api.browser-use.com): delegate web tasks to Browser Use's cloud browser agent. `run_session` starts a session on a task, `send_task` sends a follow-up to an idle keep-alive session, and browser profiles reuse persistent website logins. Tasks run for minutes, so the agent polls `get_session` for status, output and a live URL to watch. Connect with an API key from the Browser Use Cloud dashboard. `run_session` and `send_task` consume Browser Use credits.",
+  "description": "Browser Use Cloud's hosted MCP server (api.browser-use.com): delegate web tasks to Browser Use's cloud browser agent. `run_session` starts a session on a task, `send_task` sends a follow-up to an idle keep-alive session, and browser profiles reuse persistent website logins. Tasks can run for minutes, so the agent polls `get_session` for status, output and a live URL to watch. Connect with an API key from the Browser Use Cloud dashboard. `run_session` and `send_task` consume Browser Use credits.",
   "keywords": ["browser-automation", "web-scraping", "ai"],
   "license": "Apache-2.0",
   "source": {
