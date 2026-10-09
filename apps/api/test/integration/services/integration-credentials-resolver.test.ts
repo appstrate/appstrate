@@ -21,7 +21,7 @@
  * the `RefreshError` taxonomy and the scope-shrink path:
  *   - HTTP 400 + `{ "error": "invalid_grant" }` → RefreshError(kind="revoked") → 410
  *   - HTTP 500 (or any non-400)                 → RefreshError(kind="transient") → 502
- *   - HTTP 200 + narrowed `scope`               → shrinkDetected → scope-floor check
+ *   - HTTP 200 + narrowed `scope`               → shrunkFrom → scope-floor check
  *
  * Refresh is triggered deterministically by a rejection trigger ({@link REJECTED}),
  * with no clock games for the lead window.
@@ -1041,6 +1041,45 @@ describe("resolveLiveIntegrationCredentials", () => {
     );
     expect(out.auths.length).toBe(1);
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  // #1871: a narrow per-agent row is judged on what it held, not on other agents' needs.
+  it("does not flag a shrink for a scope the row never held", async () => {
+    for (const [id, tool] of [
+      ["@creds/agent-sender", "send_message"],
+      ["@creds/agent-reader", "list_messages"],
+    ] as const) {
+      await seedPackage({
+        id,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        draftManifest: agentManifest(id, [tool]),
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
+    }
+    // Never held `send`; the refresh drops `delete`, which no agent requires.
+    const connId = await seedConnection({ userId: ctx.user.id, scopes: ["read", "delete"] });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read" });
+
+    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("flags a shrink that drops a scope the row held and an agent requires", async () => {
+    await seedPackage({
+      id: "@creds/agent-reader",
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "agent",
+      draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
+    const connId = await seedConnection({ userId: ctx.user.id, scopes: ["read", "delete"] });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "delete" });
+
+    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED);
+    expect(await needsReconnection(connId)).toBe(true);
   });
 
   it("does not resolve another actor's connection — 404, never a silent empty payload", async () => {

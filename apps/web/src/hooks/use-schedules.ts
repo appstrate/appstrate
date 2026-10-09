@@ -181,7 +181,7 @@ interface ScheduleFormDeps {
    * connection-overrides picker. Empty when the agent has no
    * integrations.
    */
-  agentIntegrations: Array<{ id: string; tools?: string[] | "*" }>;
+  agentIntegrations: Array<{ id: string; tools?: string[] | "*"; scopes?: string[] }>;
   /**
    * Agent's declared skill dependencies — drives the per-skill dependency
    * override picker. Version-pinned when `version` is passed (#770).
@@ -233,6 +233,7 @@ export function useScheduleFormDeps(
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
+    ...(d.scopes ? { scopes: d.scopes } : {}),
   }));
   // `skills` is the one optional group — a summary read (`agents:run` without
   // `agents:read`) omits it rather than emptying it.

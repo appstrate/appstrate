@@ -1557,7 +1557,7 @@ export interface ConnectionResolutionError {
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
-   *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
+   *   - `insufficient_scopes` → the under-scoped connection (target of an upgrade, if chosen).
    *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
    *   - `auth_serves_no_selected_tool` → the member to take out of the set.
    * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
@@ -1570,9 +1570,10 @@ export interface ConnectionResolutionError {
   /**
    * The FULL set of oauth scopes the run's selected tools require on
    * {@link authKey} — not the diff. `insufficient_scopes` also carries
-   * {@link missingScopes} (required minus granted); `not_connected` and
-   * `needs_reconnection` end at a consent that has to stand on its own, so
-   * the full set is the only thing it can be built from. The caller forwards
+   * {@link missingScopes} (required minus granted); `not_connected` ends at a
+   * consent that has to stand on its own, so the full set is the only thing it
+   * can be built from. Never on `needs_reconnection`: a reconnect re-consents
+   * what the row holds plus `default_scopes`, adding no agent's scopes. The caller forwards
    * it as the connect kickoff's `scopes` body field, which unions it with the
    * auth's `default_scopes` and anything already granted. Omitted when the
    * auth is not `oauth2`, when the agent's selection requires no scopes, or
@@ -1595,9 +1596,8 @@ export interface ConnectionResolutionError {
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
-   * the two connection-bound connect-flow codes — `insufficient_scopes` and
-   * `needs_reconnection` — because both remedies re-consent THAT row, which is
-   * its owner's to do.
+   * the two connection-bound codes — `insufficient_scopes` and `needs_reconnection` —
+   * because re-consenting THAT row (a reconnect, or a chosen upgrade) is its owner's to do.
    */
   ownedByActor?: boolean;
   /**

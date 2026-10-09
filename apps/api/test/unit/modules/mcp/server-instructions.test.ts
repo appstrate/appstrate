@@ -79,7 +79,41 @@ describe("MCP server instructions — connect bullet", () => {
     const bullet = connectBullet(false);
     expect(bullet).toContain("initiateIntegrationConnect");
     expect(bullet).toMatch(/scopes: <[^>]*required_scopes/);
-    expect(bullet).toMatch(/connection_id: <[^>]*connection_id/);
+    expect(bullet).toMatch(
+      /connection_id: <[^>]*connection_id, for a needs_reconnection item only/,
+    );
+  });
+
+  // #1871: an in-place upgrade widens every agent bound to the connection.
+  it("answers `insufficient_scopes` with a new connection the run is rebound to", () => {
+    for (const contextInjected of [false, true]) {
+      const bullet = connectBullet(contextInjected);
+      const start = bullet.indexOf("An `insufficient_scopes` item");
+      expect(start).toBeGreaterThan(-1);
+      const part = bullet.slice(start);
+      expect(part).toContain("carries no `connect_url`");
+      // Rebound by the launch override, which beats a member pin and works inline too.
+      expect(part).toContain("`connection_overrides`");
+      // …and the caller is told where the new connection's id comes from.
+      expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
+      // The layers a member cannot override themselves.
+      for (const layer of ["admin_pin", "org_default_enforced", "schedule_override"]) {
+        expect(part).toContain(`\`${layer}\``);
+      }
+      // `connection_id` only on a reconnect, or an upgrade the owner chose.
+      expect(bullet).toContain("for a needs_reconnection item only");
+      expect(part).toMatch(/`connection_id`[^.]*only when `owned_by_actor` is true/);
+    }
+    const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
+    expect(cannotConnect).toContain("An `insufficient_scopes` item carries no `connect_url`");
+    expect(cannotConnect).not.toContain("initiateIntegrationConnect");
+  });
+
+  it("names the member pin as the way to make a choice stick for a stored agent", () => {
+    const exception = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- The exception —"));
+    expect(exception).toContain("`upsertMyIntegrationPin`");
   });
 
   it("differs between the two client kinds on delivery only", () => {

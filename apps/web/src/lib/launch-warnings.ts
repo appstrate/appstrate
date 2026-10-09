@@ -76,9 +76,9 @@ export function causeSentence(
     : i18n.t(CAUSES[w.code].key, { ns: "agents", count });
 }
 
-/** Whether {@link launchWarningsToast} has anything to say. */
-export function hasLaunchWarnings(warnings: readonly LaunchWarning[]): boolean {
-  return warningsByIntegration(warnings).size > 0;
+/** The integrations {@link launchWarningsToast} names; empty when it has nothing to say. */
+export function warnedIntegrationIds(warnings: readonly LaunchWarning[]): string[] {
+  return [...warningsByIntegration(warnings).keys()];
 }
 
 /** The one toast a launch's warnings make, or `null` when there is nothing to say. */

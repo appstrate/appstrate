@@ -277,7 +277,9 @@ export const mePaths = {
         "starts without the integration, or is refused when the agent requires it; `DELETE` " +
         "clears the pin. " +
         "Idempotent — repeated calls rewrite the same set. Path-addressed like the admin " +
-        "pins; encode each id with `encodePackageIdPath`.",
+        "pins; encode each id with `encodePackageIdPath`. " +
+        "This is how to pick among several connections (`must_choose_connection`): pin one whose " +
+        "`scopes_granted` covers what the agent needs, rather than upgrading one other agents use.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

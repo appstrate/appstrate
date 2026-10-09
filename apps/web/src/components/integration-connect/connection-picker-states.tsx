@@ -4,11 +4,12 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Loader2, Lock, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { unavailableConnectionIds } from "../../lib/connection-set";
+import { ConfirmModal } from "../confirm-modal";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { ClearChoiceButton } from "./clear-choice-button";
 import { NoConnectionLabel } from "./no-connection-label";
@@ -209,8 +210,9 @@ export function NoClientPicker({
 }
 
 /**
- * Under-scoped → blocked server-side. The owner can upgrade in place;
- * a foreign owner can only be flagged.
+ * Under-scoped → blocked server-side. The way out offered first is a new connection with the
+ * agent's scopes. Upgrading in place widens the grant of every agent bound to the connection,
+ * so the owner gets it second, behind a confirmation; a foreign owner's can only be flagged.
  */
 export function UnderScopedWarning({
   conn,
@@ -220,7 +222,22 @@ export function UnderScopedWarning({
   picker: ConnectionPicker;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { canConnect, auths, ownerLabel, oauthPending, upgradeScopes } = picker;
+  const {
+    canConnect,
+    canAddConnection,
+    authKeys,
+    auths,
+    ownerLabel,
+    oauthPending,
+    triggerConnect,
+    upgradeScopes,
+    upgradeTargetId,
+    setUpgradeTargetId,
+    missingScopeLabels,
+  } = picker;
+  const missing = missingScopeLabels(conn).join(", ");
+  const canCreate = canAddConnection && authKeys.includes(conn.auth_key);
+  const canUpgrade = canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
   return (
     <div
       className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
@@ -231,27 +248,58 @@ export function UnderScopedWarning({
         <span>
           {conn.is_own
             ? t("detail.integrationMemberPicker.missingScopesOwn")
-            : t("detail.integrationMemberPicker.missingScopesForeign", {
-                owner: ownerLabel(conn),
-              })}
+            : t(
+                canCreate
+                  ? "detail.integrationMemberPicker.missingScopesForeignCanCreate"
+                  : "detail.integrationMemberPicker.missingScopesForeign",
+                { owner: ownerLabel(conn) },
+              )}
         </span>
       </div>
-      <span className="text-foreground/80 font-mono text-[0.65rem] break-words">
-        {conn.missing_scopes.join(" ")}
+      <span className="text-foreground/80 break-words" title={conn.missing_scopes.join(" ")}>
+        {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
       </span>
-      {canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2" && (
-        <div>
-          <Button
-            size="sm"
-            disabled={oauthPending}
-            onClick={() => void upgradeScopes(conn)}
-            data-testid={`member-pick-upgrade-${conn.id}`}
-          >
-            <RefreshCw className="mr-1 size-3" />
-            {t("detail.integrationMemberPicker.upgradeButton")}
-          </Button>
+      {(canCreate || canUpgrade) && (
+        <div className="flex flex-wrap gap-1.5">
+          {canCreate && (
+            <Button
+              size="sm"
+              disabled={oauthPending}
+              onClick={() => void triggerConnect(conn.auth_key, { replacing: conn.id })}
+              data-testid={`member-pick-new-for-agent-${conn.id}`}
+            >
+              <Plus className="mr-1 size-3" />
+              {t("detail.integrationMemberPicker.newWithAgentScopes")}
+            </Button>
+          )}
+          {canUpgrade && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={oauthPending}
+              onClick={() => setUpgradeTargetId(conn.id)}
+              data-testid={`member-pick-upgrade-${conn.id}`}
+            >
+              <RefreshCw className="mr-1 size-3" />
+              {t("detail.integrationMemberPicker.upgradeButton")}
+            </Button>
+          )}
         </div>
       )}
+      <ConfirmModal
+        open={upgradeTargetId === conn.id}
+        onClose={() => setUpgradeTargetId(null)}
+        onConfirm={() => {
+          setUpgradeTargetId(null);
+          void upgradeScopes(conn);
+        }}
+        title={t("detail.integrationMemberPicker.upgradeConfirmTitle")}
+        description={t("detail.integrationMemberPicker.upgradeConfirmDescription", {
+          scopes: missing,
+        })}
+        confirmLabel={t("detail.integrationMemberPicker.upgradeConfirmButton")}
+        variant="default"
+      />
     </div>
   );
 }

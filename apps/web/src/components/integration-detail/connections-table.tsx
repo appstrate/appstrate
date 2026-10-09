@@ -26,12 +26,14 @@ import {
   isConnectionOwnedBy,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
+import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useUpdateIntegrationConnection,
   type IntegrationAuthType,
   type IntegrationConnection,
+  type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import {
   useConnectionDeleteImpact,
@@ -51,12 +53,15 @@ export function ConnectionsTable({
   packageId,
   authKey,
   authType,
+  manifest,
   connections,
   canRenew,
 }: {
   packageId: string;
   authKey: string;
   authType: IntegrationAuthType;
+  /** Names the granted scopes by the auth's `scope_catalog`. */
+  manifest: IntegrationManifestView;
   connections: IntegrationConnection[];
   canRenew: boolean;
 }) {
@@ -85,6 +90,7 @@ export function ConnectionsTable({
               packageId={packageId}
               authKey={authKey}
               authType={authType}
+              manifest={manifest}
               canRenew={canRenew}
             />
           ))}
@@ -99,6 +105,7 @@ function ConnectionTableRow({
   packageId,
   authKey,
   authType,
+  manifest,
   canRenew,
 }: {
   connection: IntegrationConnection;
@@ -107,6 +114,7 @@ function ConnectionTableRow({
   authKey: string;
   /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
   authType: IntegrationAuthType;
+  manifest: IntegrationManifestView;
   /** False when no OAuth client is usable yet — admin must set one up first. */
   canRenew: boolean;
 }) {
@@ -270,14 +278,11 @@ function ConnectionTableRow({
                     <InlineConnectButton
                       packageId={packageId}
                       authKey={authKey}
-                      intent="reconnect"
                       // Threading the existing row id is what makes the OAuth
                       // callback UPDATE-in-place rather than INSERT a duplicate
                       // (integration-connections.ts:721 "explicit connectionId
                       // = update; no id = insert").
                       connectionId={connection.id}
-                      lockToAuthKey
-                      size="sm"
                     />
                   )}
                 </>
@@ -300,12 +305,12 @@ function ConnectionTableRow({
         {/* Granted scopes */}
         <TableCell className="max-w-[16rem]">
           {connection.scopes_granted.length > 0 ? (
-            <span
-              className="text-muted-foreground block truncate font-mono text-[0.65rem]"
-              title={connection.scopes_granted.join(" ")}
-            >
-              {connection.scopes_granted.join(" ")}
-            </span>
+            <ScopeSummaryText
+              manifest={manifest}
+              authKey={authKey}
+              scopes={connection.scopes_granted}
+              className="text-muted-foreground block truncate text-[0.65rem]"
+            />
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
           )}

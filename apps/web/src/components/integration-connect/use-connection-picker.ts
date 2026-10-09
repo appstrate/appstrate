@@ -18,6 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution } from "./integration-run-readiness";
+import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -119,6 +120,7 @@ export function useConnectionPicker(
   // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
   const [open, setOpen] = useState(false);
+  const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setDraft(null);
@@ -144,6 +146,8 @@ export function useConnectionPicker(
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
+  const requiredScopesFor = (authKey: string) =>
+    requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
 
   // No picker until the entry is in: `required` is unknown before, and "no connection" must not
   // be offered for an integration the agent requires.
@@ -151,7 +155,7 @@ export function useConnectionPicker(
 
   const { resolution, run_blocking: runBlocking, required } = entry;
   const {
-    candidates,
+    candidates: unranked,
     resolved_connection_ids: resolvedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
@@ -159,8 +163,28 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
+  const fits = new Map(
+    unranked.map((c) => [
+      c.id,
+      scopeFit({
+        manifest,
+        authKey: c.auth_key,
+        granted: c.scopes_granted,
+        missing: c.missing_scopes,
+        required: requiredScopesFor(c.auth_key),
+      }),
+    ]),
+  );
+  const scopeFitOf = (c: IntegrationCandidate) => fits.get(c.id) ?? "unjudged";
+  // Compatible first, least privilege leading.
+  const candidates = sortByScopeFit(unranked, scopeFitOf);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
+  const missingScopeLabels = (c: IntegrationCandidate) =>
+    scopeLabels(manifest, c.auth_key, c.missing_scopes);
+  // A fresh connect requests the agent's scopes; only an oauth2 auth makes that worth saying.
+  const connectsWithAgentScopes = (authKey: string) =>
+    auths[authKey]?.type === "oauth2" && requiredScopesFor(authKey).length > 0;
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
       ? t("detail.integrationMemberPicker.byYou")
@@ -232,34 +256,27 @@ export function useConnectionPicker(
 
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
-  const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
+  /**
+   * A NEW connection with the agent's scopes, which takes the place of `replacing` (an
+   * under-scoped member) in the pick. Never sends a `connection_id`: the server would union the
+   * scopes into that connection, widening every agent bound to it.
+   */
+  const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
     if (!auths[authKey]) return;
-    // Every auth type goes through the hosted connect portal (issue #769) — the
-    // popup opens the connect_url, which dispatches to the OAuth screen or the
-    // hosted credential form server-side. We snapshot the accessible set first
-    // so we can identify the just-created connection afterwards (the popup
-    // can't return its id, and a cancelled popup adds nothing, leaving the
-    // prior resolution intact). On a renew (connectionId supplied) the backend
-    // UPDATEs in place and the snapshot diff is empty — we skip the select step.
+    // The popup cannot return the new id: it is the candidate this snapshot lacks.
     const before = new Set(candidates.map((c) => c.id));
-    const isRenew = !!opts?.connectionId;
-    // Forward the agent's per-tool inferred scopes so consent asks for what THIS
-    // agent needs — not just the integration's manifest defaults (the
-    // integration detail page is the surface that connects at defaults).
-    // Non-OAuth auths resolve to an empty set and connect at their fixed creds.
-    const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+    // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
+    // server always requests. Non-OAuth auths connect at their fixed credentials.
+    const scopes = requiredScopesFor(authKey);
     const settled = await openPopup({
       packageId: integrationId,
       authKey,
       ...(scopes.length ? { scopes } : {}),
-      // Account picker is noise on a renew — the user is re-authorising the
-      // existing identity, not picking a new one. Force-pick stays on fresh
-      // connects so "Add another" actually offers a different account.
-      ...(isRenew ? {} : { forceAccountSelect: true }),
-      ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
+      // Force the IdP's account picker so "Add another" can offer a different account.
+      forceAccountSelect: true,
     });
     // A settled popup has refetched the readiness verdict: read it, never ask again.
-    if (!settled || isRenew) return;
+    if (!settled) return;
     let added: IntegrationCandidate | undefined;
     try {
       added = readResolution()?.candidates.find((c) => !before.has(c.id));
@@ -272,6 +289,7 @@ export function useConnectionPicker(
       explicitIds,
       checkedIds,
       createdId: added.id,
+      ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
     if ("persist" in placed) {
       await persist(placed.persist);
@@ -282,7 +300,11 @@ export function useConnectionPicker(
     setOpen(true);
   };
 
-  // A settled popup has already refetched the active integration queries.
+  // The two in-place writes. A settled popup has already refetched the active integration queries.
+  // Renewing re-consents what the connection holds: it sends no scopes, so it widens nothing.
+  const renewConnection = (conn: IntegrationCandidate) =>
+    openPopup({ packageId: integrationId, authKey: conn.auth_key, connectionId: conn.id });
+  // Upgrading widens it for every agent bound to it — only ever after a confirmation.
   const upgradeScopes = (conn: IntegrationCandidate) =>
     openPopup({
       packageId: integrationId,
@@ -329,6 +351,10 @@ export function useConnectionPicker(
     // Labels shared by several components
     ownerLabel,
     setLabel,
+    scopeFitOf,
+    manifest,
+    missingScopeLabels,
+    connectsWithAgentScopes,
     // Menu + actions
     open,
     setOpen,
@@ -337,6 +363,9 @@ export function useConnectionPicker(
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
     upgradeScopes,
+    upgradeTargetId,
+    setUpgradeTargetId,
   };
 }

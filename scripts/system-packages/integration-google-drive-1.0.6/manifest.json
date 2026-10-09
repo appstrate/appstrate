@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-calendar",
-  "version": "1.0.5",
+  "name": "@appstrate/google-drive",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Google Calendar (API)",
-  "description": "Calendar and scheduling service by Google",
-  "keywords": ["calendar", "productivity"],
+  "display_name": "Google Drive (API)",
+  "description": "Cloud file storage and synchronization",
+  "keywords": ["storage", "productivity"],
   "license": "Apache-2.0",
-  "icon": "logos:google-calendar",
+  "icon": "logos:google-drive",
   "source": {
     "kind": "none"
   },
@@ -32,7 +32,12 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/calendar.readonly"],
+      "default_scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/drive.file"
+      ],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -61,31 +66,34 @@
           "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar.readonly",
-          "label": "Read-only access to calendars and events"
+          "value": "https://www.googleapis.com/auth/drive.file",
+          "label": "Per-file access (recommended)"
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar",
-          "label": "Full calendar access (read & write)"
+          "value": "https://www.googleapis.com/auth/drive.readonly",
+          "label": "Read-only access"
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar.events",
-          "label": "Manage events on all calendars"
+          "value": "https://www.googleapis.com/auth/drive",
+          "label": "Full access"
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar.events.readonly",
-          "label": "Read events only"
+          "value": "https://www.googleapis.com/auth/drive.metadata.readonly",
+          "label": "Read metadata only"
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar.settings.readonly",
-          "label": "Read calendar settings"
+          "value": "https://www.googleapis.com/auth/drive.appdata",
+          "label": "App data folder"
         },
         {
-          "value": "https://www.googleapis.com/auth/calendar.freebusy",
-          "label": "Read free/busy information"
+          "value": "https://www.googleapis.com/auth/drive.photos.readonly",
+          "label": "Read photos/videos"
         }
       ],
-      "authorized_uris": ["https://www.googleapis.com/calendar/**"],
+      "authorized_uris": [
+        "https://www.googleapis.com/drive/**",
+        "https://www.googleapis.com/upload/drive/**"
+      ],
       "delivery": {
         "http": {
           "in": "header",
@@ -110,7 +118,9 @@
     },
     "dev.appstrate/api": {
       "auths": {
-        "primary": {}
+        "primary": {
+          "upload_protocols": ["google-resumable"]
+        }
       }
     }
   }
