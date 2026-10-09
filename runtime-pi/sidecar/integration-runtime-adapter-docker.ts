@@ -737,9 +737,8 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // The per-run docker network is created by the platform launcher
       // (`appstrate-exec-<runId>`) with the sidecar attached under the
       // `sidecar` DNS alias. The runner joins the same network so its
-      // HTTPS_PROXY resolves via Docker's embedded DNS. Without RUN_ID there
-      // is no such network, and a runner on the default bridge would egress
-      // around the allowlist and the SSRF floor — refuse instead.
+      // HTTPS_PROXY resolves via Docker's embedded DNS. Without RUN_ID there is
+      // none, and the default bridge would bypass the egress policy: refuse.
       const envRunId = process.env.RUN_ID;
       if (!envRunId) {
         throw new Error(
@@ -760,7 +759,6 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       });
       logger.info("docker integration adapter ready", { runId, runNetwork });
       return {
-        // The runner reaches the listeners via the bridge.
         listenerBindHost: "0.0.0.0",
         proxyUrlFor: (port: number) => `http://sidecar:${port}`,
       };

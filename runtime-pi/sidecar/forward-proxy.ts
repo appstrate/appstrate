@@ -22,8 +22,8 @@ import {
   parseConnectTarget,
   netConnectWithTimeout,
   relaySockets,
+  tieSockets,
   withoutHopByHop,
-  TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
 import { redactUrlForLog } from "./redact.ts";
@@ -99,11 +99,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       return null;
     }
   }
-
-  // Tunnel parsing / connect-with-timeout / relay live in connect-tunnel.ts —
-  // shared verbatim with the per-connection egress listener (#543). Local
-  // alias keeps the call sites below unchanged.
-  const relay = (s1: Socket, s2: Socket) => relaySockets(s1, s2, TUNNEL_IDLE_TIMEOUT_MS);
 
   // The platform API is a trusted destination: the agent can only send
   // HMAC-signed messages there (the run secret is scoped to a single run).
@@ -291,7 +286,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           const remaining = combined.subarray(headerEnd + 4);
           if (remaining.length) clientSocket.write(remaining);
           if (head.length) proxySocket.write(head);
-          relay(clientSocket, proxySocket);
+          relaySockets(clientSocket, proxySocket);
         } else {
           logger.warn("Upstream CONNECT rejected", { target, status });
           clientSocket.write(`HTTP/1.1 ${status} Upstream Rejected\r\n\r\n`);
@@ -307,7 +302,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         }
         clientSocket.destroy();
       });
-      clientSocket.on("error", () => proxySocket.destroy());
+      tieSockets(clientSocket, proxySocket);
     } else {
       // Direct connection (pass-through). Resolve-and-pin to close the
       // DNS-rebind gap — the literal isAllowedTarget() check above does not
@@ -327,7 +322,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
             established = true;
             clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
             if (head.length) targetSocket.write(head);
-            relay(clientSocket, targetSocket);
+            relaySockets(clientSocket, targetSocket);
           });
           targetSocket.on("error", (err) => {
             logger.error("CONNECT direct error", { target, error: err.message });
@@ -339,7 +334,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
             }
             clientSocket.destroy();
           });
-          clientSocket.on("error", () => targetSocket.destroy());
+          tieSockets(clientSocket, targetSocket);
         })
         .catch(() => clientSocket.destroy());
     }

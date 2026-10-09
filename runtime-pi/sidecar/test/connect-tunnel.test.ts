@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `closeWith` (#1819): how one side of a relay tears down the other. A
+ * `tieSockets` (#1819): how one side of a relay tears down the other. A
  * half-close of `from` is passed on and `to` keeps carrying the reply; a close
  * flushes what is still queued for `to`, then destroys it; an error on `from`,
  * or a close while `to` is still connecting, destroys `to` at once.
@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { createServer as netCreateServer, connect as netConnect, Socket } from "node:net";
 import type { Server as NetServer } from "node:net";
 
-import { closeWith } from "../connect-tunnel.ts";
+import { tieSockets } from "../connect-tunnel.ts";
 
 const servers: NetServer[] = [];
 const sockets: Socket[] = [];
@@ -40,17 +40,21 @@ function listen(onAccept: (socket: Socket) => void = () => {}): Promise<number> 
   });
 }
 
-/** A connected TCP pair: the accepted side and the client side. */
+/** A connected TCP pair: the accepted side and the client side, half-open when its peer ends. */
 async function tcpPair(): Promise<{ accepted: Socket; client: Socket }> {
   let accept!: (socket: Socket) => void;
   const accepted = new Promise<Socket>((res) => (accept = res));
-  const client = netConnect(await listen((s) => accept(s)), "127.0.0.1");
+  const port = await listen((s) => accept(s));
+  const client = netConnect({ port, host: "127.0.0.1", allowHalfOpen: true });
   sockets.push(client);
   client.on("error", () => {});
   return { accepted: await accepted, client };
 }
 
-/** `to` with most of a large payload queued in userland: its reader (`peer`) is paused. */
+/**
+ * `to` with most of a large payload queued in userland: its reader (`peer`) is paused, and stays
+ * open once `to` ends, so only `to` itself can close their connection.
+ */
 async function backedUpSocket(): Promise<{ to: Socket; peer: Socket }> {
   const { accepted: to, client: peer } = await tcpPair();
   peer.pause();
@@ -58,7 +62,7 @@ async function backedUpSocket(): Promise<{ to: Socket; peer: Socket }> {
   return { to, peer };
 }
 
-describe("closeWith", () => {
+describe("tieSockets", () => {
   it("passes a half-close of `from` on, and keeps `to` open for the reply", async () => {
     let accept!: (socket: Socket) => void;
     const accepted = new Promise<Socket>((res) => (accept = res));
@@ -69,7 +73,7 @@ describe("closeWith", () => {
     peer.on("end", () => peer.end("reply"));
     const from = new Socket();
     sockets.push(from);
-    closeWith(from, to);
+    tieSockets(from, to);
 
     let reply = "";
     to.on("data", (chunk: Buffer) => (reply += chunk.toString()));
@@ -81,7 +85,7 @@ describe("closeWith", () => {
   it("flushes everything queued for `to` before destroying it when `from` closes cleanly", async () => {
     const { to, peer } = await backedUpSocket();
     const { accepted: from, client: fromPeer } = await tcpPair();
-    closeWith(from, to);
+    tieSockets(from, to);
 
     const released = new Promise<void>((res) => {
       from.once("end", () => res());
@@ -103,15 +107,19 @@ describe("closeWith", () => {
     await drained;
     expect(received).toBe(PAYLOAD_BYTES);
 
-    if (!to.destroyed) await new Promise<void>((res) => to.once("close", () => res()));
-    expect(to.destroyed).toBe(true);
+    const closed = new Promise<boolean>((res) => {
+      if (to.destroyed) res(true);
+      to.once("close", () => res(true));
+      setTimeout(() => res(false), 1_000);
+    });
+    expect(await closed).toBe(true);
   }, 15_000);
 
   it("destroys `to` at once, queued bytes and all, on an error on `from`", async () => {
     const { to } = await backedUpSocket();
     const from = new Socket();
     sockets.push(from);
-    closeWith(from, to);
+    tieSockets(from, to);
 
     from.emit("error", new Error("upstream reset"));
     expect(to.destroyed).toBe(true);
@@ -123,7 +131,7 @@ describe("closeWith", () => {
     to.on("error", () => {});
     const from = new Socket();
     sockets.push(from);
-    closeWith(from, to);
+    tieSockets(from, to);
 
     expect(to.connecting).toBe(true);
     from.emit("close");

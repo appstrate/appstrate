@@ -57,7 +57,7 @@ import {
   type HostResolver,
   type Peer,
 } from "./helpers.ts";
-import { destroyBothWhenIdle, netConnectWithTimeout, tieSockets } from "./connect-tunnel.ts";
+import { netConnectWithTimeout, relaySockets, tieSockets } from "./connect-tunnel.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
@@ -167,7 +167,7 @@ export function createTransparentEgressListener(
     // Preamble deadline: hard cap on the pre-splice phase (ClientHello
     // collection + SSRF resolve + upstream dial) so a client that stalls —
     // or a hung DNS resolve — can't pin the socket forever. Once the splice
-    // starts, destroyBothWhenIdle re-arms setTimeout on both sockets with its own
+    // starts, relaySockets re-arms setTimeout on both sockets with its own
     // idle window, superseding this.
     clientSocket.setTimeout(PREAMBLE_TIMEOUT_MS, () => clientSocket.destroy());
 
@@ -192,7 +192,7 @@ export function createTransparentEgressListener(
         // async window (SSRF resolve + upstream dial) with NO listener —
         // pause so post-preamble bytes (an HTTP POST body, TLS early
         // data) buffer in the kernel instead of being emitted into the
-        // void. The splice's pipe() resumes the stream.
+        // void. relaySockets' pipe() resumes the stream.
         clientSocket.pause();
 
         const policy = await peerPolicy;
@@ -254,15 +254,11 @@ export function createTransparentEgressListener(
           // byte stream exactly as the client produced it.
           upstream.write(preamble);
           emit({ kind: "tunnel-opened", target });
-          clientSocket.pipe(upstream);
-          upstream.pipe(clientSocket);
-          destroyBothWhenIdle(clientSocket, upstream);
+          relaySockets(clientSocket, upstream);
         });
         upstream.on("error", (err: Error) => {
           emit({ kind: "tunnel-error", target, reason: err.message });
         });
-        // From the dial on: a client teardown mid-dial reaps the upstream, a later one lets the
-        // upload's tail flush first.
         tieSockets(clientSocket, upstream);
       })().catch(() => {
         clientSocket.destroy();

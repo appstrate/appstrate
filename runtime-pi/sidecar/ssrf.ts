@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar egress policy on top of `@appstrate/core/ssrf`: the operator-trusted-host
- * allowlist, the allowlist-aware URL check and a local runner's compiled egress policy.
- * The base primitives are imported from `@appstrate/core/ssrf` through `./helpers.ts`.
+ * Sidecar egress policy over `@appstrate/core/ssrf`: the operator's trusted internal hosts and
+ * a local runner's compiled egress policy.
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -12,13 +11,13 @@ import {
   parseAuthorizedUriPattern,
 } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { isLoopback, type RunnerEgressPolicy } from "./helpers.ts";
+import { isLoopbackHost } from "@appstrate/afps-shared/ssrf";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 
 /**
- * Operator-trusted internal hosts, `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated), forwarded
- * by the platform. Empty ⇒ nothing is exempt. They relax the floor for operator-configured
- * upstreams (LLM baseUrl, remote-MCP boot), and for an `api_call` or a runner listener only on
- * a target the integration's declared `authorized_uris` names literally.
+ * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated), forwarded by the platform; empty exempts
+ * nothing. Operator-configured upstreams (LLM baseUrl, remote-MCP boot) skip the floor on them;
+ * an `api_call` or a runner only on one the declared `authorized_uris` names literally.
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
   (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
@@ -37,10 +36,9 @@ export function isBlockedEgressUrl(url: string): boolean {
 }
 
 /**
- * A local runner's egress policy (#1458). It skips the SSRF floor only for a (host, port) a
- * declared entry names literally and the operator lists, never under `allow_all_uris`, never
- * for this machine (#1819): a runner gets raw TCP, so a port or a host a connection value or a
- * glob chose must not open an internal host's other services.
+ * A local runner's egress policy (#1458): it skips the SSRF floor only for a (host, port) a
+ * declared entry names literally and the operator lists, never under `allow_all_uris`, never for
+ * a loopback host (#1819). A runner gets raw TCP: no templated host or port may open one.
  */
 export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,
@@ -57,7 +55,7 @@ export function compileRunnerEgressPolicy(
     ...compileEgressPolicy(egress),
     skipsSsrfFloor: (host, port) =>
       !egress.allowAllUris &&
-      !isLoopback(host) &&
+      !isLoopbackHost(host) &&
       internalHost(host) &&
       literal.allowsAuthority(host, port),
   };

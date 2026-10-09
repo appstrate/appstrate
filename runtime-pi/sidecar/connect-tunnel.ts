@@ -5,11 +5,11 @@
  *
  * Both the agent's shared {@link createForwardProxy} (port 8081) and the
  * per-connection plain egress listener ({@link createIntegrationEgressListener},
- * issue #543) terminate the same `CONNECT host:port` preamble, apply the same
- * SSRF floor, and then blind-relay raw TCP both directions. This module holds
- * the mechanical parts they share so there is ONE implementation of target
- * parsing, connect-with-timeout, relay and `http://` forwarding — the SSRF policy and
- * any upstream-proxy chaining stay in each caller (they differ).
+ * issue #543) terminate the same `CONNECT host:port` preamble and relay
+ * absolute-form `http://` requests. This module holds the mechanical parts they
+ * share so there is ONE implementation of target parsing, connect-with-timeout,
+ * relay and `http://` forwarding — the SSRF policy and any upstream-proxy
+ * chaining stay in each caller (they differ).
  */
 
 import { request as httpRequest } from "node:http";
@@ -20,7 +20,7 @@ import type { Socket } from "node:net";
 import { API_CALL_TIMEOUT_MS, HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 /** Idle window after which a relayed tunnel is torn down (no data flowing). */
-export const TUNNEL_IDLE_TIMEOUT_MS = 120_000; // 2 min
+const TUNNEL_IDLE_TIMEOUT_MS = 120_000; // 2 min
 /** Max time to wait for the upstream TCP connection to establish. */
 const TUNNEL_CONNECT_TIMEOUT_MS = 10_000;
 
@@ -74,7 +74,7 @@ export function netConnectWithTimeout(
  * Tie `to` to `from`: a half-close is passed on (the reply still flows back), a close ends `to`
  * once flushed then destroys it, an error destroys it at once, as does any close while dialing.
  */
-export function closeWith(from: Socket, to: Socket): void {
+function closeWith(from: Socket, to: Socket): void {
   from.on("error", () => to.destroy());
   from.once("end", () => {
     if (!to.destroyed) to.end();
@@ -85,7 +85,7 @@ export function closeWith(from: Socket, to: Socket): void {
   });
 }
 
-/** {@link closeWith} both ways. */
+/** {@link closeWith} both ways: wire it when the second socket is dialed. */
 export function tieSockets(s1: Socket, s2: Socket): void {
   closeWith(s1, s2);
   closeWith(s2, s1);
@@ -100,18 +100,14 @@ export function destroyBothWhenIdle(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE
   s2.setTimeout(idleMs, destroyBoth);
 }
 
-/**
- * Blind bidirectional relay between two sockets, with an idle timeout and
- * mutual teardown on error/close. Used after a CONNECT tunnel is established.
- */
-export function relaySockets(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
+/** Blind bidirectional relay with an idle timeout; teardown is {@link tieSockets}' job. */
+export function relaySockets(s1: Socket, s2: Socket): void {
   s1.pipe(s2);
   s2.pipe(s1);
-  destroyBothWhenIdle(s1, s2, idleMs);
-  tieSockets(s1, s2);
+  destroyBothWhenIdle(s1, s2);
 }
 
-/** Request headers minus the hop-by-hop set and the names `Connection` lists. */
+/** Message headers minus the hop-by-hop set and the names `Connection` lists (RFC 9110 §7.6.1). */
 export function withoutHopByHop(
   raw: IncomingMessage["headers"],
 ): Record<string, string | string[] | undefined> {
@@ -122,26 +118,35 @@ export function withoutHopByHop(
   );
 }
 
-/** Stream `req` upstream as `options` says and the answer back on `res`; a failure answers 502. */
+/**
+ * Stream `req` upstream as `options` says and the answer back on `res`, both without hop-by-hop
+ * headers; a failure, or an upstream switching protocols, answers 502.
+ */
 export function forwardHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
   options: RequestOptions,
   onError: (err: Error) => void,
 ): void {
+  const fail = (err: Error) => {
+    onError(err);
+    if (!res.headersSent) res.writeHead(502);
+    res.end("Proxy error");
+  };
   const proxyReq = httpRequest(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+    res.writeHead(proxyRes.statusCode ?? 502, withoutHopByHop(proxyRes.headers));
     proxyRes.pipe(res);
   });
   proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
     proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
   });
+  // Unheard, a 101 leaves `res` unanswered and the client waiting for good.
+  proxyReq.on("upgrade", (_upgradeRes, socket: Socket) => {
+    socket.destroy();
+    fail(new Error("upstream switched protocols"));
+  });
   req.on("error", () => proxyReq.destroy());
   res.on("error", () => proxyReq.destroy());
-  proxyReq.on("error", (err) => {
-    onError(err);
-    if (!res.headersSent) res.writeHead(502);
-    res.end("Proxy error");
-  });
+  proxyReq.on("error", fail);
   req.pipe(proxyReq);
 }

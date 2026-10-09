@@ -32,6 +32,7 @@ import {
 import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
+import type { HostResolver } from "../helpers.ts";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,
@@ -1633,17 +1634,17 @@ describe("MITM listener — egress allowlist (#1458)", () => {
     },
   );
 
-  /** `internal.test`: declared literally, resolves to a private address, `listed` or not. */
-  async function internalSetup(listed: boolean) {
+  /** `internal.test`: declared literally and operator-listed, resolved by `resolveHostFn`. */
+  async function internalSetup(resolveHostFn: HostResolver = async () => ["10.0.0.5"]) {
     const uris = ["https://internal.test/**"];
     const egress = { authorizedUris: uris, declaredUris: uris, allowAllUris: false };
     const ctx = await setup({
-      egressPolicy: compileRunnerEgressPolicy(egress, (h) => listed && h === "internal.test"),
+      egressPolicy: compileRunnerEgressPolicy(egress, (h) => h === "internal.test"),
       credentials: {
         current: () => payload("v", "oauth2", { access_token: "t" }, uris),
         deliveryPlans: () => ({ v: plan("Authorization", "t") }),
       },
-      resolveHostFn: async () => ["10.0.0.5"],
+      resolveHostFn,
     });
     const request = () =>
       drivenFetch({
@@ -1660,7 +1661,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
   runIfOpenssl(
     "forwards to a private SNI host the manifest names and the operator lists (#1819)",
     async () => {
-      const { listener, calls, request } = await internalSetup(true);
+      const { listener, calls, request } = await internalSetup();
       try {
         expect((await request()).status).toBe(200);
         expect(calls.map((c) => c.url)).toEqual(["https://internal.test/items"]);
@@ -1671,13 +1672,17 @@ describe("MITM listener — egress allowlist (#1458)", () => {
   );
 
   runIfOpenssl(
-    "keeps the SSRF floor for that SNI host when the operator does not list it",
+    "refuses the upstream request once that host resolves to loopback (#1819)",
     async () => {
-      const { listener, events, calls, request } = await internalSetup(false);
+      // The SNI gate resolves it to a private address; the request's own lookup, to loopback.
+      let lookups = 0;
+      const { listener, events, calls, request } = await internalSetup(async () =>
+        lookups++ === 0 ? ["10.0.0.5"] : ["127.0.0.1"],
+      );
       try {
-        await expect(request()).rejects.toThrow();
-        expect(events.some((e) => e.kind === "tls-error" && /rebind/i.test(e.error))).toBe(true);
+        expect((await request()).status).toBe(403);
         expect(calls.length).toBe(0);
+        expect(events.some((e) => e.kind === "request-refused")).toBe(true);
       } finally {
         await listener.close();
       }

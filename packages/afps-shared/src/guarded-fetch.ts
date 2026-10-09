@@ -124,6 +124,11 @@ export interface GuardedFetchOptions {
    */
   allowHost?: (host: string) => boolean;
   /**
+   * Replaces the host blocklist (`isBlockedHost` by default) on both the literal and the
+   * resolved-address layer of each hop; resolution and the address pin are kept.
+   */
+  blockedHost?: (host: string) => boolean;
+  /**
    * Set to `false` to disable connecting to the DNS-validated address and
    * connect by name instead (per-hop guard still runs). Default: pin whenever
    * the runtime supports it. The only known reason to disable is an egress
@@ -231,7 +236,10 @@ async function checkHost(
   opts?: GuardedFetchOptions,
 ): Promise<string | undefined> {
   if (opts?.allowHost?.(url.hostname)) return undefined; // operator-trusted host — skip blocklist
-  const check = await resolveAndCheckHost(url.hostname, { resolve: opts?.resolve });
+  const check = await resolveAndCheckHost(url.hostname, {
+    resolve: opts?.resolve,
+    isBlockedHostFn: opts?.blockedHost,
+  });
   if (check.blocked) {
     opts?.logger?.warn("guardedFetch blocked host", {
       host: url.hostname,

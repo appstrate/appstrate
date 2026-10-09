@@ -21,6 +21,15 @@ consumer's publish rather than the first user's `npm install`.
   a counter fails `isTokenCount`; keys other than the four counters and `tiers`
   are dropped; bands failing `isTokenUsageTiers` are dropped and flagged with
   `tiersDropped`. (#1846)
+- **`isLoopbackHost`** (`./ssrf`): whether a host, in any form `isBlockedHost`
+  parses, is this machine (`localhost`, `*.localhost`, 0.0.0.0/8, 127.0.0.0/8,
+  `::`, `::1`, or an IPv6 address embedding one of those IPv4s); an
+  unparseable host counts as loopback. Both predicates share one classifier, so
+  `isBlockedHost` is unchanged. (#1819)
+- **`GuardedFetchOptions.blockedHost`** (`./guarded-fetch`): a predicate that
+  replaces the host blocklist on both the literal and the resolved-address
+  layer of every hop, keeping resolution and the address pin (`allowHost`
+  skips both). (#1819)
 
 ### Changed
 

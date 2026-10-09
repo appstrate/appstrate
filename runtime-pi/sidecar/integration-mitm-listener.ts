@@ -255,13 +255,14 @@ export function createIntegrationMitmListener(
   // Each upstream request connects to the address the guard validated for it, the name kept on
   // `Host` and the TLS identity. An injected `fetch` (tests) owns its transport: checked, not pinned.
   const fetchFn: UpstreamFetch = (url, init) => {
-    // No redirect is followed, so `url` is the only hop the guard judges: its port is the hop's.
-    const port = Number(URL.parse(url)?.port) || 443;
+    // No redirect is followed, so `url` is the only hop the guard judges: the floor is its own.
+    const target = new URL(url);
+    const targetPort = Number(target.port) || 443;
     return guardedFetch(url, init, {
       followRedirects: false,
       fetchImpl: options.fetch,
       resolve: options.resolveHostFn,
-      allowHost: (h) => options.egressPolicy.skipsSsrfFloor(h, port),
+      blockedHost: ssrfFloorFor(options.egressPolicy, target.hostname, targetPort, isBlockedHost),
     });
   };
   const emit = options.onEvent ?? (() => {});
@@ -542,7 +543,7 @@ async function handleInboundConnection(
   // Mirrors the credential-proxy SSRF guard.
   //
   // Literal layer first (cheap, no DNS) … For a target the policy exempts, both
-  // layers refuse only this machine (#1819).
+  // layers refuse only a loopback host (#1819).
   const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, result.port, isBlockedHost);
   if (ssrfFloor(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });

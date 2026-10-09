@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-connection PLAIN CONNECT egress listener (issue #543).
+ * Per-connection plain HTTP egress proxy (issue #543).
  *
  * A local-source runner sits on the per-run network (`internal: true` in
  * docker mode) with no direct egress. When the integration injects a
@@ -11,17 +11,17 @@
  * itself, e.g. a form/session login) it only needs a way OUT, not a proxy
  * that opens its TLS. This listener is that way out:
  *
- *   - terminates the `CONNECT host:port` preamble,
- *   - applies the SSRF floor and the egress allowlist at CONNECT, then to the
- *     ClientHello's SNI (a CDN front routes on SNI, not on the CONNECT target),
- *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
- *     cert mint, NO header injection).
+ *   - `CONNECT host:port`: the SSRF floor and the egress allowlist apply at
+ *     CONNECT, then to the ClientHello's SNI (a CDN front routes on SNI, not on
+ *     the CONNECT target), then raw TCP is blind-relayed both directions (NO TLS
+ *     termination, NO per-SNI cert mint, NO header injection);
+ *   - absolute-form `http://` requests, each vetted the same way (#1819) and
+ *     forwarded path and query verbatim on a connection of its own: the
+ *     cleartext carries no credential the sidecar injected.
  *
  * It deliberately mirrors the MITM listener's {@link MitmListenerHandle}
  * surface (`ready` / `address` / `proxyUrl` / `close`) so `integrations-boot`
- * collects and tears down both listener kinds uniformly. It also forwards
- * absolute-form `http://` requests, each vetted like CONNECT (#1819), path and
- * query verbatim: nothing is injected here, so cleartext carries no credential.
+ * collects and tears down both listener kinds uniformly.
  *
  * Only the owning runner may connect (`isPeerAllowed`, #1458).
  */
@@ -153,7 +153,7 @@ interface CreateEgressListenerOptions {
 }
 
 /**
- * Create a per-connection plain CONNECT egress listener on an ephemeral port.
+ * Create a per-connection plain egress listener on an ephemeral port.
  * Returns a {@link MitmListenerHandle}-shaped handle for uniform lifecycle
  * management alongside MITM listeners.
  */
@@ -225,7 +225,13 @@ export function createIntegrationEgressListener(
     }
     emit({ kind: "tunnel-opened", target: target.authority });
     const headers = { ...withoutHopByHop(req.headers), host: target.hostHeader };
-    const upstream = { hostname: vetted.address, port: target.port, path: target.path };
+    // `agent: false`: no upstream connection is pooled, so none is shared with another runner.
+    const upstream = {
+      hostname: vetted.address,
+      port: target.port,
+      path: target.path,
+      agent: false,
+    };
     forwardHttpRequest(req, res, { ...upstream, method: req.method, headers }, (err) =>
       emit({ kind: "tunnel-error", target: target.authority, reason: err.message }),
     );
@@ -298,9 +304,17 @@ export function createIntegrationEgressListener(
     if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
     else socket.destroy();
   });
+  // Requests in flight per connection: the head deadline is re-armed only once none is left.
+  const inFlight = new WeakMap<Socket, number>();
   server.on("request", (req: IncomingMessage, res: ServerResponse) => {
-    req.socket.setTimeout(0); // the upstream request has its own deadline
-    res.once("finish", () => req.socket.setTimeout(preambleTimeoutMs));
+    const { socket } = req;
+    inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
+    socket.setTimeout(0); // the upstream request has its own deadline
+    res.once("finish", () => {
+      const left = (inFlight.get(socket) ?? 1) - 1;
+      inFlight.set(socket, left);
+      if (left === 0) socket.setTimeout(preambleTimeoutMs);
+    });
     handleRequest(req, res).catch(crashed(() => res.destroy()));
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {

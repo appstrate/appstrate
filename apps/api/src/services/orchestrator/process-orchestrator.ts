@@ -270,8 +270,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private pendingSpecs = new Map<string, PendingSpec>();
 
   constructor() {
-    // Docker runners would get no per-run network here, so their egress would bypass the
-    // sidecar. Raw env: unset must not read as the schema's "docker" default.
+    // Operator feedback only: the sidecar is pinned to `process` below, so docker runners never
+    // spawn here (they would need a per-run network). Raw env: unset is not the schema's default.
     if (process.env.INTEGRATION_RUNTIME_ADAPTER === "docker") {
       throw new Error(
         "INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process: " +

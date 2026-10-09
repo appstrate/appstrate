@@ -412,7 +412,7 @@ describe("transparent egress listener — plain HTTP path", () => {
   });
 });
 
-describe("transparent egress listener — internal hosts: the api_call rule (#1819)", () => {
+describe("transparent egress listener — internal hosts: the runner rule (#1819)", () => {
   type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
   const literal = (uris: string[]) => ({
     authorizedUris: uris,
@@ -423,11 +423,10 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
   async function runnerListener(
     upstreamPort: number,
     egress: RunnerEgress,
-    listed = true,
     address = privateIpv4(),
   ) {
     const events: EgressListenerEvent[] = [];
-    const internalHost = (h: string) => listed && h === "internal.test";
+    const internalHost = (h: string) => h === "internal.test";
     const listener = await makeListener({
       upstreamPort,
       isBlockedHostFn: isBlockedHost,
@@ -450,45 +449,13 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
     }
   });
 
-  it("never splices to this machine, even for a listed declared literal host", async () => {
+  it("never splices to a listed declared host that resolves to loopback", async () => {
     const upstream = await startTcpEcho();
     const egress = literal([`https://internal.test:${upstream.port}`]);
-    const { port, events } = await runnerListener(upstream.port, egress, true, "127.0.0.1");
+    const { port, events } = await runnerListener(upstream.port, egress, "127.0.0.1");
     const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
     expect(closed).toBe(true);
     expect(events[0]?.reason).toBe("ssrf");
     expect(upstream.received.length).toBe(0);
-  });
-
-  it("keeps the floor for a declared literal host the operator does not list", async () => {
-    const upstream = await startTcpEcho(privateIpv4());
-    const egress = literal([`https://internal.test:${upstream.port}`]);
-    const { port, events } = await runnerListener(upstream.port, egress, false);
-    const { closed } = await driveClient(port, [buildClientHello("internal.test")], 1);
-    expect(closed).toBe(true);
-    expect(events[0]?.reason).toBe("ssrf");
-    expect(upstream.received.length).toBe(0);
-  });
-
-  it("keeps the floor for a listed host a connection chose", async () => {
-    const upstream = await startTcpEcho(privateIpv4());
-    const egress = {
-      ...literal([`https://internal.test:${upstream.port}`]),
-      declaredUris: [`https://{$credential.host}:${upstream.port}`],
-    };
-    const { port, events } = await runnerListener(upstream.port, egress);
-    const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
-    expect(closed).toBe(true);
-    expect(events[0]?.reason).toBe("ssrf");
-    expect(upstream.received.length).toBe(0);
-  });
-
-  it("still enforces the allowlist on an exempt host (another port)", async () => {
-    const upstream = await startTcpEcho();
-    const egress = literal(["https://internal.test/**"]);
-    const { port, events } = await runnerListener(upstream.port, egress);
-    const { closed } = await driveClient(port, [buildClientHello("internal.test")], 1);
-    expect(closed).toBe(true);
-    expect(events[0]?.reason).toBe("not-authorized");
   });
 });

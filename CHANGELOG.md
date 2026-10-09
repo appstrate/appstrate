@@ -94,27 +94,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   listed host that is not loopback becomes reachable by the local
   integration runners of every organization, over raw TCP, on any port a
   declared `authorized_uris` entry names literally: keep only hosts every
-  organization may reach. Loopback is never exempt for a runner: a loopback
-  name or address (`localhost`, `127.0.0.1`), or a listed name resolving to
-  loopback, stays refused to every runner, while one listed for a local
-  model still serves `api_call` and model calls (`docs/ENV.md`).
+  organization may reach. That includes `host.docker.internal`, often listed
+  for a local model: it is not loopback, so it now opens the Docker host's
+  declared ports to every organization's runners. Loopback (`localhost`,
+  `127.0.0.1`, or a listed name resolving to it) stays refused to runners;
+  listed, it still serves `api_call` and model calls. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
+
+- **On `RUN_ADAPTER=firecracker`, narrow the runner host's
+  `FIRECRACKER_EGRESS_DENY_CIDRS` to reach a listed private host** (#1819).
+  Its default drops RFC1918 and link-local ranges, so a run never reaches
+  such a host, exempt or not, until the list leaves its range out.
 
 ### Changed
 
 - **A local integration runner can reach a host listed in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
   transparent listeners refused every private, loopback or link-local
-  address whatever the list said. They now exempt a host and port when the
-  operator lists the host, `allow_all_uris` is off, a declared
-  `authorized_uris` entry with no `{` or `*` in its authority allows that
-  host and port (the scheme's default port when it names none:
-  `https://intranet.corp/**` → 443 only; a templated or glob port exempts
-  nothing), and the host is not loopback. A loopback name or address, or a
-  listed name resolving to loopback, stays refused: dialled from the sidecar,
-  loopback is the sidecar itself. A host from a connection value (the
-  `@appstrate/ssh` host included) or a wildcard stays refused, and the
-  runner's allowlist still applies. An `api_call` keeps its per-host rule,
-  unchanged.
+  address whatever the list said. They now exempt a listed host on a port a
+  declared, untemplated `authorized_uris` entry names (the scheme's default
+  port when it names none), with `allow_all_uris` off. Loopback, literal or
+  resolved, stays refused on every path; a host from a connection value or
+  a wildcard is never exempt; the runner's allowlist still applies. An
+  `api_call` keeps its per-host rule. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
 - **BREAKING (operators): `RUN_ADAPTER=process` with
   `INTEGRATION_RUNTIME_ADAPTER=docker` is refused at boot** (#1819); see
   Operators.
@@ -386,20 +389,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **A proxy-aware local runner reaches `http://` targets through its egress
-  listener** (#1819). Such a client usually sends an `http://` request to
-  `HTTP_PROXY` in absolute-form, which the listener of a runner with nothing
-  to inject answered with 405. That listener is now an HTTP proxy like the
-  agent's forward proxy: it still tunnels `CONNECT`, and vets each
-  absolute-form `http://` request under the same allowlist and SSRF checks
-  as a `CONNECT`, then forwards it with the URL authority as `Host`, the
-  path and query verbatim and hop-by-hop headers stripped, keep-alive
-  allowed. Origin-form and `https://` absolute-form requests answer 405. The
-  listener that injects credentials still answers 405 to any plain-HTTP
-  request, since they would travel in cleartext.
+  listener** (#1819). The listener of a runner with nothing to inject
+  answered 405 to the absolute-form `http://` request such a client sends to
+  `HTTP_PROXY`. It is now an HTTP proxy like the agent's forward proxy:
+  besides `CONNECT`, it vets each absolute-form `http://` request like a
+  `CONNECT` and forwards it with the URL authority as `Host`, path and query
+  verbatim, hop-by-hop headers stripped from the request and the response,
+  keep-alive allowed; each runner's relay uses its own upstream connections.
+  Origin-form and `https://` absolute-form requests answer 405, and the
+  listener that injects credentials still refuses plain HTTP.
 - **A sidecar tunnel no longer discards bytes queued for one side when the
-  other side closes first** (#1819). On the runner egress listeners and the
-  agent's forward proxy, a half-close now reaches the other side, and a
-  close flushes the other side before closing it.
+  other side closes first** (#1819). On the `CONNECT` tunnels of the runner
+  egress listener and the agent's forward proxy, a half-close now reaches
+  the other side, and a close flushes the other side before closing it.
+- **A relayed `http://` request whose upstream answers `101` gets a `502`**
+  on the runner egress listener and the agent's forward proxy, instead of
+  leaving both sockets open forever (#1819). The forward proxy now also
+  strips hop-by-hop headers from responses (RFC 9110 §7.6.1).
 - **A `CONNECT` to a port outside 1–65535 (`0`, `70000`, a non-numeric
   port) answers `400`** on the runner egress listener and the agent's
   forward proxy, and a failing connection no longer crashes the sidecar
