@@ -21,7 +21,8 @@ export type { HostResolver } from "@appstrate/core/ssrf";
 import { ABSOLUTE_BODY_CEILING, API_CALL_TIMEOUT_MS } from "@appstrate/afps-runtime/resolvers";
 import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import { isLoopbackHost } from "@appstrate/afps-shared/ssrf";
-import type { Socket } from "node:net";
+import { isIPv6, type Socket } from "node:net";
+import { networkInterfaces } from "node:os";
 // Compiled default for the inter-chunk idle bound, shared with the platform LLM
 // gateway. Imported (not just re-exported) because the env override below falls
 // back to it.
@@ -380,13 +381,49 @@ export type PeerCheck = (peer: Peer) => Promise<boolean>;
 /** TCP-level half of the egress policy — all a blind tunnel can check. */
 export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority"> & {
   skipsSsrfFloor(host: string, port: number): boolean;
+  /** The floor an exempt target still gets; {@link isSelfHost} when absent. */
+  isSelf?(host: string): boolean;
 };
 
 export type RunnerEgressPolicy = EgressPolicy & AuthorityPolicy;
 
+/** The WHATWG form of a host, unbracketed (`::FFFF:a.b.c.d` → `::ffff:xxxx:xxxx`). */
+function canonicalHost(host: string): string | null {
+  const bare = host.replace(/^\[|\]$/g, "");
+  try {
+    const { hostname } = new URL(`http://${isIPv6(bare) ? `[${bare}]` : bare}/`);
+    return hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** This process's interface addresses, read at each check: a run's network attaches after boot. */
+export function ownAddresses(): ReadonlySet<string> {
+  const own = new Set<string>();
+  for (const infos of Object.values(networkInterfaces())) {
+    for (const { address, family } of infos ?? []) {
+      for (const form of family === "IPv4" ? [address, `::ffff:${address}`] : [address]) {
+        const canonical = canonicalHost(form);
+        if (canonical) own.add(canonical);
+      }
+    }
+  }
+  return own;
+}
+
+/** Loopback or one of `addresses`: dialled from the sidecar, either reaches its own listeners. */
+export function isSelfHost(
+  host: string,
+  addresses: () => ReadonlySet<string> = ownAddresses,
+): boolean {
+  const canonical = canonicalHost(host);
+  return isLoopbackHost(host) || canonical === null || addresses().has(canonical);
+}
+
 /**
  * The SSRF predicate a runner listener applies to `host:port`, names and resolved addresses alike.
- * An exempt target is still never loopback: the agent's proxy listens there.
+ * An exempt target is still never the sidecar itself: the agent's proxy listens there.
  */
 export function ssrfFloorFor(
   policy: AuthorityPolicy,
@@ -394,7 +431,8 @@ export function ssrfFloorFor(
   port: number,
   isBlockedHostFn: (host: string) => boolean,
 ): (host: string) => boolean {
-  return policy.skipsSsrfFloor(host, port) ? isLoopbackHost : isBlockedHostFn;
+  if (!policy.skipsSsrfFloor(host, port)) return isBlockedHostFn;
+  return policy.isSelf ?? isSelfHost;
 }
 
 /** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */

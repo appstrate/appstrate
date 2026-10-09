@@ -10,8 +10,7 @@ import {
   parseAuthorizedUriPattern,
 } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { isLoopbackHost } from "@appstrate/afps-shared/ssrf";
-import type { RunnerEgressPolicy } from "./helpers.ts";
+import { isSelfHost, ownAddresses, type RunnerEgressPolicy } from "./helpers.ts";
 
 /**
  * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated); empty exempts nothing. Who may skip the floor
@@ -40,7 +39,9 @@ export function isBlockedEgressUrl(url: string): boolean {
 export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,
   internalHost: (host: string) => boolean = isOperatorTrustedEgressHost,
+  addresses: () => ReadonlySet<string> = ownAddresses,
 ): RunnerEgressPolicy {
+  const isSelf = (host: string) => isSelfHost(host, addresses);
   const literal = compileEgressPolicy({
     authorizedUris: egress.declaredUris.filter((uri) => {
       const parsed = parseAuthorizedUriPattern(uri);
@@ -50,9 +51,10 @@ export function compileRunnerEgressPolicy(
   });
   return {
     ...compileEgressPolicy(egress),
+    isSelf,
     skipsSsrfFloor: (host, port) =>
       !egress.allowAllUris &&
-      !isLoopbackHost(host) &&
+      !isSelf(host) &&
       internalHost(host) &&
       literal.allowsAuthority(host, port),
   };

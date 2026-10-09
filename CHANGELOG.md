@@ -96,7 +96,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   organization may reach. That includes `host.docker.internal`, often listed
   for a local model: it is not loopback, so it now opens the Docker host's
   declared ports to every organization's runners. Loopback (`localhost`,
-  `127.0.0.1`, or a listed name resolving to it) stays refused to runners;
+  `127.0.0.1`) and the sidecar's own addresses, or a listed name resolving to
+  one, stay refused to runners;
   listed, it still serves `api_call` and model calls. The rule:
   `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
 
@@ -117,10 +118,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   transparent listeners refused every private, loopback or link-local
   address whatever the list said. They now exempt a listed host on a port a
   declared, untemplated `authorized_uris` entry names (a known scheme's
-  default port when it names none), with `allow_all_uris` off. Loopback,
-  literal or resolved, stays refused on every path; a host from a
-  connection value or a wildcard is never exempt; the runner's allowlist
-  still applies. An `api_call` keeps its per-host rule. The rule:
+  default port when it names none), with `allow_all_uris` off. Never
+  loopback nor the sidecar's own addresses, literal or resolved, on every
+  path; a host from a connection value or a wildcard is never exempt; the
+  runner's allowlist still applies. An `api_call` keeps its per-host rule. The rule:
   `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
 - **BREAKING (operators): `RUN_ADAPTER=process` with
   `INTEGRATION_RUNTIME_ADAPTER=docker` is refused at boot** (#1819); see

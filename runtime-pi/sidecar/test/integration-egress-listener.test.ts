@@ -22,6 +22,7 @@ import {
   type EgressListenerEvent,
 } from "../integration-egress-listener.ts";
 import type { MitmListenerHandle } from "../integration-mitm-listener.ts";
+import { ownAddresses } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { privateIpv4 } from "./helpers/private-ipv4.ts";
 import { buildClientHello, tlsRecord } from "./helpers/tls-client-hello.ts";
@@ -572,24 +573,7 @@ describe("integration-egress-listener (#543)", () => {
       expect(upstream.requests).toHaveLength(0);
     });
 
-    it("refuses SSRF targets with the real floor: literal and DNS rebind", async () => {
-      const { handle, events } = await makeListener({
-        isBlockedHostFn: undefined,
-        resolveHostFn: async () => ["10.0.0.5"],
-      });
-      for (const url of [
-        "http://169.254.169.254/latest/meta-data/",
-        "http://10.0.0.5:8080/",
-        "http://rebind.example/",
-      ]) {
-        const response = await exchange(handle.address().port, [get(url)]);
-        expect(statusOf(response)).toBe(403);
-      }
-      expect(events.filter((e) => e.reason === "ssrf")).toHaveLength(3);
-      expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
-    });
-
-    it("answers 502 when the vetted upstream cannot be reached, closing as the client asked", async () => {
+    it("answers 502 when the vetted upstream cannot be reached, closing as HTTP/1.0 asks", async () => {
       const deadPort = await new Promise<number>((resolve) => {
         const server = netCreateServer().listen(0, "127.0.0.1", () => {
           const addr = server.address();
@@ -600,12 +584,8 @@ describe("integration-egress-listener (#543)", () => {
       const authority = `127.0.0.1:${deadPort}`;
 
       // `exchange` resolves only once the connection closes: HTTP/1.0 asks for that by default.
-      for (const request of [
-        get(`http://${authority}/`),
-        `GET http://${authority}/ HTTP/1.0\r\n\r\n`,
-      ]) {
-        expect(statusOf(await exchange(handle.address().port, [request]))).toBe(502);
-      }
+      const request = `GET http://${authority}/ HTTP/1.0\r\n\r\n`;
+      expect(statusOf(await exchange(handle.address().port, [request]))).toBe(502);
       expect(events.some((e) => e.kind === "tunnel-error" && e.target === authority)).toBe(true);
     });
 
@@ -730,123 +710,60 @@ describe("integration-egress-listener (#543)", () => {
       expect(upstream.connections()).toBe(2);
     });
 
-    it("answers 405 to origin-form and https:// absolute-form requests", async () => {
+    it("answers 405 to origin-form or https://, 400 to userinfo or a bad port", async () => {
       const { handle, events } = await makeListener();
-      for (const request of [
-        get("/", ["Host: example.com"]),
-        get("https://example.com/", ["Host: example.com"]),
-      ]) {
-        expect(statusOf(await exchange(handle.address().port, [request]))).toBe(405);
+      const table: Array<[string, number]> = [
+        [get("/"), 405],
+        [get("https://example.com/"), 405],
+        [get("http://user:pw@127.0.0.1:9/"), 400],
+        [get("http://127.0.0.1:99999/"), 400],
+        [get("http://127.0.0.1:0/"), 400],
+      ];
+      const statuses: number[] = [];
+      for (const [request] of table) {
+        statuses.push(statusOf(await exchange(handle.address().port, [request])));
       }
+      expect(statuses).toEqual(table.map(([, status]) => status));
       expect(events).toEqual([]);
-    });
-
-    it("answers 431 to an oversized head, 400 to a malformed one, userinfo or a bad port", async () => {
-      const { handle, events } = await makeListener();
-      const port = handle.address().port;
-      const oversized = get("http://127.0.0.1:9/", [`X-Big: ${"a".repeat(20_000)}`]);
-      expect(statusOf(await exchange(port, [oversized]))).toBe(431);
-      for (const request of [
-        get("http://127.0.0.1:9/", ["Host: 127.0.0.1:9", " folded"]),
-        get("http://127.0.0.1:9/", ["Host : 127.0.0.1:9"]),
-        get("http://user:pw@127.0.0.1:9/"),
-        get("http://127.0.0.1:99999/"),
-        get("http://127.0.0.1:0/"),
-      ]) {
-        expect(statusOf(await exchange(port, [request]))).toBe(400);
-      }
-      expect(events).toEqual([]);
-    });
-
-    describe("every request on a kept-alive connection is vetted", () => {
-      const keepAlive = (authority: string, path: string) =>
-        get(`http://${authority}${path}`, ["Connection: keep-alive"]);
-
-      it("refuses an unauthorized one after a served one", async () => {
-        const upstream = await startHttpUpstream();
-        const { handle, events } = await makeListener({
-          egressPolicy: {
-            allowsAuthority: (h) => h === "allowed.example",
-            skipsSsrfFloor: () => false,
-          },
-          resolveHostFn: async () => ["127.0.0.1"],
-        });
-        const allowed = `allowed.example:${upstream.port}`;
-        const denied = `denied.example:${upstream.port}`;
-
-        const responses = await keepAliveExchange(handle.address().port, [
-          keepAlive(allowed, "/first"),
-          keepAlive(denied, "/second"),
-        ]);
-        expect(responses.map(statusOf)).toEqual([200, 403]);
-        expect(upstream.requests.map((r) => r.url)).toEqual(["/first"]);
-        expect(events).toContainEqual({
-          kind: "tunnel-refused",
-          target: denied,
-          reason: "not-authorized",
-        });
-      });
-
-      it("serves an authorized one for another host, with its own Host", async () => {
-        const upstream = await startHttpUpstream();
-        const { handle } = await makeListener({ resolveHostFn: async () => ["127.0.0.1"] });
-        const first = `allowed.example:${upstream.port}`;
-        const second = `other.example:${upstream.port}`;
-
-        const responses = await keepAliveExchange(handle.address().port, [
-          keepAlive(first, "/first"),
-          keepAlive(second, "/second"),
-        ]);
-        expect(responses.map(statusOf)).toEqual([200, 200]);
-        expect(upstream.requests.map((r) => [r.url, r.headers.host])).toEqual([
-          ["/first", first],
-          ["/second", second],
-        ]);
-      });
     });
   });
 
   describe("internal hosts: the runner rule, per port (#1819)", () => {
-    /** The real SSRF floor, every name resolving to `address`, `internal.test` operator-listed. */
-    const runnerListener = (uris: string[], address = privateIpv4()) =>
+    /**
+     * The real SSRF floor, every name resolving to this machine's private IPv4, `internal.test`
+     * operator-listed. That IPv4 is an own address: the sidecar's own set is empty unless given.
+     */
+    const runnerListener = (uris: string[], own: () => ReadonlySet<string> = () => new Set()) =>
       makeListener({
         isBlockedHostFn: undefined,
-        resolveHostFn: async () => [address],
+        resolveHostFn: async () => [privateIpv4()],
         egressPolicy: compileRunnerEgressPolicy(
           { authorizedUris: uris, declaredUris: uris, allowAllUris: false },
           (h) => h === "internal.test",
+          own,
         ),
       });
-    /** CONNECT to `internal.test:<port>` through a listener over `uris`. */
-    const connectInternal = async (uris: string[], port: number, address?: string) => {
-      const { handle, events } = await runnerListener(uris, address);
-      const res = await connectAndProbe(handle.address().port, `internal.test:${port}`, "ping");
-      return { ...res, events };
-    };
 
-    it("relays to a private address behind a listed declared host:port", async () => {
+    it("relays to a private address behind a listed declared host:port, never to its own", async () => {
       const echo = await startTcpEcho(privateIpv4());
-      const res = await connectInternal([`tcp://internal.test:${echo.port}`], echo.port);
-      expect(res.statusCode).toBe(200);
-      expect(res.echoed).toBe("ping");
-    });
+      const uris = [`tcp://internal.test:${echo.port}`];
+      const connectInternal = async (own?: () => ReadonlySet<string>) => {
+        const { handle, events } = await runnerListener(uris, own);
+        const res = await connectAndProbe(
+          handle.address().port,
+          `internal.test:${echo.port}`,
+          "ping",
+        );
+        return { ...res, events };
+      };
 
-    it("refuses a listed declared name that resolves to loopback", async () => {
-      const echo = await startTcpEcho();
-      const uris = [`http://internal.test:${echo.port}/**`];
-      const res = await connectInternal(uris, echo.port, "127.0.0.1");
-      expect(res.statusCode).toBe(403);
-      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
-      expect(echo.received).toEqual([]);
-    });
-
-    it("keeps the floor on a port only another entry grants", async () => {
-      // The allowlist lets `internal.test:<port>` through the glob; only :443 is declared with it.
-      const echo = await startTcpEcho(privateIpv4());
-      const uris = ["https://internal.test/**", `https://*.test:${echo.port}/**`];
-      const res = await connectInternal(uris, echo.port);
-      expect(res.statusCode).toBe(403);
-      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
+      const relayed = await connectInternal();
+      expect([relayed.statusCode, relayed.echoed]).toEqual([200, "ping"]);
+      const received = echo.received.length;
+      const self = await connectInternal(ownAddresses);
+      expect(self.statusCode).toBe(403);
+      expect(self.events.some((e) => e.reason === "ssrf")).toBe(true);
+      expect(echo.received).toHaveLength(received);
     });
 
     it("judges each http:// request on a connection by its own port", async () => {

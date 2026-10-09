@@ -431,28 +431,18 @@ describe("transparent egress listener — internal hosts: the runner rule (#1819
       upstreamPort,
       isBlockedHostFn: isBlockedHost,
       resolveHostFn: async () => [address],
-      policyForPeer: async () => compileRunnerEgressPolicy(egress, internalHost),
+      // The test upstreams bind an own address: the sidecar's own set stays empty here.
+      policyForPeer: async () => compileRunnerEgressPolicy(egress, internalHost, () => new Set()),
       onEvent: (e) => events.push(e),
     });
     return { port: listener.address().port, events };
   }
   const httpTo = (host: string) => Buffer.from(`GET / HTTP/1.1\r\nHost: ${host}\r\n\r\n`, "latin1");
 
-  it("splices to a private address behind a listed declared literal host (SNI and Host)", async () => {
+  it("splices to a private address behind a listed declared literal host, any SNI or Host case", async () => {
     const upstream = await startTcpEcho(privateIpv4());
     const egress = literal([`https://internal.test:${upstream.port}`]);
-    for (const preamble of [buildClientHello("internal.test"), httpTo("internal.test")]) {
-      const { port, events } = await runnerListener(upstream.port, egress);
-      const { received } = await driveClient(port, [preamble], preamble.length);
-      expect(received.equals(preamble)).toBe(true);
-      expect(events[0]?.kind).toBe("tunnel-opened");
-    }
-  });
-
-  it("judges an uppercase SNI or Host by its lowercase name", async () => {
-    const upstream = await startTcpEcho(privateIpv4());
-    const egress = literal([`https://internal.test:${upstream.port}`]);
-    for (const preamble of [buildClientHello("INTERNAL.TEST"), httpTo("INTERNAL.TEST")]) {
+    for (const preamble of [buildClientHello("INTERNAL.test"), httpTo("INTERNAL.test")]) {
       const { port, events } = await runnerListener(upstream.port, egress);
       const { received } = await driveClient(port, [preamble], preamble.length);
       expect(received.equals(preamble)).toBe(true);

@@ -7,8 +7,9 @@
 
 import { describe, it, expect } from "bun:test";
 
-import { ssrfFloorFor } from "../helpers.ts";
+import { isSelfHost, ssrfFloorFor } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
+import { privateIpv4 } from "./helpers/private-ipv4.ts";
 
 type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
 
@@ -82,19 +83,34 @@ describe("compileRunnerEgressPolicy — skipsSsrfFloor", () => {
     expect(actual).toEqual(table.map(([label, , , , expected]) => [label, expected]));
   });
 
-  it("never exempts loopback: neither a loopback name nor an exempt name's loopback address", () => {
-    const declared = ["localhost", "127.0.0.1", "foo.localhost", "intranet.corp"];
+  it("never exempts the sidecar itself: loopback or an own address, literal or resolved", () => {
+    const declared = ["localhost", "127.0.0.1", "foo.localhost", "10.0.0.5", "intranet.corp"];
     const policy = compileRunnerEgressPolicy(
       literal(declared.map((h) => `http://${h}:8081/**`)),
       () => true,
+      () => new Set(["10.0.0.5"]),
     );
     const exempt = declared.map((h) => policy.skipsSsrfFloor(h, 8081));
-    expect(exempt).toEqual([false, false, false, true]);
+    expect(exempt).toEqual([false, false, false, false, true]);
 
     const floor = ssrfFloorFor(policy, "intranet.corp", 8081, () => false);
-    const addresses = ["127.0.0.1", "127.8.9.10", "0.0.0.0", "::1", "::", "::ffff:127.0.0.1"];
-    expect(addresses.map(floor)).toEqual(addresses.map(() => true));
-    const elsewhere = ["10.0.0.5", "192.168.1.2", "intranet.corp"];
+    const self = [
+      "127.0.0.1",
+      "127.8.9.10",
+      "0.0.0.0",
+      "::1",
+      "::",
+      "::ffff:127.0.0.1",
+      "10.0.0.5",
+    ];
+    expect(self.map(floor)).toEqual(self.map(() => true));
+    const elsewhere = ["10.0.0.6", "192.168.1.2", "intranet.corp"];
     expect(elsewhere.map(floor)).toEqual(elsewhere.map(() => false));
+  });
+
+  it("reads this process's interfaces, IPv4-mapped forms included", () => {
+    const ip = privateIpv4();
+    const forms = [ip, `::ffff:${ip}`, `[::FFFF:${ip}]`, `${ip}.`];
+    expect(forms.map((h) => isSelfHost(h))).toEqual(forms.map(() => true));
   });
 });
