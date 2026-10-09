@@ -46,7 +46,9 @@ const { ViewAsBanner } = await import("../../components/view-as-banner.tsx");
 const { render } = await import("../../test/render.tsx");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 
+// The banner assertions read French copy: pin it rather than inherit a neighbour's language.
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 const PERSONA: ViewAsPersona = {
   orgId: "org_a",
