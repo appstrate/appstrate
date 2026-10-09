@@ -20,12 +20,13 @@ import {
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
-import { connectionOptionLabel } from "../../lib/connection-set";
-import { ConnectionSetChecklist } from "./connection-set-checklist";
+import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
+import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
- * write. With an org default in place, these are per-agent EXCEPTIONS.
+ * write. With an org default in place, these are per-agent EXCEPTIONS. An empty set pins
+ * "no connection"; whether that blocks a run is the running version's `required` to say.
  */
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
@@ -36,7 +37,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
+  const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
@@ -44,10 +45,8 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
-  const canAddPin = !!newAgent && newConnectionIds.length > 0;
-
   const onSubmitNewPin = () => {
-    if (!canAddPin) return;
+    if (!newAgent || newConnectionIds === null) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
@@ -56,7 +55,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewConnectionIds([]);
+          setNewConnectionIds(null);
         },
       },
     );
@@ -106,6 +105,11 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
                     {agentDisplayName(p.agent_package_id)}
                   </TableCell>
                   <TableCell className="px-3 py-2">
+                    {p.connection_ids.length === 0 && (
+                      <span className="text-muted-foreground">
+                        {t("agents:detail.integrationMemberPicker.none")}
+                      </span>
+                    )}
                     {p.connection_ids.map((id, i) => {
                       const c = pinnableConnections.find((x) => x.id === id);
                       return (
@@ -150,12 +154,8 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
         </p>
       )}
 
-      {/* Add new pin */}
-      {pinnableConnections.length === 0 ? (
-        <p className="text-muted-foreground text-xs italic">
-          {t("integration.admin.pinManagement.noPinnableConnections")}
-        </p>
-      ) : pinnableAgents.length === 0 ? (
+      {/* Add new pin — "no connection" needs no shared connection. */}
+      {pinnableAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>
@@ -183,17 +183,27 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnections")}
             </Label>
+            {pinnableConnections.length === 0 && (
+              <p className="text-muted-foreground mb-1 text-xs italic">
+                {t("integration.admin.pinManagement.noPinnableConnections")}
+              </p>
+            )}
             <ConnectionSetChecklist
-              connections={pinnableConnections}
+              options={pinnableConnections.map((c) => ({
+                id: c.id,
+                label: <ConnectionOptionLabel connection={c} />,
+              }))}
               value={newConnectionIds}
               onChange={setNewConnectionIds}
               idPrefix="pin-add-connection"
+              allowNone
+              noneHint={t("integration.admin.pinManagement.noneHint")}
             />
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!canAddPin || upsertPin.isPending}
+            disabled={!newAgent || newConnectionIds === null || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}

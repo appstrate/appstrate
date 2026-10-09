@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelsPaths = {
@@ -121,6 +122,7 @@ export const modelsPaths = {
                     cacheWrite: { type: "number" },
                     tiers: {
                       type: "array",
+                      maxItems: MAX_TOKEN_USAGE_TIERS,
                       items: { $ref: "#/components/schemas/ModelCostTier" },
                     },
                   },
@@ -505,6 +507,7 @@ export const modelsPaths = {
                     cacheWrite: { type: "number" },
                     tiers: {
                       type: "array",
+                      maxItems: MAX_TOKEN_USAGE_TIERS,
                       items: { $ref: "#/components/schemas/ModelCostTier" },
                     },
                   },

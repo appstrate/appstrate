@@ -103,6 +103,16 @@ describe("readModelCatalog — the file", () => {
     );
     await expect(read("{")).rejects.toThrow(/not JSON/);
   });
+
+  it("refuses price tiers the platform's rate-card rule refuses", async () => {
+    const { cost } = next() as { cost: Record<string, number> };
+    const tier = { ...cost, inputTokensAbove: 1_000 };
+    for (const tiers of [[tier, tier], [{ ...tier, inputTokensAbove: 1.5 }]]) {
+      await expect(read(catalogFile([next({ cost: { ...cost, tiers } })]))).rejects.toThrow(
+        /unexpected shape at records\.0\.cost\.tiers/,
+      );
+    }
+  });
 });
 
 describe("readModelCatalog — the records", () => {
@@ -225,9 +235,9 @@ describe("the offer with a live catalog applied", () => {
     expect(lookupCatalogModel(anthropic, BUNDLED, "bundled")).not.toBeNull();
   });
 
-  // A subscription model is priced from usage summed over requests, where a
-  // tier one request can cross cannot apply (#1552).
-  it("offers a subscription provider no model with a price tier one request can reach", async () => {
+  // Summed usage carries tier bands (RUN_COST.md), so a subscription provider
+  // is offered a tiered model like any other.
+  it("offers a subscription provider a model with a reachable price tier", async () => {
     const subscription = {
       ...anthropic,
       providerId: "subscription",
@@ -238,16 +248,16 @@ describe("the offer with a live catalog applied", () => {
       cost: Record<string, number>;
       contextWindow: number;
     };
-    const tiered = (id: string, inputTokensAbove: number) =>
-      next({ id, cost: { ...cost, tiers: [{ ...cost, inputTokensAbove }] } });
-    await apply([tiered("reachable", contextWindow - 1), tiered("unreachable", contextWindow)]);
+    await apply([
+      next({
+        id: "tiered",
+        cost: { ...cost, tiers: [{ ...cost, inputTokensAbove: contextWindow - 1 }] },
+      }),
+    ]);
 
-    const ids = (def: typeof anthropic) => listCatalogModels(def).map((m) => m.id);
-    expect(ids(anthropic)).toEqual(expect.arrayContaining(["reachable", "unreachable"]));
-    expect(ids(subscription)).toContain("unreachable");
-    expect(ids(subscription)).not.toContain("reachable");
-    expect(lookupCatalogModel(subscription, "reachable")).toBeNull();
-    expect(lookupCatalogDialect(subscription, "reachable")).toBeNull();
+    expect(listCatalogModels(subscription).map((m) => m.id)).toContain("tiered");
+    expect(lookupCatalogModel(subscription, "tiered")).not.toBeNull();
+    expect(lookupCatalogDialect(subscription, "tiered")).not.toBeNull();
   });
 
   it("goes back to the bundled registry when the catalog is withdrawn", async () => {

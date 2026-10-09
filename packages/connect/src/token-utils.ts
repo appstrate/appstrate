@@ -11,6 +11,10 @@
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 
+function formUrlEncode(value: string): string {
+  return new URLSearchParams([["", value]]).toString().slice(1);
+}
+
 /**
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
@@ -26,11 +30,9 @@ export function buildTokenHeaders(
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
-    // RFC 6749 §2.3.1: credentials MUST be URL-encoded before base64
-    const encoded = Buffer.from(
-      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
-    ).toString("base64");
-    headers["Authorization"] = `Basic ${encoded}`;
+    // RFC 6749 §2.3.1: each credential is form-urlencoded (Appendix B), leaving ASCII for `btoa`.
+    headers["Authorization"] =
+      `Basic ${btoa(`${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`)}`;
   }
   return headers;
 }
@@ -46,7 +48,8 @@ export interface ParsedTokenResponse {
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
-  scopesGranted: string[];
+  /** `null` when the response omits `scope`: unchanged (RFC 6749 §5.1), never "no scopes". */
+  scopesReturned: string[] | null;
 }
 
 /**
@@ -58,13 +61,18 @@ export interface ParsedTokenResponse {
  * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). Any other failure (network,
  * 5xx, non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
  * `access_token` nor `error`) is treated as transient because the credential
- * might still be valid.
+ * might still be valid — except a refused client (`"client_rejected"`).
  *
  * Both the initial token exchange (token-exchange.ts) and the refresh flow
  * (token-refresh.ts) read the response through {@link readTokenResponse} so
  * that revocation handling stays symmetric.
  */
-export type TokenErrorKind = "revoked" | "transient";
+export type TokenErrorKind = "revoked" | "client_rejected" | "transient";
+
+const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_client",
+  "unauthorized_client",
+]);
 
 interface TokenErrorClassification {
   kind: TokenErrorKind;
@@ -100,12 +108,10 @@ function redactErrorDescription(description: string): string {
  *
  * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
  * refresh token, where retrying is pointless and the stored PKCE state should
- * be dropped. Every other code (`invalid_client`, provider-specific ones such
- * as GitHub's `bad_refresh_token`) and a body with no string `error` stay
- * `"transient"`: an ambiguous signal never declares a credential dead.
- * `invalid_client` in particular leaves the grant untouched — it is the client
- * credentials that are wrong, and an operator fixing the registration makes
- * the same attempt work.
+ * be dropped. `invalid_client` / `unauthorized_client` map to `"client_rejected"`:
+ * the grant is untouched, only fixing the client registration helps. Any other
+ * code or a body with no string `error` stays `"transient"`: an ambiguous signal
+ * never declares a credential dead.
  *
  * `error_description` is redacted here, at the source, so every consumer that
  * folds it into `Error.message` gets the sanitized value.
@@ -120,7 +126,13 @@ export function classifyTokenErrorBody(body: unknown): TokenErrorClassification 
     typeof parsed.error_description === "string"
       ? redactErrorDescription(parsed.error_description)
       : undefined;
-  return { kind: error === "invalid_grant" ? "revoked" : "transient", error, errorDescription };
+  const kind: TokenErrorKind =
+    error === "invalid_grant"
+      ? "revoked"
+      : error !== undefined && CLIENT_REJECTED_ERRORS.has(error)
+        ? "client_rejected"
+        : "transient";
+  return { kind, error, errorDescription };
 }
 
 /**
@@ -241,13 +253,10 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
  * `…/auth/userinfo.email`), which only the platform layer knows.
  *
  * @param tokenData - Token endpoint body, as narrowed by {@link readTokenResponse}
- * @param requestedScopes - Scopes that were sent in the authorize / refresh call. Used
- *   as the granted set when the response omits `scope` (RFC 6749 §5.1).
  * @param fallbackRefreshToken - Refresh token to preserve if not present in response
  */
 export function parseTokenResponse(
   tokenData: TokenResponseBody,
-  requestedScopes?: string[],
   fallbackRefreshToken?: string,
 ): ParsedTokenResponse {
   const accessToken = tokenData.access_token;
@@ -270,22 +279,23 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
-  const scopeStr = typeof tokenData.scope === "string" ? tokenData.scope : "";
-  const responseScopes = scopeStr ? scopeStr.split(/[\s,]+|%20/).filter(Boolean) : [];
-  const scopesGranted = responseScopes.length > 0 ? responseScopes : (requestedScopes ?? []);
+  const scopes =
+    typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
 
-  return { accessToken, refreshToken, expiresAt, scopesGranted };
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    scopesReturned: scopes.length > 0 ? scopes : null,
+  };
 }
 
 /**
  * A client-authentication pair that cannot be correct — thrown by
  * {@link assertClientAuthCoherent}.
  *
- * A distinct type because the refresh path classifies anything that is not a
- * `RefreshError` as a transient upstream failure and counts it toward the
- * streak that eventually flags a connection `needs_reconnection`. A
- * configuration/programming fault must not spend a user's connection health
- * budget, and must not read in the logs like someone else's outage.
+ * A distinct type: the refresh path counts only a `RefreshError` toward the
+ * `needs_reconnection` streak, so a configuration fault never spends it.
  */
 export class ClientAuthInvariantError extends Error {
   constructor(message: string) {

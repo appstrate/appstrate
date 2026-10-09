@@ -5,6 +5,7 @@
  * joined onto their routes' guards, so the index and tools read the enforcing table.
  */
 
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
 
@@ -231,4 +232,30 @@ export function collectReferencedSchemas(
   }
 
   return resolved;
+}
+
+type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
+
+let runAndWaitOutputSchema: ToolOutputSchema | undefined;
+
+/**
+ * `RunAndWaitResult` as `run_and_wait`'s self-contained `outputSchema` (refs as `$defs`, no
+ * descriptions: the tool's own carries them). Built once: one object reaches the validator cache.
+ */
+export function getRunAndWaitOutputSchema(): ToolOutputSchema {
+  if (runAndWaitOutputSchema) return runAndWaitOutputSchema;
+  const { componentSchemas } = getCatalog();
+  const root = componentSchemas.RunAndWaitResult;
+  const $defs = collectReferencedSchemas(root, componentSchemas);
+  runAndWaitOutputSchema = JSON.parse(
+    JSON.stringify({ ...(root as object), $defs }),
+    (key, value: unknown) => {
+      if (typeof value !== "string") return value;
+      if (key === "description") return undefined;
+      return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+        ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+        : value;
+    },
+  ) as ToolOutputSchema;
+  return runAndWaitOutputSchema;
 }

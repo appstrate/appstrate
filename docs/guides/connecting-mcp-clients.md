@@ -174,7 +174,7 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
 | `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
-| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status.                                 |
+| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
 | `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
 
@@ -190,6 +190,33 @@ under your own credentials: `agents:run` without a run-read permission would
 bill a run you could never read. It declares the inline kind and its arguments
 (`manifest`, `prompt`, `context_files`) only to a caller who also holds
 `agents:write`; anyone else is offered `kind:"agent"` alone.
+
+Its `structuredContent` follows the tool's declared `outputSchema` (the
+`RunAndWaitResult` component of the OpenAPI spec), and the server refuses to
+answer anything else: `{ id, packageId, status, done, warnings }`, plus
+`result`, `error` and `files` once the run is over. `done` is the only thing
+that tells a finished run from one still going; `error` is always the run's own
+failure, and `warnings` is `[]` when the launch reported none.
+
+How long it waits depends on the client. Both delays derive from the MCP SDK
+client's default request timeout (60 s). A request carrying
+`params._meta.progressToken` is answered over SSE: the call streams
+`notifications/progress` every 15 s (a quarter of it) and returns `done:true`
+once the run is over. Without a token nothing can keep the request alive, so
+after 45 s (one heartbeat short of it) it returns `done:false` with the run
+`id` and no outcome, and a second text block saying what to do next: continue
+with `getRun` (`query: { wait: true }`, which the server holds for at most
+55 s) on that id, never with a second `run_and_wait`.
+Progress only helps a client that resets its request timeout on it: the MCP
+TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
+`false`). A client that sends a token without resetting its timeout on progress
+hits its own timeout on a long run, not the `done:false` fallback: the server
+cannot tell it apart from one that does. A client that gives up on a streamed
+call without closing its HTTP connection (MCP SDK clients: their per-call
+timeout only sends `notifications/cancelled` in a new POST, which a stateless
+server cannot match to the call) leaves the server waiting until the run ends,
+30 min at most; the run itself is unaffected, so read it back with `getRun`
+rather than launching it again.
 
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you

@@ -49,6 +49,12 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
+import {
+  announceLaunch,
+  connectionRefusalLines,
+  parseLaunchItems,
+  type LaunchItem,
+} from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
@@ -275,19 +281,18 @@ export async function runRemote(
       import("node:fs/promises").then((m) => m.writeFile(path, contents, "utf8")));
 
   // ─── 1. Trigger the run ────────────────────────────────────────────
-  const runId = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
+  const { runId, warnings } = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
 
-  // Match the local path's preamble verbatim so the user sees the same
-  // "→ running ... (reporting to ... as run_xxx)" line in both modes.
-  // The local path emits this on stderr from runCommandLocal:534 — see
-  // also `runCommand.ts` for the source of the format string.
-  if (!opts.json) {
-    writeStderr(`→ running ${opts.bundleLabel} (reporting to ${opts.instance} as ${runId})\n`);
-  } else {
-    writeStdout(
-      JSON.stringify({ type: "appstrate.remote.triggered", runId, instance: opts.instance }) + "\n",
-    );
-  }
+  // Same helper as the local path, so both modes print the same preamble.
+  announceLaunch({
+    type: "appstrate.remote.triggered",
+    json: opts.json,
+    bundleLabel: opts.bundleLabel,
+    instance: opts.instance,
+    run: { runId, warnings },
+    writeStdout,
+    writeStderr,
+  });
 
   // ─── 1b. Set up the local console sink ─────────────────────────────
   //
@@ -548,7 +553,18 @@ function apiUrl(opts: RunRemoteOptions, path: string): URL {
   return new URL(path, opts.instance);
 }
 
-async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<string> {
+/** A 409 `missing_integration_connection` as one indented line per item. */
+function refusalHint(body: unknown): string | undefined {
+  const lines = connectionRefusalLines(body);
+  return lines
+    ? `the launch was refused:${lines.map((line) => `\n  ${line}`).join("")}`
+    : undefined;
+}
+
+async function triggerRun(
+  opts: RunRemoteOptions,
+  deps: HttpDeps,
+): Promise<{ runId: string; warnings: LaunchItem[] }> {
   // Don't encode scope/name. They're already validated by `package-spec.ts`
   // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
@@ -610,7 +626,7 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
             "Verify --api-key / `appstrate login` is current and has agents:run + runs:read permissions."
           : res.status === 404
             ? `Agent ${opts.scope}/${opts.name} not found on ${opts.instance}.`
-            : undefined,
+            : refusalHint(detail),
     });
   }
 
@@ -622,7 +638,10 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
   // legacy `runId` alias). The error body carries the unexpected payload
   // so the user can debug a server mismatch without re-running with
   // extra logging.
-  const payload = (await res.json().catch(() => null)) as { id?: unknown } | null;
+  const payload = (await res.json().catch(() => null)) as {
+    id?: unknown;
+    warnings?: unknown;
+  } | null;
   if (!payload || typeof payload !== "object") {
     throw new RemoteRunError("Trigger returned a non-JSON response", {
       body: payload,
@@ -635,7 +654,7 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
       hint: "Expected the created run resource (`{ id: string, ... }`). The platform may be incompatible with this CLI version.",
     });
   }
-  return payload.id;
+  return { runId: payload.id, warnings: parseLaunchItems(payload.warnings) };
 }
 
 async function fetchRunRecord(
@@ -878,17 +897,9 @@ function buildRunResultPayload(
   }
   if (record.duration != null) result.durationMs = record.duration;
   if (record.cost != null) result.cost = record.cost;
+  // As stored (cache counters, tier bands), the two required counters zeroed when absent.
   const u = record.token_usage;
-  result.usage = {
-    input_tokens: u?.input_tokens ?? 0,
-    output_tokens: u?.output_tokens ?? 0,
-    ...(u?.cache_creation_input_tokens != null
-      ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
-      : {}),
-    ...(u?.cache_read_input_tokens != null
-      ? { cache_read_input_tokens: u.cache_read_input_tokens }
-      : {}),
-  };
+  result.usage = { ...u, input_tokens: u?.input_tokens ?? 0, output_tokens: u?.output_tokens ?? 0 };
   return result;
 }
 

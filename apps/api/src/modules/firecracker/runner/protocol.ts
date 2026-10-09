@@ -37,10 +37,11 @@ import type {
  * against a daemon speaking a different major protocol.
  *
  * History:
+ *   3 — health carries `artifactsVersion`.
  *   2 — `POST /v1/boundaries` takes `{ runId }` alone (no `opts`).
  *   1 — initial protocol.
  */
-export const RUNNER_PROTOCOL_VERSION = 2;
+export const RUNNER_PROTOCOL_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Platform-type mirrors
@@ -223,6 +224,8 @@ export const healthResponseSchema = z.object({
   // (tooling absent or platform down).
   platformReachable: z.boolean(),
   guestPathVerified: z.boolean().nullable(),
+  // The installed guest artifacts' release; null when locally built (FIRECRACKER_ARTIFACTS_LOCAL).
+  artifactsVersion: z.string().nullable(),
 });
 
 /** Long-poll answer: `done: false` means "still running, poll again". */

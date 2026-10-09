@@ -48,7 +48,7 @@ const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
 
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 
@@ -333,8 +333,8 @@ describe("login under a held credentials lock", () => {
       await release();
     }
 
-    expect(error).toBeInstanceOf(ExitError);
-    expect((error as ExitError).code).toBe(1);
+    expect(error).toBeInstanceOf(CommandExit);
+    expect((error as CommandExit).code).toBe(1);
     // `exitWithError` renders through `io.cancel`, which the sink records with stdout.
     expect(stdout()).toContain("Another appstrate credential update is running");
     expect(await loadTokens("default")).toBeNull();
@@ -529,7 +529,7 @@ describe("login org-pin branch", () => {
         },
         io,
       ),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(await readPinnedOrgId()).toBeUndefined();
   });
@@ -640,7 +640,7 @@ describe("login org-pin branch", () => {
         },
         io,
       ),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(await readPinnedOrgId()).toBeUndefined();
     // Tokens ARE persisted — the user can recover via `org switch` /
@@ -939,7 +939,7 @@ describe("login space-pin cascade", () => {
         },
         io,
       ),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
   });
 
   it("honors --create-space <name> and skips the list fetch", async () => {

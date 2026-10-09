@@ -71,8 +71,9 @@ await checkHostHygiene({ logger });
 // from the release assets unless they are already installed (or
 // FIRECRACKER_ARTIFACTS_LOCAL is set). A protocol/checksum mismatch is
 // fatal; a network failure with artifacts already present is a warning.
+let artifactsVersion: string | null = null;
 try {
-  await ensureGuestArtifacts(
+  artifactsVersion = await ensureGuestArtifacts(
     {
       kernelPath: fcEnv.FIRECRACKER_KERNEL_PATH,
       rootfsPath: fcEnv.FIRECRACKER_ROOTFS_PATH,
@@ -145,6 +146,7 @@ const app = createRunnerApp({
   orchestrator,
   token: runnerEnv.FIRECRACKER_RUNNER_TOKEN,
   health,
+  artifactsVersion,
 });
 
 // Listen transport (issue #868): a Unix socket when

@@ -11,14 +11,14 @@
  * Persistence model (Phase 4+): a single row in `model_provider_credentials`
  * carrying a `kind: "oauth"` blob. The resolver reads & writes there directly.
  *
- * Edge cases under test:
- *   - `invalid_grant` from the provider → blob flagged `needsReconnection=true`
- *     AND `OAUTH_REFRESH_REVOKED` raised (worker's structured-warn path).
- *   - Already-flagged blob → `OAUTH_CONNECTION_NEEDS_RECONNECTION` short-circuit
- *     (no provider call).
- *   - Missing `refreshToken` in stored blob → flagged + `OAUTH_REFRESH_TOKEN_MISSING`.
+ * Edge cases under test — every refusal is a 410 `oauth_connection_needs_reconnection` or a 502,
+ * with its `cause` extension:
+ *   - `invalid_grant` from the provider → blob flagged `needsReconnection=true`, `refresh_token_revoked`.
+ *   - Already-flagged blob → `connection_flagged` short-circuit (no provider call).
+ *   - Missing `refreshToken` in stored blob → flagged, `refresh_token_missing`.
  *   - Successful refresh rotates `accessToken`+`refreshToken`+`expiresAt` in DB.
- *   - Network error surfaces as a non-fatal Error (no sidecar crash).
+ *   - Network error → 502 `upstream_transient`, nothing flagged.
+ *   - A refused client → 502 `oauth_client_rejected`, never counted.
  *   - `resolveOAuthTokenForSidecar` returns the cached token when far from expiry.
  */
 
@@ -38,6 +38,7 @@ import {
   resolveOAuthTokenForSidecar,
 } from "../../../src/services/model-providers/token-resolver.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
+import { getEnv } from "@appstrate/env";
 
 // ─── globalThis.fetch swap ───────────────────────────────────
 
@@ -108,6 +109,20 @@ async function readBlob(credentialId: string): Promise<OAuthBlob> {
   return decryptCredentials<OAuthBlob>(row!.blob);
 }
 
+/** The refusal `run` throws: an `ApiError` of `status` carrying `cause`. */
+async function refusal(run: () => Promise<unknown>): Promise<ApiError> {
+  let caught: unknown;
+  try {
+    await run();
+  } catch (e) {
+    caught = e;
+  }
+  expect(caught).toBeInstanceOf(ApiError);
+  return caught as ApiError;
+}
+
+const NEEDS_RECONNECTION = "oauth_connection_needs_reconnection";
+
 // ─── Tests ───────────────────────────────────────────────────
 
 describe("OAuth model providers — token-resolver hardening", () => {
@@ -125,7 +140,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
   afterEach(() => restoreFetch());
 
   describe("forceRefreshOAuthModelProviderToken", () => {
-    it("on invalid_grant: flags needsReconnection=true and throws OAUTH_REFRESH_REVOKED", async () => {
+    it("on invalid_grant: flags needsReconnection=true and throws the 410 refresh_token_revoked", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -143,21 +158,17 @@ describe("OAuth model providers — token-resolver hardening", () => {
           ),
       );
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
-      expect((caught as ApiError).status).toBe(410);
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "refresh_token_revoked" },
+      });
 
       const blob = await readBlob(id);
       expect(blob.needsReconnection).toBe(true);
     });
 
-    it("on a 2xx invalid_grant error object: flags needsReconnection and throws OAUTH_REFRESH_REVOKED, never echoing the body", async () => {
+    it("on a 2xx invalid_grant error object: flags needsReconnection and throws refresh_token_revoked, never echoing the body", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -177,23 +188,20 @@ describe("OAuth model providers — token-resolver hardening", () => {
           ),
       );
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
-      expect((caught as ApiError).status).toBe(410);
-      expect((caught as ApiError).message).not.toContain("echoed-secret-rt");
-      expect((caught as ApiError).message).not.toContain("{");
+      const caught = await refusal(() => forceRefreshOAuthModelProviderToken(id));
+      expect(caught).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "refresh_token_revoked" },
+      });
+      expect(caught.message).not.toContain("echoed-secret-rt");
+      expect(caught.message).not.toContain("{");
 
       const blob = await readBlob(id);
       expect(blob.needsReconnection).toBe(true);
     });
 
-    it("on already-flagged credential: short-circuits with OAUTH_CONNECTION_NEEDS_RECONNECTION (no fetch)", async () => {
+    it("on already-flagged credential: short-circuits with connection_flagged (no fetch)", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -209,18 +217,15 @@ describe("OAuth model providers — token-resolver hardening", () => {
         return new Response("{}", { status: 200 });
       });
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_CONNECTION_NEEDS_RECONNECTION");
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "connection_flagged" },
+      });
       expect(fetchCalled).toBe(false);
     });
 
-    it("on missing refresh_token: flags needsReconnection and throws OAUTH_REFRESH_TOKEN_MISSING", async () => {
+    it("on missing refresh_token: flags needsReconnection and throws refresh_token_missing", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -235,14 +240,11 @@ describe("OAuth model providers — token-resolver hardening", () => {
         return new Response("{}", { status: 200 });
       });
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_TOKEN_MISSING");
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "refresh_token_missing" },
+      });
       expect(fetchCalled).toBe(false);
 
       const blob = await readBlob(id);
@@ -350,7 +352,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect((await readBlob(id)).accessToken).toBe("rotated");
     });
 
-    it("network error: surfaces as a non-fatal Error with descriptive message (does not flag credential)", async () => {
+    it("network error: a 502 upstream_transient naming it, the credential not flagged", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -364,14 +366,9 @@ describe("OAuth model providers — token-resolver hardening", () => {
         throw new Error("ECONNREFUSED");
       });
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(Error);
-      expect((caught as Error).message).toContain("ECONNREFUSED");
+      const caught = await refusal(() => forceRefreshOAuthModelProviderToken(id));
+      expect(caught).toMatchObject({ status: 502, extensions: { cause: "upstream_transient" } });
+      expect(caught.message).toContain("ECONNREFUSED");
       const blob = await readBlob(id);
       expect(blob.needsReconnection).toBe(false);
     });
@@ -426,7 +423,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(result.accessToken).toBe("rotated-eagerly");
     });
 
-    it("on needsReconnection=true: throws OAUTH_CONNECTION_NEEDS_RECONNECTION (no provider call)", async () => {
+    it("on needsReconnection=true: throws connection_flagged (no provider call)", async () => {
       const id = await seedOAuthCredential({
         orgId,
         userId,
@@ -442,14 +439,11 @@ describe("OAuth model providers — token-resolver hardening", () => {
         return new Response("{}", { status: 200 });
       });
 
-      let caught: unknown;
-      try {
-        await resolveOAuthTokenForSidecar(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_CONNECTION_NEEDS_RECONNECTION");
+      expect(await refusal(() => resolveOAuthTokenForSidecar(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "connection_flagged" },
+      });
       expect(fetchCalled).toBe(false);
     });
 
@@ -532,11 +526,12 @@ describe("OAuth model providers — token-resolver hardening", () => {
         expiresAtMs: Date.now() - 2 * HOUR_MS,
       });
 
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 1 — below threshold
+      const record = () => recordModelCredentialRefreshFailure(orgId, id, 3, 3600);
+      expect(await record()).toEqual({ failures: 1, needsReconnection: false });
       expect((await readFailureRow(id)).needsReconnection).toBe(false);
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 2 — below threshold
+      expect(await record()).toEqual({ failures: 2, needsReconnection: false });
       expect((await readFailureRow(id)).needsReconnection).toBe(false);
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 3 — hits threshold
+      expect(await record()).toEqual({ failures: 3, needsReconnection: true });
 
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(3);
@@ -606,18 +601,47 @@ describe("OAuth model providers — token-resolver hardening", () => {
           }),
       );
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(Error);
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        status: 502,
+        extensions: { cause: "upstream_transient" },
+      });
 
       // One transient failure < default threshold (5) → counted, not escalated.
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(1);
       expect(row.needsReconnection).toBe(false);
+    });
+
+    it("the transient failure that escalates the streak answers the 410 refresh_failures_exhausted", async () => {
+      const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+        getEnv();
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - (grace + 3600) * 1000,
+      });
+      await db
+        .update(modelProviderCredentials)
+        .set({ refreshFailureCount: max - 1 })
+        .where(eq(modelProviderCredentials.id, id));
+      mockFetch(
+        async () =>
+          new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "refresh_failures_exhausted" },
+      });
+      expect(await readFailureRow(id)).toEqual({
+        refreshFailureCount: max,
+        needsReconnection: true,
+      });
     });
 
     it("invalid_grant keeps its immediate flip — no streak required", async () => {
@@ -636,19 +660,50 @@ describe("OAuth model providers — token-resolver hardening", () => {
           }),
       );
 
-      let caught: unknown;
-      try {
-        await forceRefreshOAuthModelProviderToken(id);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).code).toBe("OAUTH_REFRESH_REVOKED");
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        extensions: { cause: "refresh_token_revoked" },
+      });
 
       const row = await readFailureRow(id);
       expect(row.needsReconnection).toBe(true);
       // The revoked path does NOT touch the transient streak.
       expect(row.refreshFailureCount).toBe(0);
     });
+
+    // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
+    // even on a token expired past the grace window with a streak one short of the threshold.
+    it.each(["invalid_client", "unauthorized_client"])(
+      "a refused client (%s) answers 502 oauth_client_rejected without counting",
+      async (error) => {
+        const id = await seedOAuthCredential({
+          orgId,
+          userId,
+          providerId: "test-oauth",
+          expiresAtMs: Date.now() - 2 * HOUR_MS,
+        });
+        const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+        await db
+          .update(modelProviderCredentials)
+          .set({ refreshFailureCount: max - 1 })
+          .where(eq(modelProviderCredentials.id, id));
+        mockFetch(
+          async () =>
+            new Response(JSON.stringify({ error }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            }),
+        );
+
+        expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+          status: 502,
+          extensions: { cause: "oauth_client_rejected" },
+        });
+        expect(await readFailureRow(id)).toEqual({
+          refreshFailureCount: max - 1,
+          needsReconnection: false,
+        });
+      },
+    );
   });
 });

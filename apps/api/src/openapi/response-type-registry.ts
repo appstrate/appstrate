@@ -256,6 +256,18 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  ConnectionResolutionItem:
+    "ResolutionFieldError narrowed to the 409 resolution codes; canonical type in @appstrate/core/api-errors, no shared-type",
+  ConnectionResolutionWarning:
+    "ResolutionFieldError narrowed to the warning codes; canonical type in @appstrate/core/api-errors, no shared-type",
+  MissingIntegrationConnectionProblem:
+    "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
+  LaunchWarnings:
+    "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
+  RunAndWaitResult:
+    "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
+  RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",
+  RunAndWaitTerminal: "RunAndWaitResult branch for `done: true`; no shared-type",
   // Canonical TS shape: `HandoffStep` in services/connect/provisioning.ts.
   HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
   HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",
@@ -266,6 +278,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   ModelCostTier:
     "embedded model-cost value object; canonical runtime type lives in @appstrate/core",
+  TokenUsage:
+    "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
+  TokenUsageTier:
+    "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",

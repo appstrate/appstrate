@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Users, Check, Plus, ChevronDown, RefreshCw, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  Users,
+  Check,
+  Plus,
+  ChevronDown,
+  RefreshCw,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -16,7 +26,30 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { AMBER_TEXT } from "./connection-picker-states";
+import { NoConnectionLabel } from "./no-connection-label";
 import type { ConnectionPicker } from "./use-connection-picker";
+
+/** What the closed trigger shows, first match wins. */
+type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose" | "connect";
+
+function triggerKind(p: ConnectionPicker): TriggerKind {
+  if (p.unavailableIds.length > 0) return "unavailable";
+  if (p.pickedNone) return "none";
+  if (p.displayConns.length === 1) return "one";
+  if (p.displayConns.length > 1) return "many";
+  if (p.overrideMode) return "inherit";
+  return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+}
+
+const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
+  unavailable: Users,
+  none: Ban,
+  one: Users,
+  many: Users,
+  inherit: Plus,
+  choose: Plus,
+  connect: Plus,
+};
 
 /** The picker's dropdown: its trigger, one row per candidate, and the write/connect entries. */
 export function PickerMenu({
@@ -35,7 +68,6 @@ export function PickerMenu({
     canAddConnection,
     byDefault,
     softDefaultIds,
-    emptyPickerPrompt,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -44,6 +76,8 @@ export function PickerMenu({
     authKeys,
     hasCandidates,
     explicitIds,
+    pickedNone,
+    required,
     storedIds,
     unavailableIds,
     checkedIds,
@@ -68,25 +102,27 @@ export function PickerMenu({
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
   };
-  const triggerLabel =
-    unavailableIds.length > 0
-      ? setLabel(storedIds, unavailableIds)
-      : displayConns.length === 1
-        ? displayConns[0]!.label
-        : displayConns.length > 1
-          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
-          : overrideMode
-            ? t("detail.integrationMemberPicker.inherit")
-            : emptyPickerPrompt === "choose"
-              ? t("detail.integrationMemberPicker.chooseLabel")
-              : t("detail.integrationMemberPicker.connectLabel");
+  const trigger = triggerKind(picker);
+  const triggerLabel = {
+    unavailable: () => setLabel(storedIds, unavailableIds),
+    none: () => t("detail.integrationMemberPicker.none"),
+    one: () => displayConns[0]!.label,
+    many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
+    inherit: () => t("detail.integrationMemberPicker.inherit"),
+    choose: () => t("detail.integrationMemberPicker.chooseLabel"),
+    connect: () => t("detail.integrationMemberPicker.connectLabel"),
+  }[trigger]();
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
+  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
+  // warns — or a stored "no connection" for an integration the agent now requires.
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
-    : (runBlocking ?? false);
-  const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
+    ? underScopedConns.length > 0 ||
+      unavailableIds.length > 0 ||
+      deadConns.length > 0 ||
+      (pickedNone && required)
+    : runBlocking;
+  const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -115,7 +151,7 @@ export function PickerMenu({
           const tl = typeLabel(c.auth_key);
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
-            explicitIds.length === 0 &&
+            explicitIds === null &&
             (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
@@ -250,10 +286,23 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
-        {explicitIds.length > 0 && (
+        {!required && (
+          <DropdownMenuItem
+            // A radio, like the rows are checkboxes: its state is read out, not only drawn.
+            role="menuitemradio"
+            aria-checked={pickedNone}
+            disabled={busy || pickedNone}
+            onSelect={() => void persist([])}
+            data-testid={`member-pick-none-${integrationId}`}
+          >
+            <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
+            <NoConnectionLabel />
+          </DropdownMenuItem>
+        )}
+        {explicitIds !== null && (
           <DropdownMenuItem
             disabled={busy}
-            onSelect={() => void persist([])}
+            onSelect={() => void persist(null)}
             data-testid={`member-pick-reset-${integrationId}`}
           >
             <Check className="size-3.5 opacity-0" />

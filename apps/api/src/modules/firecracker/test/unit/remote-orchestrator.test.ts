@@ -48,7 +48,15 @@ const HEALTH_OK = {
   platformUrl: "http://10.0.0.9:3000",
   platformReachable: true,
   guestPathVerified: true,
+  artifactsVersion: null,
 };
+
+async function initializeError(orchestrator: RemoteFirecrackerOrchestrator) {
+  return orchestrator.initialize().then(
+    () => undefined,
+    (err: unknown) => err as Error,
+  );
+}
 
 interface RecordedCall {
   url: string;
@@ -202,6 +210,46 @@ describe("RemoteFirecrackerOrchestrator.initialize", () => {
     );
 
     expect(error?.message).toContain("failed to initialize");
+  });
+
+  it("reports the protocol mismatch, not a malformed payload, for a protocol-2 daemon", async () => {
+    const { artifactsVersion: _absent, ...v2Health } = HEALTH_OK;
+    const { fn } = fetchStub(() => json({ ...v2Health, protocol: 2 }));
+    const orchestrator = new RemoteFirecrackerOrchestrator({ fetchFn: fn });
+
+    const error = await initializeError(orchestrator);
+
+    expect(error?.message).toContain("speaks protocol 2");
+    expect(error?.message).toContain(`expects ${RUNNER_PROTOCOL_VERSION}`);
+  });
+});
+
+describe("RemoteFirecrackerOrchestrator.initialize — guest artifacts in the version contract", () => {
+  function orchestratorWith(appVersion: string, artifactsVersion: string | null) {
+    const { fn } = fetchStub(() => json({ ...HEALTH_OK, artifactsVersion }));
+    return new RemoteFirecrackerOrchestrator({ fetchFn: fn, appVersion });
+  }
+
+  it("refuses artifacts from another release and names the pin to set on the runner host", async () => {
+    const error = await initializeError(orchestratorWith("v1.0.0-beta.67", "v1.0.0-beta.66"));
+
+    expect(error?.message).toContain("guest artifacts are release v1.0.0-beta.66");
+    expect(error?.message).toContain("platform is v1.0.0-beta.67");
+    expect(error?.message).toContain("FIRECRACKER_ARTIFACTS_VERSION=v1.0.0-beta.67");
+  });
+
+  it("accepts the same release whichever side carries the leading v", async () => {
+    expect(
+      await initializeError(orchestratorWith("v1.0.0-beta.67", "1.0.0-beta.67")),
+    ).toBeUndefined();
+  });
+
+  it("takes no part when the platform has no release identity", async () => {
+    expect(await initializeError(orchestratorWith("dev", "v1.0.0-beta.66"))).toBeUndefined();
+  });
+
+  it("takes no part when the daemon runs locally built artifacts", async () => {
+    expect(await initializeError(orchestratorWith("v1.0.0-beta.67", null))).toBeUndefined();
   });
 });
 

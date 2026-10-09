@@ -222,7 +222,7 @@ describe("ensureGuestArtifacts — install", () => {
     const s = scenario();
     const { fs, files } = makeFs();
 
-    await ensureGuestArtifacts(
+    const installedVersion = await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
       depsFor({
         fetchFn: s.fetchFn,
@@ -231,6 +231,7 @@ describe("ensureGuestArtifacts — install", () => {
       }),
     );
 
+    expect(installedVersion).toBe("1.2.3");
     expect(files.get(KERNEL_PATH)).toEqual(s.kernelBytes);
     expect(files.get(ROOTFS_PATH)).toEqual(s.rootfsPlain);
     // Marker records the installed release version + protocol.
@@ -356,13 +357,13 @@ describe("ensureGuestArtifacts — skip when present", () => {
       [KERNEL_PATH]: new Uint8Array([1]),
       [ROOTFS_PATH]: new Uint8Array([2]),
       [MARKER_PATH]: JSON.stringify({
-        version: "1.2.3",
+        version: "1.1.0",
         guest_protocol: GUEST_PROTOCOL_VERSION,
         signed: true,
       }),
     });
 
-    await ensureGuestArtifacts(
+    const installedVersion = await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: false },
       depsFor({
         fetchFn: s.fetchFn,
@@ -372,6 +373,8 @@ describe("ensureGuestArtifacts — skip when present", () => {
     );
 
     expect(s.calls).toHaveLength(0);
+    // The marker's release, not the newest one: an unpinned host never refreshes.
+    expect(installedVersion).toBe("1.1.0");
   });
 
   it("does not fetch when artifacts exist and the marker matches the pinned version", async () => {
@@ -547,7 +550,7 @@ describe("ensureGuestArtifacts — LOCAL opt-out", () => {
     const s = scenario();
     const { fs, ops } = makeFs();
 
-    await ensureGuestArtifacts(
+    const installedVersion = await ensureGuestArtifacts(
       { kernelPath: KERNEL_PATH, rootfsPath: ROOTFS_PATH, baseUrl: BASE_URL, local: true },
       depsFor({
         fetchFn: s.fetchFn,
@@ -558,6 +561,7 @@ describe("ensureGuestArtifacts — LOCAL opt-out", () => {
 
     expect(s.calls).toHaveLength(0);
     expect(ops).toHaveLength(0);
+    expect(installedVersion).toBeNull();
   });
 });
 
@@ -755,7 +759,7 @@ describe("ensureGuestArtifacts — network failure policy", () => {
         },
         depsFor({ fetchFn: throwingFetch, fs }),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("1.2.3");
   });
 
   it("does NOT keep a never-signature-verified install through a download failure", async () => {
@@ -807,7 +811,7 @@ describe("ensureGuestArtifacts — network failure policy", () => {
         // the skip fast-path fired.
         depsFor({ fetchFn: throwingFetch, fs }),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("1.2.3");
   });
 
   it("does NOT keep a stale-protocol install through a download failure (B-4)", async () => {

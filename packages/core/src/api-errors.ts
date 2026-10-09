@@ -10,6 +10,8 @@
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
 
+import type { ConnectionResolutionSource } from "./integration.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ export interface ValidationFieldError {
 /**
  * A `ValidationFieldError` carrying the connection-resolution "smuggle" fields
  * surfaced by the integration connection resolver
- * (`translateResolutionError`). These snake_case extras let the dashboard's
+ * (`translateResolutionError`, 409 items and launch `warnings` alike). These snake_case extras let the dashboard's
  * MissingConnections UI act on a 409 / readiness error without parsing the
  * `detail` string. Each field is populated only for the matching resolution
  * `code`; all are optional.
@@ -71,16 +73,11 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
   /**
-   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — OAuth
-   * scopes the run's selected tools require on `auth_key`. Forward as `scopes`
-   * when starting the connect flow so the consent covers them.
+   * The connect-flow codes (`CONNECT_FLOW_CODES`) — OAuth scopes the run's selected tools require
+   * on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.
    */
   required_scopes?: string[];
-  /**
-   * `insufficient_scopes` / `not_connected` / `needs_reconnection` — auth key
-   * of the integration manifest the connect flow must target
-   * (`/auths/{authKey}/connect/...`).
-   */
+  /** The connect-flow codes — the auth the connect flow must target (`/auths/{authKey}/connect/...`). */
   auth_key?: string;
   /**
    * `insufficient_scopes` / `needs_reconnection` — true when the connection to
@@ -88,13 +85,15 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the agent dep's `auth_key` (AFPS §4.1). */
+  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the dep's `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
+  /** The cascade layer whose set failed, or that chose `[]` (the `*integration_unbound` codes). */
+  source?: ConnectionResolutionSource;
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a
-   * run-kickoff 409 whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
+   * run-kickoff 409 (or launch `warnings`) whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
    * docblock states who may), and only on the items an oauth2 connect flow can
    * clear for the calling actor. Single-use and short-lived (`expiresAt`):
    * open it — never store it, and never call the connect kickoff as well,
@@ -319,12 +318,17 @@ export function conflict(
   });
 }
 
-export function gone(code: string, detail: string): ApiError {
+export function gone(
+  code: string,
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 410,
     code,
     title: "Gone",
     detail,
+    extensions,
   });
 }
 
@@ -408,12 +412,16 @@ export function internalError(): ApiError {
   });
 }
 
-export function badGateway(detail: string): ApiError {
+export function badGateway(
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 502,
     code: "bad_gateway",
     title: "Bad Gateway",
     detail,
+    extensions,
   });
 }
 

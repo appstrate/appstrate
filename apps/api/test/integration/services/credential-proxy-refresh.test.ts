@@ -726,6 +726,37 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     expect(await clearedWithin(connId, 1000)).toBe(true);
   });
 
+  it("a 401 on a key replaced during the call counts nothing and replays with the current key", async () => {
+    const sent: Array<string | null> = [];
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/v1/items",
+      headers: {},
+      fetch: (async (_url: string, init: RequestInit) => {
+        sent.push(new Headers(init.headers).get("x-api-key"));
+        // Not a 2xx, so no success clears a count behind the assertion below.
+        if (sent.length > 1) return new Response("{}", { status: 403 });
+        // A reconnect lands while the call carrying the old key is in flight.
+        await db
+          .update(integrationConnections)
+          .set({
+            credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k2" } }),
+            refreshFailureCount: 0,
+          })
+          .where(eq(integrationConnections.id, connId));
+        return new Response("revoked", { status: 401 });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(res.status).toBe(403);
+    expect(sent).toEqual(["k", "k2"]);
+    expect(await failures()).toBe(0);
+  });
+
   it("a non-2xx leaves it", async () => {
     const sentinelId = "@cprefreshorg/sentinel";
     const sentinel = await seedRejectedConnection(sentinelId);

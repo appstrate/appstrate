@@ -102,16 +102,30 @@ export const integrationPackageIdParam = {
   name: "integrationPackageId",
 } as const;
 
-/** A connection set as every write takes it and every pin or default returns it. */
+/** A connection set as pins and launch overrides take and return it. */
 export const connectionIdSetJsonSchema = {
   type: "array",
   items: { type: "string", format: "uuid" },
-  minItems: 1,
+  minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+  uniqueItems: true,
+  description:
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
+} as const;
+
+/** The org default's set: never empty — none for every agent of the space is deactivation. */
+const orgDefaultConnectionIdSetJsonSchema = {
+  ...connectionIdSetJsonSchema,
+  minItems: 1,
+  description:
+    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
-export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+/** {@link connectionSetRefusals} on an org-default write. */
+const orgDefaultSetRefusals = `an empty set, ${connectionSetRefusals}`;
 
 export const lockedBySchema = {
   type: ["string", "null"],
@@ -128,7 +142,7 @@ const integrationOrgDefaultSchema = {
   required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_ids: connectionIdSetJsonSchema,
+    connection_ids: orgDefaultConnectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -406,7 +420,11 @@ const authStatusSchema = {
       description:
         "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
     },
-    required: { type: "boolean" },
+    required: {
+      type: "boolean",
+      description:
+        "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`.",
+    },
     scopes: { type: "array", items: { type: "string" } },
     resource: {
       type: ["string", "null"],
@@ -559,7 +577,8 @@ const connectRunResponses = {
     },
   },
   "504": {
-    description: "The connect-run login did not complete within the timeout",
+    description:
+      "The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -575,6 +594,15 @@ const connectRunResponses = {
       },
     },
   },
+} as const;
+
+/** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
+const CONNECT_LOGIN_400 =
+  "A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+const CONNECT_LOGIN_502 =
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
+const problemJson = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
 
 export const integrationsPaths = {
@@ -948,9 +976,13 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": { description: CONNECT_LOGIN_502, content: problemJson },
         ...connectRunResponses,
       },
     },
@@ -1249,8 +1281,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail.",
+          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives: the form can be submitted again.`,
         },
         "403": {
           description:
@@ -1265,11 +1296,8 @@ export const integrationsPaths = {
             "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
         },
         "502": {
-          description:
-            "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,
@@ -1535,7 +1563,7 @@ export const integrationsPaths = {
                 connection_ids: {
                   ...connectionIdSetJsonSchema,
                   description:
-                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
                 },
               },
               additionalProperties: false,
@@ -1640,8 +1668,8 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  ...connectionIdSetJsonSchema,
-                  description: "The WHOLE default set — this write replaces it.",
+                  ...orgDefaultConnectionIdSetJsonSchema,
+                  description: "The WHOLE default set (1 or more ids) — this write replaces it.",
                 },
                 enforce: { type: "boolean", default: false },
               },
@@ -1658,7 +1686,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${orgDefaultSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {

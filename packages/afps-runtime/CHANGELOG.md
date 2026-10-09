@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — login inputs encoded for their place (#1818)
+
+- `substituteRequest` (`./resolvers`): substitutes `{{name}}` into a request's
+  URL, headers and body, each value encoded for its place — a leading URL
+  placeholder as is, every other URL value percent-encoded; a form, JSON, XML
+  or multipart body by its `Content-Type`; a header value refused unless it is
+  an HTTP field value (and a `cookie-octet` string in a `Cookie` header).
+  Inputs may be typed: a non-string value is its JSON text, or that JSON value
+  in a bare JSON position, where a string is always a JSON string.
+- `UnencodableInputError` (`./resolvers`): what `substituteRequest` throws for
+  a value it cannot carry where it is placed; carries the `field`, never the
+  value.
+- `headerNamed` (`./resolvers`): a header's value whatever the case of its
+  name.
+- `substituteVars` takes an `encode` option, `(value, key, offset) => string`,
+  rendering each resolved value for its place in the template.
+
+### Changed
+
+- `unresolvedPlaceholders` accepts a `Readonly<Record<string, unknown>>` (it
+  reads only the keys); a `Record<string, string>` still passes.
+
+### Added — the integrations a run starts without (#1830)
+
+- `PlatformPromptOptions.unavailableIntegrations` (`./bundle`):
+  `{ id, reason }[]`, the declared integrations this run starts without, one
+  entry per integration id, `reason` a short human-readable cause.
+  `renderPlatformPrompt` renders them as an `## Unavailable Integrations`
+  section that tells the agent never to present data as coming from them and
+  to report them as unavailable when the task needs them. Absent or empty: no
+  section, the prompt is unchanged.
+
+### Changed — `integrations_configuration.<id>.required` (#1830, afps-spec#28)
+
+- Requires `@afps-spec/schema` `^0.9.0` (was `^0.8.0`), which declares
+  `integrations_configuration.<id>.required` (AFPS §4.4) as a boolean: a
+  manifest whose `required` is not a boolean now fails validation. The L1.8
+  conformance case asserts the agent schema preserves `required: true`.
+
+### Changed — `appstrate.metric` usage carries price-tier bands (#1552, #1846)
+
+- `isCanonicalRunEvent` accepts an optional `usage.tiers` (`TokenUsage.tiers`),
+  validated by `isTokenUsageTiers` from `@appstrate/afps-shared/token-usage`,
+  the rule `tokenUsageSchema` in core also applies. The guard stays strict: a
+  malformed band rejects the event like any other `usage` constraint.
+- The stdout bridge reads an `appstrate.metric` line's `usage` with
+  afps-shared's `parseTokenUsage` before that guard: malformed `tiers` bands
+  and unknown keys are dropped, and the event and its counters are kept.
+- A negative or fractional `usage` counter now rejects the event: the four
+  counters take afps-shared's `isTokenCount` (a non-negative safe integer,
+  #1846), the rule core's
+  `tokenUsageSchema` applies to them.
+- `TOKEN_USAGE_COUNTERS` moved to `@appstrate/afps-shared/token-usage`, where
+  `TokenUsage`'s counters are typed from it; no longer exported here.
+
 ### Added — one vocabulary of api_call failure codes (#1761)
 
 - `ApiCallFailureCode` (`./resolvers`): the snake_case codes every `api_call`

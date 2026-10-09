@@ -44,11 +44,11 @@ import {
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
+import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
-  buildIntegrationOAuthRefreshContext,
-  forceRefreshIntegrationConnection,
-} from "../../../src/services/integration-token-refresh.ts";
-import { readIntegrationAuth } from "../../../src/services/integration-connections.ts";
+  readCredentialRevision,
+  readIntegrationAuth,
+} from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -175,10 +175,10 @@ async function consentAndCallback(authUrl: string): Promise<string> {
 }
 
 /**
- * Refresh the connection the way the live resolvers do: resolve the pinned
- * minting client from the DB, build the refresh context off the manifest, then
- * POST the `refresh_token` grant. Exercises the same client/auth-method
- * resolution the initial exchange used.
+ * Refresh the connection the way the live resolvers do after an upstream 401: resolve the pinned
+ * minting client from the DB, build the refresh context off the manifest, then POST the
+ * `refresh_token` grant. Exercises the same client/auth-method resolution the initial exchange
+ * used.
  */
 async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
   const row = (
@@ -188,20 +188,18 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .where(eq(integrationConnections.id, connectionId))
       .limit(1)
   )[0]!;
-  const { auth } = await readIntegrationAuth(
-    { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-    INTEGRATION,
-    AUTH_KEY,
-  );
-  const context = await buildIntegrationOAuthRefreshContext(
-    INTEGRATION,
-    AUTH_KEY,
-    auth as AfpsManifestAuth,
-    ctx.defaultSpaceId,
-    row,
-  );
-  expect(context).not.toBeNull();
-  await forceRefreshIntegrationConnection(row, INTEGRATION, AUTH_KEY, context!);
+  const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+  const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+  const outcome = await refreshConnectionCredential({
+    connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
+    integrationId: INTEGRATION,
+    manifest,
+    authDef: auth as AfpsManifestAuth,
+    scope,
+    actor: { type: "user", id: ctx.user.id },
+    trigger: { kind: "rejected", revision: null },
+  });
+  expect(outcome.status).toBe("refreshed");
 }
 
 /** The single connection row, or null. */

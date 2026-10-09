@@ -13,7 +13,7 @@
  *   - --max-time → exit 28
  *
  * Pattern: drive `apiCommand()` directly with a captured-IO adapter.
- * No subprocess spawn (except the #1824 pipe test, which needs the real
+ * No subprocess spawn (except the #1824 pipe tests, which need the real
  * process exit); the two Bun.serve() instances + the CLI all run
  * in-process so tests are fast and deterministic.
  */
@@ -171,6 +171,45 @@ function allBytes(buf: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/**
+ * The reader's 3 s wait plus generous slack: a CLI kept alive by an open
+ * handle after its last write blows through it.
+ */
+const PIPE_EXIT_BUDGET_MS = 10_000;
+
+/**
+ * Run the real CLI (`api …`) with stdout on a pipe nobody reads until the CLI
+ * has exited, capped at 3 s for a CLI blocked on the full pipe — so bytes
+ * still queued when the process ends are lost. A Bun.spawn pipe can't stand
+ * in: the parent drains it eagerly. stderr carries the CLI's own lines, then
+ * `exit=<code>`.
+ */
+async function pipeCli(...args: string[]) {
+  const script =
+    '{ "$0" src/cli.ts api "$@"; echo "exit=$?" >&2; touch "$EXITED"; } | ' +
+    '(i=0; while [ ! -e "$EXITED" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; cat)';
+  const started = performance.now();
+  const proc = Bun.spawn(["sh", "-c", script, process.execPath, ...args], {
+    cwd: join(import.meta.dir, ".."),
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: configHome.dir(),
+      APPSTRATE_INSTANCE: primary.url,
+      APPSTRATE_API_KEY: "test-key",
+      APPSTRATE_NO_DUAL_INSTALL_CHECK: "1",
+      EXITED: join(configHome.dir(), "cli-exited"),
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [out, stderr] = await Promise.all([
+    new Response(proc.stdout).arrayBuffer(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { body: new Uint8Array(out), stderr, ms: performance.now() - started };
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────
 
 describe("apiCommand integration — basic happy path", () => {
@@ -277,37 +316,29 @@ describe("apiCommand integration — binary download", () => {
     expect(captured.exitCode.value).toBe(0);
     expect(sha256(allBytes(captured.stdout))).toBe(sha256(primary.binaryPayload));
   });
+});
 
-  it("the real CLI delivers the whole body to a slow pipe reader (#1824)", async () => {
-    // The reader waits for the CLI to exit (3 s cap, for a CLI blocked on the
-    // full pipe), so unfixed code exits with bytes still queued. A Bun.spawn
-    // pipe can't stand in: the parent drains it eagerly.
-    const script =
-      '{ "$0" src/cli.ts api GET /binary; echo "exit=$?" >&2; touch "$1"; } | ' +
-      '(i=0; while [ ! -e "$1" ] && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done; cat)';
-    const exited = join(configHome.dir(), "cli-exited");
-    const proc = Bun.spawn(["sh", "-c", script, process.execPath, exited], {
-      cwd: join(import.meta.dir, ".."),
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: configHome.dir(),
-        APPSTRATE_INSTANCE: primary.url,
-        APPSTRATE_API_KEY: "test-key",
-        APPSTRATE_NO_DUAL_INSTALL_CHECK: "1",
-      },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, stderr] = await Promise.all([
-      new Response(proc.stdout).arrayBuffer(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+describe("the real CLI on a slow pipe (#1824)", () => {
+  it("delivers the whole body, then exits", async () => {
+    const { body, stderr, ms } = await pipeCli("GET", "/binary");
     expect(stderr).toBe("exit=0\n");
-    const body = new Uint8Array(out);
-    expect(body.byteLength).toBe(primary.binaryPayload.byteLength);
     expect(sha256(body)).toBe(sha256(primary.binaryPayload));
-  }, 15_000);
+    expect(ms).toBeLessThan(PIPE_EXIT_BUDGET_MS);
+  }, 20_000);
+
+  it("a failing exit code still lets the whole body out first", async () => {
+    const { body, stderr, ms } = await pipeCli("GET", "/binary?status=404", "--fail-with-body");
+    expect(stderr).toBe("exit=22\n");
+    expect(sha256(body)).toBe(sha256(primary.binaryPayload));
+    expect(ms).toBeLessThan(PIPE_EXIT_BUDGET_MS);
+  }, 20_000);
+
+  it("an early exit keeps its code and its message", async () => {
+    const { body, stderr, ms } = await pipeCli("GET", "/json", "-G", "-F", "a=b");
+    expect(stderr).toBe("cannot combine -G/--get with -F/--form (multipart)\nexit=2\n");
+    expect(body.byteLength).toBe(0);
+    expect(ms).toBeLessThan(PIPE_EXIT_BUDGET_MS);
+  }, 20_000);
 });
 
 describe("apiCommand integration — redirect + Authorization", () => {

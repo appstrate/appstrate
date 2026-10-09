@@ -40,12 +40,6 @@ interface ExchangeAuthorizationCodeInput {
   /** Authorization code returned by the IdP. */
   code: string;
   /**
-   * Scopes requested at authorize time. Used as the granted set when the token
-   * response omits `scope` (RFC 6749 §5.1). The integration callback reads the
-   * same signed-state value into its result's `scopesRequested`.
-   */
-  scopesRequested: string[];
-  /**
    * Extra body params (e.g. RFC 8707 `resource` for integration flows).
    */
   extraTokenParams?: Record<string, string>;
@@ -153,6 +147,6 @@ export async function exchangeAuthorizationCode(
     );
   }
 
-  const parsed = parseTokenResponse(read.raw, input.scopesRequested);
+  const parsed = parseTokenResponse(read.raw);
   return { parsed, raw: read.raw };
 }

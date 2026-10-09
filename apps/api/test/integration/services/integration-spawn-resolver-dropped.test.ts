@@ -69,7 +69,9 @@ function integManifest(serverName: string): Record<string, unknown> {
   }) as unknown as Record<string, unknown>;
 }
 
-function agentManifest(): Record<string, unknown> {
+function agentManifest(
+  config: Record<string, unknown> = { tools: ["search"] },
+): Record<string, unknown> {
   return {
     schema_version: "0.2",
     type: "agent",
@@ -77,7 +79,7 @@ function agentManifest(): Record<string, unknown> {
     version: "1.0.0",
     display_name: "Agent",
     dependencies: { integrations: { [INTEG]: "^1.0.0" } },
-    integrations_configuration: { [INTEG]: { tools: ["search"] } },
+    integrations_configuration: { [INTEG]: config },
   };
 }
 
@@ -247,7 +249,70 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
     ]);
   });
 
-  it("reports `resolve_error` — never a live pick — when the snapshot binds nothing to an integration that exposes tools", async () => {
+  it("reports `unbound` — without resolving the server — when the snapshot binds `[]` on purpose", async () => {
+    // The referenced server does not exist: any load past the binding check
+    // would surface as `mcp_server_unresolved` instead.
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: integManifest(MISSING_SERVER),
+    });
+    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedConnection();
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest(),
+      resolvedConnections: { [INTEG]: [] },
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toEqual([{ integrationId: INTEG, reason: "unbound" }]);
+  });
+
+  it("reports `unbound` for `[]` on an integration exposing no tool (bound for its scopes)", async () => {
+    await seedIntegration();
+    await seedConnection();
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest({ tools: [], scopes: ["search.read"] }),
+      resolvedConnections: { [INTEG]: [] },
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toEqual([{ integrationId: INTEG, reason: "unbound" }]);
+  });
+
+  it("drops nothing for an inert integration switched off in the space", async () => {
+    await seedServer();
+    await seedPackage({
+      id: INTEG,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: integManifest(SERVER),
+    });
+
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: agentManifest({ tools: [] }),
+      resolvedConnections: null,
+    });
+
+    expect(specs).toHaveLength(0);
+    expect(dropped).toEqual([]);
+  });
+
+  it("reports `resolve_error` — never a live pick — when the snapshot has no entry for an integration that exposes tools", async () => {
     await seedIntegration();
     // A connection the actor COULD use: picking it here is exactly what the
     // resolver must not do behind the cascade's back.
@@ -353,5 +418,37 @@ describe("recordDroppedIntegrations — run_logs marker", () => {
     expect(second!.data!.reason).toBe("resolve_error");
     expect(second!.data!.detail).toBe("boom");
     expect(second!.message).toContain("boom");
+  });
+
+  it("words an `unbound` drop as a missing binding, at `info` only when a layer chose none", async () => {
+    const runId = await seedPendingRun();
+    const chosen = "@droporg/chosen";
+
+    await recordDroppedIntegrations(
+      { orgId: ctx.orgId },
+      runId,
+      [
+        { integrationId: INTEG, reason: "unbound" },
+        { integrationId: chosen, reason: "unbound" },
+      ],
+      [
+        { integrationId: INTEG, code: "must_choose_connection" },
+        { integrationId: chosen, code: "integration_unbound", source: "admin_pin" },
+      ],
+    );
+
+    const rows = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
+    const byId = new Map(rows.map((r) => [r.data?.integrationId, r]));
+    expect(byId.get(INTEG)!.level).toBe("warn");
+    expect(byId.get(INTEG)!.data!.code).toBe("must_choose_connection");
+    expect(byId.get(INTEG)!.message).toBe(
+      `integration '${INTEG}' has no connection bound to this run (must_choose_connection) — its tools are unavailable to this run`,
+    );
+    expect(byId.get(chosen)!.level).toBe("info");
+    expect(byId.get(chosen)!.data!.reason).toBe("unbound");
+    expect(byId.get(chosen)!.data!.code).toBe("integration_unbound");
   });
 });

@@ -8,7 +8,7 @@
  * value at known JSON locations, never a blind replace.
  */
 
-import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
+import { MODEL_API_SHAPES, type ModelApiShape, type ModelSwap } from "./sidecar-types.ts";
 
 /**
  * The protocol an ALIASED run's container speaks — pi-ai's vendor-neutral
@@ -31,6 +31,10 @@ export type AliasBackingApiShape = Exclude<ModelApiShape, typeof ALIAS_CLIENT_AP
 export function isAliasBackingShape(shape: ModelApiShape): shape is AliasBackingApiShape {
   return !isAliasClientShape(shape);
 }
+
+/** Every {@link AliasBackingApiShape}: the vendor protocols a provider can declare. */
+export const ALIAS_BACKING_API_SHAPES: readonly AliasBackingApiShape[] =
+  MODEL_API_SHAPES.filter(isAliasBackingShape);
 
 // Sidecar boot pins `clientApiShape` to the client dialect, so one path is exact.
 const ALIAS_INFERENCE_PATH = "/messages";

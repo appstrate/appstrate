@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { totalTokens, accumulateTokenUsage } from "../src/token-usage.ts";
+import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
+import { totalTokens, accumulateTokenUsage, tokenUsageSchema } from "../src/token-usage.ts";
 
 describe("totalTokens", () => {
   it("sums all four buckets", () => {
@@ -52,5 +53,25 @@ describe("totalTokens", () => {
     accumulateTokenUsage(total, { input_tokens: 1, cache_read_input_tokens: 2 });
     accumulateTokenUsage(total, { output_tokens: 4, cache_creation_input_tokens: 8 });
     expect(totalTokens(total)).toBe(15);
+  });
+});
+
+describe("tokenUsageSchema", () => {
+  it("answers what parseTokenUsage answers", () => {
+    for (const raw of [
+      { input_tokens: 3, output_tokens: 1, extra: true },
+      { input_tokens: 3, tiers: [{ input_tokens_above: 0 }] },
+      { input_tokens: 3, tiers: [{ input_tokens_above: 1, output_tokens: 2 }] },
+      { input_tokens: 1.5 },
+      { output_tokens: -1 },
+      null,
+      [],
+    ]) {
+      const parsed = tokenUsageSchema.safeParse(raw);
+      expect({ raw, usage: parsed.success ? parsed.data : null }).toEqual({
+        raw,
+        usage: parseTokenUsage(raw).usage,
+      });
+    }
   });
 });

@@ -39,10 +39,16 @@ import {
   picksAfterActorChange,
   refusalForActor,
 } from "../lib/connection-choice";
-import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
+import {
+  withConnectionOverride,
+  withDeclaredConnections,
+  type ConnectionSet,
+} from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
+  type ScheduleCreateOverrides,
+  type ScheduleEditOverrides,
   sameActor,
   scheduleOverridePayload,
 } from "../lib/schedule-payload";
@@ -79,31 +85,18 @@ const TIMEZONES = [
   "Asia/Tokyo",
 ] as const;
 
-interface ScheduleSaveData {
+/** The fields both writes send; only the override half differs. */
+interface ScheduleSaveFields {
   name?: string;
   cron_expression: string;
   timezone?: string;
   input?: Record<string, unknown>;
-  enabled?: boolean;
-  model_id_override?: string | null;
-  generation_config_override?: ModelGenerationSettings | null;
-  proxy_id_override?: string | null;
-  version_override?: string | null;
-  /**
-   * Per-integration connection picks frozen on the schedule row
-   * (`package_schedules.connection_overrides`), same wire shape as the run
-   * route's `connection_overrides`; `null` clears on edit.
-   */
-  connection_overrides?: Record<string, string[]> | null;
-  /**
-   * Schedule execution identity (#738). Omitted on create → server defaults to
-   * the caller. Omitted on edit → actor left unchanged (never cleared).
-   */
-  actor?: ActorValue;
 }
 
-interface ScheduleFormProps {
-  mode: "create" | "edit";
+type ScheduleCreateData = ScheduleSaveFields & ScheduleCreateOverrides;
+type ScheduleEditData = ScheduleSaveFields & { enabled?: boolean } & ScheduleEditOverrides;
+
+interface ScheduleFormCommonProps {
   defaultValues?: {
     name?: string;
     cron_expression?: string;
@@ -140,7 +133,6 @@ interface ScheduleFormProps {
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
   onAgentChange?: (agentId: string) => void;
-  onSubmit: (data: ScheduleSaveData) => void;
   onCancel: () => void;
   onDelete?: () => void;
   isPending?: boolean;
@@ -152,6 +144,12 @@ interface ScheduleFormProps {
   connectionChoices?: readonly ConnectionChoice[];
 }
 
+type ScheduleFormProps = ScheduleFormCommonProps &
+  (
+    | { mode: "create"; onSubmit: (data: ScheduleCreateData) => void }
+    | { mode: "edit"; onSubmit: (data: ScheduleEditData) => void }
+  );
+
 interface FormFields {
   name: string;
   cron_expression: string;
@@ -159,26 +157,26 @@ interface FormFields {
   enabled: boolean;
 }
 
-export function ScheduleForm({
-  mode,
-  defaultValues,
-  currentActor,
-  inputWrapper,
-  persistedModelId,
-  persistedGenerationConfig,
-  persistedProxyId,
-  homeWritable,
-  packageId,
-  agents,
-  selectedAgentId,
-  onAgentChange,
-  onSubmit,
-  onCancel,
-  onDelete,
-  isPending,
-  blockedMessage,
-  connectionChoices,
-}: ScheduleFormProps) {
+export function ScheduleForm(props: ScheduleFormProps) {
+  const {
+    mode,
+    defaultValues,
+    currentActor,
+    inputWrapper,
+    persistedModelId,
+    persistedGenerationConfig,
+    persistedProxyId,
+    homeWritable,
+    packageId,
+    agents,
+    selectedAgentId,
+    onAgentChange,
+    onCancel,
+    onDelete,
+    isPending,
+    blockedMessage,
+    connectionChoices,
+  } = props;
   const { t } = useTranslation(["agents", "common"]);
   const cronPresets = getCronPresets(t);
   const isEdit = mode === "edit";
@@ -277,7 +275,7 @@ export function ScheduleForm({
     });
     setActor(next);
   };
-  const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
+  const setConnectionPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
@@ -348,21 +346,28 @@ export function ScheduleForm({
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
     setSubmitted({ runsAs, picks: declaredOverrides.connection_overrides ?? {} });
-    onSubmit({
+    const fields = {
       name: data.name || undefined,
       cron_expression: data.cron_expression,
       timezone: data.timezone,
       input,
-      ...(isEdit ? { enabled: data.enabled } : {}),
-      ...scheduleOverridePayload({
-        isEdit,
-        overrides: declaredOverrides,
-        versionOverride,
-        versionOverrideChanged,
-        actor,
-        currentActor,
-      }),
-    });
+    };
+    const overrideArgs = {
+      overrides: declaredOverrides,
+      versionOverride,
+      versionOverrideChanged,
+      actor,
+      currentActor,
+    };
+    if (props.mode === "edit") {
+      props.onSubmit({
+        ...fields,
+        enabled: data.enabled,
+        ...scheduleOverridePayload({ isEdit: true, ...overrideArgs }),
+      });
+    } else {
+      props.onSubmit({ ...fields, ...scheduleOverridePayload({ isEdit: false, ...overrideArgs }) });
+    }
   });
 
   return (
@@ -568,6 +573,7 @@ export function ScheduleForm({
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
                     choices={refused}
+                    integrations={firedIntegrations ?? []}
                     value={declaredOverrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />

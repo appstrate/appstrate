@@ -43,15 +43,7 @@ import type { RunStatus } from "@appstrate/core/run-status";
 import { addSubscriber, removeSubscriber } from "./realtime.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-
-/**
- * Server-side wait ceiling, in seconds. Kept below typical proxy idle
- * timeouts (commonly 60 s) — see module doc. Values above the cap are
- * clamped rather than rejected so clients can pass a generous number and
- * let the server decide (same convention as long-poll `timeout` params in
- * e.g. the Kubernetes watch API).
- */
-export const MAX_WAIT_SECONDS = 55;
+import { MAX_WAIT_SECONDS } from "../lib/run-wait-limits.ts";
 
 /**
  * Resolve the fallback DB re-check cadence while waiting (see module doc,

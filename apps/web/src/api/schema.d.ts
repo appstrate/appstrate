@@ -254,7 +254,7 @@ export interface paths {
         };
         /**
          * Bulk integration connection readiness for an agent
-         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`), so the Connexions tab and the launch badge share one source of truth.
+         * @description Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning` says why.
          */
         get: operations["getAgentConnectionReadiness"];
         put?: never;
@@ -2106,7 +2106,7 @@ export interface paths {
         get?: never;
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it; `DELETE` clears it. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
@@ -4137,7 +4137,7 @@ export interface paths {
         put?: never;
         /**
          * Validate an inline manifest without firing a run
-         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.
+         * @description Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true, warnings }` on success (`warnings`: the integrations the run would start without), `400` problem+json for validation failures (with the accumulated validation errors). Lets developers iterate on a manifest without leaving run history behind.
          *
          *     **Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors. **Permission:** `agents:write` and `agents:run` — composing a manifest is authoring, launching it is running. A caller holding `agents:run` without `agents:write` — the `operator` and `runner` presets, an API key scoped to `agents:run` — is refused.
          */
@@ -5001,7 +5001,7 @@ export interface paths {
         put?: never;
         /**
          * Force-refresh OAuth2 credentials for an active integration
-         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
+         * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint. Reports an upstream 401 on the named connection's credential, which is refreshed regardless of its remaining lifetime (OAuth2) or counted as a rejection (an auth nothing can refresh). Called by the MITM listener's `refreshOnUnauthorized` hook. A rejection is evidence only against the credential it names: when `credential_revision` names one the connection no longer holds, the call is a read — `200` exactly as the GET, nothing refreshed or counted. A connection already flagged `needsReconnection` answers `410` without any token exchange, so its refresh token is never spent. An internal fault that is no verdict on the connection (a database error, an incoherent OAuth client configuration) answers `500`, with nothing flagged or counted. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
         delete?: never;
@@ -5181,7 +5181,7 @@ export interface paths {
         put?: never;
         /**
          * Force a refresh of the access token for an OAuth model provider connection
-         * @description Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on revoked refresh tokens, flips needsReconnection=true on the connection and returns 410.
+         * @description Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on a revoked or missing refresh token, flips needsReconnection=true on the connection and returns 410.
          */
         post: operations["refreshOAuthModelProviderToken"];
         delete?: never;
@@ -5261,11 +5261,13 @@ export interface components {
             /** @description What blocks the run. The integration portion of the 409 envelope (same `field: integrations.<id>` shape as ProblemDetail.errors), plus, FIRST when it applies, `{ field: "agent", code: "agent_not_active" }` — the space has switched the agent off, so the run doors answer `404 agent_not_active_in_space` while this read answers 200 and says why. The remedy is `POST /api/spaces/{spaceId}/packages`. Shares the single ResolutionFieldError component so the shape can't drift from the 409 error items. */
             errors: (components["schemas"]["ResolutionFieldError"] & {
                 /** @enum {string} */
-                code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "agent_not_active";
+                code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "required_integration_unbound" | "integration_not_active" | "agent_not_active";
             })[];
             integrations: {
                 integration_package_id: string;
-                /** @description True iff this integration is one of the run-blocking `errors`. */
+                /** @description The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here. */
+                required: boolean;
+                /** @description True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`). */
                 run_blocking: boolean;
                 resolution: components["schemas"]["IntegrationAgentResolution"];
             }[];
@@ -5325,6 +5327,10 @@ export interface components {
                     tools?: string[] | "*";
                     /** @description Niveau 2 explicit scope escape hatch (optional) */
                     scopes?: string[];
+                    /** @description AFPS §4.4 — which of the integration's `auths` the agent uses (optional; absent lets any serving auth bind). */
+                    auth_key?: string;
+                    /** @description AFPS §4.4 — `true`: a run refuses to start unless a connection binds. Absent or `false`: the run starts without it, reported in the launch response's `warnings`. */
+                    required?: boolean;
                 }[];
             };
             /** @description Summary of the most recent run (null if never run) */
@@ -5472,6 +5478,8 @@ export interface components {
                     tools?: string[] | "*";
                     scopes?: string[];
                     auth_key?: string;
+                    /** @description Whether an execution of the agent needs a credential for this integration to start (default false). See AFPS §4.4. */
+                    required?: boolean;
                 } & {
                     [key: string]: unknown;
                 };
@@ -5610,6 +5618,15 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        ConnectionResolutionItem: components["schemas"]["ResolutionFieldError"] & {
+            /** @enum {string} */
+            code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "required_integration_unbound" | "integration_not_active" | "integration_not_found" | "integration_wrong_type" | "integration_invalid_manifest" | "remote_binds_one_connection";
+        };
+        /** @description A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`, and the `auth_key` to connect when the dep's own auth serves the selection), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`. */
+        ConnectionResolutionWarning: components["schemas"]["ResolutionFieldError"] & {
+            /** @enum {string} */
+            code?: "not_connected" | "must_choose_connection" | "auth_key_mismatch" | "integration_not_active" | "integration_unbound";
+        };
         EeBillingAccount: {
             plan: {
                 id: string;
@@ -5744,25 +5761,30 @@ export interface components {
             value: string;
             note?: string;
         };
-        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source` + `error_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. */
+        /** @description Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. */
         IntegrationAgentResolution: {
             /**
-             * @description The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).
+             * @description The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).
              * @enum {string|null}
              */
             source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
             /**
-             * @description Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.
+             * @description Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (`[]` included), for a non-required integration switched off in the space, and when there is no verdict.
              * @enum {string|null}
              */
-            error_code: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | null;
-            /** @description The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise. */
+            error_code: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "required_integration_unbound" | "integration_not_active" | null;
+            /** @description Why the next run would start without this integration — its launch `warnings[]` item. `null` when the resolver emits no warning for it. */
+            warning: components["schemas"]["ConnectionResolutionWarning"] | null;
+            /** @description The set the next run binds — empty when it binds none. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty on any other error. */
             resolved_connection_ids: string[];
             /** @description Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise. */
             resolved_missing_scopes: string[];
-            admin_pinned_connection_ids: string[];
-            member_pinned_connection_ids: string[];
-            org_default_connection_ids: string[];
+            /** @description `null` when no admin pin exists; `[]` when it pins none. */
+            admin_pinned_connection_ids: string[] | null;
+            /** @description `null` when the caller has no member pin; `[]` when it pins none. */
+            member_pinned_connection_ids: string[] | null;
+            /** @description `null` when no org default exists; an org default is never empty. */
+            org_default_connection_ids: string[] | null;
             org_default_enforced: boolean;
             /** @description Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections. */
             can_add_connection: boolean;
@@ -5818,12 +5840,16 @@ export interface components {
         IntegrationPin: {
             agent_package_id: string;
             integration_package_id: string;
-            /** @description The whole pinned set, in the order it was written. A write replaces it. */
+            /** @description The whole pinned set, in the order it was written — `[]` pins none. A write replaces it. */
             connection_ids: string[];
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        LaunchWarnings: {
+            /** @description Declared, non-required integrations the run starts without. Always present. A `required` integration in the same state is a 409 instead. */
+            warnings: components["schemas"]["ConnectionResolutionWarning"][];
         };
         /** @description Packages of a single type visible to the org. Each entry carries its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`) and whether that space runs it (`state`). */
         LibraryPackageList: {
@@ -5850,7 +5876,15 @@ export interface components {
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
-        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. */
+        /** @description `missing_integration_connection`: one `errors[]` item per integration that blocks the launch (`field: integrations.<id>`). */
+        MissingIntegrationConnectionProblem: components["schemas"]["ProblemDetail"] & {
+            /** @enum {string} */
+            code?: "missing_integration_connection";
+            errors: components["schemas"]["ConnectionResolutionItem"][];
+            /** @description On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`. */
+            version_ref?: string;
+        };
+        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card. */
         ModelCostTier: {
             inputTokensAbove: number;
             input: number;
@@ -5874,6 +5908,11 @@ export interface components {
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
+                /**
+                 * @description What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason, does not take `off`, or when what it sends is not known. An alias never reports it: it would identify the backing model.
+                 * @enum {string}
+                 */
+                off?: "disables" | "unsent";
             };
         };
         /** @description Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer. */
@@ -6337,7 +6376,7 @@ export interface components {
         };
         ResolutionFieldError: {
             field: string;
-            /** @description On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool` — the extras below are keyed on it — or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code. */
+            /** @description On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool`, `required_integration_unbound`, `integration_not_active` — the extras below are keyed on it — or one of `integration_not_found`, `integration_wrong_type`, `integration_invalid_manifest` (the declared integration's manifest could not be loaded; no extras), or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's `warnings[]` item, one of `not_connected`, `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`, `integration_unbound` (see ConnectionResolutionWarning). On any other validation item, the validator's own code. */
             code: string;
             message: string;
             /** @description Human-readable title; preserved from the underlying error factory. */
@@ -6360,17 +6399,22 @@ export interface components {
             missing_scopes?: string[];
             /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error). */
             owned_by_actor?: boolean;
-            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
             required_scopes?: string[];
-            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
             auth_key?: string;
             /** @description Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. */
             required_auth_key?: string;
             /** @description Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method. */
             available_auth_keys?: string[];
             /**
+             * @description The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.
+             * @enum {string}
+             */
+            source?: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
+            /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
             /**
@@ -6449,15 +6493,8 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             error: string | null;
-            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
-            token_usage: ({
-                input_tokens?: number;
-                output_tokens?: number;
-                cache_creation_input_tokens?: number;
-                cache_read_input_tokens?: number;
-            } & {
-                [key: string]: unknown;
-            }) | null;
+            /** @description Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage. */
+            token_usage: components["schemas"]["TokenUsage"] | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -6545,7 +6582,7 @@ export interface components {
             } | null;
             /** @description ID of the model_provider_credentials row resolved at run creation (audit + cost-attribution). */
             modelCredentialId: string | null;
-            /** @description Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 0..20 connections per integration (`[]` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6566,6 +6603,68 @@ export interface components {
                  */
                 source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             }[] | null;
+            /** @description Declared integrations this run started without, and why — the launch `warnings` recorded at kickoff, without their candidate or auth detail. In declaration order; empty when every one was bound; null when the run recorded none (no connection resolution ran, or the run predates the record). */
+            integrations_unbound: {
+                integration_package_id: string;
+                /**
+                 * @description The launch warning's code (see ConnectionResolutionWarning).
+                 * @enum {string}
+                 */
+                code: "not_connected" | "must_choose_connection" | "auth_key_mismatch" | "integration_not_active" | "integration_unbound";
+                /**
+                 * @description The cascade layer that chose no connection, on `integration_unbound`; null otherwise.
+                 * @enum {string|null}
+                 */
+                source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
+            }[] | null;
+        };
+        RunAndWaitPending: {
+            /** @description The run id. */
+            id: string | null;
+            /** @description The run's agent (`@scope/name`). */
+            packageId: string | null;
+            /** @enum {string|null} */
+            status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
+            /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
+            warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @constant */
+            done: false;
+        };
+        /** @description The `run_and_wait` MCP tool's result. `done` is its only discriminant: `true` once the run reached a terminal status, `false` when the wait ended first — the run is still going, and the payload carries no outcome. The run is still going: never call `run_and_wait` again for it — read its outcome with `getRun` on its `id`. */
+        RunAndWaitResult: components["schemas"]["RunAndWaitPending"] | components["schemas"]["RunAndWaitTerminal"];
+        RunAndWaitTerminal: {
+            /** @description The run id. */
+            id: string | null;
+            /** @description The run's agent (`@scope/name`). */
+            packageId: string | null;
+            /** @enum {string|null} */
+            status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
+            /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
+            warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @constant */
+            done: true;
+            /** @description The run's output payload. Absent when `truncated` replaces it. */
+            result?: unknown;
+            /** @description The run's own failure; never a wait outcome. */
+            error?: string;
+            /** @description Files the run published; absent when it published none. */
+            files?: {
+                id: string;
+                /** @description `appfile://` URI. */
+                uri: string;
+                name: string;
+                mime: string;
+                size: number;
+            }[];
+            /**
+             * @description `result` was over 32768 bytes of JSON: `result_head` holds its prefix, `getRun` the whole of it.
+             * @constant
+             */
+            truncated?: true;
+            result_size_bytes?: number;
+            result_head?: string;
+            /** @description How to read a truncated result. */
+            message?: string;
         };
         RunLog: {
             /** Format: int64 */
@@ -6610,7 +6709,7 @@ export interface components {
             model_id_override: string | null;
             proxy_id_override: string | null;
             version_override: string | null;
-            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..20 per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
+            /** @description Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 0..20 per integration (`[]` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback. */
             connection_overrides: {
                 [key: string]: string[];
             } | null;
@@ -6834,6 +6933,23 @@ export interface components {
             message?: string;
             /** @description Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served). */
             status?: number;
+        };
+        /** @description Cumulative token usage in the AFPS wire format. `input_tokens` is net of cache: a request's whole prompt is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. */
+        TokenUsage: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+            /** @description Per price tier, the share of the counters priced at it, one band per `input_tokens_above` (thresholds are unique). Absent when no request reached a tier. */
+            tiers?: components["schemas"]["TokenUsageTier"][];
+        };
+        /** @description The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. The threshold is compared to a request's whole prompt (input + cache read + cache write) and matches a rate card tier's `inputTokensAbove`; the band's counters stay net of cache. */
+        TokenUsageTier: {
+            input_tokens_above: number;
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
         };
         /** @description UI rendering hints for schema fields, keyed by property name. Lives at the AFPS wrapper level (outside the JSON Schema). */
         UIHintsMap: {
@@ -7069,14 +7185,14 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration has no usable connection for the caller: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. */
+        /** @description `idempotency_in_progress` — a request with the same `Idempotency-Key` is already being processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — a declared integration blocks the launch: `errors[]` carries one item per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists `candidate_connections` to pick from via `connection_overrides`. What does not block is a `warnings[]` item of the success response (see LaunchWarnings). */
         RunAdmissionConflict: {
             headers: {
                 "Request-Id": components["headers"]["RequestId"];
                 [name: string]: unknown;
             };
             content: {
-                "application/problem+json": components["schemas"]["ProblemDetail"];
+                "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
             };
         };
         /** @description `model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding. */
@@ -7224,9 +7340,9 @@ export interface components {
         AppstrateUser: string;
         /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
         AppstrateVersion: string;
-        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+        /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
@@ -7267,7 +7383,7 @@ export interface components {
         RequestId: string;
         /** @description API version used for this request (format: YYYY-MM-DD). Always included on authenticated responses. */
         AppstrateVersion: string;
-        /** @description Set to 'true' when the response is a cached replay of a previous idempotent request. */
+        /** @description Set to 'true' when the response re-serves the 2xx a previous request with the same `Idempotency-Key` stored, under the caller's current permissions; a run launch's `warnings` items carry no `connect_url`, `expiresAt` or `packageId`. A refusal or failure is never stored, so never replayed. */
         IdempotentReplayed: "true";
         /** @description IETF RateLimit structured header (limit=N, remaining=M, reset=S). Present on rate-limited endpoints. */
         RateLimit: string;
@@ -8240,9 +8356,9 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
@@ -8276,7 +8392,7 @@ export interface operations {
                     generation?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Proxy ID override for this run, or "none" to disable proxying. Takes priority over agent and org defaults. */
                     proxyId?: string;
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`) and `[]` on an integration it marks `required` (400 `validation_failed`, an `errors[]` item `required_integration_unbound` on `connection_overrides.<id>`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8288,7 +8404,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed. */
+            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8353,14 +8469,16 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       }
+                     *       },
+                     *       "warnings": []
                      *     }
                      */
-                    "application/json": components["schemas"]["Run"];
+                    "application/json": components["schemas"]["Run"] & components["schemas"]["LaunchWarnings"];
                 };
             };
             /** @description Agent readiness validation failed (empty prompt, missing skill, or inactive integration) */
@@ -8386,14 +8504,14 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`. */
             404: components["responses"]["NotFound"];
-            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration has no usable connection for the caller (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`) */
+            /** @description Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
                 };
             };
             /** @description A referenced upload has expired before consume, or its post-consume reuse window has elapsed (`upload_expired`) — stage a fresh upload and retry */
@@ -8605,7 +8723,9 @@ export interface operations {
                     cron_expression: string;
                     /** @default UTC */
                     timezone?: string;
-                    input?: Record<string, never>;
+                    input?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
@@ -8614,7 +8734,7 @@ export interface operations {
                     proxy_id_override?: string;
                     /** @description Which agent definition every run triggered by this schedule executes: `draft`, `published`, or a version spec (exact version, dist-tag, or semver range). Omitting it is identical to `published` (latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent at THIS write — `403 draft_not_writable` otherwise — and is not re-checked at fire time, the way `connection_overrides` are frozen here too. The selected definition (manifest + prompt) is resolved at each fire — a schedule inheriting (`published`) on a never-published agent skips the fire and logs a warning until a version is published or `draft` is selected. */
                     version_override?: string;
-                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 1..20 per integration, always an ARRAY. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set, which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Empty arrays and ids that are not uuids are refused here, and so is a key that names no integration the fired agent declares (400 `invalid_request`). */
+                    /** @description Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required` (400 `invalid_request`, `param: connection_overrides`). */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -8631,7 +8751,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule created */
+            /** @description Schedule created, plus `warnings`: the integrations its fires would start without. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8670,10 +8790,14 @@ export interface operations {
                      *       "actor_type": "user",
                      *       "running_runs": 0,
                      *       "unread_count": 0,
-                     *       "last_run_number": 0
+                     *       "last_run_number": 0,
+                     *       "warnings": []
                      *     }
                      */
-                    "application/json": components["schemas"]["Schedule"];
+                    "application/json": components["schemas"]["Schedule"] & {
+                        /** @description Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing. */
+                        warnings: components["schemas"]["ConnectionResolutionWarning"][] | null;
+                    };
                 };
             };
             /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, agent has file inputs (cannot be scheduled), or an actor that cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
@@ -8690,14 +8814,14 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
                 };
             };
             422: components["responses"]["VersionArtifactUnavailable"];
@@ -11632,7 +11756,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -12579,7 +12703,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
             400: components["responses"]["ValidationError"];
             /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
             403: {
@@ -12593,7 +12717,7 @@ export interface operations {
             /** @description No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
-            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. */
+            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). The page session survives. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12621,7 +12745,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connect-run login did not complete within the timeout */
+            /** @description The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`. */
             504: {
                 headers: {
                     [name: string]: unknown;
@@ -12678,6 +12802,7 @@ export interface operations {
                              * @enum {string}
                              */
                             type: "oauth2" | "api_key" | "basic" | "mtls" | "custom";
+                            /** @description The auth's `_meta["dev.appstrate/auth"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`. */
                             required: boolean;
                             scopes: string[];
                             /** @description RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC. */
@@ -12900,9 +13025,19 @@ export interface operations {
                     };
                 };
             };
+            /** @description Invalid body or credentials. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
             503: {
                 headers: {
@@ -12922,7 +13057,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connect-run login did not complete within the timeout */
+            /** @description The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`. */
             504: {
                 headers: {
                     [name: string]: unknown;
@@ -13424,6 +13559,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
+                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that. */
                         connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
@@ -13463,7 +13599,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE default set — this write replaces it. */
+                    /** @description The WHOLE default set (1 or more ids) — this write replaces it. */
                     connection_ids: string[];
                     /** @default false */
                     enforce?: boolean;
@@ -13481,6 +13617,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         integration_package_id: string;
+                        /** @description A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that. */
                         connection_ids: string[];
                         enforce: boolean;
                         /** Format: date-time */
@@ -13756,7 +13893,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it. */
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it. */
                     connection_ids: string[];
                 };
             };
@@ -13773,7 +13910,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
+            /** @description Refused: more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
@@ -13853,6 +13990,7 @@ export interface operations {
                              * @enum {string}
                              */
                             type: "oauth2" | "api_key" | "basic" | "mtls" | "custom";
+                            /** @description The auth's `_meta["dev.appstrate/auth"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`. */
                             required: boolean;
                             scopes: string[];
                             /** @description RFC 8707 resource indicator declared by the manifest (`auths.{key}.resource`). AFPS §7.3 name — matches the RFC. */
@@ -14734,19 +14872,91 @@ export interface operations {
             };
         };
         responses: {
-            /** @description JSON-RPC response. */
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`: its progress notifications, then its result, as SSE events; as `application/json` otherwise. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
+                        result?: {
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            structuredContent?: Record<string, never>;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    } & {
                         [key: string]: unknown;
                     };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: refused before the transport — `invalid_request` when the organization has no space to serve. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
         };
     };
     listMyConnections: {
@@ -15127,6 +15337,7 @@ export interface operations {
                         object: "list";
                         data: {
                             integration_package_id: string;
+                            /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs. */
                             connection_ids: string[];
                         }[];
                         hasMore: boolean;
@@ -15158,6 +15369,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs. */
                     connection_ids: string[];
                 };
             };
@@ -15172,7 +15384,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationPin"];
                 };
             };
-            /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
+            /** @description Refused: more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */
@@ -16783,7 +16995,7 @@ export interface operations {
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -21683,9 +21895,9 @@ export interface operations {
                 "Appstrate-User"?: components["parameters"]["AppstrateUser"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
@@ -21719,7 +21931,7 @@ export interface operations {
                     input?: Record<string, never>;
                     /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
-                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 1..20 connections per integration, each carrying its own authKey. Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set, and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Empty arrays and ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
+                    /** @description Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ "@scope/integration": ["<connection_id>", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`) and `[]` on an integration it marks `required` (400 `validation_failed`, an `errors[]` item `required_integration_unbound` on `connection_overrides.<id>`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     };
@@ -21731,7 +21943,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`). */
+            /** @description Inline run created — stream via SSE. The body is the created run resource (same shape as `GET /runs/{id}`) plus the launch's `warnings`. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -21790,6 +22002,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": true,
                      *       "file_counts": {
                      *         "input": 0,
@@ -21804,10 +22017,11 @@ export interface operations {
                      *         "schema_version": "0.3",
                      *         "dependencies": {}
                      *       },
-                     *       "inline_prompt": "Summarize the attached file in three bullet points."
+                     *       "inline_prompt": "Summarize the attached file in three bullet points.",
+                     *       "warnings": []
                      *     }
                      */
-                    "application/json": components["schemas"]["Run"];
+                    "application/json": components["schemas"]["Run"] & components["schemas"]["LaunchWarnings"];
                 };
             };
             /** @description Invalid manifest, oversized payload, wildcard URI when disallowed, or schema validation failure */
@@ -21914,7 +22128,8 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "valid": true
+                     *       "valid": true,
+                     *       "warnings": []
                      *     }
                      */
                     "application/json": {
@@ -21923,7 +22138,7 @@ export interface operations {
                          * @enum {boolean}
                          */
                         valid: true;
-                    };
+                    } & components["schemas"]["LaunchWarnings"];
                 };
             };
             /** @description Invalid manifest, schema mismatch, or missing connection readiness */
@@ -21950,7 +22165,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description API version override (format: YYYY-MM-DD). Defaults to the org's pinned version or the current platform version. */
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -22030,7 +22245,7 @@ export interface operations {
                          * @description ISO-8601. Events posted after this timestamp reject with 410.
                          */
                         expiresAt: string;
-                    };
+                    } & components["schemas"]["LaunchWarnings"];
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -22054,7 +22269,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
                 };
             };
             /** @description Same Idempotency-Key used with a different method, URL or body (`idempotency_conflict`), a dependency pin or `dependency_overrides` entry resolves to no published version (`dependency_unresolved`), or — `registry` source with `stage: "published"` (the default) only — the archive of the selected version is missing, corrupt or without `prompt.md` (`version_artifact_unavailable`); the working copy is never substituted. When `AFPS_SIGNATURE_POLICY` is `required`, a corrupt archive answers `bundle_invalid` instead and an unsigned or untrusted one `bundle_signature_invalid`. An archive past the decompression ceiling answers `package_archive_unreadable` */
@@ -22165,6 +22380,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": "Weekday morning sort",
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,
@@ -22272,6 +22488,7 @@ export interface operations {
                      *       "api_key_name": null,
                      *       "schedule_name": null,
                      *       "connections_used": null,
+                     *       "integrations_unbound": null,
                      *       "package_ephemeral": false,
                      *       "file_counts": {
                      *         "input": 0,
@@ -22466,13 +22683,8 @@ export interface operations {
                      */
                     status: "success" | "failed" | "timeout" | "cancelled";
                     durationMs?: number;
-                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). */
-                    usage?: {
-                        input_tokens?: number;
-                        output_tokens?: number;
-                        cache_creation_input_tokens?: number;
-                        cache_read_input_tokens?: number;
-                    };
+                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). The schema is the contract: it is the stored shape, and what a runner must send. A counter that breaks it makes the whole usage invalid, which is a 400 on a success. Undeclared keys and malformed `tiers` bands also break it, but the server tolerates them so that a platform and a runner of different versions still agree: it drops them, never stores them, and keeps the counters, priced at the base rate. */
+                    usage?: components["schemas"]["TokenUsage"];
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;
                     /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */
@@ -23094,14 +23306,16 @@ export interface operations {
                     cron_expression?: string;
                     timezone?: string;
                     enabled?: boolean;
-                    input?: Record<string, never>;
+                    input?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
                     proxy_id_override?: string | null;
                     /** @description Version selector (`draft` | `published` | version spec). Pass `null` to clear (back to the latest published version; the working copy is opt-in via `draft` only). `draft` requires WRITE authority on the agent, but only when this patch MOVES the selector: re-sending the value the row already holds decides nothing and is never refused, so a member editing the cron of someone else's draft schedule is not asked for an authority the request does not exercise. */
                     version_override?: string | null;
-                    /** @description Per-integration connection sets frozen on the schedule, one array of 1..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare is a 400 `invalid_request`. */
+                    /** @description Per-integration connection sets frozen on the schedule, one array of 0..20 connection ids per integration. Pass `null` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or `version_override` moves: a key it does not declare, or `[]` on an integration it marks `required`, is a 400 `invalid_request`. */
                     connection_overrides?: {
                         [key: string]: string[];
                     } | null;
@@ -23118,7 +23332,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule updated */
+            /** @description Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -23126,7 +23340,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Schedule"];
+                    "application/json": components["schemas"]["Schedule"] & {
+                        /** @description Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing. */
+                        warnings: components["schemas"]["ConnectionResolutionWarning"][] | null;
+                    };
                 };
             };
             /** @description Validation error. Possible causes: missing/invalid cron expression (`code: invalid_cron_expression`), a timezone `cron-parser` cannot schedule against (`code: invalid_timezone`, `param: timezone`), invalid input, or an enabled schedule whose actor cannot run agents in this space (`code: schedule_actor_invalid`, `param: actor`). */
@@ -23142,14 +23359,14 @@ export interface operations {
             /** @description Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["MissingIntegrationConnectionProblem"];
                 };
             };
             422: components["responses"]["VersionArtifactUnavailable"];
@@ -24736,7 +24953,7 @@ export interface operations {
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
                 /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
                 "X-Space-Id"?: components["parameters"]["XSpaceId"];
-                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same method, URL and body replays the original response with `Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
+                /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -25323,23 +25540,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials are unreadable (corrupted blob, failed integrity check, malformed envelope) — which is terminal on the plain read too, not only on a forced refresh. A key id missing from the keyring is NOT one of them: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics. */
+            /** @description `integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection` — on the plain read too when the stored credentials are unreadable. A key id missing from the keyring is NOT a cause: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401. */
+            /** @description A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401. */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -25394,23 +25623,35 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The credential is dead and the connection has been flagged `needsReconnection` — same semantics and same three causes as the GET endpoint. */
+            /** @description `integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`). */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count. */
+            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections. */
             502: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -26100,13 +26341,34 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Connection needs reconnection (refresh token revoked or missing). Sidecar should propagate as 401 to the agent. */
+            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401. */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
+                };
+            };
+            /** @description Not refreshed now; the credential stays usable. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -26135,13 +26397,34 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Refresh token revoked — connection flagged needsReconnection. */
+            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401. */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
+                };
+            };
+            /** @description Not refreshed now; the credential stays usable. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
+                         * @enum {string}
+                         */
+                        cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
+                    };
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];

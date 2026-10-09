@@ -11,6 +11,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { ModelReasoningOff } from "@appstrate/core/model-generation";
 import { piModelDialect } from "./pi-model.ts";
 import type { Api, Model } from "./pi-sdk.ts";
 
@@ -19,6 +20,9 @@ type Payload = Record<string, unknown>;
 // Shaped like a plain API key: pi-ai reads any other credential sent to
 // `api.openai.com` as a ChatGPT sign-in and shapes the request for it.
 export const PAYLOAD_API_KEY = "sk-test-key";
+
+// A run's Pi talks to the sidecar or the llm-proxy, never the upstream endpoint.
+export const RUN_BASE_URL = "http://sidecar.test/llm";
 
 // pi-ai reads the ChatGPT account id off a codex token's JWT claims.
 const CODEX_PAYLOAD_TOKEN = `h.${btoa(
@@ -47,6 +51,25 @@ export async function capturePayload(
     throw new Error(`${model.provider}/${model.id}: ${result.errorMessage}`);
   }
   return payload as Payload;
+}
+
+/**
+ * `unsent` when Pi's `off` payload, as a run builds it, equals the model's
+ * declared non-reasoning, instruction role pinned (it follows `reasoning` too).
+ * Limit: parameters sent whatever `reasoning` (`compat.supportsMidConvoEffort`)
+ * read as `unsent`; those refuse `off`.
+ */
+export async function observedReasoningOff(model: Model<Api>): Promise<ModelReasoningOff> {
+  const pinned = {
+    ...model,
+    baseUrl: RUN_BASE_URL,
+    compat: { ...model.compat, supportsDeveloperRole: false },
+  } as Model<Api>;
+  const [off, plain] = await Promise.all([
+    capturePayload(pinned),
+    capturePayload({ ...pinned, reasoning: false }),
+  ]);
+  return Bun.deepEquals(off, plain) ? "unsent" : "disables";
 }
 
 /** A registry record as the platform resolves it for a builder: its dialect and its own values. */

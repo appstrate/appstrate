@@ -15,6 +15,9 @@
 
 import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor } from "./helpers.ts";
 
@@ -95,6 +98,47 @@ describe("MCP server instructions — connect bullet", () => {
       expect(bullet).toMatch(/authKey: "<the error's auth_key/);
     }
   });
+
+  // #1830: only a `required` integration blocks the launch when nothing is
+  // connected; an optional one lets the run start and comes back as a warning.
+  it("tells a refused launch from a started run that lacks an integration", () => {
+    const chat = connectBullet(true);
+    const external = connectBullet(false);
+    for (const bullet of [chat, external]) {
+      expect(bullet).toMatch(/marks it `required`/);
+      // Generated from the tuple, so a new warning code reaches the model.
+      for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+        expect(bullet).toContain(`\`${code}\``);
+      }
+      // An explicit `[]` and an inactive integration warn too, without a connect target.
+      expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
+      expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
+      // `null` = nothing judged (another member's schedule: their connections stay unrevealed).
+      expect(bullet).toMatch(/A schedule write answers `warnings: null` when it judged nothing/);
+      expect(bullet).toMatch(/written for another member, whose connections it never reveals/);
+      expect(bullet).toMatch(/`\[\]` only when it judged and found nothing to report/);
+    }
+    // A started run's warning never carries a link from this server; the chat renders its own card.
+    for (const bullet of [chat, external]) {
+      expect(bullet).not.toMatch(/a `connect_url` only when the response carries one/);
+      expect(bullet).not.toMatch(/from the warning's `connect_url`/);
+    }
+    expect(chat).toMatch(/the chat client renders a connect button under the run itself/);
+    expect(chat).toMatch(/do NOT paste or promise a link/);
+    expect(external).toMatch(/a warning here never carries a `connect_url`/);
+    expect(external).toMatch(
+      /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
+    );
+    expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
+  });
+
+  it("names the layers a `required_integration_unbound` comes from and what clears it", () => {
+    const bullet = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- Code `required_integration_unbound`"));
+    expect(bullet).toContain("a stored schedule's `connection_overrides`");
+    expect(bullet).toContain("a run override outranks a member pin, not an admin pin");
+  });
 });
 
 describe("MCP server instructions — named operations follow their grant", () => {
@@ -156,9 +200,37 @@ describe("MCP server instructions — run guidance", () => {
       "Shortcut —",
       "Connecting or reconnecting an integration before a run",
       "must_choose_connection",
+      "required_integration_unbound",
+      // What a still-running run's result tells the model to do.
+      "`done:false`",
     ]) {
       expect(withRuns).toContain(marker);
       expect(without).not.toContain(marker);
+    }
+  });
+
+  it("follows a `done:false` run up by client: a long-poll outside the chat, a read inside it", () => {
+    // The chat gets `done:false` at the end of its turn budget, with less time
+    // left than a `wait: true` long-poll may block; an external client has time.
+    const shortcutOf = (contextInjected: boolean) =>
+      instructionsFor(RUNNER, contextInjected)
+        .split("\n")
+        .find((line) => line.startsWith("- Shortcut —"))!;
+    const external = shortcutOf(false);
+    expect(external).toContain(
+      `\`done:false\` means its wait ended first. ${RUN_AND_WAIT_LONG_POLL_RESUME}`,
+    );
+    expect(external).not.toContain("with an `error`");
+    const chat = shortcutOf(true);
+    expect(chat).toContain(
+      `\`done:false\` means its wait ended first. ${RUN_AND_WAIT_RESUME_INSTRUCTION}`,
+    );
+    expect(chat).not.toContain("wait: true");
+    // The generic run bullet defers to the shortcut instead of contradicting it.
+    for (const contextInjected of [false, true]) {
+      expect(instructionsFor(RUNNER, contextInjected)).toContain(
+        "for a run `run_and_wait` returned with `done:false`, see the shortcut below",
+      );
     }
   });
 
@@ -232,6 +304,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
     expect(without).not.toContain("building or configuring an agent");
+  });
+
+  it("teaches `required` alongside the tool selection", () => {
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    expect(withWrite).toContain("`integrations_configuration[id].required`");
+    expect(instructionsFor(permissions, true)).not.toContain(
+      "`integrations_configuration[id].required`",
+    );
   });
 
   it("withholds it from a caller who may author but not invoke", () => {

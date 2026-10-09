@@ -56,6 +56,12 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
+      # scripts/test/ssh-mcp.test.ts runs an unprivileged sshd on the loopback
+      # and fails on CI without one; the runner image ships the ssh client only.
+      # Which slice holds that file is decided at run time, so every slice installs it.
+      - name: Install sshd
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server
+
       # Every `bun test` in this workflow names its per-test timeout: bunfig has no
       # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
       # 15 s itself; the CLI workspace's `test` script passes 10 s (below), so
@@ -187,16 +193,27 @@ jobs:
 
   # The required status check. A matrix job reports one check per slice, named
   # after the slice, so the check the branch ruleset requires is this one: it
-  # passes only when every slice did.
+  # passes only when every slice did, or when a newer run on the same commit
+  # superseded this one (`scripts/ci-gate.sh`).
   unit-gate:
     name: Unit tests
     if: always()
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci-gate.sh
+          sparse-checkout-cone-mode: false
+
       - name: Every unit slice passed
-        run: test "${{ needs.unit.result }}" = success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-gate.sh "${{ needs.unit.result }}" success
 
   integration:
     name: Integration tests (${{ matrix.partition }}/2)
@@ -294,20 +311,27 @@ jobs:
   # The required status check, as for the unit slices. The integration slices
   # are skipped on a PR without the `integration` label, and a skipped required
   # check reads as passed — so the gate accepts `skipped`, and only that, on
-  # top of `success`. A failed or cancelled slice fails it.
+  # top of `success`. A failed or cancelled slice fails it (superseded run:
+  # see `unit-gate`).
   integration-gate:
     name: Integration tests
     if: always()
     needs: integration
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci-gate.sh
+          sparse-checkout-cone-mode: false
+
       - name: Every integration slice passed, or the suite was not requested
-        run: |
-          case "${{ needs.integration.result }}" in
-            success|skipped) ;;
-            *) echo "integration slices: ${{ needs.integration.result }}"; exit 1 ;;
-          esac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-gate.sh "${{ needs.integration.result }}" success skipped
 
   platform-container-e2e:
     name: Platform container health e2e

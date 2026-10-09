@@ -104,12 +104,14 @@ function claimsOf(item: ResolutionFieldError) {
 }
 
 describe("connectOfferTarget", () => {
-  it("accepts not_connected and carries the relayed scopes with no connection id", () => {
-    expect(connectOfferTarget(notConnected())).toEqual({
-      integrationId: INTEGRATION,
-      authKey: "primary",
-      scopes: ["mail.read", "mail.send"],
-    });
+  it("accepts a fresh-connect code — not_connected, auth_key_mismatch — with no connection id", () => {
+    for (const code of ["not_connected", "auth_key_mismatch"]) {
+      expect(connectOfferTarget({ ...notConnected(), code }), code).toEqual({
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        scopes: ["mail.read", "mail.send"],
+      });
+    }
   });
 
   it("accepts an in-place code on the actor's OWN connection — upgrade or reconnect", () => {
@@ -146,7 +148,6 @@ describe("connectOfferTarget", () => {
   it("refuses every other resolution code, connect-flow relay or not", () => {
     for (const code of [
       "must_choose_connection",
-      "auth_key_mismatch",
       "auth_serves_no_selected_tool",
       // The agent's own auth_key serves no selected tool: no consent clears it.
       "auth_key_serves_no_selected_tool",
@@ -154,6 +155,8 @@ describe("connectOfferTarget", () => {
       "override_connection_unavailable",
       "integration_not_active",
       "integration_invalid_manifest",
+      // A layer chose `[]`: nothing to connect.
+      "integration_unbound",
     ]) {
       expect(connectOfferTarget({ ...notConnected(), code })).toBeNull();
     }
@@ -318,9 +321,11 @@ describe("attachConnectOffers", () => {
   it("leaves the item alone when the auth is not oauth2, or the manifest is gone", async () => {
     const others = manifestCache({
       "@offers/keyed": authManifest("api_key"),
+      "@offers/basic": authManifest("basic"),
+      "@offers/custom": authManifest("custom"),
       "@offers/gone": "missing",
     });
-    for (const id of ["@offers/keyed", "@offers/gone"]) {
+    for (const id of ["@offers/keyed", "@offers/basic", "@offers/custom", "@offers/gone"]) {
       const errors = [notConnected(id)];
       expect(
         await attachConnectOffers({
@@ -330,6 +335,7 @@ describe("attachConnectOffers", () => {
           policy: CONNECT,
           manifestCache: others,
         }),
+        id,
       ).toEqual(errors);
     }
   });

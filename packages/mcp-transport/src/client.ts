@@ -30,6 +30,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type {
   CallToolResult,
   Implementation,
+  Progress,
   ReadResourceResult,
   ServerCapabilities,
   Tool,
@@ -161,7 +162,12 @@ export interface AppstrateMcpClient {
   /** Invoke a tool by name. */
   callTool(
     args: { name: string; arguments?: Record<string, unknown> },
-    options?: { signal?: AbortSignal; timeoutMs?: number },
+    options?: {
+      signal?: AbortSignal;
+      timeoutMs?: number;
+      /** Requests progress; `timeoutMs` then restarts on each notification. */
+      onProgress?: (progress: Progress) => void;
+    },
   ): Promise<CallToolResult>;
   /** Read a resource by URI. */
   readResource(
@@ -545,6 +551,11 @@ export function wrapClient(
     },
     async callTool(args, options) {
       return client.callTool(args, undefined, {
+        // With progress, `timeout` is an idle timeout: no `maxTotalTimeout`, the
+        // caller bounds the total with `signal` (an agent run: its deadline).
+        ...(options?.onProgress
+          ? { onprogress: options.onProgress, resetTimeoutOnProgress: true }
+          : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...((options?.timeoutMs ?? defaultTimeoutMs)
           ? { timeout: options?.timeoutMs ?? defaultTimeoutMs }

@@ -44,8 +44,13 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections, packages, runs } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
+import {
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+  runs,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 
@@ -510,8 +515,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     });
 
     expect(res.status).toBe(410);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    const body = (await res.json()) as { code?: string; detail?: string; cause?: string };
+    expect(body.code).toBe("integration_connection_needs_reconnection");
+    expect(body.cause).toBe("credentials_undecryptable");
     expect(body.detail).toMatch(/could not be decrypted/i);
 
     const [row] = await db
@@ -717,7 +723,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         headers: { Authorization: `Bearer ${token}` },
       });
     for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
-      expect((await refresh()).status).toBe(502);
+      const retry = await refresh();
+      expect(retry.status).toBe(502);
+      expect(await retry.json()).toMatchObject({ code: "bad_gateway", cause: "unrefreshable" });
     }
     const [before] = await db.select().from(runs).where(eq(runs.id, runId));
     const beforeMeta = before!.metadata as { degraded_integrations?: string[] } | null;
@@ -725,6 +733,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     const res = await refresh();
     expect(res.status).toBe(410);
+    expect(await res.json()).toMatchObject({
+      code: "integration_connection_needs_reconnection",
+      cause: "unrefreshable",
+    });
 
     const [row] = await db
       .select()
@@ -735,6 +747,92 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("410 + records the run, without spending the refresh token, once an OAuth2 connection is flagged mid-run", async () => {
+    let exchanges = 0;
+    const idp = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => {
+        exchanges += 1;
+        return Response.json({ access_token: "rotated", expires_in: 3600 });
+      },
+    });
+    try {
+      await seedPackage({
+        id: INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION,
+          serverName: MCP_SERVER,
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp.example.com/authorize",
+              tokenEndpoint: `http://127.0.0.1:${idp.port}/token`,
+              tokenEndpointAuthMethod: "client_secret_post",
+              delivery: httpHeaderDelivery({
+                name: "Authorization",
+                prefix: "Bearer ",
+                field: "access_token",
+              }),
+            },
+          },
+          tools_policy: { search: {} },
+        }),
+      });
+      await seedPackageShare(ctx.defaultSpaceId, INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          clientId: "cid",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+        })
+        .returning({ id: integrationOauthClients.id });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          accountId: "acct-oauth",
+          label: "acct-oauth",
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({
+            outputs: { access_token: "old-access", refresh_token: "rt-1" },
+          }),
+          clientRef: client!.id,
+        })
+        .returning({ id: integrationConnections.id });
+      const connectionId = conn!.id;
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      const held = await heldRevision(connectionId);
+      // Flagged after kickoff — a scope shrink seen by another caller, a peer's invalid_grant.
+      await db
+        .update(integrationConnections)
+        .set({ needsReconnection: true })
+        .where(eq(integrationConnections.id, connectionId));
+
+      const res = await app.request(
+        `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${held}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(res.status).toBe(410);
+      expect(exchanges).toBe(0);
+      const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+      const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+      expect(meta?.degraded_integrations).toContain(INTEGRATION);
+    } finally {
+      idp.stop();
+    }
   });
 
   it("DENY: 400 without `connection_id` — the selector guards BOTH routes", async () => {

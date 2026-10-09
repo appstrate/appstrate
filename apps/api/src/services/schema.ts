@@ -212,7 +212,7 @@ export function validateConnectionCredentials(
     const message = err instanceof Error ? err.message : String(err);
     return { valid: false, errors: [{ field: "", message }] };
   }
-  if (validate(effectiveData)) return { valid: true, errors: [], data: credentials };
+  if (validate(effectiveData)) return { valid: true, errors: [], data: effectiveData };
   const errors = (validate.errors || []).map((e) => ({
     field:
       e.instancePath.replace(/^\//, "") ||

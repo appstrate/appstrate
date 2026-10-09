@@ -402,10 +402,12 @@ function makeRunAndWaitExtension(
           finalPayload = step.payload;
           // Live card: push each step's payload under this tool call id so the
           // UI reflects launch → progress → terminal before execute resolves.
+          // `preliminary` (AI SDK): the call is not settled until the result below.
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
             output: toPiToolResult(step.payload),
+            preliminary: true,
           });
         }
         // The final step is ALSO delivered as the tool result (tool_execution_end

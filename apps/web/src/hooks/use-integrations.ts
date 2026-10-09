@@ -138,6 +138,35 @@ export function useIntegrations() {
   );
 }
 
+type IntegrationNameOf = (integrationId: string) => string;
+
+/**
+ * Display names from the {@link useIntegrations} list: the cached one, else fetched once through
+ * the same query when readable. The id stands in for any name the list cannot give.
+ */
+export async function loadIntegrationNames(
+  qc: QueryClient,
+  scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
+): Promise<IntegrationNameOf> {
+  const options = $api.queryOptions("get", "/api/integrations", {
+    params: { header: scope.header },
+  });
+  const envelope = scope.enabled
+    ? await qc.ensureQueryData(options).catch(() => undefined)
+    : qc.getQueryData<{ data: IntegrationSummaryWire[] }>(options.queryKey);
+  // Spec-pinned (see IntegrationSummaryWire): only `manifest` is narrowed.
+  const list = envelope?.data as IntegrationSummaryWire[] | undefined;
+  return (integrationId) =>
+    list?.find((i) => i.id === integrationId)?.manifest.display_name ?? integrationId;
+}
+
+/** {@link loadIntegrationNames} in the current org/space scope. */
+export function useIntegrationNames(): () => Promise<IntegrationNameOf> {
+  const qc = useQueryClient();
+  const scope = useIntegrationsReadScope();
+  return () => loadIntegrationNames(qc, scope);
+}
+
 export function useIntegrationDetail(packageId: string | undefined) {
   const scope = useIntegrationsReadScope();
   return $api.useQuery(
@@ -171,7 +200,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 
 /**
  * Query options for an (integration, agent) resolution verdict, shared by the
- * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * picker ({@link useIntegrationReadinessEntry}) and the launch-badge readiness
  * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
@@ -212,25 +241,6 @@ export function useAgentConnectionReadiness(agentPackageId: string | undefined) 
   return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
 }
 
-/**
- * Server-side picker verdict for a (agent, integration) on the agent page:
- * which connection the next run resolves to + the annotated candidate list
- * + pin/blocked state. Selected out of the single bulk readiness query so the
- * picker, badge, and modal all share one cache entry per agent.
- */
-export function useIntegrationAgentResolution(
-  integrationId: string | undefined,
-  agentPackageId: string | undefined,
-  version?: string,
-) {
-  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
-  return useQuery({
-    ...options,
-    enabled: options.enabled && !!integrationId,
-    select: (data) => resolutionOf(data, integrationId),
-  });
-}
-
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
 
@@ -242,7 +252,7 @@ function resolutionOf(data: AgentConnectionReadiness, integrationId: string | un
 }
 
 /**
- * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
  * it NOW, for a handler running after something already awaited the readiness
  * refetch (the connect popup does): the fresh value, without a second request.
  * Throws when that refetch failed — the cache then still holds the old verdict.
@@ -262,11 +272,10 @@ export function useReadIntegrationResolution(
 }
 
 /**
- * Whether a given integration would block the next run (run semantics — inert
- * optional integrations are NOT blocking, inert required ones ARE). Selected
- * from the same bulk readiness query the picker uses.
+ * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
+ * out of the single bulk readiness query so the picker, badge, and modal share one cache entry.
  */
-export function useIntegrationRunBlocking(
+export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
   version?: string,
@@ -276,8 +285,7 @@ export function useIntegrationRunBlocking(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_package_id === integrationId)?.run_blocking ??
-      false,
+      data.integrations.find((i) => i.integration_package_id === integrationId) ?? null,
   });
 }
 

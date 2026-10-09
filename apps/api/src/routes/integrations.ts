@@ -116,7 +116,7 @@ import {
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
-import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deletePin,
@@ -238,7 +238,7 @@ export const setPinSchema = z
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_ids: connectionIdSetSchema,
+    connection_ids: nonEmptyConnectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();
@@ -785,6 +785,8 @@ export function createIntegrationsRouter() {
             "The authorization expired before it could be exchanged. Please retry the connection.",
           client_unavailable:
             "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
+          client_rejected:
+            "The provider rejected this integration's OAuth client. Ask an administrator to check the client's registration, then connect again.",
           transient: "Could not complete the connection. Please try again in a moment.",
           issuer_mismatch:
             "The authorization response did not come from the authorization server this connection was started with. Please retry the connection.",

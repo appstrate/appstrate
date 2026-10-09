@@ -26,6 +26,7 @@ import {
   arrayOverlaps,
   asc,
   eq,
+  getTableColumns,
   gt,
   inArray,
   isNotNull,
@@ -265,6 +266,8 @@ function connectionVariablesOf(value: unknown): ConnectionVariables {
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
+  /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
+  credentialRevision: string;
 }
 
 /** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
@@ -327,7 +330,7 @@ export async function loadAccessibleConnectionById(
   integrationId: string,
   expectedAuthKey: string | null,
   context: { spaceId: string; actor: Actor },
-): Promise<(ResolvedConnectionRow & { credentialRevision: string }) | null> {
+): Promise<ResolvedConnectionRow | null> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -429,7 +432,8 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required.
+    // No agent selection: every declared auth serves, no scope is required. `required`: a proxy
+    // call cannot proceed without a connection, so nothing usable is an error (→ null below).
     requirements: [
       {
         integrationId: packageId,
@@ -437,6 +441,7 @@ export async function selectAccessibleConnection(
         hasSelectedTools: true,
         agentTools: [],
         agentScopes: [],
+        required: true,
       },
     ],
     accessibleConnections: rows,
@@ -476,7 +481,7 @@ export async function selectAccessibleConnection(
 /** The actor's accessible rows (own + shared) of `packageId` in the space, in a stable order. */
 function loadSelectableRows(packageId: string, context: { spaceId: string; actor: Actor }) {
   return db
-    .select()
+    .select({ ...getTableColumns(integrationConnections), credentialRevision })
     .from(integrationConnections)
     .where(
       and(
@@ -488,13 +493,14 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
     .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
 }
 
-type SelectableRow = typeof integrationConnections.$inferSelect;
+type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
@@ -506,6 +512,7 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
@@ -2914,13 +2921,14 @@ type RefreshFailureGate =
  * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
  * of an unrefreshable credential. Increment and escalation are one statement,
  * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
- * never cleared, and a credential write resets the count.
+ * never cleared, and a credential write resets the count. `null` when no row
+ * was counted (gone, or outside `reachable`).
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
   gate: RefreshFailureGate,
-): Promise<{ failures: number; needsReconnection: boolean }> {
+): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
   const escalates =
     "reachable" in gate
@@ -2943,23 +2951,28 @@ export async function recordIntegrationRefreshFailure(
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
     });
-  return row ?? { failures: 0, needsReconnection: false };
+  return row ?? null;
 }
 
 /**
  * Count an upstream rejection of a credential nothing can refresh toward
- * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection.
+ * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection and it still holds
+ * the rejected credential `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
-): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
+  revision: string,
+): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean } | null> {
   const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
-    reachable: reachableConnection(connectionId, integrationId, reach),
+    reachable: and(
+      reachableConnection(connectionId, integrationId, reach),
+      eq(credentialRevision, revision),
+    )!,
   });
-  return { ...counted, maxFailures };
+  return counted && { ...counted, maxFailures };
 }
 
 /**
@@ -3349,7 +3362,7 @@ async function forgetDeletedConnection(
   const owner = actorFromIds(row.userId, row.endUserId)!;
   const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
   for (const pin of plan.pins) {
-    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
     } else {
@@ -3469,6 +3482,7 @@ export async function planConnectionForget(
     schedules: ownRows.map((row) => {
       const overrides = row.connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        if (!ids.includes(id)) return [[integrationId, ids] as const]; // `[]` (none) included
         const rest = ids.filter((c) => c !== id);
         return rest.length > 0 ? [[integrationId, rest] as const] : [];
       });
@@ -3663,7 +3677,7 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
     // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
-    // under `_meta["dev.appstrate/auth"].required`.
+    // under `_meta["dev.appstrate/auth"].required` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       { required?: boolean } | undefined;
@@ -3672,7 +3686,7 @@ export async function getIntegrationAuthStatuses(
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required ?? true,
+      required: authMeta?.required === true,
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,

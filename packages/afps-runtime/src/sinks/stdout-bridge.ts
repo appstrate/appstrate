@@ -46,6 +46,7 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
+import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { EventSink } from "../interfaces/event-sink.ts";
 import { emptyRunResult, foldEvent } from "../runner/reducer.ts";
 import type { RunResult, TerminalRunResult } from "../types/run-result.ts";
@@ -111,6 +112,18 @@ export function isStdoutEventLine(value: unknown): value is RunEvent {
   // bridge re-stamps `runId` and a missing `timestamp` is already
   // tolerated by every canonical case.
   return isCanonicalRunEvent(candidate as unknown as RunEvent);
+}
+
+/**
+ * An `appstrate.metric` line with its `usage` read by `parseTokenUsage`, so a bad band never costs
+ * the event its counters. Any other line, and a usage malformed as a whole, is unchanged.
+ */
+function withParsedMetricUsage(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const line = value as Record<string, unknown>;
+  if (line.type !== "appstrate.metric" || line.usage === undefined) return value;
+  const { usage } = parseTokenUsage(line.usage);
+  return usage ? { ...line, usage } : value;
 }
 
 /**
@@ -196,12 +209,13 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
     } catch {
       return false;
     }
-    if (!isStdoutEventLine(parsed)) return false;
+    const candidate = withParsedMetricUsage(parsed);
+    if (!isStdoutEventLine(candidate)) return false;
     // Override `runId` with the bridge-configured value: the legacy
     // stdout-JSONL protocol stamps `runId` from `process.env.AGENT_RUN_ID`
     // which may be absent or stale (e.g. a CLI that didn't set the env
     // var). The bridge owns the canonical run identity here.
-    const event: RunEvent = { ...(parsed as RunEvent), runId: opts.runId };
+    const event: RunEvent = { ...candidate, runId: opts.runId };
     const promise: Promise<void> = sink.handle(event).catch(() => {});
     pendingDispatches.add(promise);
     // `void`: the promise already carries its own `.catch` above, so this

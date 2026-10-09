@@ -1045,17 +1045,15 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // ...but a success is only a success with valid usage: degenerate usage
   // there is the same 400 as none at all.
   it("rejects a success finalize whose usage is degenerate", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+    for (const usage of [{ input_tokens: "lots" }, { input_tokens: 12.5, output_tokens: 3 }]) {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { ok: true },
-      usage: { input_tokens: "lots" },
-    });
-    expect(res.status).toBe(400);
+      const res = await postFinalize(runId, { status: "success", output: { ok: true }, usage });
+      expect({ usage, status: res.status }).toEqual({ usage, status: 400 });
 
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("running");
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("running");
+    }
   });
 
   // The metric broadcaster keeps a per-run throttle entry in module memory.
@@ -1101,6 +1099,32 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.status).toBe("success");
     // Only the canonical TokenUsage fields land on the column.
     expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
+  });
+
+  it("drops malformed tier bands but keeps a success and its counters", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent", { tokenUsage: null });
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const res = await postFinalize(runId, {
+        status: "success",
+        output: { ok: true },
+        usage: {
+          input_tokens: 12,
+          output_tokens: 3,
+          tiers: [{ input_tokens_above: 1, input_tokens: -1 }],
+        },
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("success");
+      expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
+      expect(
+        warnSpy.mock.calls.filter(([message]) => message.includes("tier bands dropped")),
+      ).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // B2 preservation semantics: a NON-success terminal that carries no
@@ -2084,7 +2108,9 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     return started();
   }
 
-  async function seedPendingRemoteRun(): Promise<string> {
+  async function seedPendingRemoteRun(
+    extra: Partial<typeof runs.$inferInsert> = {},
+  ): Promise<string> {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await db.insert(runs).values({
       id: runId,
@@ -2097,9 +2123,104 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       sinkExpiresAt: new Date(Date.now() + 3600_000),
       startedAt: new Date(),
       tokenUsage: { input_tokens: 100, output_tokens: 50 } as unknown as Record<string, number>,
+      ...extra,
     });
     return runId;
   }
+
+  async function firstEvent(runId: string): Promise<void> {
+    const res = await postEvent(
+      runId,
+      buildEnvelope(runId, "appstrate.progress", { message: "first", timestamp: Date.now() }, 1),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  it("carries the integrations the run recorded starting without", async () => {
+    const { started } = await captureStartedEvents();
+    const integrationsUnbound = [
+      { integrationId: "@acme/slack", code: "not_connected" as const },
+      {
+        integrationId: "@acme/notion",
+        code: "integration_unbound" as const,
+        source: "member_pin" as const,
+      },
+    ];
+    const runId = await seedPendingRemoteRun({ integrationsUnbound });
+
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event!.integrationsUnbound).toEqual(integrationsUnbound);
+  });
+
+  it("emits run.started within the first event's request, so a finalize right after cannot overtake it", async () => {
+    const statuses: string[] = [];
+    const mod: AppstrateModule = {
+      manifest: { id: "order-spy", name: "Order Spy", version: "1.0.0" },
+      async init() {},
+      events: {
+        onRunStatusChange: async (params) => {
+          statuses.push(params.status);
+        },
+      },
+    };
+    await loadModulesFromInstances([mod], {
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
+      getOrgName: async () => null,
+      services: {} as never,
+    });
+    const runId = await seedPendingRemoteRun({
+      integrationsUnbound: [{ integrationId: "@acme/slack", code: "not_connected" }],
+    });
+
+    await firstEvent(runId);
+    // No polling: the emit is not deferred behind a read of its own.
+    expect(statuses).toEqual(["started"]);
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+    for (let i = 0; i < 100 && statuses.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(statuses).toHaveLength(2);
+    expect(statuses[0]).toBe("started");
+  });
+
+  it("ingests events and emits run.started without the field when integrations_unbound drifted", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun({
+      integrationsUnbound: [{ integrationId: "@acme/slack", code: "retired_code" }] as never,
+    });
+
+    // The sink context is the auth path: a drifted row must not fail it.
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event).toBeDefined();
+    expect(event).not.toHaveProperty("integrationsUnbound");
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("running");
+  });
+
+  it("omits integrationsUnbound when the run recorded none", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun();
+
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event).toBeDefined();
+    expect(event).not.toHaveProperty("integrationsUnbound");
+  });
 
   it("does not fire run.started for a remote run until the first event is ingested", async () => {
     const { started } = await captureStartedEvents();

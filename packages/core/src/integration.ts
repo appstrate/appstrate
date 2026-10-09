@@ -1470,6 +1470,7 @@ export interface ResolvedConnection {
 /**
  * Snapshot of the resolver output for one run. Persisted on
  * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
+ * No key: nothing to start (inert); `[]`: started without it (no connection bound, or off in the space).
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
@@ -1501,10 +1502,28 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "required_integration_unbound",
+  "integration_not_active",
 ] as const;
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
+
+export const INTEGRATION_MANIFEST_FAILURE_CODES = [
+  "integration_not_found",
+  "integration_wrong_type",
+  "integration_invalid_manifest",
+] as const;
+
+/** Every code an `errors[]` item of a `409 missing_integration_connection` carries. */
+export const MISSING_INTEGRATION_CONNECTION_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  ...INTEGRATION_MANIFEST_FAILURE_CODES,
+  "remote_binds_one_connection",
+] as const;
+
+export type MissingIntegrationConnectionCode =
+  (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.
@@ -1562,16 +1581,14 @@ export interface ConnectionResolutionError {
   requiredScopes?: string[];
   /**
    * The integration manifest auth the connect flow must target
-   * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
-   * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (the dep's `auth_key`, else the single serving
-   * `oauth2` auth; omitted when ambiguous — the user then chooses).
+   * (`/auths/{authKey}/connect/...`), for the {@link CONNECT_FLOW_CODES}. On `not_connected`:
+   * the dep's `auth_key`, else the single serving `oauth2` auth; omitted when ambiguous.
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed, on every layer-bound code; absent when no layer bound
-   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
-   * `auth_key_serves_no_selected_tool`).
+   * The cascade layer whose set failed, on every layer-bound code, and the layer that chose `[]`
+   * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
+   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
    */
   source?: ConnectionResolutionSource;
   /** The failing layer's whole set, in its order. */
@@ -1598,8 +1615,65 @@ export interface ConnectionResolutionError {
   message: string;
 }
 
+/**
+ * The warning codes the resolver emits per integration. Severity is the array (`errors` /
+ * `warnings`), never the code; `integration_unbound` alone has no error twin.
+ */
+export const CONNECTION_RESOLUTION_WARNING_CODES = [
+  "not_connected",
+  "must_choose_connection",
+  "auth_key_mismatch",
+  "integration_not_active",
+  "integration_unbound",
+] as const satisfies readonly (ConnectionResolutionErrorCode | "integration_unbound")[];
+
+export type ConnectionResolutionWarningCode = (typeof CONNECTION_RESOLUTION_WARNING_CODES)[number];
+
+/** A non-required integration the run starts without; fields as on {@link ConnectionResolutionError}. */
+export interface ConnectionResolutionWarning extends Pick<
+  ConnectionResolutionError,
+  | "integrationId"
+  | "authKey"
+  | "requiredScopes"
+  | "requiredAuthKey"
+  | "availableAuthKeys"
+  | "candidateConnections"
+  | "source"
+  | "message"
+> {
+  code: ConnectionResolutionWarningCode;
+}
+
+/**
+ * Why a run started without an integration (`runs.integrations_unbound`). No candidate
+ * connections or auth detail: the run is readable by more members than its launcher.
+ */
+export interface RunIntegrationUnbound {
+  integrationId: string;
+  code: ConnectionResolutionWarningCode;
+  /** The layer that chose `[]`, on `integration_unbound` only. */
+  source?: ConnectionResolutionSource;
+}
+
+export const runIntegrationsUnboundSchema: z.ZodType<RunIntegrationUnbound[]> = z.array(
+  z.object({
+    integrationId: z.string(),
+    code: z.enum(CONNECTION_RESOLUTION_WARNING_CODES),
+    source: z.enum(CONNECTION_RESOLUTION_SOURCES).optional(),
+  }),
+);
+
+/** The resolution codes a connect flow can clear, so the ones carrying the `auth_key` relay. */
+export const CONNECT_FLOW_CODES = [
+  "not_connected",
+  "auth_key_mismatch",
+  "needs_reconnection",
+  "insufficient_scopes",
+] as const satisfies readonly ConnectionResolutionErrorCode[];
+
 /** Full resolver output. */
 export interface ConnectionResolutionResult {
   resolved: ResolvedConnectionMap;
   errors: ConnectionResolutionError[];
+  warnings: ConnectionResolutionWarning[];
 }

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mint a hosted-connect link into the run-kickoff 409 (issue #1207).
+ * Mint a hosted-connect link into the run-kickoff 409 (issue #1207), and into
+ * the connect-flow warnings of a launch that started without one.
  *
  * The readiness gate already names WHICH auth a connect flow must target and
  * WHICH scopes it must request (`auth_key` + `required_scopes`, relayed by
@@ -23,14 +24,14 @@
  * the same scope-catalog check the route applies to `body.scopes`, and the
  * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
  * reaching this function are the ones readiness just resolved for this org and
- * space (the agent declared them and `listActiveIntegrationIds` confirmed each
- * is ACTIVE HERE).
+ * space (the agent declared them, and the resolver emits a connect-flow item only
+ * for one ACTIVE HERE).
  */
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
 import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { CONNECT_FLOW_CODES, partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -57,19 +58,22 @@ const FIELD_PREFIX = "integrations.";
  */
 const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
 
+const CONNECT_FLOW: ReadonlySet<string> = new Set(CONNECT_FLOW_CODES);
+
 /**
  * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * `not_connected` qualifies outright (a fresh connect, no `connection_id`).
- * The two {@link IN_PLACE_CODES} qualify only on a connection the actor OWNS
+ * A {@link CONNECT_FLOW_CODES} item qualifies outright as a fresh connect (no `connection_id`) —
+ * `not_connected`, or `auth_key_mismatch` on the dep's own auth — except the
+ * two {@link IN_PLACE_CODES}, which qualify only on a connection the actor OWNS
  * and only with an id to re-consent: a foreign-owned row is somebody else's
  * account, and minting against it would let the caller re-consent a
  * colleague's credential.
  *
  * Everything else is refused: `must_choose_connection` is a choice, not a
- * missing connection, and `auth_key_mismatch` and `auth_key_serves_no_selected_tool`
- * need the user to change the agent, not to connect.
+ * missing connection, and `auth_key_serves_no_selected_tool` needs the user to
+ * change the agent, not to connect.
  */
 export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget | null {
   if (!e.field.startsWith(FIELD_PREFIX)) return null;
@@ -77,13 +81,11 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
   if (!integrationId || !e.auth_key) return null;
   const scopes = e.required_scopes ?? [];
 
-  if (e.code === "not_connected") {
-    return { integrationId, authKey: e.auth_key, scopes };
-  }
-  if (IN_PLACE_CODES.has(e.code) && e.owned_by_actor === true && e.connection_id) {
-    return { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id };
-  }
-  return null;
+  if (!CONNECT_FLOW.has(e.code)) return null;
+  if (!IN_PLACE_CODES.has(e.code)) return { integrationId, authKey: e.auth_key, scopes };
+  return e.owned_by_actor === true && e.connection_id
+    ? { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id }
+    : null;
 }
 
 /**
@@ -176,4 +178,18 @@ export async function attachConnectOffers(params: {
       }
     }),
   );
+}
+
+/**
+ * `items` without the fields {@link attachConnectOffers} adds: a link connects as the actor it
+ * was minted for, and a stored response is replayed to whoever reuses its `Idempotency-Key`.
+ */
+export function withoutConnectOffers(items: ResolutionFieldError[]): ResolutionFieldError[] {
+  return items.map((item) => {
+    const copy = { ...item };
+    delete copy.connect_url;
+    delete copy.expiresAt;
+    delete copy.packageId;
+    return copy;
+  });
 }

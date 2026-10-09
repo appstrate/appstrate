@@ -17,7 +17,7 @@ import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import {
   apiIntegrationManifest,
   localIntegrationManifest,
@@ -74,8 +74,7 @@ describe("POST /api/runs/inline/validate", () => {
   it("returns 200 { valid: true } on a valid manifest + prompt", async () => {
     const res = await post({ manifest: validManifest(), prompt: "do something" });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { valid: boolean };
-    expect(body.valid).toBe(true);
+    expect(await res.json()).toEqual({ valid: true, warnings: [] });
   });
 
   it("accepts a manifest with no display_name (defaulted from name)", async () => {
@@ -447,17 +446,44 @@ describe("POST /api/runs/inline/validate", () => {
     it("raises no selection error when the catalog declares everything picked", async () => {
       // Discriminating control: the gate refuses what is OUTSIDE the catalog,
       // not every manifest that names an integration. What remains is the
-      // readiness verdict — no connection was seeded — and its `required_scopes`
-      // is the selection relayed verbatim, which is exactly the value the
-      // connect kickoff will accept.
+      // readiness verdict — no connection was seeded, and the integration is
+      // not required, so a warning — and its `required_scopes` is the selection
+      // relayed verbatim, which is exactly the value the connect kickoff will accept.
       await seedIntegration();
       const res = await validate(manifestSelecting({ tools: ["search"], scopes: ["search.read"] }));
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        errors?: { code: string; required_scopes?: string[] }[];
+        valid: boolean;
+        warnings: { code: string; required_scopes?: string[] }[];
       };
-      expect(body.errors?.map((e) => e.code)).toEqual(["not_connected"]);
-      expect(body.errors?.[0]?.required_scopes).toEqual(["search.read"]);
+      expect(body.valid).toBe(true);
+      expect(body.warnings.map((e) => e.code)).toEqual(["not_connected"]);
+      expect(body.warnings[0]?.required_scopes).toEqual(["search.read"]);
+    });
+
+    it("warns of an integration switched off in the space, or refuses it when required", async () => {
+      await seedIntegration();
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+
+      const optional = await validate(manifestSelecting({ tools: ["search"] }));
+      expect(optional.status).toBe(200);
+      const body = (await optional.json()) as { warnings: Record<string, unknown>[] };
+      expect(body.warnings).toEqual([
+        {
+          field: `integrations.${INTEGRATION}`,
+          code: "integration_not_active",
+          title: "Integration Not Active",
+          message: `Integration '${INTEGRATION}' is not active in this space; the run proceeds without it.`,
+        },
+      ]);
+
+      const required = await validate(manifestSelecting({ tools: ["search"], required: true }));
+      // Accumulate mode: the readiness refusal rides the 400 envelope.
+      expect(required.status).toBe(400);
+      const refused = (await required.json()) as { errors: { field: string; code: string }[] };
+      expect(refused.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
     });
 
     it("does NOT insert a shadow row when the selection is refused", async () => {
@@ -520,11 +546,12 @@ describe("POST /api/runs/inline/validate", () => {
         await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, PINNED);
       }
 
+      /** Required, so nothing connected stays a readiness error on both routes. */
       function agentSelecting(tools: string[]) {
         return {
           ...validManifest(),
           dependencies: { skills: {}, integrations: { [PINNED]: "^1.0.0" } },
-          integrations_configuration: { [PINNED]: { tools } },
+          integrations_configuration: { [PINNED]: { tools, required: true } },
         };
       }
 

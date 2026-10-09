@@ -259,7 +259,7 @@ The profile/member family stays camelCase as a fixed set of names:
 
 **Opaque, producer-defined** (client- or agent-supplied, returned verbatim): `runs.input`, `runs.result`, `runs.checkpoint`, `package_schedules.input`, `runs.context_snapshot` (caller-supplied environment metadata), `end_users.metadata`, `package_persistence.content`. Manifests (`packages.draft_manifest`, `package_versions.manifest`) are AFPS, hence snake_case by Zone 1. `chat_messages.content` is an AI SDK `UIMessage` (third-party vocabulary), with Appstrate's own `metadata` under 4o.
 
-**Internal-only** (never returned verbatim — producer casing): `audit_events.before` / `after` (camelCase, 4m), `runs.model_cost` (`ModelCost`), `runs.resolved_connections` (projected per key into the snake_case `connections_used`), `runs.resolved_integration_versions`.
+**Internal-only** (never returned verbatim — producer casing): `audit_events.before` / `after` (camelCase, 4m), `runs.model_cost` (`ModelCost`), `runs.resolved_connections` (projected per key into the snake_case `connections_used`), `runs.integrations_unbound` (`RunIntegrationUnbound`, projected into the snake_case `integrations_unbound`), `runs.resolved_integration_versions`.
 
 When adding a JSONB column, decide up front which of the three it is. If a route starts returning an internal blob verbatim, its keys become wire and must be snake_case; renaming a key of a wire-exposed column is a breaking wire change and needs a `scripts/migration/` rewrite of the stored rows.
 
@@ -520,7 +520,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Dependencies subkeys**: `skills`, `mcp_servers`, `integrations`
 
-**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
+**Agent extras**: `integrations_configuration.{id}.{tools, scopes, auth_key, required}`, `input`, `output`, `timeout`, `runtime_tools` (Appstrate extension)
 
 **Agent resource extension**: `_meta["dev.appstrate/resources"].{memory_mb, cpu}`
 
@@ -559,7 +559,7 @@ Authority: `afps-spec/packages/schema/src/schemas.ts`; Appstrate extensions are 
 
 **Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_ref`, `token_usage`, `cost_pricing_status`, `cron_expression`, `connection_overrides`, `dependency_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`, `read_at`
 
-**Generation settings** (snake_case — `ModelGenerationSettings`, `ModelGenerationCapabilities` in `packages/core/src/model-generation.ts`): run DTO `generation`, `generation_override`; space package `generation_config`; schedule `generation_config_override`; agent model and launch bodies `generation`. Interior: `temperature`, `reasoning_level`. Capabilities on `OrgModel` and registry models: `generation.{temperature, reasoning.{supported, temperature_compatible, adaptive, levels}}`.
+**Generation settings** (snake_case — `ModelGenerationSettings`, `ModelGenerationCapabilities` in `packages/core/src/model-generation.ts`): run DTO `generation`, `generation_override`; space package `generation_config`; schedule `generation_config_override`; agent model and launch bodies `generation`. Interior: `temperature`, `reasoning_level`. Capabilities on `OrgModel` and registry models: `generation.{temperature, reasoning.{supported, temperature_compatible, adaptive, levels, off}}`.
 
 **Run-launch and chat bodies** (snake_case beside the 5c ids): `input`, `rerun_from`, `modelId`, `proxyId`, `generation`, `connection_overrides`, `dependency_overrides` (agent run); an inline run adds `manifest`, `prompt`, `context_files` and drops `rerun_from` / `dependency_overrides`; chat: `id`, `messages`, `modelId`, `generation`, `agent_authoring` (strict). The remote-run body keeps the 4b `contextSnapshot` beside `sink.ttl_seconds`.
 

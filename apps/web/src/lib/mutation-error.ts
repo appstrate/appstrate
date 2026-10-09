@@ -2,6 +2,10 @@
 
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type {
+  INTEGRATION_MANIFEST_FAILURE_CODES,
+  MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
 import i18n from "../i18n";
 import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
@@ -15,6 +19,27 @@ export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
 };
 
+/** Item codes whose sentence is `common:apiError.<code>`, or the server's own message. */
+type CommonSentenceCode =
+  | "integration_not_active"
+  | (typeof INTEGRATION_MANIFEST_FAILURE_CODES)[number]
+  | "remote_binds_one_connection";
+
+/** Every other `missing_integration_connection` code, and a 400's `required_integration_unbound`. */
+const RESOLUTION_ERROR_KEYS = {
+  pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
+  override_connection_unavailable: "error.overrideConnectionUnavailable",
+  needs_reconnection: "error.needsReconnection",
+  must_choose_connection: "error.mustChooseConnection",
+  not_connected: "error.notConnected",
+  insufficient_scopes: "error.insufficientScopes",
+  auth_key_mismatch: "error.authKeyMismatch",
+  auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
+  auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
+  override_outranked: "error.overrideOutranked",
+  required_integration_unbound: "error.requiredIntegrationUnbound",
+} as const satisfies Record<Exclude<MissingIntegrationConnectionCode, CommonSentenceCode>, string>;
+
 /**
  * Refusals whose sentence is `agents:*` copy other components reuse; the lock codes interpolate
  * the field named in `param`. Every other code resolves to `common:apiError.<code>`.
@@ -27,18 +52,15 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   connection_pinned: "error.connectionPinned",
   connection_owner_without_access: "error.connectionOwnerWithoutAccess",
   end_user_connection_not_shareable: "error.endUserConnectionNotShareable",
-  pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
-  override_connection_unavailable: "error.overrideConnectionUnavailable",
-  needs_reconnection: "error.needsReconnection",
-  must_choose_connection: "error.mustChooseConnection",
-  not_connected: "error.notConnected",
-  insufficient_scopes: "error.insufficientScopes",
-  auth_key_mismatch: "error.authKeyMismatch",
-  auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
-  auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
-  override_outranked: "error.overrideOutranked",
+  ...RESOLUTION_ERROR_KEYS,
   ...PACKAGE_PATH_ERROR_KEYS,
   ...SKILL_FRONTMATTER_ERROR_KEYS,
+};
+
+/** Generic refusals made precise by the member they blame: `<code>:<param>` → `agents` key. */
+const PARAM_REFUSAL_KEYS: Record<string, string> = {
+  // An override key the launched version does not declare.
+  "invalid_request:connection_overrides": "error.connectionOverridesRefused",
 };
 
 /** What a refusal carries: a problem body, or one item of its `errors[]`. */
@@ -56,6 +78,8 @@ interface Refusal {
 export function refusalMessage(err: Refusal): string | null {
   const code = err.code.toLowerCase();
   const message = err.message ?? "";
+  const paramKey = PARAM_REFUSAL_KEYS[`${code}:${err.param ?? err.field}`];
+  if (paramKey) return i18n.t(paramKey, { ns: "agents" });
   const agentsKey = REFUSAL_ERROR_KEYS[code];
   if (agentsKey) {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
@@ -73,9 +97,7 @@ export function refusalMessage(err: Refusal): string | null {
 
 /** The `errors[]` items of a `validation_failed`: each one's own code names a refusal. */
 function fieldErrors(err: ApiError): Refusal[] {
-  const items: unknown = err.details;
-  if (!Array.isArray(items)) return [];
-  return items.flatMap((item: unknown) => {
+  return (err.errors ?? []).flatMap((item: unknown) => {
     if (typeof item !== "object" || item === null) return [];
     const { code, field, message } = item as Record<string, unknown>;
     if (typeof code !== "string") return [];

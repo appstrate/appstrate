@@ -72,6 +72,8 @@ live under the governance surface.
 }
 ```
 
+`run.started` also carries `integrationsUnbound` when the run recorded its connection resolution: one `{ integrationPackageId, code, source? }` per declared integration the run starts without — `code` is the resolver's warning code (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`, or `integration_unbound` with the `source` layer that chose no connection); `[]` when every one is bound. `run.connection_missing` fires only when a kickoff is refused (a `required` integration), so a run that starts degraded is visible through this field, not through that event.
+
 `timestamp` is the Standard Webhooks payload field: when the event occurred, as an RFC 3339 string. It is not the signing time — that is the `webhook-timestamp` header, in Unix seconds as the spec requires.
 
 ## Disable behavior

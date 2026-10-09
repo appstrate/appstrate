@@ -12,6 +12,7 @@ import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -148,6 +149,41 @@ describe("full persona invariants", () => {
     expect(FULL).not.toContain("activateIntegration");
     expect(FULL).toMatch(/report the refusal with its error and stop/);
     expect(FULL).not.toMatch(/the 403 names the permission it required/);
+  });
+
+  // #1830: a declared integration blocks a run only when `required`.
+  it("teaches `required` and how to read a run that started without an integration", () => {
+    expect(FULL).toContain("`integrations_configuration.<id>.required: true`");
+    expect(REDUCED).not.toContain("`integrations_configuration.<id>.required: true`");
+    for (const persona of [FULL, REDUCED]) {
+      // Every warning code the platform emits, from the core tuple: a new one is taught, not missed.
+      expect(persona).toContain(
+        `item (${CONNECTION_RESOLUTION_WARNING_CODES.map((code) => `\`${code}\``).join(", ")};`,
+      );
+      expect(persona).toMatch(/offer to connect it/);
+      // `required_integration_unbound` is the MCP server's to teach (its instructions reach chat).
+      expect(persona).not.toContain("`required_integration_unbound`");
+      expect(persona).toContain("`[]` runs without that integration");
+      expect(persona).toContain("`integration_not_active`");
+    }
+    // The canonical example's task means nothing without Gmail.
+    expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
+  });
+
+  // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
+  it("routes an `integration_not_active` warning to activation, never to connecting", () => {
+    for (const persona of [FULL, REDUCED]) {
+      expect(persona).toMatch(
+        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in this space/,
+      );
+      expect(persona).toContain(
+        "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",
+      );
+      // A chosen none is no connection gap: nothing to connect.
+      expect(persona).toContain(
+        "For `integration_unbound`, a connection choice (its `source`) binds none on purpose",
+      );
+    }
   });
 
   it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {

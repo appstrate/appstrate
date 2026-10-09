@@ -26,8 +26,12 @@
  *         auth_key?, required_scopes? }
  *     ] }
  *
- * Code path: agent-readiness.ts:151-158. Triggered by resolveRunPreflight
+ * Code path: agent-readiness.ts. Triggered by resolveRunPreflight
  * inside the run pipeline.
+ *
+ * The fixtures mark their integrations `required` (the blocking contract); a
+ * non-required one with nothing to bind starts the run with a warning instead
+ * (`run-launch-override-source.test.ts`).
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -75,14 +79,17 @@ const INTEGRATION = "@runorg/svc";
 const SECOND_INTEGRATION = "@runorg/extra-svc";
 const MCP_SERVER = "@runorg/svc-server";
 
-function buildAgentManifest(integrations: string[]): Record<string, unknown> {
+function buildAgentManifest(
+  integrations: string[],
+  opts: { required: boolean } = { required: true },
+): Record<string, unknown> {
   // AFPS §4.1/§4.4: the dependency value is a bare semver string; per-integration
   // tool/scope selection lives in the top-level `integrations_configuration` map.
   const deps: Record<string, string> = {};
-  const config: Record<string, { tools: string[] }> = {};
+  const config: Record<string, { tools: string[]; required: boolean }> = {};
   for (const id of integrations) {
     deps[id] = "^1.0.0";
-    config[id] = { tools: ["search"] };
+    config[id] = { tools: ["search"], required: opts.required };
   }
   return {
     name: AGENT,
@@ -125,10 +132,11 @@ function buildRequiredIntegrationManifest(id: string) {
   return m as unknown as ReturnType<typeof buildIntegrationManifest>;
 }
 
-/** Declares the dependency but selects zero tools → "inert" unless required auth. */
+/** Declares the dependency (required) but selects zero tools → "inert" unless required auth. */
 function buildAgentManifestNoTools(integrations: string[]): Record<string, unknown> {
   const m = buildAgentManifest(integrations);
-  (m as { integrations_configuration: Record<string, unknown> }).integrations_configuration = {};
+  (m as { integrations_configuration: Record<string, unknown> }).integrations_configuration =
+    Object.fromEntries(integrations.map((id) => [id, { required: true }]));
   return m;
 }
 
@@ -161,6 +169,7 @@ interface ProblemDetails {
   code?: string;
   detail?: string;
   errors?: ValidationFieldError[];
+  version_ref?: string;
 }
 
 describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connection", () => {
@@ -242,6 +251,35 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err.code).toBe("not_connected");
     expect(err.title).toBe("Integration Not Connected");
     expect(err.message).toBeTruthy();
+  });
+
+  it("names the version it judged, an omitted version being the latest published", async () => {
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    await seedPublishedVersion(AGENT, "1.0.0");
+
+    for (const [query, versionRef] of [
+      ["", "1.0.0"],
+      ["?version=1.0.0", "1.0.0"],
+      ["?version=draft", "draft"],
+    ] as const) {
+      const res = await app.request(`/api/agents/${AGENT}/run${query}`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.code).toBe("missing_integration_connection");
+      expect(body.version_ref).toBe(versionRef);
+    }
   });
 
   it("returns 409 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
@@ -704,8 +742,14 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     return m as unknown as ReturnType<typeof buildIntegrationManifest>;
   }
 
-  /** Declares the dependency ONLY — no `integrations_configuration` entry at all. */
-  function buildAgentManifestBareDependency(id: string): Record<string, unknown> {
+  /**
+   * Declares the dependency with no tool selection — no `integrations_configuration`
+   * entry at all, or (`required`) one carrying only the `required` flag.
+   */
+  function buildAgentManifestBareDependency(
+    id: string,
+    opts: { required?: boolean } = {},
+  ): Record<string, unknown> {
     return {
       name: AGENT,
       version: "1.0.0",
@@ -713,6 +757,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       schema_version: "0.2",
       display_name: "Bare-Dependency Agent",
       dependencies: { integrations: { [id]: "^1.0.0" } },
+      ...(opts.required ? { integrations_configuration: { [id]: { required: true } } } : {}),
     };
   }
 
@@ -743,13 +788,13 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
-  it("409s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
+  it("409s a required dependency with no tool selection, when the integration's default_tools make it active", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
-      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION, { required: true }),
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
@@ -798,6 +843,29 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
     expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
+  });
+
+  it("does not 409 a NON-required dependency with no connection, default_tools or not", async () => {
+    // Same arrangement as the required case above, minus the flag: the absence
+    // degrades to a warning instead of refusing the launch.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedDefaultToolsIntegration(INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).not.toBe(409);
+    expect(res.status).toBeLessThan(500);
   });
 
   it("keeps a bare dependency INERT when the integration declares no default_tools", async () => {

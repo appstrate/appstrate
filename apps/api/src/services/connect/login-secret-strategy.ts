@@ -36,6 +36,7 @@ import type {
 } from "./strategy.ts";
 import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
+import { maskCredentialLabel } from "./mask-label.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 export class LoginSecretStrategy implements IntegrationConnectStrategy {
@@ -62,6 +63,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       // The login secret, persisted in the NON-injectable `inputs` plane.
       inputs: credentials,
       accountId: "default",
+      labelHint: maskCredentialLabel(auth.credentials?.schema, credentials),
       identityClaims: {},
       scopesGranted: [],
       expiresAt: null,

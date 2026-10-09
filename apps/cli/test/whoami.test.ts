@@ -62,12 +62,12 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
  * process, that buffer also collected concurrent writes from other suites
  * and made `expect(...).toBe("")` a coin flip (issue #1180).
  *
- * `io.exit` throws `ExitError` instead of returning, so the rest of
+ * `io.exit` throws `CommandExit` instead of returning, so the rest of
  * `whoamiCommand` doesn't execute after what would have been a fatal exit
  * and the test worker survives. `whoamiCommand` only exits on its error
  * branches; the happy path returns normally.
  */
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 beforeEach(async () => {
@@ -270,7 +270,7 @@ describe("whoami (error paths)", () => {
     try {
       await whoamiCommand({ profile: "default" }, io);
     } catch (err) {
-      if (err instanceof ExitError) exitCode = err.code;
+      if (err instanceof CommandExit) exitCode = err.code;
       else throw err;
     }
 
@@ -289,7 +289,7 @@ describe("whoami (error paths)", () => {
     try {
       await whoamiCommand({ profile: "ghost" }, io);
     } catch (err) {
-      if (err instanceof ExitError) exitCode = err.code;
+      if (err instanceof CommandExit) exitCode = err.code;
       else throw err;
     }
 
@@ -309,7 +309,7 @@ describe("whoami (error paths)", () => {
     try {
       await whoamiCommand({ profile: "default" }, io);
     } catch (err) {
-      if (err instanceof ExitError) exitCode = err.code;
+      if (err instanceof CommandExit) exitCode = err.code;
       else throw err;
     }
 

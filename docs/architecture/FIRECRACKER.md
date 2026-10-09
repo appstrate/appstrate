@@ -109,7 +109,8 @@ security decision. Decision matrix:
 Auth is a single shared
 token compared in constant time; run **one platform per daemon** (the orphan
 sweep is daemon-wide). The protocol is JSON over HTTP (`runner/protocol.ts`,
-versioned — the client refuses a daemon speaking another major version); logs
+versioned — the client refuses a daemon speaking another major version, so the
+daemon is upgraded with the platform whenever the protocol moves); logs
 stream as NDJSON with reconnect-and-skip and exit codes long-poll.
 
 ## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
@@ -517,6 +518,20 @@ drive, exit-marker protocol, rootfs layout, the guest kernel options the
 guest firewall needs) to the artifacts; its bump rules
 are documented beside the constant.
 
+**Version contract.** The rootfs carries the `appstrate-pi` image and the
+sidecar, so the guest artifacts belong to the platform's version contract
+(root `AGENTS.md`). `ensureGuestArtifacts` returns the release the marker
+records, the daemon reports it as `artifactsVersion` on `/v1/health`, and the
+platform's `initialize()` compares it with its own `APP_VERSION` under the
+image trio's rule (`releaseVersion`, `@appstrate/core/image-ref`): when both
+are release versions and they differ, the handshake fails with the fix —
+`FIRECRACKER_ARTIFACTS_VERSION=<APP_VERSION>` on the runner host — and the
+agent runtime stays not ready until a retried handshake succeeds. A platform
+with no release identity (`dev`) or a daemon on local artifacts
+(`FIRECRACKER_ARTIFACTS_LOCAL`, `artifactsVersion: null`) takes no part.
+Unpinned stays a supported mode, but an unpinned host never refreshes
+artifacts it already trusts, so a platform upgrade moves it through the pin.
+
 **Manifest signing & key provisioning**: the private key is the
 `FIRECRACKER_MANIFEST_SIGNING_KEY` GitHub Actions secret (base64 raw 32-byte
 Ed25519 seed; generate with `bun scripts/sign-firecracker-manifest.ts
@@ -731,7 +746,7 @@ boots on a bare KVM host with only these variables.
 | `FIRECRACKER_EGRESS_DENY_CIDRS`  | metadata + RFC1918               | forward-path destinations guests may never reach                                                                                                    |
 | `FIRECRACKER_MAX_CONCURRENT_VMS` | `16` (`0` = unlimited)           | admission cap — see _Operational constraints_                                                                                                       |
 | `FIRECRACKER_MAX_CONSOLE_BYTES`  | `268435456` (256 MiB)            | per-run console cap — VM killed past it (run fails)                                                                                                 |
-| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present                                                                                                    |
+| `FIRECRACKER_ARTIFACTS_VERSION`  | `latest` / on-disk               | pin a release; unset skips download when present. A released platform refuses artifacts of another release (_Version contract_)                     |
 | `FIRECRACKER_ARTIFACTS_LOCAL`    | unset                            | `=1` skips the resolver (dev, local builds)                                                                                                         |
 | `FIRECRACKER_NET_VERIFY`         | `warn`                           | Boot guest→platform path probe: `warn` logs a drop, `strict` fails boot                                                                             |
 

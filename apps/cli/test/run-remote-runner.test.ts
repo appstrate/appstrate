@@ -513,6 +513,11 @@ describe("runRemote — happy path", () => {
   });
 
   it("emits canonical RunEvents on stdout in --json mode (parity with local)", async () => {
+    const USAGE = {
+      input_tokens: 150_000,
+      output_tokens: 20,
+      tiers: [{ input_tokens_above: 100_000, input_tokens: 140_000, output_tokens: 10 }],
+    };
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
@@ -548,7 +553,7 @@ describe("runRemote — happy path", () => {
           body: recordSummary({
             id: "run_5",
             status: "success",
-            token_usage: { input_tokens: 10, output_tokens: 20 },
+            token_usage: USAGE,
             result: { output: { greeting: "hi" } },
           }),
         },
@@ -575,12 +580,63 @@ describe("runRemote — happy path", () => {
 
     // Sanity-check the metric shape — usage + cost flow through.
     const metric = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.metric");
-    expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
+    expect(metric.usage).toEqual(USAGE);
     expect(metric.cost).toBe(0.0123);
     // Stamped with the run's own `completed_at`, not the CLI's clock.
     expect(metric.timestamp).toBe(Date.parse("2026-04-29T10:00:42Z"));
     const finalized = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.finalize");
     expect(finalized.result.output).toEqual({ greeting: "hi" });
+    // The tier bands survive, so the result prices as the platform did.
+    expect(finalized.result.usage).toEqual(USAGE);
+  });
+});
+
+// #1830: a run that starts without a non-required integration says so.
+describe("runRemote — launch warnings", () => {
+  const WARNING = {
+    field: "integrations.@appstrate/gmail",
+    code: "not_connected",
+    message: "Integration '@appstrate/gmail' is not connected",
+  };
+  function fetchWithWarning(): typeof fetch {
+    return makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 201,
+          body: { id: "run_test_1", warnings: [WARNING] },
+        },
+        "GET /api/runs/run_test_1/logs": {
+          status: 200,
+          body: { object: "list", data: [], hasMore: false },
+        },
+        "GET /api/runs/run_test_1": { status: 200, body: recordSummary() },
+      },
+      [],
+    );
+  }
+
+  it("prints one ⚠ line per warning after the preamble", async () => {
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl: fetchWithWarning() })),
+      new AbortController().signal,
+    );
+    expect(writers.stderr.join("")).toContain(
+      "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n",
+    );
+  });
+
+  it("carries the wire items on the --json triggered envelope", async () => {
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl: fetchWithWarning(), json: true })),
+      new AbortController().signal,
+    );
+    const triggered = writers.stdout
+      .join("")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type?: string; warnings?: unknown })
+      .find((event) => event.type === "appstrate.remote.triggered");
+    expect(triggered?.warnings).toEqual([WARNING]);
   });
 });
 
@@ -930,6 +986,40 @@ describe("runRemote — error paths", () => {
       if (!(err instanceof RemoteRunError)) throw err;
       expect(err.hint).toMatch(/not found/);
     }
+  });
+
+  it("lists the items of a 409 missing_integration_connection in the hint", async () => {
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 409,
+          contentType: "application/problem+json",
+          body: {
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/gmail",
+                code: "not_connected",
+                message: "Integration '@appstrate/gmail' is not connected",
+              },
+              { field: "integrations.@appstrate/clickup", code: "must_choose_connection" },
+            ],
+          },
+        },
+      },
+      [],
+    );
+
+    const err = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RemoteRunError);
+    expect((err as RemoteRunError).hint).toBe(
+      "the launch was refused:\n" +
+        "  @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n" +
+        "  @appstrate/clickup: must_choose_connection (must_choose_connection)",
+    );
   });
 
   it("throws RemoteRunError when trigger response lacks an id", async () => {

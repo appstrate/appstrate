@@ -3,10 +3,16 @@
 import { describe, it, expect } from "bun:test";
 import {
   extractAuthOffers,
+  extractRunAndWaitAuthOffers,
+  isOfferExpired,
+  isStartedRunResult,
+  resumeInstruction,
   encodeResume,
   parseResume,
   INTEGRATION_RESUME_MARKER,
 } from "../src/ui/auth-offer.ts";
+import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import { toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
 
 const BODY = { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1", state: "abc-123" };
 const OFFER = { connect_url: "https://app/api/integrations/connect/start?token=t" };
@@ -21,7 +27,7 @@ describe("extractAuthOffers", () => {
       extractAuthOffers({
         output: { connectOffers: [{ ...OFFER, expiresAt: "2026-07-15T19:08:49.000Z" }] },
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    ).toEqual([{ authUrl: OFFER.connect_url, expiresAt: "2026-07-15T19:08:49.000Z" }]);
   });
 
   // Issue #1207: a readiness error carries one link per integration to connect,
@@ -47,7 +53,13 @@ describe("extractAuthOffers", () => {
           { ...OFFER, packageId: "@appstrate/gmail", expiresAt: "2026-07-15T19:08:49.000Z" },
         ],
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);
+    ).toEqual([
+      {
+        authUrl: OFFER.connect_url,
+        packageId: "@appstrate/gmail",
+        expiresAt: "2026-07-15T19:08:49.000Z",
+      },
+    ]);
     // Absent, not empty: an offer minted by a surface that names no package
     // leaves the card on its `packageId`-less path.
     expect(extractAuthOffers({ connectOffers: [OFFER] })).toEqual([{ authUrl: OFFER.connect_url }]);
@@ -147,5 +159,106 @@ describe("extractAuthOffers", () => {
     for (const [name, shape] of legacyShapes) {
       expect(extractAuthOffers(shape), `scraped a URL out of: ${name}`).toEqual([]);
     }
+  });
+});
+
+describe("extractRunAndWaitAuthOffers", () => {
+  const warning = {
+    field: "integrations.@appstrate/gmail",
+    code: "not_connected",
+    message: "Gmail is not connected",
+    connect_url: OFFER.connect_url,
+  };
+
+  /**
+   * The parts the card renders for one call, built as the chat builds them: core's
+   * own steps, wrapped by the engine's `toPiToolResult`; every step but the last is a
+   * live (preliminary) chunk, the last is the settled tool result.
+   */
+  async function parts(run: Record<string, unknown>, maxMs?: number) {
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
+      const body = String(input).endsWith("/run")
+        ? { id: "run_1", packageId: "@acme/writer", status: "pending", warnings: [warning] }
+        : { id: "run_1", packageId: "@acme/writer", ...run };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const steps = [];
+    for await (const step of runAndWaitSteps(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl, maxMs },
+    )) {
+      steps.push(step.payload);
+    }
+    return steps.map((payload, i) => ({
+      result: toPiToolResult(payload),
+      isPreliminary: i < steps.length - 1,
+    }));
+  }
+
+  it("withholds a started run's offers while the call is in flight (#1830)", async () => {
+    const [live] = await parts({ status: "success" });
+    expect(extractRunAndWaitAuthOffers(live!)).toEqual([]);
+    // The same payload settled (a page reload reads only the settled result) shows them.
+    expect(extractRunAndWaitAuthOffers({ ...live!, isPreliminary: false })).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
+  });
+
+  it("shows them once the call settles, whether the run ended or the wait did", async () => {
+    for (const settled of [
+      (await parts({ status: "success" })).at(-1)!,
+      (await parts({ status: "running" }, 0)).at(-1)!,
+    ]) {
+      expect(extractRunAndWaitAuthOffers(settled)).toEqual([{ authUrl: OFFER.connect_url }]);
+    }
+  });
+
+  it("shows them on a refused launch", () => {
+    const refused = { content: [], connectOffers: [OFFER] };
+    expect(extractRunAndWaitAuthOffers({ result: refused })).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
+  });
+});
+
+describe("isOfferExpired", () => {
+  const now = Date.parse("2026-10-09T12:00:00.000Z");
+
+  // #1830: a started run's offer is minted at launch and shown at the end.
+  it("is expired at and after the session's expiry", () => {
+    expect(isOfferExpired("2026-10-09T12:00:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T11:50:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T12:00:01.000Z", now)).toBe(false);
+  });
+
+  it("treats an absent or unparseable expiry as live", () => {
+    expect(isOfferExpired(undefined, now)).toBe(false);
+    expect(isOfferExpired("not a date", now)).toBe(false);
+  });
+});
+
+describe("resuming after a connect from run_and_wait", () => {
+  const result = (payload: Record<string, unknown>) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+
+  it("tells a started run from a refused launch", () => {
+    expect(isStartedRunResult(result({ id: "run_1", done: true }))).toBe(true);
+    expect(isStartedRunResult(result({ id: "run_1", done: false }))).toBe(true);
+    expect(isStartedRunResult(result({ status: 409, body: {} }))).toBe(false);
+  });
+
+  // #1830: a run that already finished without the integration is not re-run on
+  // the model's initiative; a refused launch still continues the task.
+  it("continues the task only after a refused launch", () => {
+    expect(resumeInstruction("Gmail", false)).toBe(
+      "L'intégration Gmail est maintenant connectée. Continue la tâche.",
+    );
+    const afterRun = resumeInstruction("Gmail", true);
+    expect(afterRun).toStartWith("L'intégration Gmail est maintenant connectée.");
+    expect(afterRun).not.toContain("Continue la tâche");
+    expect(afterRun).toContain("Ne relance pas l'agent");
   });
 });

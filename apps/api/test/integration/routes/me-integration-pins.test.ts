@@ -226,8 +226,7 @@ describe("/api/me/integration-pins", () => {
       expect(body.data.map((pin) => pin.connection_ids)).toEqual([[own]]);
     });
 
-    it("DENY: 400 on an empty set and on a set over the cap", async () => {
-      expect((await putPin([])).status).toBe(400);
+    it("DENY: 400 on a set over the cap", async () => {
       const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
         crypto.randomUUID(),
       );
@@ -235,6 +234,58 @@ describe("/api/me/integration-pins", () => {
       // Control: a legal singleton reaches the service and lands.
       const connId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connId])).status).toBe(200);
+    });
+
+    it("ALLOW: an empty set pins the caller to no connection", async () => {
+      const connId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin([connId])).status).toBe(200);
+
+      const res = await putPin([]);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { connection_ids: string[] }).connection_ids).toEqual([]);
+      const [row] = await db
+        .select({ connectionIds: integrationPins.connectionIds })
+        .from(integrationPins)
+        .where(eq(integrationPins.userId, ctx.user.id));
+      expect(row!.connectionIds).toEqual([]);
+      // Audited as a set, not as the absence of a pin.
+      const [, cleared] = await pinAudits("integration.member_pin.upserted");
+      expect(cleared!.after).toEqual({ connectionIds: [] });
+    });
+
+    it("ALLOW: an empty set on a required integration — the run it governs is refused", async () => {
+      const REQUIRED_AGENT = "@pinorg/agent-required";
+      const manifest = buildAgentManifest();
+      await seedPackage({
+        id: REQUIRED_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+        draftManifest: {
+          ...manifest,
+          name: REQUIRED_AGENT,
+          integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
+        },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, REQUIRED_AGENT);
+
+      expect((await putPin([], authHeaders(ctx), REQUIRED_AGENT)).status).toBe(200);
+      const readiness = await app.request(`/api/agents/${REQUIRED_AGENT}/connection-readiness`, {
+        headers: authHeaders(ctx),
+      });
+      expect(((await readiness.json()) as { blocks_run: boolean }).blocks_run).toBe(true);
+
+      const run = await app.request(`/api/agents/${REQUIRED_AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(run.status).toBe(409);
+      const body = (await run.json()) as { errors: { field: string; code: string }[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
     });
 
     it("DENY: 400 when the body still names the ids the path now carries", async () => {
@@ -657,8 +708,7 @@ describe("/api/me/integration-pins", () => {
           "@pinorg/other-svc": [unknown],
         },
       });
-      // A stored empty set (no write accepts one): the delete drops it, so it disables the schedule
-      // though the connection's own set keeps a member.
+      // An explicit `[]` beside a set that only shrinks: the delete keeps it and the schedule armed.
       const emptySibling = await seedSchedule({
         packageId: AGENT,
         orgId: ctx.orgId,
@@ -765,9 +815,27 @@ describe("/api/me/integration-pins", () => {
         nextRunAt: null,
       });
       expect(schedulesAfter.get(emptySibling.id)).toMatchObject({
-        connectionOverrides: { [INTEGRATION]: [web!] },
-        enabled: false,
+        connectionOverrides: { [INTEGRATION]: [web!], "@pinorg/other-svc": [] },
+        enabled: true,
       });
+    });
+
+    // Only an explicit write pins to none: a set the delete empties drops its pin, and a pin to
+    // none, naming nothing, is left alone.
+    it("drops the pin a delete empties and keeps a pin to none", async () => {
+      const gone = await seedConnectionFor(ctx.user.id);
+      await pinSet([]);
+      await pinSet([gone], OTHER_AGENT);
+
+      const announced = await impactOf(gone);
+      expect(announced.pins.map((p) => p.agent_package_id)).toEqual([OTHER_AGENT]);
+
+      const del = await app.request(`/api/me/connections/${gone}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+      expect((await readPins()).map((p) => [p.agent, p.connectionIds])).toEqual([[AGENT, []]]);
     });
 
     it("is empty for a colleague's shared connection the caller pinned and scheduled, which the delete refuses", async () => {

@@ -113,9 +113,8 @@ export async function apiCommand(
     metrics.tEnd ??= performance.now();
     io.stdout.write(formatWriteOut(opts.writeOut, metrics));
   };
-  const exit = async (code: number): Promise<never> => {
+  const exit = (code: number): never => {
     emitWriteOut(code);
-    await io.flush?.();
     return io.exit(code);
   };
 
@@ -135,7 +134,7 @@ export async function apiCommand(
   // the former free-standing `handleStreamError` — inlined as a
   // closure so it can funnel through `exit(code)` and emit `-w`
   // output with the right exit code.
-  const handleErr = (err: unknown): Promise<never> => {
+  const handleErr = (err: unknown): never => {
     if (ac.signal.aborted || sigintFired || (err instanceof Error && err.name === "AbortError")) {
       const reason = ac.signal.reason ?? (err as { cause?: unknown })?.cause;
       const isTimeout = reason instanceof Error && reason.name === "TimeoutError" && !sigintFired;
@@ -315,8 +314,7 @@ export async function apiCommand(
   // Single source of cleanup — `--max-time` spans fetch() AND the
   // body-stream read loop, so we can't clear the timeout inside a
   // per-phase try/finally. The top-level finally covers every path,
-  // exits included (`exit` awaits a flush before `io.exit`), and an
-  // unexpected throw in the output phase. Without it the TLS env
+  // exits included, and an unexpected throw in the output phase. Without it the TLS env
   // override could leak into any subsequent fetch in the same process.
   try {
     // P3a — retry loop extracted into `executeWithRetry`. It returns

@@ -37,6 +37,7 @@ import { writeSync } from "node:fs";
 import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
+  piSkillsDir,
   prepareBundleForPi,
   buildPublishFileExtension,
   emitRuntimeReady,
@@ -455,7 +456,7 @@ try {
     if ((pkg.manifest as { type?: unknown }).type !== "skill") continue;
     const parsed = parsePackageIdentity(identity);
     if (!parsed) continue;
-    if (!(await exists(path.join(WORKSPACE, ".pi", "skills", parsed.packageId)))) {
+    if (!(await exists(path.join(piSkillsDir(WORKSPACE), parsed.packageId)))) {
       missingSkills.push(parsed.packageId);
     }
   }

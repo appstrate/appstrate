@@ -15,35 +15,13 @@
  * whole of the guarantee — it is about *provenance*, not about which of the
  * command's own writes end up in there.
  *
- * `exit` throws the shared `ExitError` from `process-exit.ts`, so the usual
- * `await expect(cmd(...)).rejects.toBeInstanceOf(ExitError)` unwind still
- * works and the exit code is still assertable.
- *
- * **Caveat: the exit unwind can add a line of its own.** Eight call sites (at
- * the time of writing) invoke `io.exit(...)` from *inside* a `try` whose
- * `catch` also handles errors — `src/commands/token.ts:57`, caught at `:114`,
- * is the canonical shape. Under production `DEFAULT_IO` that `exit` never
- * returns (the process is gone), so the `catch` is unreachable. Under this
- * sink `exit` throws instead, and the command's own `catch` treats the
- * `ExitError` like any other failure: it runs it through `formatError`, which
- * falls through to `err.message` — for `ExitError` the literal string
- * `"process.exit(<code>) called"` — and writes it out before exiting a second
- * time. The line lands in whichever buffer that `catch` renders to: stderr
- * when it writes `formatError(err)` itself (token.ts:115), stdout when it
- * delegates to `exitWithError`, which goes through `cancel` (see below).
- *
- * That extra line is deterministic, not cross-suite pollution, and it is
- * inherent to intercepting `exit` at all — the retired `captureIo()` produced
- * it too. Fixing it would mean either restructuring eight `catch` blocks or
- * teaching `src/` about a test-only error class, so it stays. The consequence
- * for test authors: on those exit-inside-try branches assert with
- * `toContain(...)`, never `toBe(...)`. Tightening one of them to an exact
- * match will fail on a trailing `"process.exit(1) called\n"` that the command
- * did not write.
+ * `exit` throws `CommandExit`, exactly as production `DEFAULT_IO` does, so
+ * `await expect(cmd(...)).rejects.toBeInstanceOf(CommandExit)` unwinds the
+ * command along the same path production takes, and the code stays
+ * assertable on the error.
  */
 
-import type { CommandIO } from "../../src/lib/io.ts";
-import { ExitError } from "./process-exit.ts";
+import { CommandExit, type CommandIO } from "../../src/lib/io.ts";
 
 /**
  * Not exported on purpose: knip fails the build on a type nothing imports,
@@ -78,7 +56,7 @@ export function createMemoryIO(): MemoryIO {
         },
       },
       exit: (code) => {
-        throw new ExitError(code);
+        throw new CommandExit(code);
       },
       // Production renders terminal errors with `clack.cancel`, which writes
       // to *stdout*. This sink keeps that channel and drops only the ANSI

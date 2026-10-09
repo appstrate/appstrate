@@ -729,6 +729,22 @@ export interface OAuthTokenResponse {
  */
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
 
+/** The `cause` extension member (RFC 9457 §3.2) of the internal credential endpoints' 410/502. */
+export const CREDENTIAL_FAILURE_CAUSES = [
+  "connection_flagged",
+  "refresh_token_revoked",
+  "refresh_token_missing",
+  "refresh_failures_exhausted",
+  "unrefreshable",
+  "credentials_undecryptable",
+  "upstream_transient",
+  "discovery_transient",
+  "connection_changed",
+  "oauth_client_rejected",
+] as const;
+
+export type CredentialFailureCause = (typeof CREDENTIAL_FAILURE_CAUSES)[number];
+
 /**
  * Prefix the sidecar's connect-login puts on the ONE error class written for
  * the person logging in: an `isError: true` CallToolResult from the

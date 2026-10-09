@@ -18,7 +18,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { startReportSession, type ReportSource } from "../src/commands/run/report.ts";
+import {
+  ReportStartError,
+  startReportSession,
+  type ReportSession,
+  type ReportSource,
+} from "../src/commands/run/report.ts";
+import { announceLaunch } from "../src/commands/run/launch-warnings.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 
 const REPORT_CTX = {
@@ -183,5 +189,184 @@ describe("startReportSession — source discrimination", () => {
     const src = stub.calls[0]!.body.source as { stage: string; spec?: string };
     expect(src.stage).toBe("draft");
     expect(src.spec).toBeUndefined();
+  });
+});
+
+// #1830: a non-required integration with nothing to bind starts the run and
+// comes back as a warning; a refused registration reads as its items.
+describe("startReportSession — integration readiness", () => {
+  const SOURCE: ReportSource = { kind: "inline", bundle: makeBundle() };
+  const WARNING = {
+    field: "integrations.@appstrate/gmail",
+    code: "not_connected" as const,
+    message: "Integration '@appstrate/gmail' is not connected",
+  };
+  let stub: ReturnType<typeof installStubFetch>;
+
+  afterEach(() => stub.restore());
+
+  it("returns the registration's warnings", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session.warnings).toEqual([WARNING]);
+  });
+
+  /** What `appstrate run --report` prints for this session, per stream. */
+  function announce(session: ReportSession | null, json: boolean) {
+    const out = { stdout: "", stderr: "" };
+    announceLaunch({
+      type: "appstrate.report.started",
+      json,
+      bundleLabel: "@scope/agent@1.0.0",
+      instance: REPORT_CTX.instance,
+      run: session,
+      writeStdout: (chunk) => (out.stdout += chunk),
+      writeStderr: (chunk) => (out.stderr += chunk),
+    });
+    return out;
+  }
+
+  const session = () =>
+    startReportSession(SOURCE, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT);
+
+  it("announces the run with its warnings under --json", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const out = announce(await session(), true);
+    expect(out.stderr).toBe("");
+    expect(out.stdout.endsWith("\n")).toBe(true);
+    expect(JSON.parse(out.stdout)).toEqual({
+      type: "appstrate.report.started",
+      runId: SUCCESS_BODY.id,
+      instance: REPORT_CTX.instance,
+      warnings: [WARNING],
+    });
+  });
+
+  it("announces the run without a warnings key when there are none", async () => {
+    stub = installStubFetch(() => ok());
+    const out = announce(await session(), true);
+    expect(JSON.parse(out.stdout)).toEqual({
+      type: "appstrate.report.started",
+      runId: SUCCESS_BODY.id,
+      instance: REPORT_CTX.instance,
+    });
+  });
+
+  it("prints one ⚠ line per warning after the preamble in human mode", async () => {
+    stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
+    const out = announce(await session(), false);
+    expect(out.stdout).toBe("");
+    expect(out.stderr).toBe(
+      `→ running @scope/agent@1.0.0 (reporting to ${REPORT_CTX.instance} as ${SUCCESS_BODY.id})\n` +
+        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n",
+    );
+  });
+
+  it("names the layer that chose no connection, and keeps codes and sources it does not know", async () => {
+    const chosenNone = {
+      field: "integrations.@appstrate/notion",
+      code: "integration_unbound" as const,
+      source: "member_pin" as const,
+      message: "Integration '@appstrate/notion' is bound to no connection by your pin",
+    };
+    const newer = { field: "integrations.@appstrate/slack", code: "newer_code", source: "newer" };
+    const runLevel = { code: "not_connected", message: "no field" };
+    const malformed = ["not an item", { field: "integrations.x" }, { code: "c", source: 1 }];
+    stub = installStubFetch(() =>
+      ok({ ...SUCCESS_BODY, warnings: [WARNING, chosenNone, newer, runLevel, ...malformed] }),
+    );
+    const live = await session();
+    expect(live.warnings).toEqual([WARNING, chosenNone, newer, runLevel]);
+    const { stderr } = announce(live, false);
+    expect(stderr).toContain(
+      "⚠ @appstrate/notion: Integration '@appstrate/notion' is bound to no connection by your pin (integration_unbound via member_pin)\n",
+    );
+    expect(stderr).toContain("⚠ @appstrate/slack: newer_code (newer_code via newer)\n");
+    expect(stderr).toContain("⚠ run: no field (not_connected)\n");
+  });
+
+  it("announces nothing on stdout for an unreported local run under --json", () => {
+    stub = installStubFetch(() => ok());
+    expect(announce(null, true)).toEqual({ stdout: "", stderr: "" });
+    expect(announce(null, false).stderr).toBe("→ running @scope/agent@1.0.0\n");
+  });
+
+  it("summarises a 409 missing_integration_connection by item", async () => {
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            status: 409,
+            code: "missing_integration_connection",
+            errors: [
+              { ...WARNING, code: "required_integration_unbound" },
+              { field: "integrations.@appstrate/clickup", code: "must_choose_connection" },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/problem+json" } },
+        ),
+    );
+    const err = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ReportStartError);
+    expect((err as ReportStartError).responseSnippet).toBe(
+      "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)" +
+        "\n    @appstrate/clickup: must_choose_connection (must_choose_connection)",
+    );
+  });
+
+  it("summarises a refusal body longer than the raw-display cut", async () => {
+    const body = JSON.stringify({
+      type: "https://docs.appstrate.dev/errors/missing-integration-connection",
+      title: "Missing integration connection",
+      status: 409,
+      detail: "The run cannot start: 2 integrations have no usable connection.",
+      instance: "/api/runs/remote",
+      code: "missing_integration_connection",
+      request_id: "req_0123456789abcdef0123456789abcdef",
+      errors: [
+        {
+          field: "integrations.@appstrate/gmail",
+          code: "required_integration_unbound",
+          message: "Integration '@appstrate/gmail' is required and bound to no connection",
+          auth_key: "oauth",
+          required_scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+          connect_url: "https://app.example.com/connect/cnx_offer_0123456789abcdef0123456789",
+        },
+        {
+          field: "integrations.@appstrate/clickup",
+          code: "must_choose_connection",
+          message: "Integration '@appstrate/clickup' has 2 usable connections; choose one",
+        },
+      ],
+    });
+    expect(body.length).toBeGreaterThan(512);
+    stub = installStubFetch(
+      () =>
+        new Response(body, {
+          status: 409,
+          headers: { "Content-Type": "application/problem+json" },
+        }),
+    );
+    const err = await session().catch((e: unknown) => e);
+    expect((err as ReportStartError).responseSnippet).toBe(
+      "@appstrate/gmail: Integration '@appstrate/gmail' is required and bound to no connection (required_integration_unbound)" +
+        "\n    @appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)",
+    );
+  });
+
+  it("cuts a long non-refusal body for raw display", async () => {
+    stub = installStubFetch(() => new Response("x".repeat(600), { status: 500 }));
+    const err = await session().catch((e: unknown) => e);
+    expect((err as ReportStartError).responseSnippet).toBe(`${"x".repeat(512)}…`);
   });
 });

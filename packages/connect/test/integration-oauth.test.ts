@@ -727,6 +727,18 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(result.scopesGranted).toEqual(["openid", "email"]);
     expect(result.scopesRequested).toEqual(["openid", "email", "profile"]);
   });
+
+  it("reports the requested scopes as granted when the token response omits `scope` (RFC 6749 §5.1)", async () => {
+    const { state } = await seedState({ scopes: ["openid", "email", "profile"] });
+    const stub = (async () =>
+      new Response(JSON.stringify({ access_token: "AT", token_type: "Bearer" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const result = await handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, stub);
+    expect(result.scopesGranted).toEqual(["openid", "email", "profile"]);
+  });
 });
 
 describe("integration OAuth clientRef round-trip", () => {

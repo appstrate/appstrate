@@ -17,7 +17,9 @@
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import type { JSONSchemaObject } from "@appstrate/core/form";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { validateConnectionCredentials } from "../schema.ts";
 
 export type { CredentialBundle };
 
@@ -101,6 +103,57 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
   if (!credentials || Object.keys(credentials).length === 0) {
     throw invalidRequest("credentials payload cannot be empty", "credentials");
   }
+}
+
+/** The credentials checked against `credentials.schema` (else a 400) and typed by it. */
+export function assertCredentialsMatchSchema(
+  schema: unknown,
+  credentials: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = validateConnectionCredentials(schema as JSONSchemaObject | undefined, credentials);
+  if (!result.valid) {
+    throw invalidRequest(
+      `Credentials do not match the integration's declared schema: ${result.errors
+        .map((e) => `${e.field} ${e.message}`)
+        .join("; ")}`,
+      "credentials",
+    );
+  }
+  return result.data ?? credentials;
+}
+
+/** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
+export function loginRejected(diagnostic: string): ApiError {
+  return invalidRequest(
+    `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
+    "credentials",
+  );
+}
+
+/** A login input the login request cannot carry where it sits (a line break in a header value). */
+export function loginInputRefused(field: string): ApiError {
+  return invalidRequest(
+    `The value of '${field}' contains a character this request cannot carry where it is placed.`,
+    `credentials.${field}`,
+  );
+}
+
+/** Submitted values that put the login URL's host somewhere the auth's `authorized_uris` refuse. */
+export function loginUrlRefused(fields: readonly string[]): ApiError {
+  return invalidRequest(
+    `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`,
+    fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
+  );
+}
+
+/** A login the service did not finish in time: not a server bug, retrying is the remedy. */
+export function loginTimedOut(timeoutMs: number): ApiError {
+  return new ApiError({
+    status: 504,
+    code: "timeout",
+    title: "Gateway Timeout",
+    detail: `The connection attempt timed out after ${timeoutMs}ms — the login did not complete in time. Please try again.`,
+  });
 }
 
 /**

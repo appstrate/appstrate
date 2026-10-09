@@ -24,7 +24,8 @@
  * `ResourceSection`); the resulting `ResourceEntry` is split into the
  * `dependencies.integrations[id]` version (§4.1) and the
  * `integrations_configuration[id]` selection (§4.4) by
- * `setResourceEntries('integrations')`.
+ * `setResourceEntries('integrations')`. Above it, the §4.4 `required` flag: set, a run refuses
+ * to start without a connection; unset (an absent key), it starts without the integration.
  */
 
 import { useState } from "react";
@@ -52,7 +53,46 @@ interface IntegrationToolPickerProps {
   onChange: (next: ResourceEntry) => void;
 }
 
-export function IntegrationToolPicker({ packageId, entry, onChange }: IntegrationToolPickerProps) {
+export function IntegrationToolPicker(props: IntegrationToolPickerProps) {
+  return (
+    <>
+      <RequiredIntegrationToggle {...props} />
+      <IntegrationToolPanel {...props} />
+    </>
+  );
+}
+
+function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationToolPickerProps) {
+  const { t } = useTranslation("settings");
+  const setRequired = (required: boolean) => {
+    const next = { ...entry };
+    if (required) next.required = true;
+    else delete next.required;
+    onChange(next);
+  };
+  return (
+    <label
+      className="mt-2 flex cursor-pointer items-start gap-2"
+      data-testid={`integ-required-${packageId}`}
+    >
+      <Checkbox
+        checked={entry.required === true}
+        onCheckedChange={(v) => setRequired(v === true)}
+        className="mt-0.5"
+      />
+      <span className="flex min-w-0 flex-col">
+        <span className="text-xs font-semibold">
+          {t("agentEditor.integrations.required.label")}
+        </span>
+        <span className="text-muted-foreground text-[11px]">
+          {t("agentEditor.integrations.required.description")}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
   const [advancedOpen, setAdvancedOpen] = useState(false);
