@@ -12,13 +12,8 @@ import {
   type ConnectionChoice,
 } from "../connection-choice.ts";
 
-function missingConnection(errors: unknown): ApiError {
-  return new ApiError(
-    "missing_integration_connection",
-    "refused",
-    409,
-    errors as Record<string, unknown>,
-  );
+function missingConnection(errors: unknown[] | undefined): ApiError {
+  return new ApiError("missing_integration_connection", "refused", 409, errors);
 }
 
 const CANDIDATE = {

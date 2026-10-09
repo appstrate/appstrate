@@ -71,8 +71,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration, and the same fields:
   - `not_connected` (`auth_key`, `required_scopes`, plus a `connect_url` on
     an agent-run or inline-run launch that sent `X-Appstrate-Connect-Offers`;
-    never stored with an idempotent response, the `201` or a `409`, so a
-    replay carries none; MCP `run_and_wait` warnings carry no connect link,
+    never stored with an idempotent `201`, so a replay carries none; MCP `run_and_wait` warnings carry no connect link,
     so an MCP client gets the warning and can call
     `initiateIntegrationConnect`, and the in-app chat gets them through its
     own launcher);
@@ -188,6 +187,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   platform bound to none, and their tools are not exposed to it.
 - **The agent detail's integrations carry `required` and `auth_key`** (#1830),
   as the manifest's `integrations_configuration.<id>` declares them.
+- **A run launch's `409 missing_integration_connection` carries
+  `version_ref`** (#1856), the definition it judged (`draft` or a semver, as
+  on `Run.version_ref`): an omitted `version` launches the latest published
+  version while readiness reads the draft for a writer, so re-check readiness
+  with `version=<version_ref>`. The dashboard's recovery modal reads it
+  instead of remembering the version itself.
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
   hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
@@ -287,6 +292,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   records "no connection".
 - **The dashboard shows a schedule's "will start without" toast only when the
   server reports `warnings`** (#1850), with no client-side guess.
+- **`Idempotency-Key` stores only a request that executed (a 2xx)** (#1856).
+  A refusal (4xx) is no longer replayed for 24 h: the key is released and a
+  retry is judged again, so a launch retried after connecting the missing
+  integration runs. The `Idempotency-Key` and `Idempotent-Replayed` docs say
+  a replay re-serves the stored 2xx under current permissions, without the
+  bearer connect links of its `warnings`.
 - **Every `appstrate` command ends through one handler** (#1858): it sets the
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.

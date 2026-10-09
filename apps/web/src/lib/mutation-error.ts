@@ -100,9 +100,7 @@ export function refusalMessage(err: Refusal): string | null {
 
 /** The `errors[]` items of a `validation_failed`: each one's own code names a refusal. */
 function fieldErrors(err: ApiError): Refusal[] {
-  const items: unknown = err.details;
-  if (!Array.isArray(items)) return [];
-  return items.flatMap((item: unknown) => {
+  return (err.errors ?? []).flatMap((item: unknown) => {
     if (typeof item !== "object" || item === null) return [];
     const { code, field, message } = item as Record<string, unknown>;
     if (typeof code !== "string") return [];

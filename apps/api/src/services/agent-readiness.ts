@@ -41,11 +41,15 @@ interface AgentReadinessParams {
    * and the spawn resolver dedupe the SELECT + Zod parse per integration.
    */
   manifestCache?: IntegrationManifestCache;
+}
+
+/** What only the throwing wrapper reads: its 409 names the version and may carry connect links. */
+interface ValidateAgentReadinessParams extends AgentReadinessParams {
+  /** `runs.version_ref` of `agent` — the 409's `version_ref`. */
+  versionRef: string;
   /**
    * Opt-in relay for the run-kickoff connect link (#1207) — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
-   *
-   * Read by the THROWING wrapper only: `collectAgentReadiness` ignores it.
    */
   connectOffers?: ConnectOfferPolicy | null;
 }
@@ -180,7 +184,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
  * returns the launch `warnings`, with connect links under the same opt-in as the 409's.
  */
 export async function validateAgentReadiness(
-  params: AgentReadinessParams,
+  params: ValidateAgentReadinessParams,
 ): Promise<ResolutionFieldError[]> {
   const { errors, warnings } = await collectAgentReadiness(params);
   if (errors.length === 0) return withConnectOffers(params, warnings);
@@ -206,7 +210,10 @@ export async function validateAgentReadiness(
     });
     // Mint the connect links LAST — strictly after the webhook projection
     // above, which must never carry a bearer capability off-platform.
-    throw missingIntegrationConnection(await withConnectOffers(params, integrationErrors));
+    throw missingIntegrationConnection(
+      await withConnectOffers(params, integrationErrors),
+      params.versionRef,
+    );
   }
 
   const first = errors[0]!;
@@ -220,7 +227,7 @@ export async function validateAgentReadiness(
 
 /** Connect links on `items`, only for a caller that opted in and holds `integrations:connect`. */
 async function withConnectOffers(
-  params: AgentReadinessParams,
+  params: ValidateAgentReadinessParams,
   items: ResolutionFieldError[],
 ): Promise<ResolutionFieldError[]> {
   if (!params.connectOffers || items.length === 0) return items;

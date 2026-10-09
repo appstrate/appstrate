@@ -46,8 +46,7 @@ function isScheduleChoiceCode(code: string): code is ConnectionChoice["code"] {
 /** The `errors[]` of a `409 missing_integration_connection`; `null` for any other error. */
 export function missingConnectionErrors(err: unknown): MissingIntegrationFieldError[] | null {
   if (!(err instanceof ApiError) || err.code !== "missing_integration_connection") return null;
-  // `details` is typed as an open record; this code carries the `errors[]` array.
-  return Array.isArray(err.details) ? (err.details as MissingIntegrationFieldError[]) : [];
+  return (err.errors ?? []) as MissingIntegrationFieldError[];
 }
 
 export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {

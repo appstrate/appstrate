@@ -83,10 +83,14 @@ export const parameters = {
     in: "header" as const,
     required: false,
     description:
-      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, " +
-      "scoped to the organization and space: a repeat with the same method, URL and body replays the original response with " +
-      "`Idempotent-Replayed: true`, the same key with a different method, URL or body is `422 idempotency_conflict`, and a concurrent duplicate " +
-      "is `409 idempotency_in_progress`. Current permissions are checked again; run responses are projected using current visibility. This operation honours the header because it declares this parameter — operations that " +
+      "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the " +
+      "organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same " +
+      "method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, " +
+      "a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, " +
+      "`expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged " +
+      "again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, " +
+      "the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is " +
+      "`409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that " +
       "do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the " +
       "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },

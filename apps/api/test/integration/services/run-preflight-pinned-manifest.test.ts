@@ -137,6 +137,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
   async function preflight(extra: Partial<PreflightArgs> = {}) {
     return resolveRunPreflight({
       agent,
+      versionRef: "draft",
       spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },

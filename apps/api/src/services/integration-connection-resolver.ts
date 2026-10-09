@@ -756,13 +756,21 @@ export async function resolveConnectionsForRun(
   });
 }
 
-export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
+/**
+ * A launch passes `versionRef`, the `runs.version_ref` of the definition it judged: an omitted
+ * `?version=` launches the latest published, while readiness reads the draft for its writer.
+ */
+export function missingIntegrationConnection(
+  errors: ValidationFieldError[],
+  versionRef?: string,
+): ApiError {
   return new ApiError({
     status: 409,
     code: "missing_integration_connection",
     title: "Missing Integration Connection",
     detail: errors[0]!.message,
     errors,
+    ...(versionRef ? { extensions: { version_ref: versionRef } } : {}),
   });
 }
 
@@ -781,12 +789,16 @@ type ResolveRunConnectionsOutcome =
  */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
+  versionRef: string,
 ): Promise<ResolveRunConnectionsOutcome> {
   const resolution = await resolveConnectionsForRun(input);
   if (resolution.errors.length > 0) {
     return {
       ok: false,
-      error: missingIntegrationConnection(resolution.errors.map(translateResolutionError)),
+      error: missingIntegrationConnection(
+        resolution.errors.map(translateResolutionError),
+        versionRef,
+      ),
     };
   }
   const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;

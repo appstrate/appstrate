@@ -32,6 +32,7 @@ import {
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import { createRun as createRunRow } from "./state/runs.ts";
+import { versionRefOf } from "./agent-version-resolver.ts";
 import { preflightGateApiError, runPreflightGates } from "./run-preflight-gates.ts";
 
 // ---------------------------------------------------------------------------
@@ -166,19 +167,23 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   //     therefore a between-readiness-and-now race (connection deleted, new
   //     admin pin), and it answers the same 409 `missing_integration_connection`
   //     the readiness check does.
+  const versionRef = versionRefOf(overrideVersionLabel);
   let resolvedConnections: ResolvedConnectionMap | null = null;
   let integrationsUnbound: RunIntegrationUnbound[] | undefined;
   if (actor) {
-    const outcome = await resolveRunConnectionsOrError({
-      agentManifest: agent.manifest as Record<string, unknown>,
-      packageId: agent.id,
-      actor,
-      scope: { orgId, spaceId },
-      launchOverrides: null,
-      // Reads the pinned manifests frozen just above (auth keys / scopes match
-      // what the spawn will use).
-      manifestCache,
-    });
+    const outcome = await resolveRunConnectionsOrError(
+      {
+        agentManifest: agent.manifest as Record<string, unknown>,
+        packageId: agent.id,
+        actor,
+        scope: { orgId, spaceId },
+        launchOverrides: null,
+        // Reads the pinned manifests frozen just above (auth keys / scopes match
+        // what the spawn will use).
+        manifestCache,
+      },
+      versionRef,
+    );
     if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
     integrationsUnbound = outcome.integrationsUnbound;
@@ -198,6 +203,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
             `to use. Pick one with a member pin (a set an admin pin or an enforced org default ` +
             `imposes is narrowed by an admin), or run the agent on the platform.`,
         })),
+        versionRef,
       );
     }
   }
@@ -250,9 +256,8 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       integrationsUnbound,
       dependencyOverrides: input.dependencyOverrides ?? null,
       resolvedIntegrationVersions,
-      ...(overrideVersionLabel
-        ? { versionLabel: overrideVersionLabel, versionRef: overrideVersionLabel }
-        : { versionRef: "draft" }),
+      ...(overrideVersionLabel ? { versionLabel: overrideVersionLabel } : {}),
+      versionRef,
       ...(contextSnapshot !== undefined ? { contextSnapshot } : {}),
       runnerName: input.runnerName ?? null,
       runnerKind: input.runnerKind ?? null,

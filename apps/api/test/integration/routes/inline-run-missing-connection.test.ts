@@ -88,6 +88,7 @@ interface ProblemDetails {
   detail?: string;
   param?: string;
   errors?: ValidationFieldError[];
+  version_ref?: string;
 }
 
 describe("POST /api/runs/inline — connection_overrides disambiguation", () => {
@@ -137,6 +138,8 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
+    // The posted definition runs as the shadow's draft.
+    expect(body.version_ref).toBe("draft");
 
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
@@ -591,7 +594,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(await db.select().from(runs)).toHaveLength(1);
     });
 
-    it("keeps no connect link in the cached 409 an Idempotency-Key replays", async () => {
+    it("stores no 409: a key reuser is judged again and never handed the first caller's link", async () => {
       await seedOauthIntegration();
       const admin = await memberContext(ctx, "admin");
       const key = crypto.randomUUID();
@@ -622,14 +625,12 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         [admin, {}],
         [ctx, {}],
       ] as const) {
-        const replay = await launchAs(who, headers);
-        expect(replay.status).toBe(409);
-        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
-        const err = await errorOf(replay);
+        const retry = await launchAs(who, headers);
+        expect(retry.status).toBe(409);
+        expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+        const err = await errorOf(retry);
         expect(err).toMatchObject({ code: "not_connected", auth_key: "primary" });
         expect(err).not.toHaveProperty("connect_url");
-        expect(err).not.toHaveProperty("expiresAt");
-        expect(err).not.toHaveProperty("packageId");
       }
       expect(await db.select().from(runs)).toHaveLength(0);
     });

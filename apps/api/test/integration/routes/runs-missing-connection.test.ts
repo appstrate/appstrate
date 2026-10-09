@@ -169,6 +169,7 @@ interface ProblemDetails {
   code?: string;
   detail?: string;
   errors?: ValidationFieldError[];
+  version_ref?: string;
 }
 
 describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connection", () => {
@@ -250,6 +251,35 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err.code).toBe("not_connected");
     expect(err.title).toBe("Integration Not Connected");
     expect(err.message).toBeTruthy();
+  });
+
+  it("names the version it judged, an omitted version being the latest published", async () => {
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    await seedPublishedVersion(AGENT, "1.0.0");
+
+    for (const [query, versionRef] of [
+      ["", "1.0.0"],
+      ["?version=1.0.0", "1.0.0"],
+      ["?version=draft", "draft"],
+    ] as const) {
+      const res = await app.request(`/api/agents/${AGENT}/run${query}`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.code).toBe("missing_integration_connection");
+      expect(body.version_ref).toBe(versionRef);
+    }
   });
 
   it("returns 409 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {

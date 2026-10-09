@@ -51,6 +51,7 @@ import {
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadiness } from "./agent-readiness.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
 import { connectionOverrideRefusals } from "../lib/launch-schemas.ts";
@@ -282,6 +283,8 @@ export async function runInlinePreflight(params: {
     if (mode === "fail-fast") {
       warnings = await validateAgentReadiness({
         agent: probeAgent,
+        // An inline run executes its posted definition, recorded as the draft.
+        versionRef: VERSION_SELECTOR_DRAFT,
         orgId,
         spaceId,
         actor,

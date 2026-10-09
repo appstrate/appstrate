@@ -24,6 +24,7 @@ import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { versionRefOf } from "./agent-version-resolver.ts";
 import {
   resolveRunConnectionsOrError,
   type LaunchOverrides,
@@ -172,6 +173,8 @@ interface RunPipelineParams {
  */
 export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
+  /** `runs.version_ref` of `agent` (`versionRefOf`), named on the 409. */
+  versionRef: string;
   spaceId: string;
   orgId: string;
   actor: Actor;
@@ -250,6 +253,7 @@ export async function resolveRunPreflight(params: {
 
   return validateAgentReadiness({
     agent,
+    versionRef: params.versionRef,
     orgId,
     spaceId,
     actor,
@@ -467,14 +471,17 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       "appstrate.run.connections",
       { attributes: spanAttributes },
       () =>
-        resolveRunConnectionsOrError({
-          agentManifest: agent.manifest as Record<string, unknown>,
-          packageId: agent.id,
-          actor,
-          scope: { orgId, spaceId },
-          launchOverrides: params.launchOverrides ?? null,
-          manifestCache,
-        }),
+        resolveRunConnectionsOrError(
+          {
+            agentManifest: agent.manifest as Record<string, unknown>,
+            packageId: agent.id,
+            actor,
+            scope: { orgId, spaceId },
+            launchOverrides: params.launchOverrides ?? null,
+            manifestCache,
+          },
+          versionRefOf(overrideVersionLabel),
+        ),
     );
     connectionsMs = Date.now() - connectionsStart;
     if (!outcome.ok) throw outcome.error;

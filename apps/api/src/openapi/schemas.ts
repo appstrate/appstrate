@@ -330,6 +330,11 @@ export const schemas = {
             type: "array",
             items: { $ref: "#/components/schemas/ConnectionResolutionItem" },
           },
+          version_ref: {
+            type: "string",
+            description:
+              "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`.",
+          },
         },
       },
     ],

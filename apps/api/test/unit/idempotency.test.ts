@@ -6,6 +6,7 @@ import type { AppEnv } from "../../src/types/index.ts";
 import { idempotency } from "../../src/middleware/idempotency.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
+import { conflict } from "../../src/lib/errors.ts";
 import { getCache } from "../../src/infra/index.ts";
 import { flushRedis } from "../helpers/redis.ts";
 
@@ -28,6 +29,12 @@ function createApp() {
   app.post("/test-500", idempotency(), async () => {
     callCount++;
     throw new Error("server error");
+  });
+  // A refusal over state the caller can change: the first call refuses, a retry succeeds.
+  app.post("/test-refused", idempotency(), async (c) => {
+    callCount++;
+    if (callCount === 1) throw conflict("not_ready_yet", "Connect first");
+    return c.json({ ok: true, callCount }, 201);
   });
   // The response keeps `secret`; what is stored (and replayed) does not.
   const storedBody = ({ secret: _secret, ...rest }: Record<string, unknown>) => rest;
@@ -158,6 +165,22 @@ describe("idempotency middleware", () => {
     expect(res2.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await res2.text()).toBe("created, not JSON");
     expect(callCount).toBe(1);
+  });
+
+  it("stores no refusal: a retry with the same key runs again", async () => {
+    const app = createApp();
+
+    const refused = await post(app, "/test-refused", { name: "Alice" }, "key-4xx");
+    expect(refused.status).toBe(409);
+
+    const retry = await post(app, "/test-refused", { name: "Alice" }, "key-4xx");
+    expect(retry.status).toBe(201);
+    expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+    expect(callCount).toBe(2);
+
+    const replay = await post(app, "/test-refused", { name: "Alice" }, "key-4xx");
+    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(callCount).toBe(2);
   });
 
   it("releases lock on 5xx so retry is possible", async () => {

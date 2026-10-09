@@ -18,9 +18,13 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { launchFlight, launchedVersion, retryLaunch, type RunLaunch } from "../lib/run-launch";
-import type { MissingIntegrationFieldError } from "../lib/connection-choice";
-import { missingConnectionErrors } from "../lib/connection-choice";
+import {
+  launchFlight,
+  launchRefusal,
+  retryLaunch,
+  type LaunchRefusal,
+  type RunLaunch,
+} from "../lib/run-launch";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
 // NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
@@ -106,12 +110,6 @@ function useRunAgent(packageId: string) {
   });
 }
 
-/** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
-interface LaunchRefusal {
-  errors: MissingIntegrationFieldError[];
-  version: string;
-}
-
 /**
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
@@ -140,8 +138,8 @@ export function useRunLauncher(packageId: string) {
         },
         // The mutation cache reports every failure; this picks up the 409.
         onError: (err) => {
-          const errors = missingConnectionErrors(err);
-          if (errors) setRefusal({ errors, version: launchedVersion(launch) });
+          const refused = launchRefusal(err);
+          if (refused) setRefusal(refused);
         },
       },
     );
