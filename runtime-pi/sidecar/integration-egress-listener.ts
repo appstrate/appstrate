@@ -62,7 +62,7 @@ function headComplete(buf: Buffer): boolean {
   return recordLen > MAX_TLS_RECORD || buf.length >= 5 + recordLen;
 }
 
-/** The tunnel's first bytes, `seed` (read with the CONNECT head) first; the socket stays paused. */
+/** The tunnel's first bytes, `seed` (read with the CONNECT head) first; the socket is left paused. */
 function collectTunnelHead(socket: Socket, seed: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let buf = seed;
@@ -78,7 +78,6 @@ function collectTunnelHead(socket: Socket, seed: Buffer): Promise<Buffer> {
     };
     socket.on("data", onData);
     socket.once("close", onClose);
-    socket.resume();
   });
 }
 
@@ -146,6 +145,8 @@ interface CreateEgressListenerOptions {
   isPeerAllowed: PeerCheck;
   /** Deadline for a tunnel's first bytes after the 200, while both sides are silent. */
   preambleTimeoutMs?: number;
+  /** Idle deadline of a relayed `http://` request's upstream (default `API_CALL_TIMEOUT_MS`). */
+  upstreamTimeoutMs?: number;
 }
 
 /**
@@ -163,7 +164,8 @@ export function createIntegrationEgressListener(
   const { egressPolicy } = options;
   const preambleTimeoutMs = options.preambleTimeoutMs ?? PREAMBLE_TIMEOUT_MS;
 
-  // Peer gate, settled once per connection from accept: nothing a refused peer sends is acted upon.
+  // Peer gate, settled once per connection: nothing a refused peer sends is acted upon. Settled at
+  // accept for the http relay; Bun 1.3 emits no `connection` for a CONNECT socket: settled at CONNECT.
   const admissions = new WeakMap<Socket, Promise<boolean>>();
   const admitted = (socket: Socket): Promise<boolean> => {
     let admission = admissions.get(socket);
@@ -228,8 +230,12 @@ export function createIntegrationEgressListener(
       path: target.path,
       agent: false,
     };
-    forwardHttpRequest(req, res, { ...upstream, method: req.method, headers }, (err) =>
-      emit({ kind: "tunnel-error", target: target.authority, reason: err.message }),
+    forwardHttpRequest(
+      req,
+      res,
+      { ...upstream, method: req.method, headers },
+      (err) => emit({ kind: "tunnel-error", target: target.authority, reason: err.message }),
+      options.upstreamTimeoutMs,
     );
   };
 
@@ -296,8 +302,6 @@ export function createIntegrationEgressListener(
     handleRequest(req, res).catch(crashed(() => res.destroy()));
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
-    // Nothing is read from the client before its target is vetted and the 200 sent.
-    clientSocket.pause();
     clientSocket.on("error", () => clientSocket.destroy());
     handleConnect(req, clientSocket, head).catch(crashed(() => clientSocket.destroy()));
   });

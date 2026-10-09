@@ -825,6 +825,66 @@ describe("upstream proxy bypass for platform host", () => {
   });
 });
 
+// --- A header value Bun's HTTP client refuses (it throws synchronously) ---
+
+describe("header value the HTTP client refuses", () => {
+  /** Status of the answer to `head` sent raw (0 when the connection closes unanswered). */
+  function rawStatus(proxyPort: number, head: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      let data = "";
+      const socket = netConnect(proxyPort, "127.0.0.1", () => socket.write(head));
+      const done = () => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(parseInt(data.split(" ")[1] ?? "0") || 0);
+      };
+      socket.on("data", (chunk) => {
+        data += chunk.toString("latin1");
+        if (data.includes("\r\n\r\n")) done();
+      });
+      socket.on("error", () => {}); // a reset surfaces as `close`
+      socket.on("close", done);
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error("no answer"));
+      }, 5000);
+    });
+  }
+
+  const withBadHeader = (url: string) =>
+    `GET ${url} HTTP/1.1\r\nHost: ${new URL(url).host}\r\nX-T: \x7f\r\nConnection: close\r\n\r\n`;
+
+  it("direct: answers 502 and keeps serving", async () => {
+    const echo = await startEchoServer();
+    const proxy = makeProxy();
+    await proxy.ready;
+    const { port } = proxy.address();
+    const url = `http://127.0.0.1:${echo.port}/`;
+
+    expect(await rawStatus(port, withBadHeader(url))).toBe(502);
+    expect((await httpViaProxy(port, url)).status).toBe(200);
+  });
+
+  it("chained through the upstream proxy: answers 502 and keeps serving", async () => {
+    const upstream = await startFakeUpstream();
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://platform-host:3000",
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${upstream.port}`,
+      },
+    });
+    await proxy.ready;
+    const { port } = proxy.address();
+    const url = "http://127.0.0.1:9/";
+
+    expect(await rawStatus(port, withBadHeader(url))).toBe(502);
+    const res = await httpViaProxy(port, url);
+    expect(res.headers["x-via-upstream"]).toBe("true");
+    expect(upstream.receivedHttpHosts).toEqual(["127.0.0.1"]);
+  });
+});
+
 // --- Lifecycle ---
 
 describe("lifecycle", () => {

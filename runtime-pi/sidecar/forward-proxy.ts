@@ -141,6 +141,14 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     return check.blocked ? null : check.pinnedAddress;
   }
 
+  // One bad request must never become an unhandled rejection: Bun would exit.
+  const crashed = (destroy: () => void) => (err: unknown) => {
+    logger.error("Forward proxy handler error", {
+      error: err instanceof Error ? err.name : "unknown",
+    });
+    destroy();
+  };
+
   function handleRequest(req: IncomingMessage, res: ServerResponse) {
     // Regular HTTP requests (non-CONNECT) — forward through upstream or direct
     const targetUrl = req.url;
@@ -217,7 +225,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           headers: { ...cleaned, host: parsed.host },
         });
       })
-      .catch(() => res.destroy());
+      .catch(crashed(() => res.destroy()));
   }
 
   function handleConnect(req: IncomingMessage, clientSocket: Socket, head: Buffer) {
@@ -336,7 +344,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
           });
           tieSockets(clientSocket, targetSocket);
         })
-        .catch(() => clientSocket.destroy());
+        .catch(crashed(() => clientSocket.destroy()));
     }
   }
 
@@ -351,21 +359,25 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       peer: peerAddress(socket),
     });
   const server = createHttpServer((req: IncomingMessage, res: ServerResponse) => {
-    void peerAdmitted(req.socket, deps.isPeerAllowed).then((ok) => {
-      if (ok) return handleRequest(req, res);
-      // The absolute target may carry a secret in its query: origin + path only.
-      refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
-      res.writeHead(403);
-      res.end("Blocked: peer not allowed");
-    });
+    peerAdmitted(req.socket, deps.isPeerAllowed)
+      .then((ok) => {
+        if (ok) return handleRequest(req, res);
+        // The absolute target may carry a secret in its query: origin + path only.
+        refusePeer("request-refused", redactUrlForLog(req.url ?? ""), req.socket);
+        res.writeHead(403);
+        res.end("Blocked: peer not allowed");
+      })
+      .catch(crashed(() => res.destroy()));
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
-    void peerAdmitted(clientSocket, deps.isPeerAllowed).then((ok) => {
-      if (ok) return handleConnect(req, clientSocket, head);
-      refusePeer("tunnel-refused", req.url ?? "", clientSocket);
-      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-      clientSocket.destroy();
-    });
+    peerAdmitted(clientSocket, deps.isPeerAllowed)
+      .then((ok) => {
+        if (ok) return handleConnect(req, clientSocket, head);
+        refusePeer("tunnel-refused", req.url ?? "", clientSocket);
+        clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        clientSocket.destroy();
+      })
+      .catch(crashed(() => clientSocket.destroy()));
   });
 
   server.on("error", (err) => {

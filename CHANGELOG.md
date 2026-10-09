@@ -397,18 +397,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   answered 405 to the absolute-form `http://` request such a client sends to
   `HTTP_PROXY`. It now vets each one like a `CONNECT` and forwards it with
   the URL authority as `Host` and hop-by-hop headers stripped both ways, on
-  upstream connections no other runner shares. Origin-form and `https://`
-  absolute-form requests answer 405; the listener that injects credentials
-  still refuses plain HTTP.
+  upstream connections no other runner shares; an upstream `101` answers
+  `502`. Origin-form and `https://` absolute-form requests answer 405; the
+  listener that injects credentials still refuses plain HTTP. The listener
+  now parses the `CONNECT` head with Bun's HTTP parser: an HTTP/1.1
+  `CONNECT` must carry `Host` (the SSH `ProxyCommand` does).
 - **Sidecar tunnels and proxies close cleanly** (#1819). On every tunnel
   (runner egress `CONNECT`, transparent plane, the agent's forward proxy) a
   clean close flushes what is queued for the other side first, a client
   gone during the dial takes the upstream down, and the idle timeout closes
-  both sides. On the runner egress listener and the forward proxy, a relayed
-  `http://` request answered `101` gets `502` instead of holding both sockets
-  open, and a `CONNECT` port outside 1–65535 answers `400` instead of
-  crashing the sidecar. The forward proxy also strips response hop-by-hop
-  headers.
+  both sides. On the runner egress listener and the forward proxy, a
+  `CONNECT` port outside 1–65535 answers `400` instead of crashing the
+  sidecar, and a relayed `http://` request whose upstream times out answers
+  `502` instead of leaving the client waiting. A header value the sidecar's
+  HTTP client refuses (a `0x7f` byte) answers `502` and can no longer crash
+  the sidecar through the forward proxy. The forward proxy also strips
+  response hop-by-hop headers.
 - **A new organization's starter agent runs from the CLI, the chat and the
   Claude Code plugin on its first try** (#1789). It was created as a draft
   only, so `appstrate run @<scope>/hello-world`, which runs the latest

@@ -609,6 +609,36 @@ describe("integration-egress-listener (#543)", () => {
       expect(events.some((e) => e.kind === "tunnel-error" && e.target === authority)).toBe(true);
     });
 
+    it("answers 502 when the upstream never answers, at the upstream timeout", async () => {
+      const server = createHttpServer(() => {});
+      httpServers.push(server);
+      await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+      const { port } = server.address() as { port: number };
+      const { handle, events } = await makeListener({ upstreamTimeoutMs: 200 });
+      const authority = `127.0.0.1:${port}`;
+
+      const response = await exchange(handle.address().port, [get(`http://${authority}/`)]);
+      expect(statusOf(response)).toBe(502);
+      expect(events).toContainEqual({
+        kind: "tunnel-error",
+        target: authority,
+        reason: "Request timeout after 200ms",
+      });
+    });
+
+    it("answers 502 to a header value its HTTP client refuses, and keeps serving", async () => {
+      const upstream = await startHttpUpstream();
+      const { handle, events } = await makeListener();
+      const authority = `127.0.0.1:${upstream.port}`;
+      const port = handle.address().port;
+
+      const refused = await exchange(port, [get(`http://${authority}/`, ["X-T: \x7f"])]);
+      expect(statusOf(refused)).toBe(502);
+      expect(events.some((e) => e.kind === "tunnel-error" && e.target === authority)).toBe(true);
+      expect(statusOf(await exchange(port, [get(`http://${authority}/`)]))).toBe(200);
+      expect(upstream.requests).toHaveLength(1);
+    });
+
     it("refuses a peer that is not the owning runner: no policy, no lookup, no upstream", async () => {
       const upstream = await startHttpUpstream();
       let consulted = false;

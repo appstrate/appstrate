@@ -119,20 +119,36 @@ export function forwardHttpRequest(
   res: ServerResponse,
   options: RequestOptions,
   onError: (err: Error) => void,
+  timeoutMs = API_CALL_TIMEOUT_MS,
 ): void {
+  let failed = false;
   const fail = (err: Error) => {
+    if (failed) return;
+    failed = true;
     onError(err);
-    if (!res.headersSent) res.writeHead(502);
+    if (res.headersSent) return void res.destroy();
+    res.writeHead(502);
     res.end("Proxy error");
   };
-  const proxyReq = httpRequest(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode ?? 502, withoutHopByHop(proxyRes.headers));
-    proxyRes.pipe(res);
+  let proxyReq: ReturnType<typeof httpRequest>;
+  try {
+    // Throws on a header value Bun's server parser accepted but its client refuses (e.g. `\x7f`).
+    proxyReq = httpRequest(options, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode ?? 502, withoutHopByHop(proxyRes.headers));
+      proxyRes.pipe(res);
+    });
+  } catch (err) {
+    req.resume();
+    return fail(err instanceof Error ? err : new Error(String(err)));
+  }
+  proxyReq.setTimeout(timeoutMs, () => {
+    const err = new Error(`Request timeout after ${timeoutMs}ms`);
+    // Bun 1.3 emits no `error` for this destroy: answer here.
+    fail(err);
+    proxyReq.destroy(err);
   });
-  proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
-    proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
-  });
-  // Unheard, a 101 leaves `res` unanswered and the client waiting for good.
+  // Unheard on Bun 1.4, a 101 leaves `res` unanswered and the client waiting for good (Bun 1.3
+  // emits `error` instead).
   proxyReq.on("upgrade", (_upgradeRes, socket: Socket) => {
     socket.destroy();
     fail(new Error("upstream switched protocols"));
