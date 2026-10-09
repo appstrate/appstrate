@@ -551,8 +551,8 @@ export function wrapClient(
     },
     async callTool(args, options) {
       return client.callTool(args, undefined, {
-        // No `maxTotalTimeout`: it would cut a call that keeps reporting; a caller
-        // opting in bounds the total with `signal`.
+        // With progress, `timeout` is an idle timeout: no `maxTotalTimeout`, the
+        // caller bounds the total with `signal` (an agent run: its deadline).
         ...(options?.onProgress
           ? { onprogress: options.onProgress, resetTimeoutOnProgress: true }
           : {}),

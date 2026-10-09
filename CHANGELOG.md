@@ -277,6 +277,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call** (#1847): a refresh by a peer, a reconnect or an API-key rotation. It
   replays the call once with the connection's current credential.
 
+### Security
+
+- **The sidecar relays an integration MCP server's progress notifications only
+  when the value increases** (#1857), as the MCP spec requires, and at most
+  once per second per call: an untrusted upstream can no longer flood the
+  agent or keep a call open with repeated values. With progress,
+  `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
+  the call's total duration.
+
+### Removed
+
+- **The sidecar `/mcp` transport's `maxRequestBodySize` option** (#1857). It
+  had no effect: the sidecar bounds request bodies before the MCP SDK reads
+  them.
+
 ## [1.0.0-beta.66] - 2026-10-08
 
 ### Operators

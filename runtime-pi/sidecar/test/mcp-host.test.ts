@@ -455,10 +455,7 @@ describe("McpHost — progress relay", () => {
 
   async function callLong(
     extra: Partial<AppstrateRequestExtra>,
-    steps: Array<Record<string, unknown>> = [1, 2].map((progress) => ({
-      progress,
-      message: `step ${progress}`,
-    })),
+    steps: Array<Record<string, unknown>> = [{ progress: 1, message: "step 1" }],
   ) {
     const upstream = await makeUpstream(reportingTool(steps));
     try {
@@ -480,12 +477,12 @@ describe("McpHost — progress relay", () => {
       },
     });
     expect(result.content).toEqual([{ type: "text", text: "done" }]);
-    expect(sent).toEqual(
-      [1, 2].map((progress) => ({
+    expect(sent).toEqual([
+      {
         method: "notifications/progress",
-        params: { progress, message: `step ${progress}`, progressToken: "agent_tok" },
-      })),
-    );
+        params: { progress: 1, message: "step 1", progressToken: "agent_tok" },
+      },
+    ]);
   });
 
   it("relays only the spec fields, with the message capped", async () => {
@@ -540,6 +537,141 @@ describe("McpHost — progress relay", () => {
       },
     });
     expect(result.content).toEqual([{ type: "text", text: "done" }]);
+  });
+
+  /** Relay timers fired by hand; the relay arms at most one at a time per call. */
+  function manualTimers() {
+    const armed = new Map<number, { fn: () => void; ms: number }>();
+    let next = 0;
+    return {
+      armed,
+      timers: {
+        setTimeout: (fn: () => void, ms: number) => {
+          armed.set(++next, { fn, ms });
+          return next;
+        },
+        clearTimeout: (handle: unknown) => {
+          armed.delete(handle as number);
+        },
+      },
+      /** Ends every open window, as the clock reaching it would. */
+      elapse() {
+        const due = [...armed];
+        armed.clear();
+        for (const [, { fn }] of due) fn();
+      },
+    };
+  }
+
+  /** A call held open upstream, whose progress the test emits step by step. */
+  async function openCall(clock: ReturnType<typeof manualTimers>, signal?: AbortSignal) {
+    let upstream!: AppstrateRequestExtra;
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const up = await makeUpstream([
+      {
+        descriptor: { name: "long", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          upstream = extra;
+          started.resolve();
+          await release.promise;
+          return { content: [{ type: "text", text: "done" }] };
+        },
+      },
+    ]);
+    const host = new McpHost({ progressTimers: clock.timers });
+    await host.register({ connection: CONN_A, namespace: "up", client: up.client });
+    const tool = host.buildTools().find((t) => t.descriptor.name === "up__long")!;
+    const relayed: number[] = [];
+    const result = tool.handler({}, {
+      _meta: { progressToken: "agent_tok" },
+      ...(signal ? { signal } : {}),
+      sendNotification: async (n: { params: { progress: number } }) => {
+        relayed.push(n.params.progress);
+      },
+    } as unknown as AppstrateRequestExtra);
+    await started.promise;
+    return {
+      relayed,
+      result,
+      async emit(...values: number[]) {
+        for (const progress of values) {
+          await upstream.sendNotification({
+            method: "notifications/progress",
+            params: { progressToken: upstream._meta!.progressToken!, progress },
+          });
+        }
+        await Bun.sleep(0);
+      },
+      async elapse() {
+        clock.elapse();
+        await Bun.sleep(0);
+      },
+      async finish() {
+        release.resolve();
+        await result.catch(() => {});
+        await up.pair.close();
+      },
+    };
+  }
+
+  it("drops progress that does not increase", async () => {
+    const clock = manualTimers();
+    const call = await openCall(clock);
+    try {
+      await call.emit(2, 2, 1);
+      await call.elapse();
+      await call.emit(1.5, 3);
+      expect(call.relayed).toEqual([2, 3]);
+    } finally {
+      await call.finish();
+    }
+  });
+
+  it("relays a burst once per second, the latest value when the window ends", async () => {
+    const clock = manualTimers();
+    const call = await openCall(clock);
+    try {
+      await call.emit(1, 2, 3, 4);
+      expect(call.relayed).toEqual([1]);
+      expect([...clock.armed.values()].map(({ ms }) => ms)).toEqual([1000]);
+      await call.elapse();
+      expect(call.relayed).toEqual([1, 4]);
+      // That relay opened a window of its own; it ends with nothing to send.
+      expect(clock.armed.size).toBe(1);
+      await call.elapse();
+      expect(call.relayed).toEqual([1, 4]);
+      expect(clock.armed.size).toBe(0);
+    } finally {
+      await call.finish();
+    }
+  });
+
+  it("relays nothing once the call has answered, and leaves no timer behind", async () => {
+    const clock = manualTimers();
+    const call = await openCall(clock);
+    await call.emit(1, 2);
+    await call.finish();
+    expect((await call.result).content).toEqual([{ type: "text", text: "done" }]);
+    expect(clock.armed.size).toBe(0);
+    clock.elapse();
+    await Bun.sleep(0);
+    expect(call.relayed).toEqual([1]);
+  });
+
+  it("leaves no timer behind when the call is aborted", async () => {
+    const clock = manualTimers();
+    const abort = new AbortController();
+    const call = await openCall(clock, abort.signal);
+    try {
+      await call.emit(1, 2);
+      abort.abort();
+      await expect(call.result).rejects.toThrow();
+      expect(clock.armed.size).toBe(0);
+      expect(call.relayed).toEqual([1]);
+    } finally {
+      await call.finish();
+    }
   });
 });
 
