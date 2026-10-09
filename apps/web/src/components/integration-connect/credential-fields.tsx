@@ -13,11 +13,15 @@ import { deriveFieldNames, fieldSchemas } from "./credential-schema";
  * ONE credential renderer with no per-surface drift.
  */
 
-// Fields whose value is multi-line by nature (PEM-encoded cert/key blobs, RSA
-// private keys, certificate chains). Detected by name so arbitrary
-// manifest-declared properties get the right input affordance without each
-// integration opting in.
-const MULTILINE_FIELD_PATTERN = /cert|certificate|private_key|^key$|_key$/i;
+// Fields whose value is multi-line by nature (PEM-encoded certs and keys,
+// certificate chains), detected by name so manifest-declared properties get the
+// right affordance. Key material matches by substring, since a single-line input
+// would strip a PEM's newlines; there is no generic `*_key` suffix, which also
+// matches single-line secrets like `api_key` that must stay masked.
+const MULTILINE_FIELD_PATTERN = /cert|private_key|public_key|^(?:client_key|key)$/i;
+
+// An SSH `host_key` is a single-line public key, not a secret: never masked.
+const HOST_KEY_PATTERN = /^host_key$/i;
 
 const SENSITIVE_KEYWORDS = ["password", "secret", "token", "key"];
 
@@ -35,7 +39,9 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
   return (
     <>
       {fields.map((field) => {
-        const isSensitive = SENSITIVE_KEYWORDS.some((k) => field.toLowerCase().includes(k));
+        const isHostKey = HOST_KEY_PATTERN.test(field);
+        const isSensitive =
+          !isHostKey && SENSITIVE_KEYWORDS.some((k) => field.toLowerCase().includes(k));
         const isMultiline = MULTILINE_FIELD_PATTERN.test(field);
         const schema = schemas[field];
         // Three sources, most specific first: a localized override, then the

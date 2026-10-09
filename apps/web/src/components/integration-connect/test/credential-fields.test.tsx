@@ -94,6 +94,60 @@ describe("CredentialFields — values belong to the caller", () => {
   });
 });
 
+describe("CredentialFields — widget per field name", () => {
+  const WIDGETS: Record<string, "password" | "textarea" | "text"> = {
+    api_key: "password",
+    consumer_key: "password",
+    consumer_secret: "password",
+    password: "password",
+    bot_token: "password",
+    client_key: "textarea",
+    private_key: "textarea",
+    client_cert: "textarea",
+    certificate: "textarea",
+    key: "textarea",
+    host_key: "text",
+    ssh_public_key: "textarea",
+    ssh_private_key: "textarea",
+    host: "text",
+    username: "text",
+  };
+  const auth = {
+    type: "custom",
+    credentials: {
+      schema: {
+        type: "object",
+        properties: Object.fromEntries(Object.keys(WIDGETS).map((f) => [f, { type: "string" }])),
+      },
+    },
+  } as unknown as IntegrationManifestAuth;
+
+  function expectWidget(markup: string, field: string, widget: "password" | "textarea" | "text") {
+    const tag = inputTag(markup, field);
+    if (widget === "textarea") {
+      expect(tag).toStartWith("<textarea");
+    } else {
+      expect(tag).toStartWith("<input");
+      expect(tag).toContain(`type="${widget}"`);
+    }
+  }
+
+  for (const [field, widget] of Object.entries(WIDGETS)) {
+    it(`renders ${field} as ${widget}`, () => expectWidget(html(auth), field, widget));
+  }
+
+  it("masks the api_key field of an api_key auth with no declared schema", () => {
+    const bare = { type: "api_key" } as unknown as IntegrationManifestAuth;
+    expectWidget(html(bare), "api_key", "password");
+  });
+
+  it("renders the PEM fields of an mtls auth with no declared schema as textareas", () => {
+    const markup = html({ type: "mtls" } as unknown as IntegrationManifestAuth);
+    expectWidget(markup, "client_key", "textarea");
+    expectWidget(markup, "client_cert", "textarea");
+  });
+});
+
 describe("initialCredentialValues", () => {
   it("seeds exactly the defaults the auth declares", () => {
     // A default the form displays but does not seed would be a value under the
