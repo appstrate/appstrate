@@ -28,12 +28,13 @@ const MAX_CAUSE_DEPTH = 5;
  * ## Why this exists at all
  *
  * `{ cause }` is threaded through the codebase, and until this function
- * NOTHING rendered it. Two measurements, both on Bun 1.3:
+ * NOTHING rendered it. Two measurements, the same on Bun 1.3.14 and 1.4.2:
  *
  *  - `new Error(outer, { cause: inner }).stack.includes(inner.message)` is
- *    **false**. V8 builds `.stack` at construction and never walks the chain,
- *    so a log line carrying `err.message` + `err.stack` — which is what the API
- *    error handler emitted — contains no trace of the cause.
+ *    **false**. JavaScriptCore builds `.stack` at construction and never
+ *    walks the chain, so a log line carrying `err.message` + `err.stack` —
+ *    which is what the API error handler emitted — contains no trace of the
+ *    cause.
  *  - pino DOES walk the chain, and needs no configuration to do it: its `err`
  *    serializer is on by default and emits `message`/`stack` with every cause
  *    appended. But it only fires for a property literally named `err` holding
