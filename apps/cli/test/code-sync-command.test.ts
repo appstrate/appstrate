@@ -90,7 +90,7 @@ describe("code sync — claude-plugin target", () => {
     expect(manifest.name).toBe("appstrate");
     expect(manifest).not.toHaveProperty("version");
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
-      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1",\n      "headers": {\n        "X-Space-Id": "spc_1"\n      }\n    }\n  }\n}\n',
+      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1/s/spc_1"\n    }\n  }\n}\n',
     );
     expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate code sync");
 
@@ -135,15 +135,14 @@ describe("code sync — claude-plugin target", () => {
     expect(server.downloads()).toBe(1);
   });
 
-  for (const [changed, profile, url, spaceId] of [
-    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2", "spc_1"],
+  for (const [changed, profile, url] of [
+    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2/s/spc_1"],
     [
       "instance",
       { instance: "https://other.example.com/" },
-      "https://other.example.com/api/mcp/o/org_1",
-      "spc_1",
+      "https://other.example.com/api/mcp/o/org_1/s/spc_1",
     ],
-    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1", "spc_2"],
+    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1/s/spc_2"],
   ] as const) {
     it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
       const server = createSkillServer(ONE_SKILL);
@@ -157,7 +156,7 @@ describe("code sync — claude-plugin target", () => {
       await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
       expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
-        mcpServers: { appstrate: { type: "http", url, headers: { "X-Space-Id": spaceId } } },
+        mcpServers: { appstrate: { type: "http", url } },
       });
       expect(await readText(skillPath)).toBe(before);
       expect(server.downloads()).toBe(1);
@@ -196,8 +195,7 @@ describe("code sync — claude-plugin target", () => {
       mcpServers: {
         appstrate: {
           type: "http",
-          url: "https://app.example.com/api/mcp/o/org_1",
-          headers: { "X-Space-Id": "spc_1" },
+          url: "https://app.example.com/api/mcp/o/org_1/s/spc_1",
         },
       },
     });
@@ -1739,10 +1737,8 @@ describe("code sync — multiple spaces", () => {
     await codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1", "Library", "spc_2"] }, io);
     expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
     expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
-        "X-Space-Id"
-      ],
-    ).toBe("spc_1");
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_1");
     expect(await exists(join(pluginRoot(), "skills", "other", "SKILL.md"))).toBe(true);
   });
 });
@@ -1793,7 +1789,7 @@ describe("code sync — active context replacement", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
-    ).toBe("https://app.example.com/api/mcp/o/org_2");
+    ).toBe("https://app.example.com/api/mcp/o/org_2/s/spc_1");
   });
 
   it("rejects a context changed while downloading before writing any installation", async () => {
@@ -1832,10 +1828,8 @@ describe("code sync — active context replacement", () => {
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/pdf-tools");
     expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
-        "X-Space-Id"
-      ],
-    ).toBe("spc_2");
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_2");
     expect(await readText(skillPath)).toBe(before);
     expect(server.downloads()).toBe(0);
   });

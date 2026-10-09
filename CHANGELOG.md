@@ -95,7 +95,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unchanged, and a new URL form pins one too: `/api/mcp/o/<org>/s/<space>`,
   for clients that cannot send headers (claude.ai), with the same OAuth token.
   The organization settings' "MCP connection" block picks between "All my
-  spaces" and one space and builds the URL and client snippets for it. A caller who reaches no space is refused with a `403` instead of
+  spaces" and one space and builds the URL and client snippets for it. The
+  CLI's Claude Code plugin pins its MCP server the same way
+  (`…/s/<pinned space>` in `.mcp.json`, no header): Claude Code keys an MCP
+  login on the server URL and headers, so the first sync after the upgrade
+  asks for the plugin's OAuth login once, as a space switch already did. A caller who reaches no space is refused with a `403` instead of
   landing on the default space, and no request lands on the default space by
   omission any more: the in-process re-entry fallback is gone.
 
@@ -366,6 +370,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The OAuth consent and device-activation pages introduce the scope list
+  with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover
+  of the application → space rename (#1825).
+
 - **A login connection that reports no identity is no longer just
   `Connexion N`** (#1818): a `connect.login` or `connect.tool` connection is
   named, as a pasted credential already is, after its one non-secret required
@@ -478,6 +486,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   does not know yet** (#1848).
 
 ### Security
+
+- **A self-registered OAuth client no longer names the platform's pages and
+  emails** (#1825). An `instance`-level client took its own `name` as the
+  brand of the login, consent and account pages and as the sender name of the
+  account emails; a client registered through DCR or CIMD chooses that name
+  itself, so it could present the platform as whatever it claimed to be. Only
+  an operator-declared client (`OIDC_INSTANCE_CLIENTS`) names the brand now; a
+  self-registered one gets the platform's.
 
 - **A run never loads Pi extensions from its agent directory** (#1820). In
   process mode that directory is `/tmp/pi-agent`, under the world-writable
