@@ -30,6 +30,7 @@ export function useSchemaFormLabels(): Required<SchemaFormLabels> {
       removeItem: t("btn.remove", { ns: "common" }),
       moveItemUp: t("btn.moveUp", { ns: "common" }),
       moveItemDown: t("btn.moveDown", { ns: "common" }),
+      noOptions: t("toolbar.noResults", { ns: "common" }),
       // Ajv's `params` carry the bound (`limit`, also the plural `count`), the `format`…
       validationError: (keyword, params) =>
         t(`validation.schema.${keyword}`, {

@@ -9,6 +9,7 @@ import type { WidgetProps } from "@rjsf/utils";
 import Select, { type StylesConfig } from "react-select";
 import { cn } from "../cn.ts";
 import { LABEL_CLASS } from "./primitives.tsx";
+import type { SchemaFormContext } from "./context.ts";
 export { FileWidget } from "./file-widget.tsx";
 
 interface EnumOption {
@@ -32,7 +33,10 @@ const selectStyles: StylesConfig<EnumOption> = {
     color: "inherit",
   }),
   multiValue: (base) => ({ ...base, backgroundColor: "var(--secondary)" }),
-  input: (base) => ({ ...base, color: "inherit" }),
+  // The app's base style rings every focused `<input>`: the one react-select
+  // keeps inside the control would draw a box around the typed text, while the
+  // control itself already shows the focus.
+  input: (base) => ({ ...base, color: "inherit", "input:focus": { boxShadow: "none" } }),
   singleValue: (base) => ({ ...base, color: "inherit" }),
   placeholder: (base) => ({ ...base, color: "var(--muted-foreground)" }),
 };
@@ -79,6 +83,12 @@ export function CheckboxWidget(props: WidgetProps) {
   );
 }
 
+/** The select's "no match" sentence, from the form's labels (translated by the app). */
+function noOptionsMessage(props: WidgetProps): () => string {
+  const labels = ((props.registry?.formContext ?? {}) as SchemaFormContext).labels;
+  return () => labels?.noOptions ?? "No options";
+}
+
 export function SelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options, placeholder } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
@@ -94,6 +104,7 @@ export function SelectWidget(props: WidgetProps) {
       value={selected}
       placeholder={placeholder ?? ""}
       onChange={(opt) => onChange(opt ? opt.value : undefined)}
+      noOptionsMessage={noOptionsMessage(props)}
       classNamePrefix="rjsf-select"
       styles={selectStyles}
     />
@@ -116,6 +127,7 @@ export function MultiSelectWidget(props: WidgetProps) {
       options={enumOptions}
       value={selected}
       onChange={(sel) => onChange(sel.map((s) => s.value))}
+      noOptionsMessage={noOptionsMessage(props)}
       classNamePrefix="rjsf-ms"
       styles={selectStyles as StylesConfig<EnumOption, true>}
     />
