@@ -114,11 +114,10 @@ interface UpstreamRequest {
 
 /**
  * A keep-alive HTTP/1.1 upstream on `host` recording every request it gets and counting the
- * connections it accepts; it answers each one `ok`, after `delayMs(url)`.
+ * connections it accepts; it answers each one `ok`.
  */
 function startHttpUpstream(
   host = "127.0.0.1",
-  delayMs: (url: string) => number = () => 0,
 ): Promise<{ port: number; requests: UpstreamRequest[]; connections: () => number }> {
   const requests: UpstreamRequest[] = [];
   let connections = 0;
@@ -128,7 +127,7 @@ function startHttpUpstream(
       req.on("data", (chunk: Buffer) => (body += chunk.toString("latin1")));
       req.on("end", () => {
         requests.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
-        setTimeout(() => res.end("ok"), delayMs(req.url ?? ""));
+        res.end("ok");
       });
     });
     server.on("connection", () => connections++);
@@ -162,19 +161,15 @@ function exchange(proxyPort: number, chunks: string[]): Promise<string> {
 }
 
 /**
- * Send `requests` on ONE connection, each once the previous answer is complete (all at once when
- * `pipelined`); resolves with every answer, or those received before the connection closed.
+ * Send `requests` on ONE connection, each once the previous answer is complete; resolves with
+ * every answer, or those received before the connection closed.
  */
-function keepAliveExchange(
-  proxyPort: number,
-  requests: string[],
-  pipelined = false,
-): Promise<string[]> {
+function keepAliveExchange(proxyPort: number, requests: string[]): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const responses: string[] = [];
     let buf = "";
     const socket = netConnect(proxyPort, "127.0.0.1", () => {
-      socket.write(pipelined ? requests.join("") : requests[0]!);
+      socket.write(requests[0]!);
     });
     const finish = () => {
       clearTimeout(timer);
@@ -191,7 +186,7 @@ function keepAliveExchange(
         responses.push(buf.slice(0, headEnd + 4 + length));
         buf = buf.slice(headEnd + 4 + length);
         if (responses.length === requests.length) return finish();
-        if (!pipelined) socket.write(requests[responses.length]!);
+        socket.write(requests[responses.length]!);
       }
     });
     socket.on("error", () => {}); // a reset surfaces as `close`
@@ -393,18 +388,6 @@ describe("integration-egress-listener (#543)", () => {
     expect(res.echoed).toBe("ping");
   });
 
-  it("tunnels past the preamble deadline when DNS is slow: it bounds the head only", async () => {
-    const echo = await startTcpEcho();
-    const { handle } = await makeListener({
-      preambleTimeoutMs: 300,
-      resolveHostFn: () =>
-        new Promise<string[]>((res) => setTimeout(() => res(["127.0.0.1"]), 600)),
-    });
-    const res = await connectAndProbe(handle.address().port, `slow.example:${echo.port}`, "ping");
-    expect(res.statusCode).toBe(200);
-    expect(res.echoed).toBe("ping");
-  });
-
   it("refuses a host the egress policy does not grant, before resolving it", async () => {
     const echo = await startTcpEcho();
     let resolved = false;
@@ -512,7 +495,7 @@ describe("integration-egress-listener (#543)", () => {
       const authority = `app.example:${upstream.port}`;
 
       const response = await exchange(handle.address().port, [
-        get(`http://${authority}/path?q=1`, [
+        get(`http://${authority}/a/b?x=1&y=2`, [
           "Host: vhost.other.example", // replaced by the URL authority (RFC 9112 §3.2.2)
           "Proxy-Connection: keep-alive",
           "Proxy-Authorization: Basic dXNlcjpwdw==",
@@ -526,30 +509,13 @@ describe("integration-egress-listener (#543)", () => {
       expect(response.endsWith("\r\n\r\nok")).toBe(true);
       expect(upstream.requests).toHaveLength(1);
       const [request] = upstream.requests;
-      expect(request?.url).toBe("/path?q=1");
+      expect(request?.url).toBe("/a/b?x=1&y=2");
       expect(request?.headers.host).toBe(authority);
       expect(request?.headers["x-keep"]).toBe("1");
       for (const name of ["proxy-connection", "proxy-authorization", "x-hop"]) {
         expect(request?.headers[name]).toBeUndefined();
       }
       expect(events).toContainEqual({ kind: "tunnel-opened", target: authority });
-    });
-
-    it("forwards the path and query byte for byte", async () => {
-      const upstream = await startHttpUpstream();
-      const { handle } = await makeListener({ resolveHostFn: async () => ["127.0.0.1"] });
-      const authority = `app.example:${upstream.port}`;
-      const cases: Array<[string, string]> = [
-        ["/a/%2e%2e/b?x='y'&z=<w>", "/a/%2e%2e/b?x='y'&z=<w>"],
-        ["/a/../b/./c", "/a/../b/./c"],
-        ["?q=%41", "/?q=%41"],
-      ];
-
-      for (const [sent] of cases) {
-        const response = await exchange(handle.address().port, [get(`http://${authority}${sent}`)]);
-        expect(statusOf(response)).toBe(200);
-      }
-      expect(upstream.requests.map((r) => r.url)).toEqual(cases.map(([, received]) => received));
     });
 
     it("relays a request body intact, past the head and across segments", async () => {
@@ -623,7 +589,7 @@ describe("integration-egress-listener (#543)", () => {
       expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
     });
 
-    it("answers 502 when the vetted upstream cannot be reached", async () => {
+    it("answers 502 when the vetted upstream cannot be reached, closing as the client asked", async () => {
       const deadPort = await new Promise<number>((resolve) => {
         const server = netCreateServer().listen(0, "127.0.0.1", () => {
           const addr = server.address();
@@ -633,8 +599,13 @@ describe("integration-egress-listener (#543)", () => {
       const { handle, events } = await makeListener();
       const authority = `127.0.0.1:${deadPort}`;
 
-      const response = await exchange(handle.address().port, [get(`http://${authority}/`)]);
-      expect(statusOf(response)).toBe(502);
+      // `exchange` resolves only once the connection closes: HTTP/1.0 asks for that by default.
+      for (const request of [
+        get(`http://${authority}/`),
+        `GET http://${authority}/ HTTP/1.0\r\n\r\n`,
+      ]) {
+        expect(statusOf(await exchange(handle.address().port, [request]))).toBe(502);
+      }
       expect(events.some((e) => e.kind === "tunnel-error" && e.target === authority)).toBe(true);
     });
 
@@ -714,35 +685,6 @@ describe("integration-egress-listener (#543)", () => {
       expect(events.some((e) => e.kind === "tunnel-error")).toBe(true);
     });
 
-    it("drops the upstream request when the client leaves mid-answer", async () => {
-      let markClosed!: () => void;
-      const upstreamClosed = new Promise<void>((res) => (markClosed = res));
-      const server = createHttpServer((_req, res) => {
-        res.writeHead(200);
-        const streaming = setInterval(() => res.write("x"), 20);
-        res.once("close", () => {
-          clearInterval(streaming);
-          markClosed();
-        });
-      });
-      httpServers.push(server);
-      await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
-      const { port } = server.address() as { port: number };
-      const { handle } = await makeListener();
-
-      const client = netConnect(handle.address().port, "127.0.0.1", () =>
-        client.write(get(`http://127.0.0.1:${port}/`)),
-      );
-      client.on("error", () => {});
-      await new Promise((res) => client.once("data", res));
-      client.destroy();
-      const outcome = await Promise.race([
-        upstreamClosed.then(() => "closed"),
-        new Promise((res) => setTimeout(() => res("still streaming"), 1000)),
-      ]);
-      expect(outcome).toBe("closed");
-    });
-
     it("shares no upstream connection between two runners' listeners", async () => {
       const upstream = await startHttpUpstream();
       const resolveHostFn = async () => ["127.0.0.1"];
@@ -769,11 +711,12 @@ describe("integration-egress-listener (#543)", () => {
       expect(events).toEqual([]);
     });
 
-    it("answers 400 to an oversized or malformed head, userinfo or a bad port", async () => {
+    it("answers 431 to an oversized head, 400 to a malformed one, userinfo or a bad port", async () => {
       const { handle, events } = await makeListener();
       const port = handle.address().port;
+      const oversized = get("http://127.0.0.1:9/", [`X-Big: ${"a".repeat(20_000)}`]);
+      expect(statusOf(await exchange(port, [oversized]))).toBe(431);
       for (const request of [
-        get("http://127.0.0.1:9/", [`X-Big: ${"a".repeat(20_000)}`]),
         get("http://127.0.0.1:9/", ["Host: 127.0.0.1:9", " folded"]),
         get("http://127.0.0.1:9/", ["Host : 127.0.0.1:9"]),
         get("http://user:pw@127.0.0.1:9/"),
@@ -785,63 +728,33 @@ describe("integration-egress-listener (#543)", () => {
       expect(events).toEqual([]);
     });
 
-    it("closes a connection whose request head never completes, at the preamble deadline", async () => {
-      const { handle, events } = await makeListener({ preambleTimeoutMs: 200 });
-      const partial = "GET http://127.0.0.1:9/ HTTP/1.1\r\nX-Partial: 1";
-      expect(await exchange(handle.address().port, [partial])).toBe("");
-      expect(events).toEqual([]);
-    });
-
     describe("every request on a kept-alive connection is vetted", () => {
       const keepAlive = (authority: string, path: string) =>
         get(`http://${authority}${path}`, ["Connection: keep-alive"]);
 
-      for (const [mode, pipelined] of [
-        ["in turn", false],
-        ["pipelined", true],
-      ] as const) {
-        it(`refuses an unauthorized one after a served one (${mode})`, async () => {
-          const upstream = await startHttpUpstream();
-          const { handle, events } = await makeListener({
-            egressPolicy: {
-              allowsAuthority: (h) => h === "allowed.example",
-              skipsSsrfFloor: () => false,
-            },
-            resolveHostFn: async () => ["127.0.0.1"],
-          });
-          const allowed = `allowed.example:${upstream.port}`;
-          const denied = `denied.example:${upstream.port}`;
-
-          const responses = await keepAliveExchange(
-            handle.address().port,
-            [keepAlive(allowed, "/first"), keepAlive(denied, "/second")],
-            pipelined,
-          );
-          expect(responses.map(statusOf)).toEqual([200, 403]);
-          expect(upstream.requests.map((r) => r.url)).toEqual(["/first"]);
-          expect(events).toContainEqual({
-            kind: "tunnel-refused",
-            target: denied,
-            reason: "not-authorized",
-          });
-        });
-      }
-
-      it("keeps the head deadline off while a pipelined request is still in flight", async () => {
-        const delayMs = (url: string) => (url === "/slow" ? 600 : 0);
-        const upstream = await startHttpUpstream("127.0.0.1", delayMs);
-        const { handle } = await makeListener({
-          preambleTimeoutMs: 200,
+      it("refuses an unauthorized one after a served one", async () => {
+        const upstream = await startHttpUpstream();
+        const { handle, events } = await makeListener({
+          egressPolicy: {
+            allowsAuthority: (h) => h === "allowed.example",
+            skipsSsrfFloor: () => false,
+          },
           resolveHostFn: async () => ["127.0.0.1"],
         });
-        const authority = `app.example:${upstream.port}`;
+        const allowed = `allowed.example:${upstream.port}`;
+        const denied = `denied.example:${upstream.port}`;
 
-        const responses = await keepAliveExchange(
-          handle.address().port,
-          [keepAlive(authority, "/fast"), keepAlive(authority, "/slow")],
-          true,
-        );
-        expect(responses.map(statusOf)).toEqual([200, 200]);
+        const responses = await keepAliveExchange(handle.address().port, [
+          keepAlive(allowed, "/first"),
+          keepAlive(denied, "/second"),
+        ]);
+        expect(responses.map(statusOf)).toEqual([200, 403]);
+        expect(upstream.requests.map((r) => r.url)).toEqual(["/first"]);
+        expect(events).toContainEqual({
+          kind: "tunnel-refused",
+          target: denied,
+          reason: "not-authorized",
+        });
       });
 
       it("serves an authorized one for another host, with its own Host", async () => {

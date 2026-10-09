@@ -96,29 +96,29 @@ interface HttpTarget {
   port: number;
   authority: string;
   hostHeader: string;
-  /** Origin-form target: the raw path and query, never re-serialised. */
   path: string;
 }
 
-/** `undefined` for a non-`http://` target, `null` for a malformed, userinfo or ambiguous one. */
+/** `undefined` for a non-`http://` target, `null` for a malformed or userinfo one. */
 function httpTarget(raw: string): HttpTarget | null | undefined {
   if (!/^http:\/\//i.test(raw)) return undefined;
-  const rest = raw.slice("http://".length);
-  const end = rest.search(/[/?]/);
-  const url = URL.parse(`http://${end === -1 ? rest : rest.slice(0, end)}/`);
-  if (!url?.hostname || url.username || url.password || url.pathname !== "/" || url.hash) {
-    return null;
-  }
+  const url = URL.parse(raw);
+  if (!url?.hostname || url.username || url.password) return null;
   const port = url.port ? Number(url.port) : 80;
   if (port < 1) return null;
-  const path = end === -1 ? "/" : rest[end] === "?" ? `/${rest.slice(end)}` : rest.slice(end);
   return {
     host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
     port,
     authority: `${url.hostname}:${port}`,
     hostHeader: url.host,
-    path,
+    path: url.pathname + url.search,
   };
+}
+
+/** Whether the client asked for the connection to close after this exchange (RFC 9112 §9.3). */
+function wantsClose(req: IncomingMessage): boolean {
+  const tokens = (req.headers.connection ?? "").split(",").map((t) => t.trim().toLowerCase());
+  return req.httpVersion === "1.0" ? !tokens.includes("keep-alive") : tokens.includes("close");
 }
 
 export interface EgressListenerEvent {
@@ -144,7 +144,7 @@ interface CreateEgressListenerOptions {
   resolveHostFn?: HostResolver;
   egressPolicy: AuthorityPolicy;
   isPeerAllowed: PeerCheck;
-  /** Deadline for a request head, and for a tunnel's first bytes while both sides are silent. */
+  /** Deadline for a tunnel's first bytes after the 200, while both sides are silent. */
   preambleTimeoutMs?: number;
 }
 
@@ -289,32 +289,14 @@ export function createIntegrationEgressListener(
   };
 
   const server = createHttpServer();
-  server.on("connection", (socket: Socket) => {
-    void admitted(socket);
-    // Bounds a request head and an idle keep-alive connection; lifted while a handler owns it.
-    socket.setTimeout(preambleTimeoutMs);
-    socket.on("timeout", () => socket.destroy());
-  });
-  server.on("clientError", (_err: Error, socket: Socket) => {
-    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
-    else socket.destroy();
-  });
-  // Requests in flight per connection: the head deadline is re-armed only once none is left.
-  const inFlight = new WeakMap<Socket, number>();
+  server.on("connection", (socket: Socket) => void admitted(socket));
   server.on("request", (req: IncomingMessage, res: ServerResponse) => {
-    const { socket } = req;
-    inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
-    socket.setTimeout(0); // the upstream request has its own deadline
-    res.once("finish", () => {
-      const left = (inFlight.get(socket) ?? 1) - 1;
-      inFlight.set(socket, left);
-      if (left === 0) socket.setTimeout(preambleTimeoutMs);
-    });
+    // Bun 1.3 may keep the connection open after an asynchronous answer, whatever the client asked.
+    if (wantsClose(req)) res.once("finish", () => req.socket.end());
     handleRequest(req, res).catch(crashed(() => res.destroy()));
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
-    // The dial has its own timeout, the relay its idle window; paused until the 200.
-    clientSocket.setTimeout(0);
+    // Nothing is read from the client before its target is vetted and the 200 sent.
     clientSocket.pause();
     clientSocket.on("error", () => clientSocket.destroy());
     handleConnect(req, clientSocket, head).catch(crashed(() => clientSocket.destroy()));

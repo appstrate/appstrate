@@ -87,8 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had no per-run network, so proxy-aware clients had no egress and the
   others had unfiltered egress. Removing the variable alone leaves every
   `source.kind: "local"` integration (e.g. `@appstrate/github-git`) refused
-  at spawn, as `RUN_ADAPTER=process` refuses them; to keep them, run
-  `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`.
+  at spawn: only `docker` and `firecracker` run them.
 
 - **Before the deploy, review `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). Every
   listed host that is not loopback becomes reachable by the local
@@ -104,13 +103,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **On `RUN_ADAPTER=firecracker`, narrow the runner host's
   `FIRECRACKER_EGRESS_DENY_CIDRS` to reach a listed private host** (#1819).
   Its default drops RFC1918, CGNAT `100.64.0.0/10` (Tailscale included),
-  link-local and other reserved ranges, so a run never reaches such a host,
-  exempt or not, until the list leaves its range out. The cost: the list is
-  the runner host's forward chain for every guest, so narrowing a range
-  removes that range's L3 backstop for every run on that host, leaving only
-  the sidecar's app-layer floor. That exemption ships in the sidecar, i.e. in
-  this release's Firecracker rootfs: pin the runner's artifacts to this
-  release.
+  link-local and other reserved ranges, so a run never reaches such a host
+  until the list leaves its range out. The cost: the list is the runner
+  host's forward chain for every guest, so narrowing a range removes its L3
+  backstop for every run on that host, leaving only the sidecar's app-layer
+  floor. The exemption ships in this release's Firecracker rootfs: pin the
+  runner's artifacts to this release.
 
 ### Changed
 
@@ -397,29 +395,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A proxy-aware local runner reaches `http://` targets through its egress
   listener** (#1819). The listener of a runner with nothing to inject
   answered 405 to the absolute-form `http://` request such a client sends to
-  `HTTP_PROXY`. It is now an HTTP proxy like the agent's forward proxy:
-  besides `CONNECT`, it vets each absolute-form `http://` request like a
-  `CONNECT` and forwards it with the URL authority as `Host`, path and query
-  verbatim, hop-by-hop headers stripped from the request and the response,
-  keep-alive allowed; each runner's relay uses its own upstream connections.
-  Origin-form and `https://` absolute-form requests answer 405, and the
-  listener that injects credentials still refuses plain HTTP.
-- **A sidecar tunnel no longer discards bytes queued for one side when the
-  other side closes first** (#1819). On every tunnel (the runner egress
-  listener's `CONNECT`, the transparent plane, the agent's forward proxy), a
-  clean close now flushes what is queued for the other side before
-  destroying it, a client that closes while the upstream is still dialing
-  takes the upstream down with it, and the idle timeout closes both sides.
-- **An abandoned relayed `http://` request tears down its upstream
-  request** (#1819): a client gone mid-response no longer leaves it running,
-  on the runner egress listener and the agent's forward proxy.
-- **A relayed `http://` request whose upstream answers `101` gets a `502`**
-  on the runner egress listener and the agent's forward proxy, instead of
-  leaving both sockets open forever (#1819). The forward proxy now also
-  strips hop-by-hop headers from responses (RFC 9110 §7.6.1).
-- **A `CONNECT` to a port outside 1–65535 (`0`, `70000`, a non-numeric
-  port) answers `400`** on the runner egress listener and the agent's
-  forward proxy, and such a `CONNECT` no longer crashes the sidecar (#1819).
+  `HTTP_PROXY`. It now vets each one like a `CONNECT` and forwards it with
+  the URL authority as `Host` and hop-by-hop headers stripped both ways, on
+  upstream connections no other runner shares. Origin-form and `https://`
+  absolute-form requests answer 405; the listener that injects credentials
+  still refuses plain HTTP.
+- **Sidecar tunnels and proxies close cleanly** (#1819). On every tunnel
+  (runner egress `CONNECT`, transparent plane, the agent's forward proxy) a
+  clean close flushes what is queued for the other side first, a client
+  gone during the dial takes the upstream down, and the idle timeout closes
+  both sides. On the runner egress listener and the forward proxy, a relayed
+  `http://` request answered `101` gets `502` instead of holding both sockets
+  open, and a `CONNECT` port outside 1–65535 answers `400` instead of
+  crashing the sidecar. The forward proxy also strips response hop-by-hop
+  headers.
 - **A new organization's starter agent runs from the CLI, the chat and the
   Claude Code plugin on its first try** (#1789). It was created as a draft
   only, so `appstrate run @<scope>/hello-world`, which runs the latest

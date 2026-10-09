@@ -69,14 +69,11 @@ export function netConnectWithTimeout(
 }
 
 /**
- * Tie `to` to `from`: a half-close is passed on (the reply still flows back), a close ends `to`
- * once flushed then destroys it, an error destroys it at once, as does any close while dialing.
+ * Tie `to` to `from`: a close ends `to` once flushed then destroys it; an error, or a close while
+ * `to` is still dialing, destroys it at once.
  */
 function closeWith(from: Socket, to: Socket): void {
   from.on("error", () => to.destroy());
-  from.once("end", () => {
-    if (!to.destroyed) to.end();
-  });
   from.once("close", () => {
     if (to.connecting) to.destroy();
     else if (!to.destroyed) to.end(() => to.destroy());
@@ -142,10 +139,6 @@ export function forwardHttpRequest(
   });
   req.on("error", () => proxyReq.destroy());
   res.on("error", () => proxyReq.destroy());
-  // A client gone mid-answer: drop the upstream, or it keeps streaming into a sidecar socket.
-  res.on("close", () => {
-    if (!res.writableFinished) proxyReq.destroy();
-  });
   proxyReq.on("error", fail);
   req.pipe(proxyReq);
 }

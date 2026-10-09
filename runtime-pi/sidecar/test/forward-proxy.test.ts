@@ -3,7 +3,7 @@
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { createServer } from "node:http";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
-import { connect as netConnect, createServer as createNetServer } from "node:net";
+import { connect as netConnect } from "node:net";
 import { createForwardProxy, type ForwardProxyResult } from "../forward-proxy.ts";
 import { logger } from "../logger.ts";
 
@@ -439,51 +439,6 @@ describe("CONNECT tunneling", () => {
 
     expect((await connectViaProxy(port, "example.com:70000")).statusCode).toBe(400);
     expect((await connectViaProxy(port, `127.0.0.1:${echo.port}`)).statusCode).toBe(200);
-  });
-
-  it("carries the upstream's reply back after the client half-closes (#1819)", async () => {
-    // Answers only once the client's FIN arrived, like a request-then-shutdown(WR) client expects.
-    const upstream = createNetServer({ allowHalfOpen: true }, (socket) => {
-      let got = "";
-      socket.on("data", (chunk: Buffer) => (got += chunk.toString()));
-      socket.on("end", () => socket.end(`reply-to:${got}`));
-      socket.on("error", () => {});
-    });
-    await new Promise<void>((res) => upstream.listen(0, "127.0.0.1", () => res()));
-    const upstreamPort = (upstream.address() as { port: number }).port;
-    const proxy = makeProxy({ resolveHostFn: async () => ["127.0.0.1"] });
-    await proxy.ready;
-
-    try {
-      const received = await new Promise<string>((resolve, reject) => {
-        let buf = "";
-        let established = false;
-        const target = `svc.example:${upstreamPort}`;
-        const client = netConnect(
-          { port: proxy.address().port, host: "127.0.0.1", allowHalfOpen: true },
-          () => client.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`),
-        );
-        client.on("data", (chunk: Buffer) => {
-          buf += chunk.toString();
-          if (established || !buf.includes("\r\n\r\n")) return;
-          established = true;
-          buf = buf.slice(buf.indexOf("\r\n\r\n") + 4);
-          client.end("hello");
-        });
-        client.on("error", reject);
-        client.on("close", () => {
-          clearTimeout(timer);
-          resolve(buf);
-        });
-        const timer = setTimeout(() => {
-          client.destroy();
-          reject(new Error("half-close timeout"));
-        }, 3000);
-      });
-      expect(received).toBe("reply-to:hello");
-    } finally {
-      await new Promise<void>((res) => upstream.close(() => res()));
-    }
   });
 });
 

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `tieSockets` (#1819): how one side of a relay tears down the other. A
- * half-close of `from` is passed on and `to` keeps carrying the reply; a close
+ * `tieSockets` (#1819): how one side of a relay tears down the other. A close
  * flushes what is still queued for `to`, then destroys it; an error on `from`,
  * or a close while `to` is still connecting, destroys `to` at once.
  */
@@ -63,25 +62,6 @@ async function backedUpSocket(): Promise<{ to: Socket; peer: Socket }> {
 }
 
 describe("tieSockets", () => {
-  it("passes a half-close of `from` on, and keeps `to` open for the reply", async () => {
-    let accept!: (socket: Socket) => void;
-    const accepted = new Promise<Socket>((res) => (accept = res));
-    const to = netConnect(await listen((s) => accept(s)), "127.0.0.1");
-    sockets.push(to);
-    to.on("error", () => {});
-    const peer = await accepted;
-    peer.on("end", () => peer.end("reply"));
-    const from = new Socket();
-    sockets.push(from);
-    tieSockets(from, to);
-
-    let reply = "";
-    to.on("data", (chunk: Buffer) => (reply += chunk.toString()));
-    from.emit("end");
-    await new Promise<void>((res) => to.once("end", () => res()));
-    expect(reply).toBe("reply");
-  });
-
   it("flushes everything queued for `to` before destroying it when `from` closes cleanly", async () => {
     const { to, peer } = await backedUpSocket();
     const { accepted: from, client: fromPeer } = await tcpPair();
