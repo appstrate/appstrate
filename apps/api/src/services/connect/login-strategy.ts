@@ -41,17 +41,11 @@ import {
 import { resolveConnectionVariables } from "./connection-variables.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
-/**
- * The answer to a login that failed for a reason the submitter can act on: credentials refused, a
- * value the request cannot carry, a target down or slow. Any other failure is a defect of the
- * integration and stays the caller's generic 500. Neither the inputs nor the upstream body are
- * ever echoed.
- */
+/** A login failure the submitter can act on, as its 4xx/5xx; any other stays the caller's 500. */
 function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
   if (!(err instanceof LoginError)) return err;
   if (err.reason === "upstream_failed" || err.reason === "timeout") {
-    // The operator's half of a 502/504 whose body says nothing of the cause. The message names a
-    // status, a delay or an error class — never a request URL, an input or the upstream body.
+    // The cause the 502/504 body leaves out: a status, a delay or an error class, never an input.
     logger.warn("connect.login did not complete", {
       integrationId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -88,7 +82,6 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.login declaration`);
     }
     requireNonEmptyCredentials(credentials);
-    // Typed by the schema: a JSON body takes a `number` field as a number, a `string` one as a string.
     const inputs = assertCredentialsMatchSchema(auth.credentials?.schema, credentials);
 
     const variables = await resolveConnectionVariables(

@@ -5,9 +5,8 @@
  *
  * Executes a manifest-declared single login request: substitute `{{...}}`
  * placeholders (from the transient bootstrap `inputs`) into one HTTP request,
- * each value encoded for the place it takes (URL component, form or JSON or XML
- * body, header value — see {@link renderRequest}), fire it, and extract the
- * injectable token/cookie values declared in `connect.login.outputs` into
+ * each value encoded for its place ({@link renderRequest}), fire it, and extract
+ * the injectable token/cookie values declared in `connect.login.outputs` into
  * `outputs` (the final injectable bundle).
  * Intentionally stateless: no request chaining, no cookie jar, no redirect
  * following. Stateful flows (multi-cookie sessions, TLS impersonation, refresh,
@@ -137,10 +136,7 @@ export interface LoginConfig {
 }
 
 interface LoginContext {
-  /**
-   * Transient bootstrap secrets (e.g. password) for `{{...}}`, as submitted: a value that is not a
-   * string goes as its JSON text, or as that JSON value in a bare JSON position. Never persisted.
-   */
+  /** Transient bootstrap secrets (e.g. password) for `{{...}}`, typed. Never persisted. */
   inputs: Record<string, unknown>;
   /** Integration URL allowlist (global). The request URL must match unless allowAllUris. */
   authorizedUris: string[] | null;
@@ -158,15 +154,9 @@ interface LoginResult {
 }
 
 /**
- * Structured failure — carries the reason; never the response body nor an input value.
- *
- *  - `rejected`: the submitted credentials were refused (`upstreamStatus`; see
- *    {@link failedStatusReason});
- *  - `upstream_failed`: the target could not be reached, or answered a retryable status;
- *  - `timeout`: the target did not answer within `request_timeout_ms` (`timeoutMs`);
- *  - `invalid_input`: input `field` cannot be encoded where the request carries it;
- *  - `url_not_allowed` with `fields`: the URL whose authority those inputs filled is refused;
- *  - every other reason is a defect of the integration.
+ * Structured failure — never the response body nor an input value. `rejected`, `upstream_failed`
+ * (see {@link failedStatusReason}), `timeout`, `invalid_input` (`field`) and `url_not_allowed` with
+ * `fields` are the submitter's or the target's; every other reason is a defect of the integration.
  */
 export class LoginError extends Error {
   readonly upstreamStatus?: number;
@@ -486,10 +476,7 @@ function applyOutput(
   }
 }
 
-/**
- * The request with every `{{name}}` replaced by its encoded input ({@link substituteRequest}), and
- * the declared `content_type` as a `Content-Type` header unless one is written.
- */
+/** {@link substituteRequest}, plus `content_type` as a `Content-Type` header unless one is written. */
 function renderRequest(
   request: LoginRequest,
   inputs: Record<string, unknown>,
@@ -515,12 +502,10 @@ function renderRequest(
   return rendered;
 }
 
-/** The answers that say "these credentials are refused" when no `success_criteria` judge. */
 const REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 422]);
-/** The answers that say "this is not the login endpoint", whatever the criteria. */
 const NOT_A_LOGIN_STATUSES: ReadonlySet<number> = new Set([404, 405, 410]);
 
-/** Who a status that failed the success test blames: the target, the submitter or the integration. */
+/** Who a status failing the success test blames: a 404/405/410 is never a login endpoint. */
 function failedStatusReason(status: number, login: LoginRequestSpec): LoginError["reason"] {
   if (isRetryableHttpStatus(status)) return "upstream_failed";
   if (NOT_A_LOGIN_STATUSES.has(status)) return "unexpected_status";
@@ -528,7 +513,7 @@ function failedStatusReason(status: number, login: LoginRequestSpec): LoginError
   return judged || REFUSAL_STATUSES.has(status) ? "rejected" : "unexpected_status";
 }
 
-/** The inputs that fill the authority of URL template `url`: a URL refused for its host is theirs. */
+/** The inputs that fill the authority of URL template `url`. */
 function authorityInputs(url: string): string[] {
   const authority = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0]!;
   return unresolvedPlaceholders(authority, {});
@@ -578,7 +563,6 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     );
   }
   const { url, headers, body } = renderRequest(login.request, vars);
-  // A URL refused below is the submitter's when one of its inputs put the authority there.
   const urlFields = authorityInputs(login.request.url);
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {
@@ -653,8 +637,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
         timeoutMs: limits.stepTimeoutMs,
       });
     }
-    // The error's class and code, never its message: a transport message may quote the URL,
-    // which can carry a substituted input.
+    // Class and code only: a transport message may quote the URL, and the URL an input.
     const code = (err as { code?: unknown } | null)?.code;
     const kind = `${err instanceof Error ? err.name : typeof err}${typeof code === "string" ? ` (${code})` : ""}`;
     throw new LoginError(`request failed: ${kind}`, "upstream_failed", { cause: err });

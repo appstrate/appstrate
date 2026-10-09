@@ -105,10 +105,7 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
   }
 }
 
-/**
- * The submitted credentials checked against the auth's `credentials.schema` (a 400 on `credentials`
- * naming each mismatch), returned typed by it: a `"1234"` posted for a `number` field is `1234`.
- */
+/** The credentials checked against `credentials.schema` (else a 400) and typed by it. */
 export function assertCredentialsMatchSchema(
   schema: unknown,
   credentials: Record<string, unknown>,
@@ -125,10 +122,7 @@ export function assertCredentialsMatchSchema(
   return result.data ?? credentials;
 }
 
-/**
- * A login the service refused the submitted credentials to — the submitter's own input, so a 400
- * on `credentials` naming the remedy. `diagnostic` is one sentence, never a credential value.
- */
+/** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
 export function loginRejected(diagnostic: string): ApiError {
   return invalidRequest(
     `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,

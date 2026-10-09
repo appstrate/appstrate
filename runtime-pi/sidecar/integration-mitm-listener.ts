@@ -173,12 +173,7 @@ export interface MitmCredentialSource {
    * {@link ActiveConnectInputs}).
    */
   activeInputs?(): ActiveConnectInputs | null;
-  /**
-   * The listener refused a login request to `url` because input `field` cannot be encoded where
-   * the login tool placed it (a line break in a header value): recorded on the open windows whose
-   * `authorizedUris` admit `url`, so the login primitive reports the field, not the tool's own
-   * account of a refused request.
-   */
+  /** Input `field` of a login request to `url` could not be encoded: recorded for the login. */
   refuseActiveInput?(field: string, url: string): void;
 }
 
@@ -755,14 +750,12 @@ type ConnectInputSubstitutionResult =
 /**
  * Pure, unit-testable helper for connect-login transient-input
  * substitution: `substituteRequest` over the URL, body, and each header
- * value using `inputs`, each value encoded for the place it takes (the
- * request's own `Content-Type` decides the body's encoding).
+ * value using `inputs`.
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream; a value the request cannot carry (a line break in a header
- * value) returns `{ refused: <name> }`. A request with no placeholders is
- * returned verbatim.
+ * upstream; a value the request cannot carry returns `{ refused: <name> }`.
+ * A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
   parts: { url: string; bodyText: string | null; headers: Record<string, string> },
@@ -942,9 +935,7 @@ async function forwardInnerRequest(
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
-    // Every value is an HTTP field value: the literal parts passed Bun's request parser,
-    // which refuses a control character on the wire, and `substituteRequest` refused any
-    // substituted value that is not one.
+    // Field values all: the literal parts passed Bun's parser, `substituteRequest` checked the rest.
     const subbed = new Headers();
     for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
     headersForOutbound = subbed;
@@ -1113,7 +1104,6 @@ async function forwardInnerRequest(
 }
 
 const INVALID_CREDENTIAL = "credential is not a valid header value";
-/** A login input refused where the login tool placed it (a header line break, a multipart CRLF…). */
 const LOGIN_INPUT_NOT_CARRIED =
   "login input contains a character this request cannot carry where it is placed";
 
