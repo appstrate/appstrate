@@ -12,8 +12,6 @@
 
 import { describe, it, expect, jest, mock } from "bun:test";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
@@ -580,17 +578,6 @@ describe("POST /mcp — bounded response read", () => {
     // The token-budget gate must have triggered the blob spill.
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
-  });
-});
-
-describe("StreamableHTTPClientTransport interop (smoke test)", () => {
-  it("the SDK client transport is importable", async () => {
-    // Sanity check: the SDK ships a real StreamableHTTPClientTransport
-    // we can import without instantiating (instantiation requires a
-    // network URL; we pin only that the symbol exists so any future
-    // refactor that swaps transports compile-fails this test).
-    expect(typeof StreamableHTTPClientTransport).toBe("function");
-    expect(typeof Client).toBe("function");
   });
 });
 

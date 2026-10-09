@@ -887,8 +887,9 @@ export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = 15_000;
 export const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
 
 /**
- * Emit `notifications/progress` every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS}
- * while a run is waited on, when the request carried a `progressToken`; returns
+ * Emit `notifications/progress` at once, then every
+ * {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS} while a run is waited on, when the
+ * request carried a `progressToken`; returns
  * the stop function, or `null` without a token. A failed send is logged and
  * never fails the tool call.
  */
@@ -897,18 +898,12 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
   let progress = 0;
-  const timer = setInterval(() => {
-    progress += 1;
-    const elapsedS = Math.round((performance.now() - startedAt) / 1000);
+  const beat = (message: string) =>
     notifyDetached(
       extra,
       {
         method: "notifications/progress",
-        params: {
-          progressToken,
-          progress,
-          message: `Waiting for run ${runId} (${elapsedS}s elapsed)`,
-        },
+        params: { progressToken, progress: ++progress, message },
       },
       (err) =>
         logger.debug("mcp: run_and_wait progress notification failed", {
@@ -916,6 +911,10 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
           error: err instanceof Error ? err.message : String(err),
         }),
     );
+  beat(`Run ${runId} launched`);
+  const timer = setInterval(() => {
+    const elapsedS = Math.round((performance.now() - startedAt) / 1000);
+    beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
   return () => clearInterval(timer);
 }

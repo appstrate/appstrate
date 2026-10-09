@@ -463,14 +463,17 @@ describe("run_and_wait", () => {
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
       // A streamed call keeps the full default wait.
       expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+      // One beat at launch, then one per interval.
       expect(sent).toEqual(
-        [1, 2, 3].map((progress) => ({
+        [
+          "Run run_1 launched",
+          ...[1, 2, 3].map(
+            (n) =>
+              `Waiting for run run_1 (${(n * RUN_AND_WAIT_PROGRESS_INTERVAL_MS) / 1000}s elapsed)`,
+          ),
+        ].map((message, i) => ({
           method: "notifications/progress",
-          params: {
-            progressToken: "tok_1",
-            progress,
-            message: `Waiting for run run_1 (${(progress * RUN_AND_WAIT_PROGRESS_INTERVAL_MS) / 1000}s elapsed)`,
-          },
+          params: { progressToken: "tok_1", progress: i + 1, message },
         })),
       );
     });
@@ -496,7 +499,7 @@ describe("run_and_wait", () => {
       poll.settle({ id: "run_1", status: "success" });
       const res = await pending;
 
-      expect(attempts).toBe(2);
+      expect(attempts).toBe(3); // the launch beat + two intervals
       expect(res.isError).toBeFalsy();
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
     });

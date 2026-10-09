@@ -64,20 +64,6 @@ import {
  * `{ content: [...], isError: true }` instead of being thrown.
  */
 export type AppstrateRequestExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
-
-/**
- * Send `notification` on the request's stream without awaiting it: a failed
- * send — the client went away — goes to `onError` and never fails the handler.
- */
-export function notifyDetached(
-  extra: AppstrateRequestExtra,
-  notification: ServerNotification,
-  onError: (err: unknown) => void,
-): void {
-  Promise.resolve()
-    .then(() => extra.sendNotification(notification))
-    .catch(onError);
-}
 export type AppstrateToolHandler = (
   args: Record<string, unknown>,
   extra: AppstrateRequestExtra,
@@ -289,6 +275,20 @@ export async function createInProcessPair(
       await server.close();
     },
   };
+}
+
+/**
+ * Send `notification` on the request's stream without awaiting it: a failed
+ * send — the client went away — goes to `onError` and never fails the handler.
+ */
+export function notifyDetached(
+  extra: AppstrateRequestExtra,
+  notification: ServerNotification,
+  onError: (err: unknown) => void,
+): void {
+  Promise.resolve()
+    .then(() => extra.sendNotification(notification))
+    .catch(onError);
 }
 
 // Re-export the SDK error primitives so callers don't need a second

@@ -507,6 +507,21 @@ describe("McpHost — progress relay", () => {
     ]);
   });
 
+  it("never splits a surrogate pair when capping the message", async () => {
+    const sent: Array<{ params: { message?: string } }> = [];
+    await callLong(
+      {
+        _meta: { progressToken: "agent_tok" },
+        sendNotification: async (n) => {
+          sent.push(n as never);
+        },
+      },
+      // 1023 one-unit characters, then emoji: a cut by code unit would end mid-pair.
+      [{ progress: 1, message: "x".repeat(1023) + "😀".repeat(10) }],
+    );
+    expect(sent[0]!.params.message).toBe("x".repeat(1023) + "😀");
+  });
+
   it("relays nothing when the agent asked for no progress", async () => {
     const sent: unknown[] = [];
     await callLong({

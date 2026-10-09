@@ -105,10 +105,18 @@ export const mcpPaths = {
             "text/event-stream": { schema: { type: "string" } },
           },
         },
-        "400": jsonRpcTransportError(
-          "Unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), " +
-            "or an unsupported `MCP-Protocol-Version` header (`-32000`).",
-        ),
+        "400": {
+          description:
+            "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON " +
+            "(`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an " +
+            "unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: " +
+            "refused before the transport — `invalid_request` when the organization has no " +
+            "space to serve.",
+          content: {
+            ...jsonRpcTransportError("").content,
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "406": jsonRpcTransportError(

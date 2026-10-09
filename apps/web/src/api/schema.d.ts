@@ -14759,7 +14759,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). */
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: refused before the transport — `invalid_request` when the organization has no space to serve. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14775,6 +14775,7 @@ export interface operations {
                             data?: unknown;
                         };
                     };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];

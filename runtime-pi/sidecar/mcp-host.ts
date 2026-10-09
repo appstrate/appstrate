@@ -77,7 +77,12 @@ function relayProgress(
             progress,
             ...(total !== undefined ? { total } : {}),
             ...(message !== undefined
-              ? { message: message.slice(0, RELAYED_PROGRESS_MESSAGE_MAX_CHARS) }
+              ? {
+                  // By code point, so the cut never splits a surrogate pair.
+                  message: Array.from(message)
+                    .slice(0, RELAYED_PROGRESS_MESSAGE_MAX_CHARS)
+                    .join(""),
+                }
               : {}),
           },
         },
