@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason). Optional: absent when the model does not reason, does not take
   `off`, or when what it sends is not known. (#1774)
 
+### Changed
+
+- **`waitForRunAndWaitCompletion`** (`@appstrate/core/run-and-wait-client`): the
+  `error` of a `done: false` step — the wait ended before the run reached a
+  terminal status — now reads "run_and_wait stopped waiting … the run is still in
+  progress. Do not launch it again — read its outcome later with `getRun` on this
+  `id`." instead of "run_and_wait timed out …". It is not a run outcome (the old
+  wording read like the run's own `timeout` status), and a caller that relaunched
+  on it duplicated a run still going. (#1844)
+
 ## [15.0.0] — 2026-10-08
 
 ### Added

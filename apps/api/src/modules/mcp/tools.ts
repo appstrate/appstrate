@@ -158,8 +158,6 @@ export interface McpToolContext {
    * server instructions); external MCP clients leave it false and keep get_me.
    */
   contextInjected?: boolean;
-  /** Overrides of `run_and_wait`'s heartbeat period and unstreamed wait cap (tests). */
-  runAndWaitTiming?: { progressIntervalMs?: number; unstreamedMaxMs?: number };
 }
 
 /** Never let an observer error affect the tool result. */
@@ -878,25 +876,21 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
-/** Heartbeat period: well under Cloudflare's 100 s silent-origin cutoff and the clients' 60 s timers. */
-const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = 15_000;
+/** Heartbeat period: under the 60 s request/idle timers a client resets on each progress notification. */
+export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = 15_000;
 /**
  * Wait cap, launch included, when the caller asked for no progress: nothing then
  * keeps the request alive, so answer before the 60 s first-byte / default request
  * timeout of MCP clients rather than be cut by it.
  */
-const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
+export const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
 
 /**
- * Emit `notifications/progress` every `intervalMs` while a run is waited on, when
- * the request carried a `progressToken`; returns the stop function, or `null`
- * without a token. A failed send is logged and never fails the tool call.
+ * Emit `notifications/progress` every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS}
+ * while a run is waited on, when the request carried a `progressToken`; returns
+ * the stop function, or `null` without a token. A failed send is logged and never fails the tool call.
  */
-function startProgressHeartbeat(
-  extra: AppstrateRequestExtra,
-  runId: string,
-  intervalMs: number,
-): (() => void) | null {
+function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
@@ -921,7 +915,7 @@ function startProgressHeartbeat(
           error: err instanceof Error ? err.message : String(err),
         });
       });
-  }, intervalMs);
+  }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
   return () => clearInterval(timer);
 }
 
@@ -1208,11 +1202,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
 
     // With a progress token the heartbeat keeps the request alive for the full
     // default wait; without one the wait is capped below the clients' timeout.
-    const stopHeartbeat = startProgressHeartbeat(
-      extra,
-      runId,
-      ctx.runAndWaitTiming?.progressIntervalMs ?? RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
-    );
+    const stopHeartbeat = startProgressHeartbeat(extra, runId);
     let final: RunAndWaitStep;
     try {
       final = await waitForRunAndWaitCompletion(launched.launch, {
@@ -1220,9 +1210,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         headers: dispatchHeaders,
         fetch: dispatchFetch,
         signal,
-        maxMs: stopHeartbeat
-          ? undefined
-          : (ctx.runAndWaitTiming?.unstreamedMaxMs ?? RUN_AND_WAIT_UNSTREAMED_MAX_MS),
+        maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
       });
     } finally {
       stopHeartbeat?.();

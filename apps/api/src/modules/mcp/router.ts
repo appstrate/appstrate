@@ -226,9 +226,14 @@ export function buildServerInstructions(
   const runIntro = runs
     ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
     : "";
+  // A `done:false` run is still going. An external client waits on it; the chat
+  // gets `done:false` at the end of its turn budget, too late for a long-poll.
+  const doneFalseFollowUp = contextInjected
+    ? "read its outcome with `getRun` on that `id`"
+    : "wait for it with `getRun` (`query: { wait: true }`) on that `id`";
   const runBullets = runs
-    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that was not launched through \`run_and_wait\` in this turn.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done: false\` (with an \`error\`) means the run is still going: never call \`run_and_wait\` again for it — read its outcome with \`getRun\` on that \`id\`.${inlineShortcut}
+    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; a run it answered \`done:false\` for is covered by the shortcut below.
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` (with an \`error\`) means the run is still going: never call \`run_and_wait\` again for it — ${doneFalseFollowUp}.${inlineShortcut}
 `
     : "";
   const authKeySource = listsIntegrations
@@ -271,40 +276,68 @@ ${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions, ceiling)}`;
 }
 
+/** A POSTed MCP body, parsed once for both the transport choice and the SDK. */
+interface McpPost {
+  payload: unknown;
+  /**
+   * Whether it holds a request asking for progress — `params._meta.progressToken`,
+   * the MCP spec's opt-in, on any request of a batch. Such a call is answered
+   * over SSE, so a long tool call stays alive through client first-byte timers
+   * and proxy idle limits.
+   */
+  requestsProgress: boolean;
+}
+
 /**
- * Whether a POSTed JSON-RPC payload (one message or a batch) holds a request
- * asking for progress — `params._meta.progressToken`, the MCP spec's opt-in.
- * Such a call is answered over SSE: the headers leave at once and its progress
- * notifications reach the client before the result, so a long tool call stays
- * alive through client first-byte timers and proxy idle limits. Anything that
- * does not parse is not one; the SDK owns validation and answers it as JSON.
+ * `body` as an MCP POST, or `null` when it is not JSON — the SDK then reads the
+ * bytes itself and answers its own `-32700`. Validation stays the SDK's.
  */
-export function requestsProgress(body: ArrayBuffer): boolean {
+export function parseMcpPost(body: ArrayBuffer): McpPost | null {
   let payload: unknown;
   try {
     payload = JSON.parse(new TextDecoder().decode(body));
   } catch {
-    return false;
+    return null;
   }
   const messages: unknown[] = Array.isArray(payload) ? payload : [payload];
-  return messages.some(
-    (message) => isJSONRPCRequest(message) && message.params?._meta?.progressToken !== undefined,
-  );
+  return {
+    payload,
+    requestsProgress: messages.some(
+      (message) => isJSONRPCRequest(message) && message.params?._meta?.progressToken !== undefined,
+    ),
+  };
 }
 
+/** An SSE comment: clients ignore it, but it makes Bun send the headers at once. */
+const SSE_OPEN_COMMENT = ": stream open\n\n";
+
 /**
- * `response` with its SSE body re-exposed so `release` runs once the stream is
- * over — drained to its end, failed, or cancelled by the client. A cancel is
- * passed on to the SDK's stream first; `release` closing the transport then
- * aborts the in-flight handler's `extra.signal`, so a gone client stops the work.
+ * `response` with its SSE body re-exposed: it opens with a comment, then passes
+ * the SDK's stream through unchanged, and runs `release` exactly once when that
+ * is over — drained, failed, or cancelled by the client.
+ *
+ * The comment is there because Bun sends response headers with the first body
+ * chunk, and the SDK's first write is otherwise its 15 s keep-alive or the
+ * tool's first progress. A cancel is passed on to the SDK's stream first;
+ * `release` closing the transport then aborts the in-flight handler's
+ * `extra.signal`, so a gone client stops the work.
  */
-function releaseWhenSettled(
+export function releaseWhenSettled(
   response: Response,
   sse: ReadableStream<Uint8Array>,
   release: () => Promise<void>,
 ): Response {
   const reader = sse.getReader();
+  let released = false;
+  const settle = async () => {
+    if (released) return;
+    released = true;
+    await release();
+  };
   const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(SSE_OPEN_COMMENT));
+    },
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
@@ -316,11 +349,11 @@ function releaseWhenSettled(
       } catch (err) {
         controller.error(err);
       }
-      await release();
+      await settle();
     },
     async cancel(reason) {
       await reader.cancel(reason);
-      await release();
+      await settle();
     },
   });
   return new Response(body, { status: response.status, headers: response.headers });
@@ -617,13 +650,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         resources,
       },
     );
-    // Read once: the predicate below parses it, the SDK re-reads the bytes.
     const raw = c.req.raw;
     const body = await raw.arrayBuffer();
+    const post = parseMcpPost(body);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      // JSON unless the caller asked for progress (see `requestsProgress`).
-      enableJsonResponse: !requestsProgress(body),
+      // JSON unless the caller asked for progress (see `McpPost`).
+      enableJsonResponse: !post?.requestsProgress,
       // Disabled deliberately: the SDK's Host-header allowlist would reject
       // legitimate reverse-proxied hosts, and the rebinding threat it guards
       // (a browser tricked into POSTing to a localhost MCP server) doesn't
@@ -631,25 +664,29 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       // or a SameSite session cookie), so a cross-site page cannot drive it.
       enableDnsRebindingProtection: false,
       // The global `bodyLimit` already bounds this request; match it so the
-      // SDK's own 4 MB default does not become a second, lower, hidden cap.
+      // SDK's own 4 MB default does not become a second, lower, hidden cap
+      // (it applies only to a body the SDK reads itself: one that did not parse).
       maxRequestBodySize: getEnv().API_BODY_LIMIT_BYTES,
     });
 
-    // Reconstruct the request so the SDK transport can read the body once.
+    // Reconstruct the request: the SDK reads the bytes only when they did not
+    // parse here, and takes the parsed payload otherwise.
     const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
 
-    let released: Promise<void> | undefined;
-    const release = () =>
-      (released ??= (async () => {
-        await transport.close();
-        await server.close();
-      })());
+    // Called on exactly one of the three exits below.
+    const release = async () => {
+      await transport.close();
+      await server.close();
+    };
     let response: Response;
     try {
       await server.connect(transport);
       // Any audit insert the tool layer triggered is already tracked (see
       // `observe` above) and flushed at shutdown, not here.
-      response = await transport.handleRequest(forwarded);
+      response = await transport.handleRequest(
+        forwarded,
+        post ? { parsedBody: post.payload } : undefined,
+      );
     } catch (err) {
       await release();
       throw err;
