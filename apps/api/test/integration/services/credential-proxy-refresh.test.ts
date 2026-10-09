@@ -112,11 +112,11 @@ async function setup(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     // oauth2 connections always pin their minting client by id; here the org's
     // custom per-space client registered just above.
     clientRef: customClient!.id,
@@ -157,11 +157,11 @@ async function setupSystemPinned(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     clientRef: systemId,
     expiresAt: new Date(Date.now() - 60_000),
   });
@@ -263,13 +263,13 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
           authKey: "google",
           accountId: "acct-2",
           label: "acct-2",
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: encryptCredentialEnvelope({
             outputs: { access_token: "other_token", refresh_token: "rt_other" },
           }),
           scopesGranted: ["openid", "email"],
-          sharedWithOrg: false,
         });
         return new Response("expired", { status: 401 });
       }
@@ -677,6 +677,7 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
         authKey: "key",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),

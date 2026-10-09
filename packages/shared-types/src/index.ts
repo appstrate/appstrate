@@ -20,7 +20,7 @@ export {
 } from "./member-role-policy.ts";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
-import type { AgentIntegrationEntry } from "./integrations.ts";
+import type { AgentIntegrationEntry, ConnectionScope } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
   AgentIntegrationEntry,
@@ -465,21 +465,22 @@ export interface MeConnectionEntry {
   identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
-  /** Admin/owner sharing toggle (per-org). */
-  shared_with_org: boolean;
+  scope: ConnectionScope;
+  /** Spaces whose members may use it. */
+  shared_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
   /**
-   * Number of agents this connection's space RUNS — placed here and switched
-   * on, or on by the deployment's default — that declare this integration in
-   * their dependencies. Used by the UI to surface "reused by N agents" so
-   * members understand that the connection is shared across the org's agents
-   * rather than per-agent.
+   * Number of agents RUN by the connection's home space (its space, or its origin space for an
+   * org-scoped row) and by the spaces it is shared into — placed there and switched on, or on by
+   * the deployment's default — that declare this integration in their dependencies.
    */
   reused_by_agents: number;
-  /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
-  space: { id: string; name: string };
+  /** The one space a space-scoped connection lives in; `null` for an org-scoped one. */
+  space: { id: string; name: string } | null;
+  /** The space an org-scoped connection was connected from; `null` when unknown or space-scoped. */
+  origin_space: { id: string; name: string } | null;
 }
 
 export interface MeConnectionSourceGroup {

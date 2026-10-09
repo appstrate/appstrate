@@ -198,6 +198,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: integrationId,
         authKey: "primary",
         accountId: overrides?.accountId ?? `acct-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
@@ -436,6 +437,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -1097,20 +1099,21 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     // connection: the remedy re-consents THAT row, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
-      async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
+      async function seedDeadConnection(userId: string, shared = false): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
             scopesGranted: ["base", "search.read"],
             needsReconnection: true,
-            sharedWithOrg,
+            sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
@@ -1169,18 +1172,16 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       /**
        * A LIVE oauth2 connection granted `base` only — short of the
        * `search.read` the agent's `search` selection requires — owned by
-       * `userId` and optionally shared with the org.
+       * `userId` and optionally shared into the space.
        */
-      async function seedUnderScopedConnection(
-        userId: string,
-        sharedWithOrg = false,
-      ): Promise<string> {
+      async function seedUnderScopedConnection(userId: string, shared = false): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
@@ -1188,7 +1189,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
               outputs: { access_token: "live-but-narrow" },
             }),
             scopesGranted: ["base"],
-            sharedWithOrg,
+            sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
             label: `Étroite ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });

@@ -259,6 +259,8 @@
   "apiError.schedule_modified_concurrently": "The schedule was changed in the meantime. Reload it and try again.",
   "apiError.connection_blocked_by_admin": "The administrator disabled personal connections for this integration: use the shared connection.",
   "apiError.connection_not_in_org_default": "This connection is not among those the organization enforces: {{message}}",
+  "apiError.connection_scope_narrowing": "This connection serves the whole organization: reconnecting it through this space's OAuth client would confine it to this space. Create a new connection instead.",
+  "apiError.invalid_share_target": "A connection can only be shared with spaces of its organization, and a connection confined to one space only with that space.",
   "apiError.identity_mismatch": "This connection is linked to another account, reconnect with the same account or create a new connection: {{message}}",
   "apiError.connect_unavailable": "This connection method is not available on this instance. Contact your administrator.",
   "apiError.encryption_key_unavailable": "A stored credential is encrypted with a key this instance does not have. Contact your administrator.",

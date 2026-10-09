@@ -5,7 +5,7 @@
  * is left with no connection choice to make.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 import type { ConnectionOverrides, ConnectionResolutionError } from "@appstrate/core/integration";
@@ -18,6 +18,7 @@ import {
   unavailableMemberError,
 } from "./integration-connection-resolver.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
+import { sharedInSpace } from "./connection-reach.ts";
 import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -90,19 +91,13 @@ export async function assertScheduleOverridesReachable(params: {
   );
 }
 
-/** Connections among `ids` shared in `spaceId`: id → integration id. */
+/** Connections among `ids` shared into `spaceId`: id → integration id. */
 async function sharedConnections(spaceId: string, ids: string[]): Promise<Map<string, string>> {
   if (ids.length === 0) return new Map();
   const rows = await db
     .select({ id: integrationConnections.id, integrationId: integrationConnections.integrationId })
     .from(integrationConnections)
-    .where(
-      and(
-        inArray(integrationConnections.id, ids),
-        eq(integrationConnections.spaceId, spaceId),
-        eq(integrationConnections.sharedWithOrg, true),
-      ),
-    );
+    .where(and(inArray(integrationConnections.id, ids), sharedInSpace(spaceId)));
   return new Map(rows.map((r) => [r.id, r.integrationId]));
 }
 

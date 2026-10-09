@@ -94,7 +94,9 @@ export const connectionUpdateEventSchema = z.object({
   authKey: z.string().nullable(),
   userId: z.string().nullable(),
   endUserId: z.string().nullable(),
-  spaceId: z.string(),
+  orgId: z.string(),
+  // NULL for an org-scoped connection, which reaches every space of its org.
+  spaceId: z.string().nullable(),
   // NULL on DELETE (the OLD row carries no live reconnection flag).
   needsReconnection: z.boolean().nullable(),
   deleted: z.boolean(),

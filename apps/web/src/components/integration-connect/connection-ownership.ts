@@ -41,3 +41,17 @@ export function connectionRowGrants(args: {
     shareLocked: args.locked && args.isShared,
   };
 }
+
+/**
+ * Whether the row is shared into `spaceId`. An owner's row lists every space it is shared
+ * into; anyone else's lists only the current one, when shared here.
+ */
+export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: string | null) {
+  return !!spaceId && c.shared_space_ids.includes(spaceId);
+}
+
+/** The `shared_space_ids` a PATCH sends (it replaces the set) to share into or out of `spaceId`. */
+export function withSpaceShare(ids: string[], spaceId: string, shared: boolean): string[] {
+  const rest = ids.filter((id) => id !== spaceId);
+  return shared ? [...rest, spaceId] : rest;
+}

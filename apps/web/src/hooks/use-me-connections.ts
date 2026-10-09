@@ -3,12 +3,10 @@
 /**
  * R1 — user-scope connection mutations.
  *
- * The unified `/preferences/connections` page (now backed by
- * `useMyConnections()`) lists a user's connections across every org/space
- * they belong to. The mutation endpoints are space-scoped (X-Space-Id
- * is part of every connection write path) so each mutation here passes
- * the entry's own org/space as explicit headers — overriding the
- * SPA's currently-active context for that single request.
+ * The unified `/preferences/connections` page (backed by `useMyConnections()`)
+ * lists a user's connections across every org/space they belong to. Its writes
+ * go through the owner-only `/api/me/connections/{connectionId}` routes, which
+ * need no org/space context.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -40,18 +38,6 @@ export function useConnectionDeleteImpact(connectionId: string | undefined) {
   );
 }
 
-interface OrgSpaceHeaders {
-  orgId: string;
-  spaceId: string;
-}
-
-function scopedHeaders({ orgId, spaceId }: OrgSpaceHeaders) {
-  return {
-    "X-Org-Id": orgId,
-    "X-Space-Id": spaceId,
-  };
-}
-
 /**
  * Destructive delete of an integration connection from the user-scope page.
  *
@@ -76,46 +62,29 @@ export function useDisconnectIntegrationConnection() {
 }
 
 /**
- * Update an integration connection's label and/or `sharedWithOrg` flag from
- * the user-scope page. The entry's own org/space context is passed as explicit
- * headers, overriding the SPA's active context for this single request.
+ * Rename the caller's own connection and/or replace the set of spaces it is
+ * shared into, from the user-scope page.
  */
 export function useUpdateMeIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare connection resource (#657).
     mutationFn: async ({
-      packageId,
       connectionId,
-      orgId,
-      spaceId,
-      label,
-      sharedWithOrg,
-    }: OrgSpaceHeaders & {
-      packageId: string;
+      body,
+    }: {
       connectionId: string;
-      label?: string;
-      sharedWithOrg?: boolean;
+      body: { label?: string; shared_space_ids?: string[] };
     }) => {
-      const { data } = await client.PATCH(
-        "/api/integrations/{packageId}/connections/{connectionId}",
-        {
-          params: {
-            path: { packageId, connectionId },
-            header: scopedHeaders({ orgId, spaceId }),
-          },
-          body: {
-            ...(label !== undefined ? { label } : {}),
-            ...(sharedWithOrg !== undefined ? { shared_with_org: sharedWithOrg } : {}),
-          },
-        },
-      );
+      const { data } = await client.PATCH("/api/me/connections/{connectionId}", {
+        params: { path: { connectionId } },
+        body,
+      });
       return data;
     },
-    onSuccess: (_data, { sharedWithOrg }) => {
+    onSuccess: (_data, { body }) => {
       void invalidateIntegrationQueries(qc);
       // Unsharing disables other people's schedules naming the connection.
-      if (sharedWithOrg === false) invalidateSchedules(qc);
+      if (body.shared_space_ids) invalidateSchedules(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
     },
   });

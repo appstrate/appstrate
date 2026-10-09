@@ -44,7 +44,7 @@ type Subscriber = {
     channels?: ReadonlySet<RealtimeChannel>;
     /**
      * Actor identity for the `connection_update` channel. The trigger
-     * fires for every connection on the space; the subscriber
+     * fires for every connection of the org; the subscriber
      * forwards a row when it belongs to this actor (own connection).
      * Cross-actor shared-connection invalidations rely on the consumer
      * refetching from the server, so we don't need the shared/owner
@@ -233,11 +233,10 @@ function handleRunMetric(payload: string): void {
 // page's member picker verdict, the integration detail's connection
 // row all read off React Query keys that this event invalidates.
 //
-// Filter is per-space; the subscriber owns its actor identity
-// (set at SSE auth time) so a member only sees their own rows. The
-// payload deliberately omits `org_id` (the table has none) — tenant
-// isolation is bound to the upstream SSE auth gate proving
-// `spaceId ∈ orgId`.
+// Tenant filter: the row's org, and its space unless it is org-scoped
+// (`space_id` NULL), which reaches the owner in every space of the org.
+// The subscriber owns its actor identity (set at SSE auth time) so a
+// member only sees their own rows.
 function handleConnectionUpdate(payload: string): void {
   try {
     if (!anyAccepts("connection_update")) return;
@@ -252,7 +251,8 @@ function handleConnectionUpdate(payload: string): void {
     const data = parsed.data;
     for (const sub of subscribers.values()) {
       if (!accepts(sub, "connection_update")) continue;
-      if (sub.filter.spaceId !== raw.space_id) continue;
+      if (sub.filter.orgId !== data.orgId) continue;
+      if (data.spaceId !== null && sub.filter.spaceId !== data.spaceId) continue;
       // Actor filter: only fan out rows the subscriber owns. Without
       // this, every member of a space would receive every other
       // member's connection events (org-wide cache pollution).

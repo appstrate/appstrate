@@ -8,12 +8,13 @@
  *   GET /api/integrations/:packageId            (`auths[].connections`, `ready`)
  *
  * Both read `listIntegrationConnections`, whose predicate is the actor's own
- * rows UNION every row opted into org-wide sharing — the same set the runtime
- * resolver picks from. Before that union the list was own-only, which made the
- * admin org-default and pin pickers unable to offer another member's shared
- * connection (they filter this list for `shared_with_org`) even though the pin
- * endpoint accepts one, and made `auths[].ready` report "not connected" for an
- * actor whose run would in fact resolve a shared connection.
+ * rows that reach the space UNION every row shared into it — the same set the
+ * runtime resolver picks from. Before that union the list was own-only, which
+ * made the admin org-default and pin pickers unable to offer another member's
+ * shared connection even though the pin endpoint accepts one, and made
+ * `auths[].ready` report "not connected" for an actor whose run would in fact
+ * resolve a shared connection. Sharing is per target space, and a non-owner
+ * reads it projected onto the current space only.
  *
  * Ownership-scoped *writes* keep their own tests: metadata PATCH authz lives in
  * `integrations-authz.test.ts`, delete in `me.test.ts`.
@@ -28,7 +29,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   integrationConnections,
@@ -54,10 +55,12 @@ interface ConnectionDTO {
   owner_name?: string | null;
   locked_by?: "admin_pin" | "org_default" | null;
   identity_claims: Record<string, unknown> | null;
-  shared_with_org?: boolean;
+  scope: "org" | "space";
+  shared_space_ids: string[];
+  origin_space_id: string | null;
 }
 
-describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", () => {
+describe("GET /api/integrations/:packageId/connections — own ∪ shared into the space", () => {
   let ctx: TestContext;
   /** A second dashboard user, plain `member` of the same org. */
   let other: Awaited<ReturnType<typeof createTestUser>>;
@@ -70,12 +73,16 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
     };
   }
 
+  /** Space-scoped in the default space unless `originSpaceId` makes it org-scoped. */
   async function seedConnection(opts: {
     userId: string;
     accountId: string;
     shared: boolean;
     needsReconnection?: boolean;
+    originSpaceId?: string;
+    sharedSpaceIds?: string[];
   }): Promise<string> {
+    const orgScoped = opts.originSpaceId !== undefined;
     const [row] = await db
       .insert(integrationConnections)
       .values({
@@ -83,13 +90,15 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
         authKey: "primary",
         accountId: opts.accountId,
         label: opts.accountId,
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: orgScoped ? null : ctx.defaultSpaceId,
+        originSpaceId: opts.originSpaceId ?? null,
         userId: opts.userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         identityClaims: { email: `${opts.accountId}@example.com`, sub: `sub-${opts.accountId}` },
-        sharedWithOrg: opts.shared,
+        sharedSpaceIds: opts.sharedSpaceIds ?? (opts.shared ? [ctx.defaultSpaceId] : []),
         needsReconnection: opts.needsReconnection ?? false,
       })
       .returning({ id: integrationConnections.id });
@@ -319,5 +328,55 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
     });
     const body = (await res.json()) as { auths: Array<{ auth_key: string; ready: boolean }> };
     expect(body.auths.find((a) => a.auth_key === "primary")!.ready).toBe(false);
+  });
+  it("lists the owner's org-scoped connection in every space of the org", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    const orgRow = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "org-row",
+      shared: false,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+
+    const rows = await listAs({ ...authHeaders(ctx), "X-Space-Id": elsewhere.id });
+    expect(rows.find((c) => c.id === orgRow)).toMatchObject({
+      scope: "org",
+      origin_space_id: ctx.defaultSpaceId,
+      shared_space_ids: [],
+    });
+  });
+
+  it("shows the owner the whole share set and a non-owner only the current space", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    const orgRow = await seedConnection({
+      userId: other.id,
+      accountId: "mike-org",
+      shared: true,
+      originSpaceId: elsewhere.id,
+      sharedSpaceIds: [elsewhere.id, ctx.defaultSpaceId],
+    });
+
+    const asOwner = (await listAs(otherHeaders())).find((c) => c.id === orgRow)!;
+    expect(asOwner.shared_space_ids.toSorted()).toEqual(
+      [elsewhere.id, ctx.defaultSpaceId].toSorted(),
+    );
+    expect(asOwner.origin_space_id).toBe(elsewhere.id);
+
+    const asOther = (await listAs(authHeaders(ctx))).find((c) => c.id === orgRow)!;
+    expect(asOther.shared_space_ids).toEqual([ctx.defaultSpaceId]);
+    expect(asOther.origin_space_id).toBeNull();
+  });
+
+  it("does not list a member's org-scoped connection shared into another space only", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    const orgRow = await seedConnection({
+      userId: other.id,
+      accountId: "mike-elsewhere",
+      shared: true,
+      originSpaceId: ctx.defaultSpaceId,
+      sharedSpaceIds: [elsewhere.id],
+    });
+
+    expect((await listAs(authHeaders(ctx))).map((c) => c.id)).not.toContain(orgRow);
   });
 });

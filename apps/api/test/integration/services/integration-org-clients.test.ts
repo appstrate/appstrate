@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedEndUser, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import {
@@ -184,17 +184,35 @@ describe("org-level integration OAuth clients", () => {
     return resolveConnectClient(INTEGRATION, AUTH_KEY, manifest, OAUTH2_AUTH, resolved).clientId;
   }
 
-  async function seedConnection(spaceId: string, userId: string, clientRef: string) {
-    await db.insert(integrationConnections).values({
-      integrationId: INTEGRATION,
-      authKey: AUTH_KEY,
-      accountId: `acct-${spaceId}`,
-      label: "Connexion 1",
-      spaceId,
-      userId,
-      credentialsEncrypted: "enc",
-      clientRef,
-    });
+  /** A connection row: `spaceId: null` = org scope. Returns its id. */
+  async function seedConnection(opts: {
+    spaceId: string | null;
+    clientRef: string;
+    userId?: string;
+    endUserId?: string;
+    orgId?: string;
+    originSpaceId?: string;
+    sharedSpaceIds?: string[];
+    label?: string;
+  }): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        accountId: `acct-${crypto.randomUUID()}`,
+        label: opts.label ?? "Connexion 1",
+        orgId: opts.orgId ?? ctx.orgId,
+        spaceId: opts.spaceId,
+        originSpaceId: opts.originSpaceId ?? null,
+        userId: opts.userId ?? null,
+        endUserId: opts.endUserId ?? null,
+        sharedSpaceIds: opts.sharedSpaceIds ?? [],
+        credentialsEncrypted: "enc",
+        clientRef: opts.clientRef,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
   }
 
   describe("connect cascade", () => {
@@ -492,31 +510,42 @@ describe("org-level integration OAuth clients", () => {
       });
     });
 
-    it("org delete cascades the connections of every space of the org, not another org's", async () => {
+    it("org delete cascades the org's connections it minted, not another org's", async () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-      await seedConnection(spaceA.spaceId, ctx.user.id, orgRow);
-      await seedConnection(spaceB.spaceId, ctx.user.id, orgRow);
-      await seedConnection(otherSpace.spaceId, other.user.id, orgRow);
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: spaceB.spaceId });
+      await seedConnection({
+        spaceId: null,
+        originSpaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: orgRow,
+      });
+      await seedConnection({ spaceId: spaceB.spaceId, endUserId: endUser.id, clientRef: orgRow });
+      await seedConnection({
+        spaceId: null,
+        orgId: other.orgId,
+        userId: other.user.id,
+        clientRef: orgRow,
+      });
       expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toMatchObject({
         deletedConnections: 2,
         disabledScheduleIds: [],
       });
       const left = await db
-        .select({ spaceId: integrationConnections.spaceId })
+        .select({ orgId: integrationConnections.orgId })
         .from(integrationConnections)
         .where(eq(integrationConnections.clientRef, orgRow));
-      expect(left).toEqual([{ spaceId: otherSpace.spaceId }]);
+      expect(left).toEqual([{ orgId: other.orgId }]);
     });
   });
 
   describe("promote", () => {
-    it("moves a space client to the org; pinned connections still resolve from every space", async () => {
+    it("moves a space client to the org; its connections still refresh from every space", async () => {
       const id = await seedClient({
         spaceId: spaceA.spaceId,
         clientId: "space-a",
         isDefault: true,
       });
-      await seedConnection(spaceA.spaceId, ctx.user.id, id);
+      await seedConnection({ spaceId: spaceA.spaceId, userId: ctx.user.id, clientRef: id });
       const promoted = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
       expect(promoted).toMatchObject({ id, spaceId: null, isDefault: true, client_id: "space-a" });
       for (const scope of [spaceA, spaceB]) {
@@ -527,8 +556,42 @@ describe("org-level integration OAuth clients", () => {
       const [conn] = await db
         .select({ clientRef: integrationConnections.clientRef })
         .from(integrationConnections)
-        .where(eq(integrationConnections.spaceId, spaceA.spaceId));
+        .where(eq(integrationConnections.originSpaceId, spaceA.spaceId));
       expect(conn?.clientRef).toBe(id);
+    });
+
+    it("widens the members' connections it minted, keeping shares and deduping labels", async () => {
+      const id = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: spaceA.spaceId });
+      await seedConnection({ spaceId: null, userId: ctx.user.id, clientRef: SYSTEM_ID });
+      const mine = await seedConnection({
+        spaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: id,
+        sharedSpaceIds: [spaceA.spaceId],
+      });
+      const endUsers = await seedConnection({
+        spaceId: spaceA.spaceId,
+        endUserId: endUser.id,
+        clientRef: id,
+      });
+
+      await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+
+      const byId = new Map(
+        (await db.select().from(integrationConnections)).map((row) => [row.id, row]),
+      );
+      expect(byId.get(mine)).toMatchObject({
+        spaceId: null,
+        originSpaceId: spaceA.spaceId,
+        sharedSpaceIds: [spaceA.spaceId],
+        label: "Connexion 1 (2)",
+      });
+      expect(byId.get(endUsers)).toMatchObject({
+        spaceId: spaceA.spaceId,
+        originSpaceId: null,
+        label: "Connexion 1",
+      });
     });
 
     it("keeps the org's existing default", async () => {

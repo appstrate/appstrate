@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A connection shared with the org (`shared_with_org`) powers colleagues' runs.
- * Every write that takes its owner's access to the connection's space away
- * must unshare it in the same transaction — otherwise a departed member's
- * credentials keep running, and nobody can stop them (unsharing is owner-only
- * for everyone but a governor).
+ * A connection shared into a space (`shared_space_ids`) powers colleagues' runs there.
+ * Every write that takes its owner's access to a target space away must withdraw that
+ * share in the same transaction — otherwise a departed member's credentials keep running,
+ * and nobody can stop them (unsharing is owner-only for everyone but a governor). Shares
+ * into spaces the owner still reaches stay.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   createTestContext,
@@ -44,7 +44,7 @@ import {
 } from "../../../src/services/organizations.ts";
 import { removeSpaceMember } from "../../../src/services/space-members.ts";
 import { updateSpace } from "../../../src/services/spaces.ts";
-import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
+import { updateConnection } from "../../../src/services/integration-pins-service.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
@@ -109,10 +109,15 @@ describe("unsharing on access loss", () => {
     return row!.id;
   }
 
+  /**
+   * An org-scope connection connected from `spaceId`, shared into it (unless `shared: false`)
+   * and into `alsoSharedInto`.
+   */
   async function seedConnection(opts: {
     spaceId: string;
     userId: string;
     shared?: boolean;
+    alsoSharedInto?: string[];
   }): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
@@ -120,28 +125,49 @@ describe("unsharing on access loss", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-        spaceId: opts.spaceId,
+        orgId: sql`(SELECT org_id FROM spaces WHERE id = ${opts.spaceId})`,
+        spaceId: null,
+        originSpaceId: opts.spaceId,
         userId: opts.userId,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
-        sharedWithOrg: opts.shared ?? true,
+        sharedSpaceIds: [
+          ...(opts.shared === false ? [] : [opts.spaceId]),
+          ...(opts.alsoSharedInto ?? []),
+        ],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
   }
 
-  /** The ids among `ids` still shared, sorted. */
+  /** The ids among `ids` still shared anywhere, sorted. */
   async function stillShared(ids: string[]): Promise<string[]> {
     const rows = await db
-      .select({ id: integrationConnections.id, shared: integrationConnections.sharedWithOrg })
+      .select({ id: integrationConnections.id, shares: integrationConnections.sharedSpaceIds })
       .from(integrationConnections)
       .where(inArray(integrationConnections.id, ids));
     return rows
-      .filter((row) => row.shared)
+      .filter((row) => row.shares.length > 0)
       .map((row) => row.id)
       .sort();
   }
+
+  async function sharesOf(id: string): Promise<string[]> {
+    const [row] = await db
+      .select({ shares: integrationConnections.sharedSpaceIds })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, id));
+    return [...row!.shares].sort();
+  }
+
+  /** The owner's own edit of the share targets, from the account surface. */
+  const shareAs = (userId: string, connectionId: string, sharedSpaceIds: string[]) =>
+    updateConnection({
+      connectionId,
+      viewer: { actor: { type: "user", id: userId }, spaceId: null, governs: false },
+      sharedSpaceIds,
+    });
 
   describe("org exit", () => {
     async function seedExitFixture() {
@@ -215,6 +241,28 @@ describe("unsharing on access loss", () => {
     expect(await stillShared([inClosed, inOpen])).toEqual([inOpen]);
   });
 
+  it("losing one target withdraws that share only, wherever the connection was made", async () => {
+    const member = await addMember();
+    const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+    await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
+    // Connected from the default space, shared into both it and the closed space.
+    const conn = await seedConnection({
+      spaceId: ctx.defaultSpaceId,
+      userId: member,
+      alsoSharedInto: [closed.id],
+    });
+
+    const removal = await removeSpaceMember({
+      orgId: ctx.orgId,
+      space: closed,
+      userId: member,
+      actorPermissions: presetPermissions("admin"),
+    });
+
+    expect(removal.unsharedConnectionIds).toEqual([conn]);
+    expect(await sharesOf(conn)).toEqual([ctx.defaultSpaceId]);
+  });
+
   it("a demotion unshares where the org role was the only way in", async () => {
     const admin = await addMember("admin");
     // No member row: an admin reaches a closed space by org role alone.
@@ -249,12 +297,11 @@ describe("unsharing on access loss", () => {
 
   // The share-side twin: a share committed after the access loss must not re-share what the
   // loss unshared (the route's own access check ran before the loss).
-  it("refuses sharing a connection whose owner no longer reaches its space", async () => {
+  it("refuses sharing into a space the owner no longer reaches, naming it", async () => {
     const member = await addMember();
     const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
     await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
-    const lost = await seedConnection({ spaceId: closed.id, userId: member, shared: false });
-    const kept = await seedConnection({
+    const conn = await seedConnection({
       spaceId: ctx.defaultSpaceId,
       userId: member,
       shared: false,
@@ -266,13 +313,15 @@ describe("unsharing on access loss", () => {
       actorPermissions: presetPermissions("admin"),
     });
 
-    await expect(updateConnectionMetadata(lost, { sharedWithOrg: true })).rejects.toMatchObject({
+    await expect(shareAs(member, conn, [ctx.defaultSpaceId, closed.id])).rejects.toMatchObject({
       status: 409,
       code: "connection_owner_without_access",
+      extensions: { space_id: closed.id },
     });
-    // Control: the same write where the owner still reaches the space.
-    await updateConnectionMetadata(kept, { sharedWithOrg: true });
-    expect(await stillShared([lost, kept])).toEqual([kept]);
+    expect(await sharesOf(conn)).toEqual([]);
+    // Control: the same write naming only a space the owner still reaches.
+    await shareAs(member, conn, [ctx.defaultSpaceId]);
+    expect(await sharesOf(conn)).toEqual([ctx.defaultSpaceId]);
   });
 
   // Never refused and never shrunk: the colleague re-picks before re-enabling.
@@ -323,9 +372,7 @@ describe("unsharing on access loss", () => {
         connectionIds: [conn],
       });
 
-      const { disabledScheduleIds } = await updateConnectionMetadata(conn, {
-        sharedWithOrg: false,
-      });
+      const { disabledScheduleIds } = await shareAs(member, conn, []);
 
       expect(disabledScheduleIds).toEqual([colleagues.id]);
       expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
@@ -370,6 +417,30 @@ describe("unsharing on access loss", () => {
 
       expect(disabledScheduleIds).toEqual([colleagues.id]);
       expect(await rowOf(colleagues.id)).toMatchObject(unsharedFor(conn));
+    });
+
+    it("is kept in a target the owner still reaches when another target is lost", async () => {
+      const member = await addMember();
+      const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
+      await seedSpaceMember({ spaceId: closed.id, userId: member, presetRole: "builder" });
+      const conn = await seedConnection({
+        spaceId: ctx.defaultSpaceId,
+        userId: member,
+        alsoSharedInto: [closed.id],
+      });
+      const inClosed = await scheduleOf(ctx.user.id, conn, closed.id);
+      const inDefault = await scheduleOf(ctx.user.id, conn);
+
+      const { disabledScheduleIds } = await removeSpaceMember({
+        orgId: ctx.orgId,
+        space: closed,
+        userId: member,
+        actorPermissions: presetPermissions("admin"),
+      });
+
+      expect(disabledScheduleIds).toEqual([inClosed.id]);
+      expect(await rowOf(inClosed.id)).toMatchObject(unsharedFor(conn));
+      expect(await rowOf(inDefault.id)).toEqual(inDefault);
     });
 
     it("is disabled, and reported for its job, when the owner's open space closes", async () => {

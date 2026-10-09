@@ -177,6 +177,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       authKey: "session",
       accountId: "default",
       label: "default",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

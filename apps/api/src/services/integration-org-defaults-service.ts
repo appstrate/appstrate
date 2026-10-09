@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Org-wide default connection set per (space, integration) — admin CRUD +
- * the resolver-facing aggregator.
+ * Default connection set per (space, integration) — a space rule despite the
+ * `org_default` name — admin CRUD + the resolver-facing aggregator.
  *
  * The default is the cross-agent governance baseline: one row covers every
  * agent that consumes the integration, instead of one `integration_pins`
@@ -11,9 +11,8 @@
  * cascade in `integration-connection-resolver.ts`).
  *
  * Same target validation as admin pins (`validatePinTargets`, shared-only):
- * the connection must exist, belong to this space,
- * reference this integration, and be `sharedWithOrg = true` — an admin
- * can't coerce a member's personal connection.
+ * the connection must serve this space, reference this integration, and be
+ * shared into this space — an admin can't coerce a member's personal connection.
  */
 
 import { and, eq } from "drizzle-orm";

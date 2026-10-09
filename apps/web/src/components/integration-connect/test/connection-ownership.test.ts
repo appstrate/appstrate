@@ -12,7 +12,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { connectionRowGrants, isConnectionOwnedBy } from "../connection-ownership";
+import {
+  connectionRowGrants,
+  isConnectionOwnedBy,
+  isSharedInSpace,
+  withSpaceShare,
+} from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;
@@ -102,5 +107,32 @@ describe("connectionRowGrants", () => {
       shareLocked: true,
     });
     expect(connectionRowGrants({ ...base, isOwn: true, locked: true }).shareLocked).toBe(false);
+  });
+});
+
+describe("isSharedInSpace", () => {
+  it("reads the current space in the owner's full set", () => {
+    expect(isSharedInSpace({ shared_space_ids: ["spc_b", "spc_a"] }, "spc_a")).toBe(true);
+    expect(isSharedInSpace({ shared_space_ids: ["spc_b"] }, "spc_a")).toBe(false);
+  });
+
+  it("is false without a current space", () => {
+    expect(isSharedInSpace({ shared_space_ids: ["spc_a"] }, null)).toBe(false);
+  });
+});
+
+describe("withSpaceShare", () => {
+  it("adds the space to the owner's set, keeping the other targets", () => {
+    expect(withSpaceShare(["spc_b"], "spc_a", true)).toEqual(["spc_b", "spc_a"]);
+    expect(withSpaceShare(["spc_a"], "spc_a", true)).toEqual(["spc_a"]);
+  });
+
+  it("removes only that space", () => {
+    expect(withSpaceShare(["spc_b", "spc_a"], "spc_a", false)).toEqual(["spc_b"]);
+  });
+
+  it("sends an empty set for a governor withdrawing a colleague's share here", () => {
+    // A non-owner sees `[current space]`; the API accepts only that minus the space.
+    expect(withSpaceShare(["spc_a"], "spc_a", false)).toEqual([]);
   });
 });

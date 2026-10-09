@@ -7,7 +7,8 @@
  * client id (system env id or `integration_oauth_clients.id`); token refresh
  * resolves the same client's credentials by that id (system-first then DB-by-id,
  * mirroring the model-provider credential pattern). Covers:
- *   - persist stamps `client_ref` (round-trip insert/update)
+ *   - persist stamps `client_ref` (round-trip insert/update), and the row takes
+ *     its client's tier as its scope
  *   - `resolveIntegrationClientById` (system / custom-by-id / cross-scope / public)
  *   - refresh-context resolution by `client_ref`
  *   - the client-listing merge + default precedence
@@ -135,20 +136,27 @@ describe("integration multi-client", () => {
   }
 
   describe("persist stamps client_ref", () => {
-    it("stores the system client id on insert", async () => {
+    it("stores the system client id on insert, at org scope", async () => {
       const created = await connect(SYSTEM_ID);
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      expect(created).toMatchObject({ scope: "org", origin_space_id: ctx.defaultSpaceId });
     });
 
-    it("stores the custom client id on insert", async () => {
+    it("stores the custom client id on insert, scoped to the client's space", async () => {
       const customId = await seedCustomClient("org-client", "org-secret");
       const created = await connect(customId);
       expect(await readClientRef(created.id)).toBe(customId);
+      expect(created).toMatchObject({ scope: "space", origin_space_id: null });
     });
 
-    it("leaves client_ref NULL when omitted (non-oauth2 callers)", async () => {
+    it("leaves client_ref NULL when omitted (non-oauth2 callers), at org scope", async () => {
       const created = await connect();
       expect(await readClientRef(created.id)).toBeNull();
+      expect(created.scope).toBe("org");
+    });
+
+    it("refuses a custom client id that names no client", async () => {
+      await expect(connect(crypto.randomUUID())).rejects.toMatchObject({ status: 404 });
     });
 
     it("re-stamps the client_ref on reconnect (update-owned)", async () => {
@@ -167,6 +175,15 @@ describe("integration multi-client", () => {
         clientRef: SYSTEM_ID,
       });
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      const [row] = await db
+        .select({
+          spaceId: integrationConnections.spaceId,
+          originSpaceId: integrationConnections.originSpaceId,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, created.id));
+      // A system client serves the org: the reconnect widened the row.
+      expect(row).toEqual({ spaceId: null, originSpaceId: ctx.defaultSpaceId });
     });
   });
 

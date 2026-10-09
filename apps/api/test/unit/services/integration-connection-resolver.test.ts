@@ -44,6 +44,7 @@ import type {
 // ─────────────────────────── Fixtures ─────────────────────────────────────────
 
 const INTEG = "@vendor/test-integ";
+const ORG_ID = "org_test";
 const SPACE_ID = "spc_test";
 const USER_ID = "user_alice";
 const AGENT_ID = "@vendor/test-agent";
@@ -108,7 +109,9 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
     integrationId: INTEG,
     authKey: input.authKey ?? "oauth",
     accountId: "acc_x",
+    orgId: ORG_ID,
     spaceId: SPACE_ID,
+    originSpaceId: null,
     userId: USER_ID,
     endUserId: null,
     credentialsEncrypted: "ciphertext",
@@ -119,7 +122,7 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
     // NOT NULL in `integration_connections`: the sidecar keys its `connection`
     // tool parameter on this value, so a nameless row is unaddressable.
     label: `conn-${connId}`,
-    sharedWithOrg: false,
+    sharedSpaceIds: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...input,
@@ -163,8 +166,10 @@ function memberPin(connectionIds: string | string[]): PinRow {
  * the fallback binds only the actor's OWN connection, so an actor-less call
  * would turn every single-candidate case into `must_choose_connection`.
  */
-function resolveConnections(input: Parameters<typeof resolveConnectionsPure>[0]) {
-  return resolveConnectionsPure({ actorUserId: USER_ID, ...input });
+function resolveConnections(
+  input: Omit<Parameters<typeof resolveConnectionsPure>[0], "spaceId"> & { spaceId?: string },
+) {
+  return resolveConnectionsPure({ actorUserId: USER_ID, spaceId: SPACE_ID, ...input });
 }
 
 function req(
@@ -430,7 +435,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   const END_USER = "eu_1";
   const own = (over: Partial<ConnectionRow> = {}) => conn(over);
   const shared = (over: Partial<ConnectionRow> = {}) =>
-    conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
+    conn({ userId: COLLEAGUE, sharedSpaceIds: [SPACE_ID], ...over });
   const DEAD = { needsReconnection: true };
 
   /**
@@ -725,6 +730,103 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       ],
     });
   });
+
+  describe("several own rows — the one OF this space wins", () => {
+    const OTHER_SPACE = "spc_other";
+    const orgRow = (originSpaceId: string | null, over: Partial<ConnectionRow> = {}) =>
+      own({ spaceId: null, originSpaceId, ...over });
+    const boundIds = (result: ReturnType<typeof resolveConnections>) =>
+      result.resolved[INTEG]?.map((r) => [r.connectionId, r.source]);
+
+    const bindsAlone = (rows: ConnectionRow[]) =>
+      resolveConnections({
+        requirements: [requiredReq(oauth2Manifest())],
+        accessibleConnections: rows,
+        pins: [],
+      });
+
+    it("binds the org row connected from this space over one connected elsewhere", () => {
+      const elsewhere = orgRow(OTHER_SPACE);
+      const here = orgRow(SPACE_ID, { authKey: "pat" });
+      expect(boundIds(bindsAlone([elsewhere, here]))).toEqual([[here.id, "fallback_auto"]]);
+    });
+
+    it("binds this space's own-scope row over an org row from elsewhere", () => {
+      const elsewhere = orgRow(OTHER_SPACE);
+      const here = own();
+      expect(boundIds(bindsAlone([elsewhere, here]))).toEqual([[here.id, "fallback_auto"]]);
+    });
+
+    it("binds a lone own org row whatever its origin", () => {
+      const lone = orgRow(null);
+      expect(boundIds(bindsAlone([lone]))).toEqual([[lone.id, "fallback_auto"]]);
+    });
+
+    it("must choose when none, or several, are of this space", () => {
+      for (const rows of [
+        [orgRow(OTHER_SPACE), orgRow(null)],
+        [orgRow(SPACE_ID), own({ authKey: "pat" })],
+      ]) {
+        const result = bindsAlone(rows);
+        expect(result.resolved[INTEG]).toBeUndefined();
+        expect(result.errors[0]!.code).toBe("must_choose_connection");
+        expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual(
+          rows.map((r) => r.id),
+        );
+      }
+    });
+
+    it("a colleague's row shared from this space never breaks the tie", () => {
+      const rows = [
+        orgRow(OTHER_SPACE),
+        orgRow(null),
+        shared({ spaceId: null, originSpaceId: SPACE_ID }),
+      ];
+      const result = bindsAlone(rows);
+      expect(result.errors[0]!.code).toBe("must_choose_connection");
+    });
+  });
+});
+
+describe("resolveConnections — labels of a bound set", () => {
+  const COLLEAGUE = "user_colleague";
+  const labelsOf = (ids: string[], rows: ConnectionRow[]) =>
+    resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: rows,
+      pins: [pin(ids)],
+    }).resolved[INTEG]!.map((r) => [r.connectionId, r.label]);
+
+  it("suffixes two owners' equal labels in set order, so every member is addressable", () => {
+    const mine = conn({ label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const theirs = conn({ userId: COLLEAGUE, label: "Work", sharedSpaceIds: [SPACE_ID] });
+    expect(labelsOf([mine.id, theirs.id], [mine, theirs])).toEqual([
+      [mine.id, "Work"],
+      [theirs.id, "Work (2)"],
+    ]);
+    expect(labelsOf([theirs.id, mine.id], [mine, theirs])).toEqual([
+      [theirs.id, "Work"],
+      [mine.id, "Work (2)"],
+    ]);
+  });
+
+  it("skips a suffix another member already holds", () => {
+    const a = conn({ label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const b = conn({ userId: COLLEAGUE, label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const c = conn({ userId: "user_third", label: "Work (2)", sharedSpaceIds: [SPACE_ID] });
+    const labels = labelsOf([a.id, b.id, c.id], [a, b, c]).map(([, label]) => label);
+    expect(labels).toEqual(["Work", "Work (2)", "Work (2) (2)"]);
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it("leaves distinct labels as stored", () => {
+    const a = conn({ label: "Work" });
+    const b = conn({ label: "Perso", authKey: "pat" });
+    expect(labelsOf([a.id, b.id], [a, b])).toEqual([
+      [a.id, "Work"],
+      [b.id, "Perso"],
+    ]);
+  });
 });
 
 describe("resolveConnections — health checks", () => {
@@ -981,7 +1083,11 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
   });
 
   it("flags ownedByActor=false when the under-scoped connection belongs to someone else", () => {
-    const foreign = conn({ userId: "user_someone_else", sharedWithOrg: true, scopesGranted: [] });
+    const foreign = conn({
+      userId: "user_someone_else",
+      sharedSpaceIds: [SPACE_ID],
+      scopesGranted: [],
+    });
     const result = resolveConnections({
       requirements: [req(scopedManifest(), ["t1"])],
       accessibleConnections: [foreign],
@@ -1001,7 +1107,7 @@ describe("resolveConnections — org default", () => {
   const SOFT = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: false } });
 
   it("ENFORCE default refuses a launch override outside it with override_outranked", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1016,7 +1122,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("a SOFT default never outranks a launch override", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1029,7 +1135,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("ENFORCE default wins over the member pin", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1050,7 +1156,7 @@ describe("resolveConnections — org default", () => {
 
   it("per-agent admin pin beats the ENFORCE org default (agent-specific exception)", () => {
     const pinned = conn({});
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinned, def],
@@ -1074,7 +1180,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("SOFT default kills must_choose: used when N candidates and no pin/override", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const otherA = conn({});
     const otherB = conn({});
     const result = resolveConnections({
@@ -1096,7 +1202,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("member pin beats the SOFT default (explicit preference wins)", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const mine = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1111,7 +1217,7 @@ describe("resolveConnections — org default", () => {
 
   it("SOFT default with an unreachable member fails loud — it never falls through to the fallback", () => {
     const onlyOne = conn({});
-    const live = conn({ sharedWithOrg: true });
+    const live = conn({ sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [onlyOne, live],
@@ -1166,7 +1272,7 @@ describe("resolveConnections — org default", () => {
       },
       tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
     } as unknown as IntegrationManifest;
-    const def = conn({ sharedWithOrg: true, scopesGranted: [] });
+    const def = conn({ sharedSpaceIds: [SPACE_ID], scopesGranted: [] });
     const result = resolveConnections({
       requirements: [req(manifest, ["t1"])],
       accessibleConnections: [def],
@@ -1823,8 +1929,8 @@ describe("resolveConnections — connection sets", () => {
   });
 
   it("an ENFORCE org default of 2 is narrowed by an override naming one of its members", () => {
-    const defA = conn({ label: "web-1", sharedWithOrg: true });
-    const defB = conn({ authKey: "pat", label: "db", sharedWithOrg: true });
+    const defA = conn({ label: "web-1", sharedSpaceIds: [SPACE_ID] });
+    const defB = conn({ authKey: "pat", label: "db", sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [defA, defB],
@@ -1883,7 +1989,7 @@ describe("resolveConnections — connection sets", () => {
   });
 
   it("an ENFORCE default with a gone member fails loud, naming it", () => {
-    const live = conn({ label: "web-1", sharedWithOrg: true });
+    const live = conn({ label: "web-1", sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [live],
@@ -2418,7 +2524,7 @@ describe("resolveConnections — a warning carries the code its state raises on 
       code: "must_choose_connection",
       requirement: req(oauth2Manifest()),
       input: () => ({
-        accessibleConnections: [conn({ userId: "user_colleague", sharedWithOrg: true })],
+        accessibleConnections: [conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID] })],
       }),
     },
     {

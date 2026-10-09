@@ -45,11 +45,11 @@ export async function seedProxyConnection(
       authKey,
       accountId,
       label: accountId,
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
       scopesGranted: [],
-      sharedWithOrg: false,
     })
     .returning({ id: integrationConnections.id });
   return row!.id;

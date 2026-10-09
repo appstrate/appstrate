@@ -156,7 +156,7 @@ describe("credential-proxy integration-resolver", () => {
     /** Also the label, which is unique per (space, integration). */
     accountId?: string;
     authKey?: string;
-    sharedWithOrg?: boolean;
+    sharedSpaceIds?: string[];
     needsReconnection?: boolean;
     scopes?: string[];
   }): Promise<string> {
@@ -175,12 +175,13 @@ describe("credential-proxy integration-resolver", () => {
         authKey: opts.authKey ?? "primary",
         accountId,
         label: accountId,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read"],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
+        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
@@ -297,6 +298,7 @@ describe("credential-proxy integration-resolver", () => {
       authKey: "primary",
       accountId: "acct-1",
       label: "Connexion 1",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({
@@ -363,6 +365,7 @@ describe("credential-proxy integration-resolver", () => {
       authKey: "primary",
       accountId: "acct-1",
       label: "Connexion 1",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
@@ -641,7 +644,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("uses the actor's own connection even when a colleague shares one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
 
       const resolved = await resolveIntegrationProxyCredentials(input());
@@ -654,7 +661,7 @@ describe("credential-proxy integration-resolver", () => {
       const sharedId = await seedConnection({
         userId: colleague.id,
         accountId: "shared",
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
       });
 
       const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
@@ -683,7 +690,7 @@ describe("credential-proxy integration-resolver", () => {
       const sharedId = await seedConnection({
         userId: colleague.id,
         accountId: "shared",
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
       });
       // A colleague's UNshared connection is not the caller's to name.
       await seedConnection({ userId: colleague.id, accountId: "private" });
@@ -732,7 +739,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("reports a lone dead own connection as 409 needs_reconnection — never switches to the shared one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const deadId = await seedConnection({
         userId: ctx.user.id,
         accountId: "dead",

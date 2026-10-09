@@ -24,6 +24,8 @@ import {
   connectionLockHintKey,
   connectionRowGrants,
   isConnectionOwnedBy,
+  isSharedInSpace,
+  withSpaceShare,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
 import { isQueryInFlight } from "../../lib/query-state";
@@ -124,14 +126,14 @@ function ConnectionTableRow({
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
-  const isShared = connection.shared_with_org === true;
+  const isShared = isSharedInSpace(connection, spaceId);
   // The list now returns org-shared connections owned by OTHER members, so
   // every per-row control has to be gated on the same rule the API enforces —
   // otherwise the button renders and the request comes back 403:
   //   - delete  → `DELETE /api/me/connections/:id`, strictly owner-scoped
   //               (`routes/me.ts`), no admin escape hatch by design;
   //   - share   → owner-only, because sharing is the owner's consent
-  //               (`routes/integrations.ts`, `shared_with_org` branch);
+  //               (`routes/integrations.ts`, `shared_space_ids` branch);
   //               UNsharing is also open to `integrations:configure`;
   //   - rename  → owner OR org admin (same route, label branch).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
@@ -331,12 +333,19 @@ function ConnectionTableRow({
                   type="checkbox"
                   checked={isShared}
                   disabled={updateConnection.isPending || shareLocked}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    if (!spaceId) return;
                     updateConnection.mutate({
                       params: { path: { packageId, connectionId: connection.id } },
-                      body: { shared_with_org: e.target.checked },
-                    })
-                  }
+                      body: {
+                        shared_space_ids: withSpaceShare(
+                          connection.shared_space_ids,
+                          spaceId,
+                          e.target.checked,
+                        ),
+                      },
+                    });
+                  }}
                   data-testid={`share-toggle-${connection.id}`}
                 />
                 {t("integration.connection.shareWithOrg.label")}

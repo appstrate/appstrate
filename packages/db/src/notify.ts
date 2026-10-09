@@ -261,11 +261,8 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // integration detail, status cards). Without this, the badge only
   // refreshes on window-focus refetch and stays stale across tabs.
   //
-  // Tenant scope: the payload carries `space_id` only — the table
-  // has no `org_id` column (org is enforced via the `spaces` row).
-  // The realtime subscriber filter relies on the SSE auth gate
-  // (`validateSSEAuth`) having proven `spaceId ∈ orgId`, so this
-  // payload-side scope is sufficient.
+  // Tenant scope: `org_id` always, `space_id` NULL for an org-scoped
+  // connection (#1870), which reaches every space of its org.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
   // invalidate the right cache; `needs_reconnection` is NULL on delete
@@ -286,6 +283,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', OLD.auth_key,
           'user_id', OLD.user_id,
           'end_user_id', OLD.end_user_id,
+          'org_id', OLD.org_id,
           'space_id', OLD.space_id,
           'needs_reconnection', NULL,
           'deleted', TRUE
@@ -299,6 +297,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', NEW.auth_key,
           'user_id', NEW.user_id,
           'end_user_id', NEW.end_user_id,
+          'org_id', NEW.org_id,
           'space_id', NEW.space_id,
           'needs_reconnection', NEW.needs_reconnection,
           'deleted', FALSE

@@ -23,7 +23,10 @@ import { isQueryInFlight } from "../../lib/query-state";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
-import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
+import {
+  connectionLockHintKey,
+  withSpaceShare,
+} from "../../components/integration-connect/connection-ownership";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -127,7 +130,7 @@ function ConnectionRow({
   conn: MeConnectionEntry;
   onDisconnect: () => void;
   onUpdateLabel?: (label: string, onSuccess: () => void) => void;
-  onToggleShare?: (next: boolean) => void;
+  onToggleShare?: (sharedSpaceIds: string[]) => void;
   disconnecting: boolean;
   updating: boolean;
 }) {
@@ -135,6 +138,9 @@ function ConnectionRow({
   // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
   const lockKey = connectionLockHintKey(conn.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
+  // The space the row lives in, or was connected from when it spans the org.
+  const home = conn.space ?? conn.origin_space;
+  const sharedHome = !!home && conn.shared_spaces.some((s) => s.id === home.id);
 
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -152,7 +158,7 @@ function ConnectionRow({
     value: (
       <>
         <span>{conn.org.name}</span>
-        <span className="text-muted-foreground"> &middot; {conn.space.name}</span>
+        {home && <span className="text-muted-foreground"> &middot; {home.name}</span>}
       </>
     ),
   });
@@ -195,7 +201,7 @@ function ConnectionRow({
             <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
           {statusBadge(t, conn)}
-          {conn.shared_with_org && (
+          {conn.shared_spaces.length > 0 && (
             <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
               {t("connections.sharedBadge")}
             </span>
@@ -213,14 +219,22 @@ function ConnectionRow({
         </div>
 
         {/* Share toggle */}
-        {onToggleShare && (
-          <DisabledReasonTooltip reason={conn.shared_with_org ? lockHint : null}>
+        {onToggleShare && home && (
+          <DisabledReasonTooltip reason={sharedHome ? lockHint : null}>
             <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
-                checked={conn.shared_with_org}
-                disabled={updating || (conn.shared_with_org && !!lockHint)}
-                onChange={(e) => onToggleShare(e.target.checked)}
+                checked={sharedHome}
+                disabled={updating || (sharedHome && !!lockHint)}
+                onChange={(e) =>
+                  onToggleShare(
+                    withSpaceShare(
+                      conn.shared_spaces.map((s) => s.id),
+                      home.id,
+                      e.target.checked,
+                    ),
+                  )
+                }
               />
               <span>{t("connections.shareWithOrgLabel")}</span>
             </label>
@@ -405,23 +419,14 @@ export function PreferencesConnectionsPage() {
                     }
                     onUpdateLabel={(label, onSuccess) =>
                       updateIntegration.mutate(
-                        {
-                          packageId: group.source_id,
-                          connectionId: conn.connection_id,
-                          orgId: conn.org.id,
-                          spaceId: conn.space.id,
-                          label,
-                        },
+                        { connectionId: conn.connection_id, body: { label } },
                         { onSuccess },
                       )
                     }
-                    onToggleShare={(next) =>
+                    onToggleShare={(sharedSpaceIds) =>
                       updateIntegration.mutate({
-                        packageId: group.source_id,
                         connectionId: conn.connection_id,
-                        orgId: conn.org.id,
-                        spaceId: conn.space.id,
-                        sharedWithOrg: next,
+                        body: { shared_space_ids: sharedSpaceIds },
                       })
                     }
                   />

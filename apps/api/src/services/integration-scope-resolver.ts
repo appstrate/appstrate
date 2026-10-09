@@ -5,8 +5,8 @@ import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 
 import type { Actor } from "../lib/actor.ts";
-import { actorFilter } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
+import { ownRowInSpace } from "./connection-reach.ts";
 
 /**
  * `scopesGranted` of a single connection row the actor owns — the row
@@ -34,11 +34,7 @@ export async function getCurrentScopesGranted(input: {
         eq(integrationConnections.id, input.connectionId),
         eq(integrationConnections.integrationId, input.integrationId),
         eq(integrationConnections.authKey, input.authKey),
-        eq(integrationConnections.spaceId, input.scope.spaceId),
-        actorFilter(input.actor, {
-          userId: integrationConnections.userId,
-          endUserId: integrationConnections.endUserId,
-        }),
+        ownRowInSpace(input.scope.spaceId, input.actor),
       ),
     );
   return rows[0]?.scopesGranted ?? [];

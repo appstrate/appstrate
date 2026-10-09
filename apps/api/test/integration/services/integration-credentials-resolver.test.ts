@@ -231,6 +231,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
         label: opts.accountId ?? "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
@@ -570,6 +571,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         authKey: "primary",
         accountId: "acct-1",
         label: "Connexion 1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({
@@ -628,6 +630,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         authKey: "primary",
         accountId: "acct-1",
         label: "Connexion 1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),

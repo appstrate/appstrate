@@ -16,7 +16,7 @@
  *   4. A delegated credential is capped by its scope ceiling: the read needs
  *      `integrations:read`, the writes `integrations:connect`.
  *
- * Service-layer behaviour (own vs other member's connection, sharedWithOrg
+ * Service-layer behaviour (own vs other member's connection, shared
  * fallback, the 6-layer cascade resolution) lives in
  * `services/integration-pins-service.test.ts` + `services/integration-
  * connection-resolver.test.ts`. This file pins the HTTP boundary only.
@@ -102,16 +102,18 @@ describe("/api/me/integration-pins", () => {
     userId: string | null,
     opts: { endUserId?: string; spaceId?: string; shared?: boolean } = {},
   ): Promise<string> {
+    const spaceId = opts.spaceId ?? ctx.defaultSpaceId;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${(userId ?? opts.endUserId)!.slice(0, 6)}`,
-        spaceId: opts.spaceId ?? ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId,
         userId,
         endUserId: opts.endUserId ?? null,
-        sharedWithOrg: opts.shared ?? false,
+        sharedSpaceIds: opts.shared ? [spaceId] : [],
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -855,7 +857,8 @@ describe("/api/me/integration-pins", () => {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(404);
+      // Same 204 as an unknown id: a probe learns nothing, and the row is untouched.
+      expect(del.status).toBe(204);
       expect(await readPins()).toEqual(pinsBefore);
       expect(await readSchedules()).toEqual(schedulesBefore);
     });

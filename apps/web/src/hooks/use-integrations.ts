@@ -661,7 +661,7 @@ export function useUpdateIntegrationConnection() {
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string; shared_with_org?: boolean };
+      body: { label?: string; shared_space_ids?: string[] };
     }) => {
       const { data } = await client.PATCH(
         "/api/integrations/{packageId}/connections/{connectionId}",
@@ -674,7 +674,7 @@ export function useUpdateIntegrationConnection() {
       // A label shows on every picker and readiness view, not just the connection list.
       void invalidateIntegrationQueries(qc);
       // Unsharing disables other people's schedules naming the connection.
-      if (vars.body.shared_with_org === false) invalidateSchedules(qc);
+      if (vars.body.shared_space_ids) invalidateSchedules(qc);
     },
   });
 }
