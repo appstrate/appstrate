@@ -19,7 +19,7 @@ import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-ser
 import { fieldsConnect, hostedSubmit, type ProblemBody } from "../../helpers/connect-surfaces.ts";
 
 const INTEGRATION_ID = "@myorg/legacy-app";
-const USERNAME = "alice";
+const USERNAME = "alice@example.com";
 // Every character a form body gives a meaning to.
 const PASSWORD = "p&ss=w+rd %x";
 const UPSTREAM_BODY = "upstream-says-no";
@@ -300,6 +300,19 @@ describe("declarative connect.login at the route boundary", () => {
     expect(body.detail).toContain("cannot carry where it is placed");
     expect(raw).not.toContain("X-Admin");
     expect(received).toEqual([]);
+  });
+
+  it("connect/fields: names a connection without identity after its username, masked", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties.password = { type: "string", format: "password" };
+      }),
+    );
+
+    const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { label: string }).label).toBe("al****.com");
   });
 
   it("connect/fields: keeps a login the integration cannot complete a generic 500", async () => {

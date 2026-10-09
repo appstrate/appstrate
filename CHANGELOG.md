@@ -349,6 +349,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A login connection that reports no identity is no longer just
+  `Connexion N`** (#1818): a `connect.login` or `connect.tool` connection is
+  named, as a pasted credential already is, after its one non-secret required
+  credential field, masked (`al****.com`).
 - **A new organization's starter agent runs from the CLI, the chat and the
   Claude Code plugin on its first try** (#1789). It was created as a draft
   only, so `appstrate run @<scope>/hello-world`, which runs the latest
