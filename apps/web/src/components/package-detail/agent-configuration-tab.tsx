@@ -199,8 +199,8 @@ function InputSettingRow({
 }
 
 /**
- * One input as a settings row: its field, a line under it saying where the
- * value comes from, and a control on the right. The agent's Entrées (with
+ * One input as a settings row: its field, then under it what the value is
+ * (left) and what can be done to it (right): a note is text, a control acts. The agent's Entrées (with
  * "Verrouiller") and a schedule's Entrées share it.
  */
 export function InputFieldRow({
@@ -221,7 +221,7 @@ export function InputFieldRow({
   labels: ReturnType<typeof useSchemaFormLabels>;
   upload: ReturnType<typeof useUploadClient>;
   onValueChange: (next: unknown) => void;
-  hint?: string;
+  hint?: ReactNode;
   control?: ReactNode;
 }) {
   const subset = subsetWrapper(wrapper, [fieldKey]);
@@ -244,7 +244,11 @@ export function InputFieldRow({
         onChange={(e) => onValueChange((e.formData as Record<string, unknown>)[fieldKey])}
       />
       <div className="flex items-center justify-between gap-3">
-        {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : <span />}
+        {hint ? (
+          <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">{hint}</p>
+        ) : (
+          <span />
+        )}
         {control}
       </div>
     </div>

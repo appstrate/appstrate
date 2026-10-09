@@ -380,16 +380,15 @@ function InputsSection({
               setEdited(true);
             }}
             hint={
-              agentValue !== undefined && !locked
-                ? t("schedule.settings.agentValue", { value: formatInputValue(agentValue) })
-                : undefined
-            }
-            control={
               locked ? (
-                <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                <>
                   <Lock className="size-3.5" aria-hidden />
                   {t("schedule.settings.lockedByAgent")}
-                </span>
+                </>
+              ) : agentValue !== undefined &&
+                JSON.stringify(values[key]) !== JSON.stringify(agentValue) ? (
+                // Said only when this schedule replaces the agent's value.
+                t("schedule.settings.agentValue", { value: formatInputValue(agentValue) })
               ) : undefined
             }
           />
