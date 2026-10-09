@@ -79,16 +79,15 @@ function renderCard(
   entry: { required?: boolean; blocking?: boolean; active?: boolean } = {},
 ): string {
   const qc = new QueryClient();
-  qc.setQueryData($api.queryOptions("get", "/api/integrations", { params: { header } }).queryKey, {
-    object: "list",
-    data: [{ id: GMAIL, active: entry.active ?? true, manifest: { display_name: "Gmail" } }],
-    hasMore: false,
-  });
   qc.setQueryData(
     $api.queryOptions("get", "/api/integrations/{packageId}", {
       params: { path: { packageId: GMAIL }, header },
     }).queryKey,
-    { manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } }, auths: [] },
+    {
+      manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+      auths: [],
+      active: entry.active ?? true,
+    },
   );
   qc.setQueryData(
     $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
@@ -183,7 +182,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     expect(html).not.toContain(label("integrationUnbound"));
   });
 
-  it("off in the space per the list: blocking only when the agent requires it", () => {
+  it("off in the space per its detail: blocking only when the agent requires it", () => {
     const optional = renderCard(unbound({ warning: warning("integration_not_active") }), {
       active: false,
     });

@@ -10,10 +10,10 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import i18n, { i18nReady } from "../../i18n.ts";
 import {
-  hasLaunchWarnings,
   isViewersLaunch,
   launchWarningsToast,
   NONE_CHOOSING_SOURCES,
+  warnedIntegrationIds,
   type LaunchWarning,
 } from "../launch-warnings.ts";
 
@@ -202,11 +202,17 @@ describe("launchWarningsToast — why", () => {
   });
 });
 
-describe("hasLaunchWarnings", () => {
-  it("is true exactly when the toast has something to say", () => {
-    expect(hasLaunchWarnings([])).toBe(false);
-    expect(hasLaunchWarnings([warning("x", { field: "input.prompt" })])).toBe(false);
-    expect(hasLaunchWarnings([warning("@acme/gmail")])).toBe(true);
+describe("warnedIntegrationIds", () => {
+  it("names each warned integration once, and nothing when the toast has nothing to say", () => {
+    expect(warnedIntegrationIds([])).toEqual([]);
+    expect(warnedIntegrationIds([warning("x", { field: "input.prompt" })])).toEqual([]);
+    expect(
+      warnedIntegrationIds([
+        warning("@acme/gmail"),
+        warning("@acme/slack"),
+        warning("@acme/gmail", { code: "integration_unbound" }),
+      ]),
+    ).toEqual(["@acme/gmail", "@acme/slack"]);
   });
 });
 
