@@ -104,7 +104,7 @@ import {
   parseJsonPath,
 } from "@appstrate/afps-shared/jsonpath";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
-import { actorFromIds, actorInsert, actorFilter } from "../lib/actor.ts";
+import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.ts";
 import { connectionInSpace, ownRowInSpace, usableInSpace } from "./connection-reach.ts";
 import type { MeConnectionAuthority } from "./me-connections.ts";
 import {
@@ -2665,6 +2665,15 @@ export async function lockConnectionLabels(tx: Tx, key: ConnectionLabelKey): Pro
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey(key)})::bigint)`);
 }
 
+/** {@link lockConnectionLabels} for several keys, in one sorted pass; returns the lock keys held. */
+async function lockLabelKeys(tx: Tx, keys: ConnectionLabelKey[]): Promise<Set<string>> {
+  const byLockKey = new Map(keys.map((key) => [labelLockKey(key), key]));
+  for (const lockKey of [...byLockKey.keys()].sort()) {
+    await lockConnectionLabels(tx, byLockKey.get(lockKey)!);
+  }
+  return new Set(byLockKey.keys());
+}
+
 async function takenLabels(tx: Tx, key: ConnectionLabelKey): Promise<string[]> {
   const rows = await tx
     .select({ label: integrationConnections.label })
@@ -2707,27 +2716,29 @@ export async function widenConnectionsToOrgScope(
 ): Promise<{ id: string; label: string; previousLabel: string }[]> {
   const c = integrationConnections;
   const widenable = and(where, isNotNull(c.spaceId), isNotNull(c.userId));
-  const keyOf = (row: { orgId: string; integrationId: string; userId: string | null }) => ({
+  const keyOf = (
+    row: { orgId: string; integrationId: string; userId: string | null },
+    spaceId: string | null,
+  ): ConnectionLabelKey => ({
     orgId: row.orgId,
-    spaceId: null,
+    spaceId,
     integrationId: row.integrationId,
     ownerId: row.userId!,
   });
-  const locked = new Set<string>();
-  const lock = async (keys: ConnectionLabelKey[]) => {
-    const pending = new Map(keys.map((key) => [labelLockKey(key), key]));
-    for (const lockKey of [...pending.keys()].sort()) {
-      if (locked.has(lockKey)) continue;
-      await lockConnectionLabels(tx, pending.get(lockKey)!);
-      locked.add(lockKey);
-    }
-  };
-  const owners = await tx
-    .selectDistinct({ orgId: c.orgId, integrationId: c.integrationId, userId: c.userId })
+  const sources = await tx
+    .selectDistinct({
+      orgId: c.orgId,
+      spaceId: c.spaceId,
+      integrationId: c.integrationId,
+      userId: c.userId,
+    })
     .from(c)
     .where(widenable);
-  await lock(owners.map(keyOf));
-  const rows = await tx
+  const locked = await lockLabelKeys(
+    tx,
+    sources.flatMap((source) => [keyOf(source, source.spaceId), keyOf(source, null)]),
+  );
+  const matching = await tx
     .select({
       id: c.id,
       orgId: c.orgId,
@@ -2740,13 +2751,13 @@ export async function widenConnectionsToOrgScope(
     .where(widenable)
     .orderBy(asc(c.id))
     .for("update");
-  // A row that started matching after the first read: its key, out of order.
-  await lock(rows.map(keyOf));
+  // A row that started matching after the first read holds a key not locked: left as it is.
+  const rows = matching.filter((row) => locked.has(labelLockKey(keyOf(row, row.spaceId))));
 
   const taken = new Map<string, string[]>();
   const widened: { id: string; label: string; previousLabel: string }[] = [];
   for (const row of rows) {
-    const key = keyOf(row);
+    const key = keyOf(row, null);
     let labels = taken.get(labelLockKey(key));
     if (!labels) {
       labels = await takenLabels(tx, key);
@@ -2923,12 +2934,16 @@ export async function persistCredentialBundle(
       const clientSpace = restamped ? await mintingClientSpace(tx, input.clientRef) : null;
       const widens = restamped && clientSpace === null && target.actor.type === "user";
       if (widens) {
-        await lockConnectionLabels(tx, {
+        // The keys a widening leaves and joins (`widenConnectionsToOrgScope`), before the row lock.
+        const key = {
           orgId: target.scope.orgId,
-          spaceId: null,
           integrationId: target.packageId,
           ownerId: target.actor.id,
-        });
+        };
+        await lockLabelKeys(tx, [
+          { ...key, spaceId: target.scope.spaceId },
+          { ...key, spaceId: null },
+        ]);
       }
       const [existing] = await tx
         .select({
@@ -3257,7 +3272,7 @@ export async function listIntegrationConnections(
   );
   return rows.map((row) => ({
     ...serializeIntegrationConnection(row, {
-      owner: isOwnedBy(row, actor),
+      owner: actorOwns(actor, row),
       spaceId: scope.spaceId,
     }),
     owner_name: ownerName(row),
@@ -3318,7 +3333,7 @@ export async function listUsableIntegrationsForActor(
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {
     const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
-    entry.own ||= isOwnedBy(row, actor);
+    entry.own ||= actorOwns(actor, row);
     entry.shared ||= row.sharedSpaceIds.includes(scope.spaceId);
     acc.set(row.integrationId, entry);
   }
@@ -3433,34 +3448,43 @@ export async function assertConnectionsUnpinned(
 
 /**
  * Delete one connection row the actor owns ({@link forgetDeletedConnection}), wherever it serves.
- * A `bound` credential reaches only the rows of its org — and of its space, when it pins one.
+ * A `bound` credential reaches only the rows of its org — and of its space, when it pins one,
+ * where it deletes only a row scoped to that space: an org-scoped row serves other spaces too (403).
  */
 export async function deleteOwnConnection(
   actor: Actor,
   connectionId: string,
   authority: MeConnectionAuthority,
 ): Promise<{ disabledScheduleIds: string[] }> {
+  const boundSpaceId = authority.kind === "bound" ? authority.spaceId : undefined;
   const owned = and(
     eq(integrationConnections.id, connectionId),
     actorFilter(actor, integrationConnections),
     authority.kind === "bound"
       ? and(
           eq(integrationConnections.orgId, authority.orgId),
-          authority.spaceId ? connectionInSpace(authority.spaceId) : undefined,
+          boundSpaceId ? connectionInSpace(boundSpaceId) : undefined,
         )
       : undefined,
   );
   const [found] = await db
-    .select({ id: integrationConnections.id })
+    .select({ spaceId: integrationConnections.spaceId })
     .from(integrationConnections)
     .where(owned)
     .limit(1);
   if (!found) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+  if (boundSpaceId && found.spaceId === null) {
+    throw forbidden(
+      "A credential bound to a space cannot delete a connection serving the whole organization",
+    );
+  }
   return db.transaction(async (tx) => {
     await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
     const deleted = await tx
       .delete(integrationConnections)
-      .where(owned)
+      .where(
+        and(owned, boundSpaceId ? eq(integrationConnections.spaceId, boundSpaceId) : undefined),
+      )
       .returning(deletedConnectionOwner);
     if (deleted.length === 0) {
       throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
@@ -3635,11 +3659,26 @@ function compareBinary(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function isOwnedBy(
-  row: { userId: string | null; endUserId: string | null },
-  actor: Actor,
-): boolean {
-  return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+/**
+ * A row's scope and shares as `view` may see them: the owner sees the origin and every target,
+ * anyone else only whether the row is shared into `view.spaceId`.
+ */
+export function connectionReachView(
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "spaceId" | "sharedSpaceIds" | "originSpaceId"
+  >,
+  view: { owner: boolean; spaceId: string | null },
+): { scope: "org" | "space"; shared_space_ids: string[]; origin_space_id: string | null } {
+  return {
+    scope: row.spaceId === null ? "org" : "space",
+    shared_space_ids: view.owner
+      ? row.sharedSpaceIds
+      : view.spaceId !== null && row.sharedSpaceIds.includes(view.spaceId)
+        ? [view.spaceId]
+        : [],
+    origin_space_id: view.owner ? row.originSpaceId : null,
+  };
 }
 
 /**
@@ -3674,13 +3713,7 @@ export function serializeIntegrationConnection(
     owner_type: row.userId ? "user" : "end_user",
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    scope: row.spaceId === null ? "org" : "space",
-    shared_space_ids: view.owner
-      ? row.sharedSpaceIds
-      : view.spaceId !== null && row.sharedSpaceIds.includes(view.spaceId)
-        ? [view.spaceId]
-        : [],
-    origin_space_id: view.owner ? row.originSpaceId : null,
+    ...connectionReachView(row, view),
     // Which registered client minted this connection (system env id or custom
     // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
     // UI can show, per connection, exactly which client is in use.

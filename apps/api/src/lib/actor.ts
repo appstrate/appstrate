@@ -45,6 +45,15 @@ export function actorFilter(actor: Actor, cols: { userId: Column; endUserId: Col
   return actor.type === "end_user" ? eq(cols.endUserId, actor.id) : eq(cols.userId, actor.id);
 }
 
+/** {@link actorFilter} over a loaded row: whether `actor` (none: nobody) owns it. */
+export function actorOwns(
+  actor: Actor | null,
+  row: { userId: string | null; endUserId: string | null },
+): boolean {
+  if (!actor) return false;
+  return actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
+}
+
 /**
  * WHERE clause matching a polymorphic actor against a `{typeCol, idCol}`
  * pair — the generic counterpart to {@link actorFilter} for tables that

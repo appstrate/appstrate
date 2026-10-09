@@ -518,7 +518,8 @@ export const mePaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
-          description: "The credential's scope ceiling lacks `integrations:connect`.",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or an added target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
         },
         "404": {
           $ref: "#/components/responses/NotFound",
@@ -553,7 +554,9 @@ export const mePaths = {
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
-        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
+        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise); " +
+        "a credential bound to a space deletes only a connection scoped to it (403 for one serving the " +
+        "whole organization).",
       parameters: [
         {
           name: "connectionId",
@@ -565,6 +568,11 @@ export const mePaths = {
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:disconnect`, or the credential is bound to a space and the connection serves the whole organization.",
+        },
         "409": {
           description:
             "Connection is named by an admin pin or an org default (`connection_pinned`)",

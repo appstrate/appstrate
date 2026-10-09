@@ -79,6 +79,8 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
+import { callerPermissionsInSpace } from "../lib/view-as.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
@@ -1518,10 +1520,15 @@ export function createIntegrationsRouter() {
       const body = await readJsonBody(c, updateConnectionSchema);
       // The owner, or whoever governs this space's integrations — `updateConnection` bounds what
       // a governor may do (rename a row scoped to this space, withdraw any row from it).
+      const { orgId, spaceId } = getSpaceScope(c);
       const viewer: ConnectionViewer = {
         actor: getActor(c),
-        spaceId: getSpaceScope(c).spaceId,
+        spaceId,
         governs: canConfigureIntegrations(c),
+        // A delegated credential acts from this space only.
+        boundSpaceId: isUserPrincipal(c) ? null : spaceId,
+        governsIn: async (target) =>
+          (await callerPermissionsInSpace(c, target, orgId)).has("integrations:configure"),
       };
       return c.json(await applyConnectionUpdate(c, viewer, connectionId, body));
     },
@@ -1563,7 +1570,7 @@ export async function applyConnectionUpdate(
     ...(body.shared_space_ids !== undefined ? { sharedSpaceIds: body.shared_space_ids } : {}),
   });
   await removeScheduleJobs(disabledScheduleIds);
-  const audit = (action: string, after: AuditPayload) =>
+  const audit = (action: string, after: AuditPayload, spaceIdOverride?: string) =>
     recordAuditFromContext(c, {
       action,
       resourceType: "integration_connection",
@@ -1571,9 +1578,15 @@ export async function applyConnectionUpdate(
       after,
       // `/me/*` carries no org context: the audit names the connection's org.
       orgIdOverride: connection.orgId,
+      ...(spaceIdOverride ? { spaceIdOverride } : {}),
     });
-  for (const spaceId of added) await audit("integration.connection.share_added", { spaceId });
-  for (const spaceId of removed) await audit("integration.connection.share_removed", { spaceId });
+  // A share is recorded in the space it opens or closes.
+  for (const spaceId of added) {
+    await audit("integration.connection.share_added", { spaceId }, spaceId);
+  }
+  for (const spaceId of removed) {
+    await audit("integration.connection.share_removed", { spaceId }, spaceId);
+  }
   if (body.label !== undefined || disabledScheduleIds.length > 0) {
     await audit("integration.connection.metadata.updated", {
       ...(body.label !== undefined ? { label: body.label } : {}),

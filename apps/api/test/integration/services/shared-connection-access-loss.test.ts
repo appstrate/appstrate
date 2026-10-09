@@ -165,7 +165,13 @@ describe("unsharing on access loss", () => {
   const shareAs = (userId: string, connectionId: string, sharedSpaceIds: string[]) =>
     updateConnection({
       connectionId,
-      viewer: { actor: { type: "user", id: userId }, spaceId: null, governs: false },
+      viewer: {
+        actor: { type: "user", id: userId },
+        spaceId: null,
+        governs: false,
+        boundSpaceId: null,
+        governsIn: async () => false,
+      },
       sharedSpaceIds,
     });
 

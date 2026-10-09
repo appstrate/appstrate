@@ -1326,7 +1326,13 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     await deleteOwnConnection(owner, deleted!.id, { kind: "bound", ...scope });
     await updateConnection({
       connectionId: unshared!.id,
-      viewer: { actor: owner, spaceId: scope.spaceId, governs: false },
+      viewer: {
+        actor: owner,
+        spaceId: scope.spaceId,
+        governs: false,
+        boundSpaceId: null,
+        governsIn: async () => false,
+      },
       sharedSpaceIds: [],
     });
 

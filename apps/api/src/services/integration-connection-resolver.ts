@@ -11,7 +11,8 @@
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection; several →
  *      the one OF this space (`space_id`, else `origin_space_id`), else `must_choose_connection`;
- *      none → as below. Never in a space blocking user connections for the integration.
+ *      none → as below. In a space blocking user connections for the integration, only a row
+ *      made there (`usableInSpace`).
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -27,13 +28,7 @@
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { db } from "@appstrate/db/client";
-import {
-  integrationConnections,
-  integrationPins,
-  packageShares,
-  packages,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -63,9 +58,10 @@ import {
   type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
-import type { Actor } from "../lib/actor.ts";
+import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
-import { usableInSpace } from "./connection-reach.ts";
+import { usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
@@ -76,7 +72,6 @@ import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
@@ -614,10 +609,7 @@ function isOwnedByActor(
   actor: ActorIdentity,
   conn: Pick<ConnectionRow, "userId" | "endUserId">,
 ): boolean {
-  return (
-    (actor.actorUserId !== null && conn.userId === actor.actorUserId) ||
-    (actor.actorEndUserId !== null && conn.endUserId === actor.actorEndUserId)
-  );
+  return actorOwns(actorFromIds(actor.actorUserId, actor.actorEndUserId), conn);
 }
 
 interface ActorIdentity {
@@ -991,29 +983,20 @@ async function loadPins(
  * Used at POST /api/integration-connections — refuses non-admin actors
  * when the (space, integration) row has block_user_connections=true.
  * Surfaced as a permission check, not a resolution error, because it
- * fires *before* the connection exists (so the resolver path doesn't
- * see this case in practice).
+ * fires *before* the connection exists. The predicate is the one
+ * resolution applies ({@link userConnectionsBlocked}). `enabled` is
+ * deliberately NOT required — a lock on a switched-off integration is
+ * still the space's call.
  */
 export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
+  executor: DbOrTx = db,
 ): Promise<boolean> {
-  // PLACEMENT, not activation (`placementReadFilter` + its `packageShares`
-  // join): the flag is this space's decision about an integration it HOLDS, so
-  // an ORPHAN row is nobody's decision here. `enabled` is deliberately NOT
-  // required — a lock on a switched-off integration is still the space's call.
-  const rows = await db
-    .select({ blocked: spacePackages.blockUserConnections })
-    .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
-    .where(
-      and(
-        eq(spacePackages.spaceId, spaceId),
-        eq(spacePackages.packageId, integrationId),
-        placementReadFilter(spaceId),
-      ),
-    )
-    .limit(1);
-  return rows[0]?.blocked === true;
+  // In WHERE position, unlike a select field, drizzle qualifies the predicate's columns.
+  const rows = await executor
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.id, spaceId), userConnectionsBlocked(spaceId, integrationId)));
+  return rows.length > 0;
 }

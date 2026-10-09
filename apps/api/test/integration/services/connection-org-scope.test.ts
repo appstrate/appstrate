@@ -5,8 +5,8 @@
  * client, or no client) serves every space of its org, except a space with its own MANUAL OAuth
  * client for its auth, unless the row was connected from there. A space-scoped row serves its
  * space only. Within that reach an actor uses their own rows and the rows shared into the space;
- * `block_user_connections` narrows their own to the shared ones. The picker, the pins, the
- * resolver and the credential proxy all read the same reach.
+ * `block_user_connections` narrows their own to the shared ones and those made in the space. The
+ * picker, the pins, the resolver and the credential proxy all read the same reach.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -231,6 +231,21 @@ describe("org-scope connections across spaces", () => {
       expect(await proxySelects(b)).toBeNull();
       // Control: the block is B's alone.
       expect(await verdictIn(a)).toEqual([id]);
+    });
+
+    it("keeps an own row made in the space binding there, whether space- or org-scoped", async () => {
+      // Made before the block (or by a governor): the creation gate already ruled on it.
+      const scoped = await seedConnection({ owner: me, scopedTo: b });
+      expect(await listed(b)).toEqual([scoped]);
+      expect(await verdictIn(b)).toEqual([scoped]);
+      expect(await proxySelects(b)).toBe(scoped);
+
+      const widened = await seedConnection({ owner: me, from: b });
+      expect(await listed(b)).toEqual([scoped, widened].sort());
+      await memberPin(b, widened);
+      // Made elsewhere, it is still out of B: the origin, not the scope, exempts.
+      const fromA = await seedConnection({ owner: me, from: a });
+      expect(await listed(b)).not.toContain(fromA);
     });
 
     it("keeps an own row shared into the space usable: the share is what the block asks for", async () => {

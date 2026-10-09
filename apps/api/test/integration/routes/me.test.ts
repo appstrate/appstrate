@@ -14,13 +14,20 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
+  addOrgMember,
   createTestUser,
   createTestContext,
   createTestOrg,
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedPackage,
+  seedPlacedPackage,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import { auditEvents, integrationConnections, integrationPins } from "@appstrate/db/schema";
@@ -619,13 +626,20 @@ describe("Me API (/api/me)", () => {
 
       // One audit row per target, in the connection's org (a cookie session has no org context).
       const audits = await db
-        .select({ action: auditEvents.action, orgId: auditEvents.orgId, after: auditEvents.after })
+        .select({
+          action: auditEvents.action,
+          orgId: auditEvents.orgId,
+          spaceId: auditEvents.spaceId,
+          after: auditEvents.after,
+        })
         .from(auditEvents)
         .where(eq(auditEvents.resourceId, id));
       const added = audits.filter((a) => a.action === "integration.connection.share_added");
       expect(added.map((a) => (a.after as { spaceId: string }).spaceId).toSorted()).toEqual(
         [ctx.defaultSpaceId, spaceB.id].toSorted(),
       );
+      // Each recorded in the space it opens.
+      for (const a of added) expect(a.spaceId).toBe((a.after as { spaceId: string }).spaceId);
       expect(audits.every((a) => a.orgId === ctx.orgId)).toBe(true);
     });
 
@@ -677,11 +691,100 @@ describe("Me API (/api/me)", () => {
       };
       const readKey = { Authorization: `Bearer ${(await key(["integrations:read"])).rawKey}` };
 
+      const ofKeySpace = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@mepatch/key-space",
+        userId: ctx.user.id,
+      });
+
       // A space-scoped row of another space is outside the key's binding.
       expect((await patch(outside, connectKey, { label: "x" })).status).toBe(404);
-      // An org-scoped row reaches the key's space, wherever it was connected from.
-      expect((await patch(inside, connectKey, { label: "y" })).status).toBe(200);
-      expect((await patch(inside, readKey, { label: "z" })).status).toBe(403);
+      // An org-scoped row reaches the key's space, wherever it was connected from, but serves
+      // other spaces too: the key shares it into its own space, and renames none but its own.
+      expect((await patch(inside, connectKey, { label: "y" })).status).toBe(403);
+      expect(
+        (await patch(inside, connectKey, { shared_space_ids: [ctx.defaultSpaceId] })).status,
+      ).toBe(200);
+      expect((await patch(ofKeySpace, connectKey, { label: "y" })).status).toBe(200);
+      expect((await patch(ofKeySpace, readKey, { label: "z" })).status).toBe(403);
+    });
+
+    it("holds a key bound to a space to that space's share", async () => {
+      const ctx = await createTestContext({ orgSlug: "mepatch-bound" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: spaceB.id,
+        integrationId: "@mepatch/bound",
+        userId: ctx.user.id,
+        sharedWithSpace: true,
+      });
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:connect"],
+      });
+      const bearer = { Authorization: `Bearer ${key.rawKey}` };
+
+      // Withdrawing B — another space's share — is refused, and so is any edit touching it.
+      expect((await patch(id, bearer, { shared_space_ids: [] })).status).toBe(403);
+      expect((await patch(id, bearer, { shared_space_ids: [ctx.defaultSpaceId] })).status).toBe(
+        403,
+      );
+      const [row] = await db
+        .select({ sharedSpaceIds: integrationConnections.sharedSpaceIds })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, id));
+      expect(row?.sharedSpaceIds).toEqual([spaceB.id]);
+    });
+
+    it("refuses a member sharing into a space that blocks user connections, not its governor", async () => {
+      const ctx = await createTestContext({ orgSlug: "mepatch-block" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id);
+      const blocked = await seedSpace({ orgId: ctx.orgId, name: "Locked" });
+      const integrationId = "@mepatch/blocked";
+      const memberRow = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId,
+        userId: member.id,
+      });
+      await seedPlacedPackage(blocked.id, integrationId, { blockUserConnections: true });
+      const [governorRow] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "google",
+          accountId: "acct-governor",
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+          label: "Shared",
+        })
+        .returning({ id: integrationConnections.id });
+
+      const refused = await patch(
+        memberRow,
+        { Cookie: member.cookie },
+        { shared_space_ids: [blocked.id] },
+      );
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { code: string }).code).toBe("connection_blocked_by_admin");
+      // The org owner holds `admin` — and `integrations:configure` — in every team space.
+      const allowed = await patch(
+        governorRow!.id,
+        { Cookie: ctx.cookie },
+        { shared_space_ids: [blocked.id] },
+      );
+      expect(allowed.status).toBe(200);
     });
   });
 
@@ -929,6 +1032,26 @@ describe("Me API (/api/me)", () => {
       // state, not the status code.
       expect(res.status).toBe(204);
       await assertDbHas(integrationConnections, eq(integrationConnections.id, connB));
+    });
+
+    it("a key pinned to a space cannot delete an org-scoped connection reaching it (403)", async () => {
+      const { user, orgA, bearer } = await setupTwoOrgConnections();
+      const elsewhere = await seedSpace({ orgId: orgA.id, name: "Elsewhere" });
+      const orgRow = await seedConnectionFor({
+        orgId: orgA.id,
+        spaceId: null,
+        originSpaceId: elsewhere.id,
+        integrationId: "@crit03/org-del",
+        userId: user.id,
+      });
+
+      const res = await app.request(`/api/me/connections/${orgRow}`, {
+        method: "DELETE",
+        headers: { Authorization: bearer },
+      });
+
+      expect(res.status).toBe(403);
+      await assertDbHas(integrationConnections, eq(integrationConnections.id, orgRow));
     });
 
     it("an org-A API key CAN delete a connection inside its own (org, space)", async () => {

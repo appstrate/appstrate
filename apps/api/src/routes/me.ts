@@ -55,7 +55,7 @@ import {
 } from "../services/me-connections.ts";
 import { actorFilter, getActor, type Actor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
+import { callerOrgRole, callerPermissionsInSpace, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
@@ -369,6 +369,8 @@ async function ownConnectionOrg(
  * WHOLE set of spaces it is shared into, wherever it lives: an org-scoped connection belongs to
  * no space, so no `X-Space-Id` could address it. Same edit, same service, same audits as
  * `PATCH /api/integrations/{packageId}/connections/{connectionId}`; capped like the pin writes.
+ * A credential bound to a space shares into or withdraws that space only, and renames only a
+ * connection scoped to it.
  */
 router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
   const connectionId = c.req.param("connectionId")!;
@@ -376,11 +378,18 @@ router.patch("/connections/:connectionId", requireCeiling("integrations", "conne
     throw notFound(`Connection '${connectionId}' not found`);
   }
   const actor = getActor(c);
-  if (!(await ownConnectionOrg(actor, connectionId, getMeConnectionAuthority(c)))) {
-    throw notFound(`Connection '${connectionId}' not found`);
-  }
+  const authority = getMeConnectionAuthority(c);
+  const orgId = await ownConnectionOrg(actor, connectionId, authority);
+  if (!orgId) throw notFound(`Connection '${connectionId}' not found`);
   const body = await readJsonBody(c, updateConnectionSchema);
-  const viewer = { actor, spaceId: null, governs: false };
+  const viewer = {
+    actor,
+    spaceId: null,
+    governs: false,
+    boundSpaceId: authority.kind === "bound" ? (authority.spaceId ?? null) : null,
+    governsIn: async (spaceId: string) =>
+      (await callerPermissionsInSpace(c, spaceId, orgId)).has("integrations:configure"),
+  };
   return c.json(await applyConnectionUpdate(c, viewer, connectionId, body));
 });
 
@@ -400,7 +409,9 @@ router.patch("/connections/:connectionId", requireCeiling("integrations", "conne
  *
  * A connection the caller does not own, or outside a bound credential's binding (a leaked key
  * must not destroy the creator's credentials in other orgs/spaces), answers the same 204 as one
- * that never existed: same end state, nothing disclosed to a caller probing ids.
+ * that never existed: same end state, nothing disclosed to a caller probing ids. A credential
+ * bound to a space deletes only a connection scoped to it: one serving the whole organization
+ * is 403.
  */
 router.delete(
   "/connections/:connectionId",

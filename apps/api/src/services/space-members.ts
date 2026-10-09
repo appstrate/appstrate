@@ -22,7 +22,7 @@ import {
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { SpaceMember } from "@appstrate/shared-types";
-import { conflict, notFound } from "../lib/errors.ts";
+import { ApiError, conflict, notFound } from "../lib/errors.ts";
 import {
   customRoleOn,
   loadSpaceMember,
@@ -471,10 +471,22 @@ export function nothingUnshared(): ConnectionsUnshared {
   return { connectionIds: [], shares: [], disabledScheduleIds: [] };
 }
 
+/** 400 `invalid_share_target` on `shared_space_ids`. */
+export function invalidShareTarget(detail: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "invalid_share_target",
+    title: "Invalid Share Target",
+    detail,
+    param: "shared_space_ids",
+  });
+}
+
 /**
  * The one gate of a share into `targets`, called in the sharing transaction before the write.
  * 409 `end_user_connection_not_shareable` for an end user's connection (see the
- * `integration_connections_end_user_not_shared` CHECK). 409 `connection_owner_without_access`
+ * `integration_connections_end_user_not_shared` CHECK). 400 `invalid_share_target` for a target
+ * that is not (or no longer) a space of the connection's org. 409 `connection_owner_without_access`
  * when the owning member does not reach a target — the share-side twin of
  * {@link unshareConnectionsOfOwnersWithoutAccess}. Locks the owner's membership, then the targets
  * in id order.
@@ -499,12 +511,17 @@ export async function assertConnectionShareable(
   }
   await lockOrgMember(tx, conn.orgId, conn.userId);
   const inTargets = inArray(spaces.id, [...targets]);
-  await tx
+  const locked = await tx
     .select({ id: spaces.id })
     .from(spaces)
-    .where(inTargets)
+    .where(and(inTargets, eq(spaces.orgId, conn.orgId)))
     .orderBy(asc(spaces.id))
     .for("share");
+  if (locked.length !== new Set(targets).size) {
+    const ids = new Set(locked.map((space) => space.id));
+    const missing = targets.find((id) => !ids.has(id))!;
+    throw invalidShareTarget(`'${missing}' is not a space of this organization`);
+  }
   const [lost] = await sharesOfOwnersWithoutAccess(
     tx,
     inTargets,

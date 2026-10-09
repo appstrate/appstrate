@@ -39,7 +39,8 @@ import {
 import { activeHereSql } from "./package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 import { connectionLocks, planConnectionForget } from "./integration-connections.ts";
-import { connectionInSpace } from "./connection-reach.ts";
+import { connectionInSpace, usableInSpace } from "./connection-reach.ts";
+import { listSpacesForPrincipal } from "./spaces.ts";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -134,12 +135,15 @@ async function listAllActorIntegrationConnections(
   // For dashboard users, additionally filter to orgs they're still a member of.
   // (An integration connection survives the user leaving the org via on-delete cascade,
   // but if no cascade fired we still don't want stale rows.)
+  const memberRoles =
+    actor.type === "user"
+      ? await db
+          .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
+          .from(organizationMembers)
+          .where(eq(organizationMembers.userId, actor.id))
+      : [];
   if (actor.type === "user") {
-    const memberOrgs = await db
-      .select({ orgId: organizationMembers.orgId })
-      .from(organizationMembers)
-      .where(eq(organizationMembers.userId, actor.id));
-    const memberSet = new Set(memberOrgs.map((m) => m.orgId));
+    const memberSet = new Set(memberRoles.map((m) => m.orgId));
     for (const id of uniqueOrgIds) {
       if (!memberSet.has(id)) orgNameMap.delete(id);
     }
@@ -180,51 +184,53 @@ async function listAllActorIntegrationConnections(
     });
   }
 
-  // The agents each reached space RUNS that declare this integration in their
-  // dependencies — "reused by N agents" is a statement about runs, so the
-  // question is the ONE activation rule ({@link activeHereSql}) and not the
-  // presence of a `space_packages` row: a deactivated agent, and an ORPHAN row
-  // naming a package the space has lost, execute nowhere and reuse nothing.
-  //
-  // That rule is per-space, so this is ONE query per reached space (never per
-  // connection, never per integration), written in the query builder so the
-  // predicate is CONJOINED rather than hand-copied into SQL — a hand copy is
-  // the drift this rule exists to remove.
-  const wantedPackageIds = new Set(uniquePackageIds);
-  const reuseSpaces = spaceRows.filter((space) => orgNameMap.has(space.orgId));
-  const perSpace = await Promise.all(
-    reuseSpaces.map(async (space) => {
-      const agents = await db
-        .select({ id: packages.id, integrationIds: declaredIntegrationIds })
-        .from(packages)
-        .leftJoin(spacePackages, placementRowJoin(packages.id, space.id))
-        .leftJoin(packageShares, placementShareJoin(packages.id, space.id))
+  // "Reused by N agents": the agents that RUN ({@link activeHereSql}) declaring the row's
+  // integration in a space where the row BINDS ({@link usableInSpace}). An org-scope row may bind in
+  // any space its owner reaches, so those join every row's home and shares as candidates; the
+  // predicates take a space id, so this is ONE query per candidate space.
+  const orgScopeOrgIds = new Set(rows.filter((r) => r.spaceId === null).map((r) => r.orgId));
+  const candidateOrgBySpace = new Map(
+    spaceRows.filter((sp) => orgNameMap.has(sp.orgId)).map((sp) => [sp.id, sp.orgId]),
+  );
+  const reachable = await Promise.all(
+    memberRoles
+      .filter((m) => orgScopeOrgIds.has(m.orgId))
+      .map((m) => listSpacesForPrincipal(m.orgId, m.role, actor.id, actor.id)),
+  );
+  for (const { space, role } of reachable.flat()) {
+    if (role) candidateOrgBySpace.set(space.id, space.orgId);
+  }
+  const rowIds = rows.map((r) => r.connectionId);
+  const reusePairs = await Promise.all(
+    [...candidateOrgBySpace].map(([spaceId, orgId]) =>
+      db
+        .selectDistinct({ connectionId: integrationConnections.id, agentId: packages.id })
+        .from(integrationConnections)
+        .innerJoin(
+          packages,
+          sql`${integrationConnections.integrationId} = ANY(${declaredIntegrationIds})`,
+        )
+        .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+        .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
         .where(
           and(
+            inArray(integrationConnections.id, rowIds),
+            usableInSpace(spaceId, actor),
             eq(packages.type, "agent"),
-            orgOrSystemFilter(space.orgId),
+            orgOrSystemFilter(orgId),
             notEphemeralFilter(),
-            activeHereSql(space.id),
+            activeHereSql(spaceId),
           ),
-        );
-      return { spaceId: space.id, agents };
-    }),
+        ),
+    ),
   );
-  const agentsBySpaceIntegration = new Map<string, string[]>();
-  for (const { spaceId, agents } of perSpace) {
-    for (const agent of agents) {
-      for (const integrationId of agent.integrationIds ?? []) {
-        if (!wantedPackageIds.has(integrationId)) continue;
-        const key = `${spaceId}|${integrationId}`;
-        agentsBySpaceIntegration.set(key, [...(agentsBySpaceIntegration.get(key) ?? []), agent.id]);
-      }
-    }
+  // An agent run in two spaces is one agent.
+  const reusingAgents = new Map<string, Set<string>>();
+  for (const { connectionId, agentId } of reusePairs.flat()) {
+    const agents = reusingAgents.get(connectionId) ?? new Set<string>();
+    agents.add(agentId);
+    reusingAgents.set(connectionId, agents);
   }
-  // An agent run in two reached spaces is one agent.
-  const reuseCount = (r: (typeof rows)[number]) =>
-    new Set(
-      reachedSpaces(r).flatMap((id) => agentsBySpaceIntegration.get(`${id}|${r.packageId}`) ?? []),
-    ).size;
 
   const locks = await connectionLocks(
     db,
@@ -274,7 +280,7 @@ async function listAllActorIntegrationConnections(
       scope: row.spaceId === null ? "org" : "space",
       shared_spaces: row.sharedSpaceIds.flatMap((id) => spaceRef(id) ?? []),
       locked_by: locks.get(row.connectionId) ?? null,
-      reused_by_agents: reuseCount(row),
+      reused_by_agents: reusingAgents.get(row.connectionId)?.size ?? 0,
       org: { id: row.orgId, name: orgName },
       space: spaceRef(row.spaceId),
       origin_space: spaceRef(row.originSpaceId),

@@ -637,8 +637,12 @@ export const connectionUpdateDescription =
   "(`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` " +
   "in the space the request is made from) may rename a space-scoped connection of that space, and withdraw " +
   "any connection from that space by sending the projection it reads without it (`[]`); nothing else. " +
-  "An org-scoped connection may be shared into any space of its org; a space-scoped one only into its own " +
-  "space. Every target space must still be reached by the owning member. Sharing an end user's connection " +
+  "A connection may be shared into a space of its org it serves: an org-scoped one into any space but one " +
+  "with its own OAuth client for the integration (unless connected from there), a space-scoped one only into " +
+  "its own space. Every target space must still be reached by the owning member, and one that blocks user " +
+  "connections for the integration takes a sharer holding `integrations:configure` there (403 " +
+  "`connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) adds or " +
+  "removes that space only, and renames only a connection scoped to it. Sharing an end user's connection " +
   "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
   "`connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin " +
   "does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
@@ -681,7 +685,7 @@ export const connectionUpdateRequestBody = {
 } as const;
 
 export const connectionUpdateRefusals400 =
-  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or a target that is not a space of the connection's org, or another space than its own for a space-scoped connection (`invalid_share_target`).";
+  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space with its own OAuth client for an org-scoped one (`invalid_share_target`).";
 
 export const connectionUpdateConflicts = {
   description:
@@ -1471,7 +1475,7 @@ export const integrationsPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space.",
+            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and an added target blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
         },
         "404": {
           $ref: "#/components/responses/NotFound",

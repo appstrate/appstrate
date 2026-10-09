@@ -1846,6 +1846,18 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
     expect(audits.filter((a) => a.action === "integration.connection.share_removed")).toEqual([
       { action: "integration.connection.share_removed", after: { spaceId: ctx.defaultSpaceId } },
     ]);
+    // Each recorded in the space it opens or closes, not the one the edit was made from.
+    const recorded = await db
+      .select({
+        action: auditEvents.action,
+        spaceId: auditEvents.spaceId,
+        after: auditEvents.after,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, id));
+    for (const row of recorded.filter((a) => a.action.includes(".share_"))) {
+      expect(row.spaceId).toBe((row.after as { spaceId: string }).spaceId);
+    }
   });
 
   it("lets a governor withdraw a member's connection from this space only", async () => {

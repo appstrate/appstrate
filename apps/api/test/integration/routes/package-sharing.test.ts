@@ -1851,7 +1851,7 @@ describe("the table has no other reader", () => {
     // `placementReadFilter`, which needs this LEFT JOIN or an offered
     // integration drops out of its own page. The three integration surfaces
     // beside it ask the same rule rather than a bare `space_packages` row —
-    // `integration-connection-resolver.ts` conjoins `placementReadFilter`,
+    // `connection-reach.ts` conjoins `placementReadFilter` (the `block_user_connections` rule),
     // `integration-pins-service.ts` and `me-connections.ts` conjoin
     // `activeHereSql`, both of which need this join, so a row nothing places
     // counts for nothing there either.
@@ -1867,7 +1867,7 @@ describe("the table has no other reader", () => {
     expect(files).toEqual([
       "apps/api/src/lib/package-access.ts",
       "apps/api/src/services/chat-enforced-skills.ts",
-      "apps/api/src/services/integration-connection-resolver.ts",
+      "apps/api/src/services/connection-reach.ts",
       "apps/api/src/services/integration-connections.ts",
       "apps/api/src/services/integration-pins-service.ts",
       "apps/api/src/services/integration-service.ts",
