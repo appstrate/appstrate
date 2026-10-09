@@ -425,7 +425,8 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // UNDER the run panel and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown
-// once the run ends. Zero offers adds nothing: unlike the invoke_operation
+// once the run ends — by then it may have lapsed, so the card gets its expiry.
+// Zero offers adds nothing: unlike the invoke_operation
 // connect branch there is no placeholder card here, because the run panel
 // already holds the block's geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
@@ -441,6 +442,7 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
           packageId={offer.packageId}
           toolCallId={props.toolCallId}
           runStarted={isStartedRunResult(props.result)}
+          expiresAt={offer.expiresAt}
         />
       ))}
     </>

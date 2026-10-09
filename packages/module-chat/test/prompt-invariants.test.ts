@@ -166,6 +166,16 @@ describe("full persona invariants", () => {
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
+  // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
+  it("routes an `integration_not_active` warning to activation, never to connecting", () => {
+    for (const persona of [FULL, REDUCED]) {
+      expect(persona).toMatch(
+        /For `integration_not_active`, connecting is not the remedy: the integration is not activated in this space/,
+      );
+      expect(persona).toContain("For `integration_unbound`, offer to connect it");
+    }
+  });
+
   it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {
     expect(FULL).toContain("guides for YOU");
     expect(FULL).toContain("LOAD IT BEFORE acting: call `read_skill` with its `id`");

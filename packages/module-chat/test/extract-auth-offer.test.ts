@@ -4,6 +4,7 @@ import { describe, it, expect } from "bun:test";
 import {
   extractAuthOffers,
   extractRunAndWaitAuthOffers,
+  isOfferExpired,
   isStartedRunResult,
   resumeInstruction,
   encodeResume,
@@ -24,7 +25,7 @@ describe("extractAuthOffers", () => {
       extractAuthOffers({
         output: { connectOffers: [{ ...OFFER, expiresAt: "2026-07-15T19:08:49.000Z" }] },
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    ).toEqual([{ authUrl: OFFER.connect_url, expiresAt: "2026-07-15T19:08:49.000Z" }]);
   });
 
   // Issue #1207: a readiness error carries one link per integration to connect,
@@ -50,7 +51,13 @@ describe("extractAuthOffers", () => {
           { ...OFFER, packageId: "@appstrate/gmail", expiresAt: "2026-07-15T19:08:49.000Z" },
         ],
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);
+    ).toEqual([
+      {
+        authUrl: OFFER.connect_url,
+        packageId: "@appstrate/gmail",
+        expiresAt: "2026-07-15T19:08:49.000Z",
+      },
+    ]);
     // Absent, not empty: an offer minted by a surface that names no package
     // leaves the card on its `packageId`-less path.
     expect(extractAuthOffers({ connectOffers: [OFFER] })).toEqual([{ authUrl: OFFER.connect_url }]);
@@ -173,6 +180,22 @@ describe("extractRunAndWaitAuthOffers", () => {
     expect(extractRunAndWaitAuthOffers(step({ status: 409, body: {} }))).toEqual([
       { authUrl: OFFER.connect_url },
     ]);
+  });
+});
+
+describe("isOfferExpired", () => {
+  const now = Date.parse("2026-10-09T12:00:00.000Z");
+
+  // #1830: a started run's offer is minted at launch and shown at the end.
+  it("is expired at and after the session's expiry", () => {
+    expect(isOfferExpired("2026-10-09T12:00:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T11:50:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T12:00:01.000Z", now)).toBe(false);
+  });
+
+  it("treats an absent or unparseable expiry as live", () => {
+    expect(isOfferExpired(undefined, now)).toBe(false);
+    expect(isOfferExpired("not a date", now)).toBe(false);
   });
 });
 

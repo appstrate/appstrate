@@ -258,8 +258,10 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
         `\`${LIST_FILES}\` \`{ "runId": "<id>" }\`. Never call \`getRun\` on a finished run.`,
       "- `connect_url` or `must_choose_connection`: follow the Appstrate server's instructions.",
       "- `warnings` items (`integration_unbound`, `integration_not_active`): the run started " +
-        "without those integrations. Say so with the result, and hand over any `connect_url` " +
-        "they carry; do not retry.",
+        "without those integrations. Say so with the result; do not retry. They carry no link: " +
+        "connect an `integration_unbound` one only if the user asks, with " +
+        "`initiateIntegrationConnect` as the Appstrate server's instructions describe; an " +
+        "`integration_not_active` one is activated in the space, not connected.",
       "- `404` `agent_not_found`, `agent_not_active_in_space` or `no_published_version`, or the " +
         "pinned version not found: this command is out of date. Tell the user to run " +
         `\`${PLUGIN_UPDATE_COMMAND}\`; do not retry.`,

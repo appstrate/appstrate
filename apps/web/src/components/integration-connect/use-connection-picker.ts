@@ -5,7 +5,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   invalidateIntegrationQueries,
-  useIntegrationAgentResolution,
   useIntegrationReadinessEntry,
   useReadIntegrationResolution,
   type IntegrationAuthStatus,
@@ -51,7 +50,8 @@ import { useCanReach } from "../../hooks/use-can-reach";
  * member pin loses to them, and an override naming a connection outside the
  * locked set is refused (`override_outranked`). A stored override within the
  * locked set narrows it and is shown as what binds; one reaching outside it is
- * offered its only fix, being cleared.
+ * offered its only fix, being cleared. "No connection" narrows any lock, so an
+ * override may still pick it under one.
  */
 export type ConnectionPickerPersistence =
   | { mode: "pin" }
@@ -103,15 +103,12 @@ export function useConnectionPicker(
   deps: ConnectionPickerDeps = {},
 ) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: resolution, isPending } = useIntegrationAgentResolution(
+  // Same bulk query as the launch badge, selected per-integration.
+  const { data: entry, isPending } = useIntegrationReadinessEntry(
     integrationId,
     agentPackageId,
     version,
   );
-  // Same bulk query as the launch badge, selected per-integration.
-  const { data: entry } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
-  const runBlocking = entry?.run_blocking ?? false;
-  const required = entry?.required ?? false;
   const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
@@ -140,7 +137,7 @@ export function useConnectionPicker(
   // this the "add connection" entries offered a flow doomed to 403.
   const connectable = connectableAuthKeys(manifest, authStatuses);
   // When the actor's connections sit on another auth, only the agent's own auth fixes it.
-  const requiredAuthKey = resolution?.required_auth_key ?? null;
+  const requiredAuthKey = entry?.resolution.required_auth_key ?? null;
   const authKeys = Object.keys(auths).filter(
     (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
   );
@@ -148,8 +145,11 @@ export function useConnectionPicker(
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
 
-  if (isPending || !resolution) return null;
+  // No picker until the entry is in: `required` is unknown before, and "no connection" must not
+  // be offered for an integration the agent requires.
+  if (isPending || !entry) return null;
 
+  const { resolution, run_blocking: runBlocking, required } = entry;
   const {
     candidates,
     resolved_connection_ids: resolvedConnectionIds,

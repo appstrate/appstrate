@@ -182,7 +182,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 
 /**
  * Query options for an (integration, agent) resolution verdict, shared by the
- * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * picker ({@link useIntegrationReadinessEntry}) and the launch-badge readiness
  * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
@@ -223,25 +223,6 @@ export function useAgentConnectionReadiness(agentPackageId: string | undefined) 
   return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
 }
 
-/**
- * Server-side picker verdict for a (agent, integration) on the agent page:
- * which connection the next run resolves to + the annotated candidate list
- * + pin/blocked state. Selected out of the single bulk readiness query so the
- * picker, badge, and modal all share one cache entry per agent.
- */
-export function useIntegrationAgentResolution(
-  integrationId: string | undefined,
-  agentPackageId: string | undefined,
-  version?: string,
-) {
-  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
-  return useQuery({
-    ...options,
-    enabled: options.enabled && !!integrationId,
-    select: (data) => resolutionOf(data, integrationId),
-  });
-}
-
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
 
@@ -253,7 +234,7 @@ function resolutionOf(data: AgentConnectionReadiness, integrationId: string | un
 }
 
 /**
- * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
  * it NOW, for a handler running after something already awaited the readiness
  * refetch (the connect popup does): the fresh value, without a second request.
  * Throws when that refetch failed — the cache then still holds the old verdict.
@@ -272,7 +253,12 @@ export function useReadIntegrationResolution(
   };
 }
 
-/** One declared integration's readiness entry (resolution, `run_blocking`, `required`). */
+/**
+ * One declared integration's readiness entry: the server-side picker verdict
+ * (`resolution`: what the next run binds, the annotated candidates, the pins),
+ * `run_blocking` and `required`. Selected out of the single bulk readiness
+ * query so the picker, badge, and modal all share one cache entry per agent.
+ */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,

@@ -62,7 +62,8 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 /**
  * The locked set, read-only. A stored override within it narrows it, so that subset is what
  * binds (`[]`: none); one reaching outside it is refused (`override_outranked`). Either can be
- * cleared back to the locked set.
+ * cleared back to the locked set. In override mode, an integration the agent does not require
+ * can be narrowed to none: `[]` is a subset of any lock.
  */
 export function LockedPicker({
   integrationId,
@@ -80,6 +81,7 @@ export function LockedPicker({
     lockedBy,
     candidateIds,
     runBlocking,
+    required,
     setLabel,
   } = picker;
   const storedOverride = overrideMode ? explicitIds : null;
@@ -87,6 +89,8 @@ export function LockedPicker({
   const bindingIds = storedOverride !== null && !outranked ? storedOverride : lockedConnectionIds;
   const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
   const clearable = outranked || storedOverride?.length === 0;
+  const offersNone =
+    overrideMode && !required && lockedConnectionIds.length > 0 && storedOverride?.length !== 0;
   return (
     <div data-testid={`member-picker-${integrationId}`}>
       <Button
@@ -111,6 +115,17 @@ export function LockedPicker({
           )}
         </Badge>
       </Button>
+      {offersNone && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void persist([])}
+          data-testid={`member-pick-none-${integrationId}`}
+        >
+          {t("detail.integrationMemberPicker.none")}
+        </Button>
+      )}
       {clearable && (
         <ClearChoiceButton
           onClick={() => void persist(null)}

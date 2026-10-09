@@ -172,7 +172,7 @@
   "run.sectionInputPayload": "Paramètres d'entrée",
   "run.sectionRunDetails": "Détails d'exécution",
   "run.infoConnections": "Connexions utilisées",
-  "run.integrationUnbound": "Aucune connexion pour ce run",
+  "run.integrationUnbound": "Non liée pendant ce run — l'agent s'est exécuté sans",
   "run.connSource.admin_pin": "Épinglée (admin)",
   "run.connSource.org_default_enforced": "Défaut de l'espace (imposé)",
   "run.connSource.run_override": "Choix du run",

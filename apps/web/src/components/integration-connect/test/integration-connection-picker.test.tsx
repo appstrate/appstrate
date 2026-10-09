@@ -559,6 +559,61 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(html).not.toContain(`member-pick-none-${INTEGRATION}`);
     expect(html).not.toContain(t("none"));
   });
+
+  // `[]` is a subset of any lock, so a launch override may narrow it to none (#1830).
+  it("under a lock, offers a 'no connection' override for an integration the agent does not require", () => {
+    const none = `member-pick-none-${INTEGRATION}`;
+    const inherit: Persistence = { mode: "override", value: null, onChange: () => {} };
+    const pinned = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
+    const enforced = resolution({
+      source: "org_default_enforced",
+      org_default_connection_ids: [WEB],
+      org_default_enforced: true,
+      resolved_connection_ids: [WEB],
+    });
+    for (const locked of [pinned, enforced]) {
+      const html = renderPicker(locked, false, inherit);
+      expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
+      expect(html).toContain(none);
+      // Never for a required integration, nor on a member pin (it loses to the lock anyway).
+      expect(renderPicker(locked, false, inherit, true)).not.toContain(none);
+      expect(renderPicker(locked, false)).not.toContain(none);
+    }
+    // Already none: through the stored override, or the admin's own pin to none.
+    expect(
+      renderPicker(pinned, false, { mode: "override", value: [], onChange: () => {} }),
+    ).not.toContain(none);
+    expect(
+      renderPicker(
+        resolution({ source: null, admin_pinned_connection_ids: [], resolved_connection_ids: [] }),
+        false,
+        inherit,
+      ),
+    ).not.toContain(none);
+  });
+
+  it("offers nothing to pick before the readiness entry, and so `required`, is known", () => {
+    const pickers: Array<ConnectionPicker | null> = [];
+    const html = render(
+      <PickerProbe persistence={{ mode: "pin" }} onPicker={(p) => pickers.push(p)} />,
+      { queryClient: new QueryClient() },
+    );
+    expect(html).toBe("");
+    expect(pickers).toEqual([null]);
+    const loading = render(
+      <IntegrationConnectionPicker
+        integrationId={INTEGRATION}
+        agentPackageId={AGENT}
+        manifest={MANIFEST}
+        authStatuses={[]}
+        agentTools={undefined}
+        agentScopes={undefined}
+      />,
+      { queryClient: new QueryClient() },
+    );
+    expect(loading).toContain(`member-picker-${INTEGRATION}`);
+    expect(loading).not.toContain(`member-pick-none-${INTEGRATION}`);
+  });
 });
 
 describe("useConnectionPicker — triggerConnect after the connect popup", () => {

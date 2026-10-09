@@ -22,6 +22,8 @@ export interface AuthOffer {
   state?: string;
   /** Integration the link connects — drives the card's icon, name and resume claim. */
   packageId?: string;
+  /** RFC 3339 expiry of the connect session behind `authUrl`. */
+  expiresAt?: string;
 }
 
 /** Payload the connect surfaces broadcast — defined in `@appstrate/core`. */
@@ -117,7 +119,19 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
     authUrl: offer.connect_url,
     ...(offer.state ? { state: offer.state } : {}),
     ...(offer.packageId ? { packageId: offer.packageId } : {}),
+    ...(offer.expiresAt ? { expiresAt: offer.expiresAt } : {}),
   }));
+}
+
+/**
+ * Whether the connect session behind an offer has lapsed. A started run's
+ * offers are minted at launch but shown when the run ends, so they can outlive
+ * their session. An absent or unparseable expiry is treated as live.
+ */
+export function isOfferExpired(expiresAt: string | undefined, now = Date.now()): boolean {
+  if (!expiresAt) return false;
+  const at = Date.parse(expiresAt);
+  return Number.isFinite(at) && at <= now;
 }
 
 /**

@@ -127,3 +127,39 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
         : "schedule.connectionOverrides.actorMustChoose";
   }
 }
+
+/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
+export type ConnectionOverridesMap = Record<string, string[]>;
+
+/**
+ * The package-level verdicts and the agent's own `auth_key` serving none of its selected tools,
+ * all raised before any account is looked at: no pick fixes them.
+ */
+export function isStructuralCode(code: string): boolean {
+  return (
+    code === "integration_not_active" ||
+    code === "integration_not_found" ||
+    code === "integration_wrong_type" ||
+    code === "integration_invalid_manifest" ||
+    code === "auth_key_serves_no_selected_tool"
+  );
+}
+
+/**
+ * The Re-run button's state: a `must_choose_connection` row waits for a pick (`[]` counts —
+ * "no connection" is a choice); the others re-run freely (a fresh 409 reopens this).
+ */
+export function retryDecision(
+  errors: MissingIntegrationFieldError[],
+  picks: ConnectionOverridesMap,
+  retrying = false,
+): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
+  const mustChooseIds = errors
+    .filter((e) => e.code === "must_choose_connection")
+    .map((e) => integrationIdOfField(e.field));
+  return {
+    mustChoose: mustChooseIds.length > 0,
+    showRetry: errors.some((e) => !isStructuralCode(e.code)),
+    canRetry: !retrying && mustChooseIds.every((id) => picks[id] !== undefined),
+  };
+}

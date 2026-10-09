@@ -11,26 +11,15 @@ import { IntegrationConnectionPicker } from "./integration-connect/integration-c
 import { unboundReason, UNBOUND_LABEL_KEYS } from "./integration-connect/integration-run-readiness";
 import { useIntegrationDetail, useIntegrationReadinessEntry } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
-import { integrationIdOfField, type MissingIntegrationFieldError } from "../lib/connection-choice";
+import {
+  integrationIdOfField,
+  isStructuralCode,
+  retryDecision,
+  type ConnectionOverridesMap,
+  type MissingIntegrationFieldError,
+} from "../lib/connection-choice";
 import { withConnectionPick, type ConnectionSet } from "../lib/connection-set";
 import { refusalMessage } from "../lib/mutation-error";
-
-/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
-type ConnectionOverridesMap = Record<string, string[]>;
-
-/**
- * The package-level verdicts and the agent's own `auth_key` serving none of its selected tools,
- * all raised before any account is looked at: no pick fixes them.
- */
-function isStructuralCode(code: string): boolean {
-  return (
-    code === "integration_not_active" ||
-    code === "integration_not_found" ||
-    code === "integration_wrong_type" ||
-    code === "integration_invalid_manifest" ||
-    code === "auth_key_serves_no_selected_tool"
-  );
-}
 
 interface MissingConnectionsModalProps {
   open: boolean;
@@ -68,17 +57,7 @@ export function MissingConnectionsModal({
   const [picks, setPicks] = useState<ConnectionOverridesMap>({});
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
-
-  // A must_choose row waits for a pick (`[]` counts); the others re-run freely (a fresh 409
-  // reopens this).
-  const mustChooseIds = integrationErrors
-    .filter((e) => e.code === "must_choose_connection")
-    .map((e) => integrationIdOfField(e.field));
-  const allMustChosen = mustChooseIds.every((id) => picks[id] !== undefined);
-
-  const hasActionable = integrationErrors.some((e) => !isStructuralCode(e.code));
-  const showRetry = hasActionable;
-  const canRetry = !retrying && allMustChosen;
+  const { mustChoose, showRetry, canRetry } = retryDecision(integrationErrors, picks, retrying);
 
   // A `null` pick drops the key: the re-run falls back to the cascade.
   const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
@@ -101,7 +80,7 @@ export function MissingConnectionsModal({
               data-testid="must-choose-retry"
             >
               {retrying && <Spinner />}
-              {mustChooseIds.length > 0
+              {mustChoose
                 ? t("missingConnections.mustChoose.retry")
                 : t("missingConnections.retry")}
             </Button>
@@ -130,7 +109,8 @@ export function MissingConnectionsModal({
   );
 }
 
-function MissingRow({
+/** One refused integration: its live verdict for the launched version, and a picker when a pick can fix it. */
+export function MissingRow({
   err,
   agentPackageId,
   version,

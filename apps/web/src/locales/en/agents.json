@@ -172,7 +172,7 @@
   "run.sectionInputPayload": "Input payload",
   "run.sectionRunDetails": "Run details",
   "run.infoConnections": "Connections used",
-  "run.integrationUnbound": "No connection for this run",
+  "run.integrationUnbound": "Not bound during this run — the agent ran without it",
   "run.connSource.admin_pin": "Pinned (admin)",
   "run.connSource.org_default_enforced": "Space default (enforced)",
   "run.connSource.run_override": "Run choice",
