@@ -9,16 +9,14 @@
  * answers 401 otherwise, or fails with a 503 when told to.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, spyOn } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
-
-const app = getTestApp();
+import { fieldsConnect, hostedSubmit, type ProblemBody } from "../../helpers/connect-surfaces.ts";
 
 const INTEGRATION_ID = "@myorg/legacy-app";
 const USERNAME = "alice";
@@ -105,59 +103,15 @@ function baseLoginManifest(origin: string) {
   });
 }
 
-interface ProblemBody {
-  status: number;
-  code: string;
-  detail: string;
-  param?: string;
-}
-
-async function fieldsConnect(
-  ctx: TestContext,
-  credentials: Record<string, string>,
-): Promise<Response> {
-  return app.request(`/api/integrations/${INTEGRATION_ID}/auths/session/connect/fields`, {
-    method: "POST",
-    headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-    body: JSON.stringify({ credentials }),
-  });
-}
-
-/** Drive the hosted portal end to end: mint → dispatch → context → submit. */
-async function hostedSubmit(
-  ctx: TestContext,
-  credentials: Record<string, string>,
-): Promise<Response> {
-  const mint = await app.request(
-    `/api/integrations/${INTEGRATION_ID}/auths/session/connect/session`,
-    {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    },
-  );
-  expect(mint.status).toBe(200);
-  const token = new URL(
-    ((await mint.json()) as { connect_url: string }).connect_url,
-  ).searchParams.get("token")!;
-  const start = await app.request(
-    `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
-    { redirect: "manual" },
-  );
-  const cookie = `appstrate_connect=${start.headers.get("set-cookie")!.match(/appstrate_connect=([^;]+)/)![1]}`;
-  const context = (await (
-    await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie } })
-  ).json()) as { csrf: string };
-  return app.request("/api/integrations/connect/submit", {
-    method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": context.csrf },
-    body: JSON.stringify({ credentials }),
-  });
-}
+/** Both connect doors for this integration's `session` auth. */
+const submitFields = (ctx: TestContext, credentials: Record<string, unknown>) =>
+  fieldsConnect(ctx, INTEGRATION_ID, "session", credentials);
+const submitHosted = (ctx: TestContext, credentials: Record<string, unknown>) =>
+  hostedSubmit(ctx, INTEGRATION_ID, "session", credentials);
 
 const surfaces = [
-  ["connect/fields", fieldsConnect],
-  ["connect/submit", hostedSubmit],
+  ["connect/fields", submitFields],
+  ["connect/submit", submitHosted],
 ] as const;
 
 describe("declarative connect.login at the route boundary", () => {
@@ -208,100 +162,100 @@ describe("declarative connect.login at the route boundary", () => {
       expect(raw).not.toContain("wrong&password");
       expect(raw).not.toContain(UPSTREAM_BODY);
     });
+  }
 
-    it(`${surface}: answers a target slower than request_timeout_ms with 504 timeout`, async () => {
-      slow = true;
-      await reseed(
-        loginManifest(server.url.origin, (auth) => {
-          auth.connect.limits = { request_timeout_ms: 100 };
-        }),
-      );
+  it("connect/fields: answers a target slower than request_timeout_ms with 504 timeout", async () => {
+    slow = true;
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.connect.limits = { request_timeout_ms: 100 };
+      }),
+    );
 
-      const res = await submit(ctx, { username: USERNAME, password: PASSWORD });
+    const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
 
-      expect(res.status).toBe(504);
-      const raw = await res.text();
-      const body = JSON.parse(raw) as ProblemBody;
-      expect(body.code).toBe("timeout");
-      expect(body.detail).toContain("after 100ms");
-      expect(raw).not.toContain(PASSWORD);
-    });
+    expect(res.status).toBe(504);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as ProblemBody;
+    expect(body.code).toBe("timeout");
+    expect(body.detail).toContain("after 100ms");
+    expect(raw).not.toContain(PASSWORD);
+  });
 
-    it(`${surface}: types a JSON login's inputs by credentials.schema, not by what they spell`, async () => {
-      await reseed(
-        loginManifest(server.url.origin, (auth) => {
-          auth.credentials.schema.properties = {
-            pin: { type: "number" },
-            code: { type: "string" },
-          };
-          auth.connect.login.request = {
-            method: "POST",
-            url: `${server.url.origin}/json-login`,
-            content_type: "application/json",
-            body: '{"pin":{{pin}},"code":{{code}}}',
-          };
-        }),
-      );
+  it("connect/submit: types a JSON login's inputs by credentials.schema, not by what they spell", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties = {
+          pin: { type: "number" },
+          code: { type: "string" },
+        };
+        auth.connect.login.request = {
+          method: "POST",
+          url: `${server.url.origin}/json-login`,
+          content_type: "application/json",
+          body: '{"pin":{{pin}},"code":{{code}}}',
+        };
+      }),
+    );
 
-      const res = await submit(ctx, { pin: "1234", code: "0123" });
+    const res = await submitHosted(ctx, { pin: "1234", code: "0123" });
 
-      expect(res.status).toBe(200);
-      expect(receivedJson).toEqual([{ pin: 1234, code: "0123" }]);
-    });
+    expect(res.status).toBe(200);
+    expect(receivedJson).toEqual([{ pin: 1234, code: "0123" }]);
+  });
 
-    it(`${surface}: refuses credentials the schema refuses before any login request`, async () => {
-      await reseed(
-        loginManifest(server.url.origin, (auth) => {
-          auth.credentials.schema.properties.password = { type: "string", minLength: 64 };
-        }),
-      );
+  it("connect/fields: refuses credentials the schema refuses before any login request", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties.password = { type: "string", minLength: 64 };
+      }),
+    );
 
-      const res = await submit(ctx, { username: USERNAME, password: PASSWORD });
+    const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
+
+    expect(res.status).toBe(400);
+    const raw = await res.text();
+    expect((JSON.parse(raw) as ProblemBody).param).toBe("credentials");
+    expect(raw).not.toContain(PASSWORD);
+    expect(received).toEqual([]);
+  });
+
+  it("connect/submit: answers a failing target with 502 bad_gateway", async () => {
+    failing = true;
+
+    const res = await submitHosted(ctx, { username: USERNAME, password: PASSWORD });
+
+    expect(res.status).toBe(502);
+    const raw = await res.text();
+    expect((JSON.parse(raw) as ProblemBody).code).toBe("bad_gateway");
+    expect(raw).not.toContain(PASSWORD);
+    expect(raw).not.toContain("maintenance");
+  });
+
+  it("connect/fields: refuses a base URL the submitter chose outside the allowlist, naming it", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties.base_url = { type: "string" };
+        auth.connect.login.request.url = "{{base_url}}/login";
+      }),
+    );
+
+    // `localhost` passes the SSRF gate here (operator opt-in) but not `authorized_uris`,
+    // which names 127.0.0.1; a loopback address the opt-in does not name fails the SSRF gate.
+    for (const baseUrl of [`http://localhost:${server.port}`, "http://127.0.0.2:9"]) {
+      const res = await submitFields(ctx, {
+        base_url: baseUrl,
+        username: USERNAME,
+        password: PASSWORD,
+      });
 
       expect(res.status).toBe(400);
-      const raw = await res.text();
-      expect((JSON.parse(raw) as ProblemBody).param).toBe("credentials");
-      expect(raw).not.toContain(PASSWORD);
-      expect(received).toEqual([]);
-    });
-
-    it(`${surface}: answers a failing target with 502 bad_gateway`, async () => {
-      failing = true;
-
-      const res = await submit(ctx, { username: USERNAME, password: PASSWORD });
-
-      expect(res.status).toBe(502);
-      const raw = await res.text();
-      expect((JSON.parse(raw) as ProblemBody).code).toBe("bad_gateway");
-      expect(raw).not.toContain(PASSWORD);
-      expect(raw).not.toContain("maintenance");
-    });
-
-    it(`${surface}: refuses a base URL the submitter chose outside the allowlist, naming it`, async () => {
-      await reseed(
-        loginManifest(server.url.origin, (auth) => {
-          auth.credentials.schema.properties.base_url = { type: "string" };
-          auth.connect.login.request.url = "{{base_url}}/login";
-        }),
-      );
-
-      // `localhost` passes the SSRF gate here (operator opt-in) but not `authorized_uris`,
-      // which names 127.0.0.1; a loopback address the opt-in does not name fails the SSRF gate.
-      for (const baseUrl of [`http://localhost:${server.port}`, "http://127.0.0.2:9"]) {
-        const res = await submit(ctx, {
-          base_url: baseUrl,
-          username: USERNAME,
-          password: PASSWORD,
-        });
-
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as ProblemBody;
-        expect(body.code).toBe("invalid_request");
-        expect(body.param).toBe("credentials.base_url");
-      }
-      expect(received).toEqual([]);
-    });
-  }
+      const body = (await res.json()) as ProblemBody;
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("credentials.base_url");
+    }
+    expect(received).toEqual([]);
+  });
 
   it("connect/fields: answers an unreachable target with 502 bad_gateway", async () => {
     // A listener that drops every connection as it opens: the login request gets no answer.
@@ -314,7 +268,7 @@ describe("declarative connect.login at the route boundary", () => {
 
     const warn = spyOn(logger, "warn");
     try {
-      const res = await fieldsConnect(ctx, { username: USERNAME, password: PASSWORD });
+      const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
 
       expect(res.status).toBe(502);
       expect(((await res.json()) as ProblemBody).code).toBe("bad_gateway");
@@ -336,7 +290,7 @@ describe("declarative connect.login at the route boundary", () => {
       }),
     );
 
-    const res = await fieldsConnect(ctx, { username: "alice\r\nX-Admin: 1", password: PASSWORD });
+    const res = await submitFields(ctx, { username: "alice\r\nX-Admin: 1", password: PASSWORD });
 
     expect(res.status).toBe(400);
     const raw = await res.text();
@@ -356,7 +310,7 @@ describe("declarative connect.login at the route boundary", () => {
       }),
     );
 
-    const res = await fieldsConnect(ctx, { username: USERNAME, password: PASSWORD });
+    const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
 
     expect(res.status).toBe(500);
     expect(((await res.json()) as ProblemBody).code).toBe("internal_error");
@@ -369,7 +323,7 @@ describe("declarative connect.login at the route boundary", () => {
         delete (auth.connect.login as Record<string, unknown>).success_criteria;
       }),
     );
-    const res = await fieldsConnect(ctx, { username: USERNAME, password: "wrong" });
+    const res = await submitFields(ctx, { username: USERNAME, password: "wrong" });
 
     // A wrong login URL, not wrong credentials.
     expect(res.status).toBe(500);

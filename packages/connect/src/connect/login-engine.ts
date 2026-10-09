@@ -42,8 +42,8 @@ import {
   substituteRequest,
   UnencodableInputError,
   unresolvedPlaceholders,
-  urlAuthorityInputs,
 } from "@appstrate/afps-runtime/resolvers";
+import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { evaluateJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
@@ -160,15 +160,13 @@ interface LoginResult {
 /**
  * Structured failure — carries the reason; never the response body nor an input value.
  *
- *  - `rejected`: the submitted credentials were refused — declared `success_criteria` failed
- *    on an answer below 500 other than 404, 405, 410 or 429, or, with none, the target answered
- *    400, 401, 403 or 422 (`upstreamStatus` says which);
- *  - `upstream_failed`: the target could not be reached, or answered 429 or 5xx;
+ *  - `rejected`: the submitted credentials were refused (`upstreamStatus`; see
+ *    {@link failedStatusReason});
+ *  - `upstream_failed`: the target could not be reached, or answered a retryable status;
  *  - `timeout`: the target did not answer within `request_timeout_ms` (`timeoutMs`);
  *  - `invalid_input`: input `field` cannot be encoded where the request carries it;
  *  - `url_not_allowed` with `fields`: the URL whose authority those inputs filled is refused;
- *  - every other reason is a defect of the integration (manifest, allowlist, a 404, a 302 that
- *    no criterion judges).
+ *  - every other reason is a defect of the integration.
  */
 export class LoginError extends Error {
   readonly upstreamStatus?: number;
@@ -522,6 +520,20 @@ const REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 422]);
 /** The answers that say "this is not the login endpoint", whatever the criteria. */
 const NOT_A_LOGIN_STATUSES: ReadonlySet<number> = new Set([404, 405, 410]);
 
+/** Who a status that failed the success test blames: the target, the submitter or the integration. */
+function failedStatusReason(status: number, login: LoginRequestSpec): LoginError["reason"] {
+  if (isRetryableHttpStatus(status)) return "upstream_failed";
+  if (NOT_A_LOGIN_STATUSES.has(status)) return "unexpected_status";
+  const judged = (login.success_criteria?.length ?? 0) > 0;
+  return judged || REFUSAL_STATUSES.has(status) ? "rejected" : "unexpected_status";
+}
+
+/** The inputs that fill the authority of URL template `url`: a URL refused for its host is theirs. */
+function authorityInputs(url: string): string[] {
+  const authority = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0]!;
+  return unresolvedPlaceholders(authority, {});
+}
+
 /**
  * Execute the declarative login request. Throws {@link LoginError} on the
  * first failure (no partial persistence — the caller persists nothing on throw).
@@ -567,7 +579,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   }
   const { url, headers, body } = renderRequest(login.request, vars);
   // A URL refused below is the submitter's when one of its inputs put the authority there.
-  const urlFields = urlAuthorityInputs(login.request.url);
+  const urlFields = authorityInputs(login.request.url);
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {
       ...options,
@@ -660,16 +672,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
 
   if (!passesSuccessCriteria(response, login.success_criteria)) {
     // Never log/echo the body — only the status.
-    const judged = (login.success_criteria?.length ?? 0) > 0;
-    const reason =
-      res.status >= 500 || res.status === 429
-        ? "upstream_failed"
-        : NOT_A_LOGIN_STATUSES.has(res.status)
-          ? "unexpected_status"
-          : judged || REFUSAL_STATUSES.has(res.status)
-            ? "rejected"
-            : "unexpected_status";
-    throw new LoginError(`unexpected status ${res.status}`, reason, {
+    throw new LoginError(`unexpected status ${res.status}`, failedStatusReason(res.status, login), {
       upstreamStatus: res.status,
     });
   }

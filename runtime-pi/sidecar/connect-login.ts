@@ -23,7 +23,6 @@
 import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import {
-  CONNECT_LOGIN_INPUT_REFUSED_PREFIX,
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type ManifestDeliveryHttp,
 } from "@appstrate/core/sidecar-types";
@@ -98,12 +97,15 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
   try {
     // The secret is delivered ONLY via proxy-side substitution — the tool
     // is called with empty arguments (security contract).
-    // An input the listener refused to send outranks whatever the tool made of that refusal.
+    // An input the listener refused to send outranks whatever the tool made of that refusal: it
+    // is the submitter's own value, so it travels as a login-tool error (a 400 on `credentials`).
     const refusedInput = () => {
       const field = opts.source.refusedActiveInput(opts.authKey);
       return field === undefined
         ? null
-        : new Error(`${CONNECT_LOGIN_INPUT_REFUSED_PREFIX}: ${field}`);
+        : new Error(
+            `${CONNECT_LOGIN_TOOL_ERROR_PREFIX}: the value of '${field}' contains a character this request cannot carry where it is placed.`,
+          );
     };
     let parsed: LoginToolResult;
     try {

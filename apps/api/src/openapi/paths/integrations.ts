@@ -598,7 +598,7 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused — a `connect.tool` that reports it, or a declarative `connect.login` whose declared success criteria failed on an answer below 500 other than 404, 405, 410 or 429, or that has none and got a 400, 401, 403 or 422 — is `invalid_request` with `param: credentials` and a `detail` starting `Login failed:`. A credential value the login request cannot carry where it is placed (a line break in a header value or a multipart body), or a submitted base URL that is malformed or outside `authorized_uris`, is `invalid_request` naming `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+  "A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
 const CONNECT_LOGIN_502 =
   "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
 const problemJson = {

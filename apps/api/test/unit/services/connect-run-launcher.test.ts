@@ -380,29 +380,6 @@ describe("parseConnectResult", () => {
     expect(api.message).toContain("Check the credentials you submitted");
   });
 
-  it("surfaces a login input the sidecar refused to send as a 400 naming the field", () => {
-    const err = catchErr(() =>
-      parseConnectResult(
-        ["APPSTRATE_CONNECT_ERROR:connect-login: login input cannot be sent: password"],
-        KEY,
-      ),
-    );
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(400);
-    expect((err as ApiError).code).toBe("invalid_request");
-    expect((err as ApiError).param).toBe("credentials.password");
-  });
-
-  it("keeps a refused-input sentinel whose field is not a name a plain Error", () => {
-    const err = catchErr(() =>
-      parseConnectResult(
-        ["APPSTRATE_CONNECT_ERROR:connect-login: login input cannot be sent: a b/../c"],
-        KEY,
-      ),
-    );
-    expect(err).not.toBeInstanceOf(ApiError);
-  });
-
   it("falls back to a neutral diagnostic when the login tool reported no text", () => {
     const err = catchErr(() =>
       parseConnectResult(

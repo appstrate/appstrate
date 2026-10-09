@@ -16,7 +16,7 @@
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { normalizeMime } from "@appstrate/afps-shared/mime";
-import { placeholderAt, substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
+import { substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
 /** What every refusal says: the field, never the value. */
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
@@ -33,21 +33,6 @@ export class UnencodableInputError extends Error {
 }
 
 const asIs: PlaceholderEncoder = (value) => value;
-
-/**
- * The inputs that land in the authority of URL template `template` — every placeholder before its
- * first literal `/`, `?` or `#` after `scheme://`: a URL refused for its host is theirs.
- */
-export function urlAuthorityInputs(template: string): string[] {
-  let i = /^[a-z][a-z0-9+.-]*:\/\//i.exec(template)?.[0].length ?? 0;
-  const keys: string[] = [];
-  while (i < template.length && !"/?#".includes(template[i]!)) {
-    const placeholder = placeholderAt(template, i);
-    if (placeholder) keys.push(placeholder.key);
-    i += placeholder?.length ?? 1;
-  }
-  return keys;
-}
 
 /**
  * URL: a placeholder that starts the template is a base URL, spliced as is — the caller's URL gate
@@ -169,7 +154,7 @@ export function substituteRequest<B extends string | null | undefined>(
     contentType?: string;
   },
   inputs: Readonly<Record<string, unknown>>,
-): { url: string; headers: Record<string, string>; body: B } {
+): { url: string; headers: Record<string, string>; body: B extends string ? string : B } {
   const text: Record<string, string> = {};
   for (const [key, value] of Object.entries(inputs)) {
     text[key] = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
@@ -191,7 +176,11 @@ export function substituteRequest<B extends string | null | undefined>(
     typeof request.body === "string"
       ? render(request.body, bodyEncoder(request.body, contentType, inputs))
       : request.body;
-  return { url: render(request.url, urlValue), headers, body: body as B };
+  return {
+    url: render(request.url, urlValue),
+    headers,
+    body: body as B extends string ? string : B,
+  };
 }
 
 /** The value of header `name` (lower case), whatever the case it is written in. */

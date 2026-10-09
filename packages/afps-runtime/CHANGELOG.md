@@ -21,8 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value.
 - `headerNamed` (`./resolvers`): a header's value whatever the case of its
   name.
-- `urlAuthorityInputs` (`./resolvers`): the inputs a URL template places in its
-  authority.
 - `substituteVars` takes an `encode` option, `(value, key, offset) => string`,
   rendering each resolved value for its place in the template.
 

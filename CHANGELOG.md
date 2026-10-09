@@ -363,8 +363,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   JSON string whatever it spells. A value the request cannot carry where it is
   placed (a line break in a header or a `multipart/*` body, a `Cookie` value
   outside `cookie-octet`), or a submitted base URL outside `authorized_uris`,
-  is a `400 invalid_request` naming `credentials.<field>`. The sidecar ships
-  with the platform in this release: both read the error that names the field.
+  is a `400 invalid_request` naming the field — on `credentials.<field>` for a
+  declarative login, in the `Login failed:` detail for a `connect.tool` one.
 - **A refused declarative login is no longer a `500 internal_error`** on
   `POST …/connect/fields` and the hosted connect form (#1818). Credentials the
   service refuses (declared `success_criteria` failed, or, with none, a 400,

@@ -44,7 +44,6 @@ import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
-  CONNECT_LOGIN_INPUT_REFUSED_PREFIX,
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
@@ -72,12 +71,7 @@ import {
   writeConnectRunGrant,
 } from "./connect-run-grant.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
-import {
-  loginInputRefused,
-  loginRejected,
-  loginTimedOut,
-  type CredentialBundle,
-} from "./strategy.ts";
+import { loginRejected, loginTimedOut, type CredentialBundle } from "./strategy.ts";
 
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
@@ -407,11 +401,6 @@ export function parseConnectResult(
     const errIdx = line.indexOf(ERROR_SENTINEL);
     if (errIdx !== -1) {
       const msg = line.slice(errIdx + ERROR_SENTINEL.length).trim();
-      // A login input the sidecar refused to send where the tool placed it: the submitter's value.
-      const refused = msg.startsWith(`${CONNECT_LOGIN_INPUT_REFUSED_PREFIX}: `)
-        ? msg.slice(CONNECT_LOGIN_INPUT_REFUSED_PREFIX.length + 2)
-        : "";
-      if (/^\w+$/.test(refused)) throw loginInputRefused(refused);
       const diagnostic = loginToolDiagnostic(msg);
       if (diagnostic !== null) {
         // The login tool rejected the caller's OWN credentials — a 4xx about

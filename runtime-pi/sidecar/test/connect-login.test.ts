@@ -14,7 +14,7 @@ import {
   type ActiveConnectInputs,
 } from "../integration-mitm-listener.ts";
 import { runConnectLogin } from "../connect-login.ts";
-import { CONNECT_LOGIN_INPUT_REFUSED_PREFIX } from "@appstrate/core/sidecar-types";
+import { CONNECT_LOGIN_TOOL_ERROR_PREFIX } from "@appstrate/core/sidecar-types";
 import {
   coerceExpiresAtToEpochMs,
   createIntegrationCredentialsSource,
@@ -76,70 +76,7 @@ describe("applyConnectInputSubstitution", () => {
   });
 });
 
-describe("applyConnectInputSubstitution — each value encoded for its place", () => {
-  const PASSWORD = "p&ss=w+rd %x";
-  const substituted = (result: ReturnType<typeof applyConnectInputSubstitution>) => {
-    if ("failed" in result || "refused" in result) throw new Error(JSON.stringify(result));
-    return result;
-  };
-
-  it("form body (by the request's own Content-Type): a value is one form component", () => {
-    const result = substituted(
-      applyConnectInputSubstitution(
-        {
-          url: "https://api.example.com/login",
-          bodyText: "username={{username}}&password={{password}}",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-        },
-        { username: "a b&admin=1", password: PASSWORD },
-      ),
-    );
-    const params = new URLSearchParams(result.bodyText!);
-    expect([...params.keys()]).toEqual(["username", "password"]);
-    expect(params.getAll("password")).toEqual([PASSWORD]);
-    expect(params.get("username")).toBe("a b&admin=1");
-  });
-
-  it("JSON body: a quote in a value stays inside its string literal", () => {
-    const hostile = 'a"b\\c","admin":true,"x":"';
-    const result = substituted(
-      applyConnectInputSubstitution(
-        {
-          url: "https://api.example.com/login",
-          bodyText: '{"password":"{{password}}"}',
-          headers: { "content-type": "application/json; charset=utf-8" },
-        },
-        { password: hostile },
-      ),
-    );
-    expect(JSON.parse(result.bodyText!)).toEqual({ password: hostile });
-  });
-
-  it("JSON body: a bare position takes a login input as a JSON string, whatever it spells", () => {
-    const result = substituted(
-      applyConnectInputSubstitution(
-        {
-          url: "https://api.example.com/login",
-          bodyText: '{"pin":{{pin}},"user":{{user}}}',
-          headers: { "content-type": "application/json" },
-        },
-        { pin: "1234", user: "alice" },
-      ),
-    );
-    expect(JSON.parse(result.bodyText!)).toEqual({ pin: "1234", user: "alice" });
-  });
-
-  it("URL: a value is one query component", () => {
-    const result = substituted(
-      applyConnectInputSubstitution(
-        { url: "https://api.example.com/login?p={{password}}&v=1", bodyText: null, headers: {} },
-        { password: PASSWORD },
-      ),
-    );
-    expect(new URL(result.url).searchParams.getAll("p")).toEqual([PASSWORD]);
-    expect(new URL(result.url).searchParams.get("v")).toBe("1");
-  });
-
+describe("applyConnectInputSubstitution — a value the request cannot carry", () => {
   it("refuses a value carrying CR/LF into a header, naming only the field", () => {
     const result = applyConnectInputSubstitution(
       { url: "https://api.example.com/login", bodyText: null, headers: { "x-pw": "{{password}}" } },
@@ -380,7 +317,9 @@ describe("runConnectLogin", () => {
         authorizedUris: ["https://api.example.com/**"],
         deliveryHttp: DELIVERY_HTTP,
       }).catch((e: unknown) => e);
-      expect((err as Error).message).toBe(`${CONNECT_LOGIN_INPUT_REFUSED_PREFIX}: password`);
+      expect((err as Error).message).toBe(
+        `${CONNECT_LOGIN_TOOL_ERROR_PREFIX}: the value of 'password' contains a character this request cannot carry where it is placed.`,
+      );
       expect(source.activeInputs()).toBeNull();
     });
   }

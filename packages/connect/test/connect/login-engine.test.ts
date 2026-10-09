@@ -966,7 +966,7 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
   });
 });
 
-describe("runLogin — input encoding (AFPS §7.7 request)", () => {
+describe("runLogin — input encoding wiring (the matrix: afps-runtime request-template.test)", () => {
   const PASSWORD = "p&ss=w+rd %x";
 
   async function sent(
@@ -1036,80 +1036,6 @@ describe("runLogin — input encoding (AFPS §7.7 request)", () => {
     expect(Object.keys(init.headers as Record<string, string>)).toEqual(["content-type"]);
   });
 
-  it("JSON body: a value is escaped inside its string literal and adds no member", async () => {
-    const hostile = 'a"b\\c\n","admin":true,"x":"';
-    const { init } = await sent(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        body: '{"username":"{{username}}","password":"{{password}}"}',
-        content_type: "application/json",
-      },
-      { username: hostile, password: PASSWORD },
-    );
-    expect(JSON.parse(String(init.body))).toEqual({ username: hostile, password: PASSWORD });
-  });
-
-  it("JSON body: a placeholder outside a string literal becomes a whole JSON string", async () => {
-    const { init } = await sent(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        body: '{"password":{{password}},"remember":true}',
-        content_type: "application/vnd.api+json",
-      },
-      { password: '1,"admin":true' },
-    );
-    expect(JSON.parse(String(init.body))).toEqual({ password: '1,"admin":true', remember: true });
-  });
-
-  it("XML body: a value is entity-escaped, and only `]]>` is split inside CDATA", async () => {
-    const hostile = "</p><admin/>&]]>";
-    const { init } = await sent(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        body: '<login u="{{username}}"><p>{{password}}</p><c><![CDATA[{{password}}]]></c></login>',
-        content_type: "text/xml",
-      },
-      { username: 'x"y', password: hostile },
-    );
-    expect(String(init.body)).toBe(
-      '<login u="x&quot;y"><p>&lt;/p&gt;&lt;admin/&gt;&amp;]]&gt;</p>' +
-        "<c><![CDATA[</p><admin/>&]]]]><![CDATA[>]]></c></login>",
-    );
-  });
-
-  it("a body with no known media type is sent as is", async () => {
-    const { init } = await sent(
-      { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
-      { password: PASSWORD },
-    );
-    expect(init.body).toBe(`p=${PASSWORD}`);
-  });
-
-  it("URL: a value is one path segment or one query component", async () => {
-    const { url } = await sent(
-      {
-        method: "GET",
-        url: "https://idp.example.com/users/{{username}}/login?password={{password}}&v=1",
-      },
-      { username: "a/b?c#d", password: PASSWORD },
-    );
-    const parsed = new URL(url);
-    expect(parsed.pathname).toBe("/users/a%2Fb%3Fc%23d/login");
-    expect([...parsed.searchParams.keys()]).toEqual(["password", "v"]);
-    expect(parsed.searchParams.get("password")).toBe(PASSWORD);
-  });
-
-  it("URL: a leading value fills the base URL as is", async () => {
-    const { url } = await sent(
-      { method: "POST", url: "{{base_url}}/login?u={{username}}" },
-      { base_url: "https://idp.example.com/app", username: "a&b" },
-    );
-    expect(url).toBe("https://idp.example.com/app/login?u=a%26b");
-  });
-
   it("header: a value carrying CR/LF is refused before any request, naming only the field", async () => {
     const { err, calls } = refusal(
       {
@@ -1123,57 +1049,6 @@ describe("runLogin — input encoding (AFPS §7.7 request)", () => {
     expect(e).toBeInstanceOf(LoginError);
     expect(e).toMatchObject({ reason: "invalid_input", field: "api_key" });
     expect((e as Error).message).not.toContain("X-Admin");
-    expect(calls).toHaveLength(0);
-  });
-
-  it("header: a valid value is sent as is", async () => {
-    const { init } = await sent(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        headers: { Authorization: "Basic {{token}}" },
-      },
-      { token: "a b=c&d" },
-    );
-    expect((init.headers as Record<string, string>).Authorization).toBe("Basic a b=c&d");
-  });
-
-  it("refuses a value that is not well-formed Unicode", async () => {
-    const { err, calls } = refusal(
-      { method: "GET", url: "https://idp.example.com/token?p={{password}}" },
-      { password: "a\uD800b" },
-    );
-    expect(await err).toMatchObject({ reason: "invalid_input", field: "password" });
-    expect(calls).toHaveLength(0);
-  });
-  it("JSON body: a string fills a bare position as a JSON string, whatever it spells", async () => {
-    const { init } = await sent(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        body: '{"pin":{{pin}},"remember":{{remember}},"name":{{name}},"pin_text":"{{pin}}"}',
-        content_type: "application/json",
-      },
-      { pin: "1234", remember: "false", name: "1234x" },
-    );
-    expect(JSON.parse(String(init.body))).toEqual({
-      pin: "1234",
-      remember: "false",
-      name: "1234x",
-      pin_text: "1234",
-    });
-  });
-
-  it("header: a Cookie value outside cookie-octet is refused, naming the field", async () => {
-    const { err, calls } = refusal(
-      {
-        method: "POST",
-        url: "https://idp.example.com/token",
-        headers: { Cookie: "sid={{sid}}" },
-      },
-      { sid: "x; admin=1" },
-    );
-    expect(await err).toMatchObject({ reason: "invalid_input", field: "sid" });
     expect(calls).toHaveLength(0);
   });
 
@@ -1198,22 +1073,6 @@ describe("runLogin — input encoding (AFPS §7.7 request)", () => {
       profile_text: '{"a":"x\\"y"}',
       name_text: 'a"b',
     });
-  });
-
-  it("multipart body: a value carrying CR or LF is refused, before any request", async () => {
-    const request = {
-      method: "POST" as const,
-      url: "https://idp.example.com/token",
-      body: '--B\r\nContent-Disposition: form-data; name="password"\r\n\r\n{{password}}\r\n--B--\r\n',
-      content_type: "multipart/form-data; boundary=B",
-    };
-    for (const hostile of ['pw\r\n--B\r\nContent-Disposition: form-data; name="admin"', "pw\nx"]) {
-      const { err, calls } = refusal(request, { password: hostile });
-      expect(await err).toMatchObject({ reason: "invalid_input", field: "password" });
-      expect(calls).toHaveLength(0);
-    }
-    const { init } = await sent(request, { password: PASSWORD });
-    expect(String(init.body)).toContain(`\r\n\r\n${PASSWORD}\r\n--B--`);
   });
 
   it("URL: a placeholder after a literal host is a path value, never raw", async () => {

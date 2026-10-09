@@ -64,17 +64,6 @@ export function unresolvedPlaceholders(
     .filter((key) => !Object.hasOwn(fields, key));
 }
 
-/** The `{{key}}` placeholder starting exactly at `offset` of `template`, or `null`. */
-export function placeholderAt(
-  template: string,
-  offset: number,
-): { key: string; length: number } | null {
-  const sticky = new RegExp(VAR_PLACEHOLDER.source, "y");
-  sticky.lastIndex = offset;
-  const match = sticky.exec(template);
-  return match ? { key: match[1]!, length: match[0].length } : null;
-}
-
 /**
  * True when `input` contains at least one `{{key}}` placeholder whose key is
  * an own property of `fields`. Used by the credential-exfil guard

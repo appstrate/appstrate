@@ -9,11 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`CONNECT_LOGIN_INPUT_REFUSED_PREFIX`** (`@appstrate/core/sidecar-types`):
-  the connect-run error a sidecar raises when it refuses to send a login input
-  where the login tool placed it (`<prefix>: <field>`); the platform answers it
-  with a `400 invalid_request` naming `credentials.<field>`. (#1818)
-
 - **`required?: boolean`** on `ManifestIntegrationEntry` and
   `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
   afps-spec#28): the agent needs at least one connection of that integration

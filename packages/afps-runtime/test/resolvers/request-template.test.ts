@@ -2,11 +2,7 @@
 // Copyright 2025-2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import {
-  substituteRequest,
-  UnencodableInputError,
-  urlAuthorityInputs,
-} from "../../src/resolvers/request-template.ts";
+import { substituteRequest, UnencodableInputError } from "../../src/resolvers/request-template.ts";
 
 const url = (template: string, inputs: Record<string, unknown>) =>
   substituteRequest({ url: template, headers: {}, body: undefined }, inputs).url;
@@ -16,29 +12,24 @@ describe("substituteRequest — URL", () => {
     expect(url("https://h.example{{p}}", { p: "/login?admin=1#" })).toBe(
       "https://h.example%2Flogin%3Fadmin%3D1%23",
     );
-    expect(urlAuthorityInputs("https://h.example{{p}}")).toEqual(["p"]);
   });
 
   it("a leading base URL is spliced as is; a placeholder right after it is encoded", () => {
     expect(url("{{base}}{{path}}", { base: "https://h.example", path: "/login?admin=1&x=" })).toBe(
       "https://h.example%2Flogin%3Fadmin%3D1%26x%3D",
     );
-    expect(urlAuthorityInputs("{{base}}{{path}}")).toEqual(["base", "path"]);
     expect(url("{{base_url}}/x?y={{v}}", { base_url: "https://h.example/app", v: "a&b=c" })).toBe(
       "https://h.example/app/x?y=a%26b%3Dc",
     );
-    expect(urlAuthorityInputs("{{base_url}}/x?y={{v}}")).toEqual(["base_url"]);
   });
 
-  it("a port or userinfo value is encoded, and both are authority inputs", () => {
+  it("a port or userinfo value is encoded", () => {
     expect(url("https://h.example:{{port}}/x", { port: "443@evil.example" })).toBe(
       "https://h.example:443%40evil.example/x",
     );
-    expect(urlAuthorityInputs("https://h.example:{{port}}/x")).toEqual(["port"]);
     const rendered = url("https://{{user}}@h.example/", { user: "evil.example/?" });
     expect(rendered).toBe("https://evil.example%2F%3F@h.example/");
     expect(new URL(rendered).host).toBe("h.example");
-    expect(urlAuthorityInputs("https://{{user}}@h.example/")).toEqual(["user"]);
   });
 
   it("path segment, query component and fragment are each one encoded value", () => {
@@ -49,7 +40,6 @@ describe("substituteRequest — URL", () => {
     });
     expect(rendered).toBe("https://h.example/a%2Fb?q=1%26admin%3D1#x%23y");
     expect([...new URL(rendered).searchParams.keys()]).toEqual(["q"]);
-    expect(urlAuthorityInputs("https://h.example/{{seg}}?q={{v}}#{{f}}")).toEqual([]);
   });
 });
 
@@ -98,6 +88,44 @@ describe("substituteRequest — bodies", () => {
     expect([...params.keys()]).toEqual(["n", "o"]);
   });
 
+  it("form: each value is one WHATWG form component, never a separator", () => {
+    const encoded = body("u={{u}}&p={{p}}", "application/x-www-form-urlencoded", {
+      u: "a b&admin=1",
+      p: "p&ss=w+rd %x",
+    })!;
+    expect(encoded).toBe("u=a+b%26admin%3D1&p=p%26ss%3Dw%2Brd+%25x");
+    expect([...new URLSearchParams(encoded).keys()]).toEqual(["u", "p"]);
+  });
+
+  it("the body's media type is its Content-Type header's, any case, parameters ignored", () => {
+    const { body: encoded } = substituteRequest(
+      {
+        url: "https://h.example/",
+        headers: { "content-TYPE": "Application/X-WWW-Form-Urlencoded; charset=utf-8" },
+        body: "p={{p}}",
+        contentType: "text/plain",
+      },
+      { p: "a&b" },
+    );
+    expect(encoded).toBe("p=a%26b");
+  });
+
+  it("XML: a value is entity-escaped, and only `]]>` is split inside CDATA", () => {
+    const template = '<l u="{{u}}"><p>{{p}}</p><c><![CDATA[{{p}}]]></c></l>';
+    expect(body(template, "text/xml", { u: 'x"y', p: "</p><admin/>&]]>" })).toBe(
+      '<l u="x&quot;y"><p>&lt;/p&gt;&lt;admin/&gt;&amp;]]&gt;</p>' +
+        "<c><![CDATA[</p><admin/>&]]]]><![CDATA[>]]></c></l>",
+    );
+  });
+
+  it("a body of any other media type, or none, takes the value as is", () => {
+    expect(body("p={{p}}", "text/plain", { p: "a&b" })).toBe("p=a&b");
+    expect(
+      substituteRequest({ url: "https://h.example/", headers: {}, body: "p={{p}}" }, { p: "a&b" })
+        .body,
+    ).toBe("p=a&b");
+  });
+
   it("an unterminated CDATA section still only splits `]]>`", () => {
     expect(body("<a><![CDATA[{{a}}", "application/xml", { a: "]]><b/>" })).toBe(
       "<a><![CDATA[]]]]><![CDATA[><b/>",
@@ -122,6 +150,24 @@ describe("substituteRequest — refusals name the field, never the value", () =>
           body: "--B\r\n\r\n{{pw}}\r\n--B--",
         },
         { pw: "x\r\n--B" },
+      ),
+    ).toThrow(UnencodableInputError);
+  });
+
+  it("sends a header value that is a field value as is", () => {
+    expect(
+      substituteRequest(
+        { url: "https://h.example/", headers: { Authorization: "Basic {{t}}" }, body: undefined },
+        { t: "a b=c&d" },
+      ).headers.Authorization,
+    ).toBe("Basic a b=c&d");
+  });
+
+  it("refuses a value that is not well-formed Unicode, wherever it sits", () => {
+    expect(() =>
+      substituteRequest(
+        { url: "https://h.example/?p={{p}}", headers: {}, body: undefined },
+        { p: "a\uD800b" },
       ),
     ).toThrow(UnencodableInputError);
   });
