@@ -107,7 +107,8 @@ describe("CredentialFields — widget per field name", () => {
     certificate: "textarea",
     key: "textarea",
     host_key: "text",
-    ssh_public_key: "text",
+    ssh_public_key: "textarea",
+    ssh_private_key: "textarea",
     host: "text",
     username: "text",
   };
@@ -138,6 +139,12 @@ describe("CredentialFields — widget per field name", () => {
   it("masks the api_key field of an api_key auth with no declared schema", () => {
     const bare = { type: "api_key" } as unknown as IntegrationManifestAuth;
     expectWidget(html(bare), "api_key", "password");
+  });
+
+  it("renders the PEM fields of an mtls auth with no declared schema as textareas", () => {
+    const markup = html({ type: "mtls" } as unknown as IntegrationManifestAuth);
+    expectWidget(markup, "client_key", "textarea");
+    expectWidget(markup, "client_cert", "textarea");
   });
 });
 
