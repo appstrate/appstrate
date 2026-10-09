@@ -12703,7 +12703,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused — a `connect.tool` that reports it, or a declarative `connect.login` whose declared success criteria failed on an answer below 500 other than 404, 405, 410 or 429, or that has none and got a 400, 401, 403 or 422 — is `invalid_request` with `param: credentials` and a `detail` starting `Login failed:`. A credential value the login request cannot carry where it is placed (a line break in a header value or a multipart body), or a submitted base URL that is malformed or outside `authorized_uris`, is `invalid_request` naming `credentials.<field>`. Neither echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
             400: components["responses"]["ValidationError"];
             /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
             403: {
@@ -12717,7 +12717,7 @@ export interface operations {
             /** @description No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
-            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. */
+            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). The page session survives. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12745,7 +12745,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connect-run login did not complete within the timeout */
+            /** @description The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`. */
             504: {
                 headers: {
                     [name: string]: unknown;
@@ -13025,9 +13025,19 @@ export interface operations {
                     };
                 };
             };
+            /** @description Invalid body or credentials. A login the service refused — a `connect.tool` that reports it, or a declarative `connect.login` whose declared success criteria failed on an answer below 500 other than 404, 405, 410 or 429, or that has none and got a 400, 401, 403 or 422 — is `invalid_request` with `param: credentials` and a `detail` starting `Login failed:`. A credential value the login request cannot carry where it is placed (a line break in a header value or a multipart body), or a submitted base URL that is malformed or outside `authorized_uris`, is `invalid_request` naming `credentials.<field>`. Neither echoes a credential value nor the service's answer. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description The configured execution backend cannot run a connect-run (sidecar-only workload). Operator configuration; the remedy is logged server-side and deliberately kept out of this response, which an end user can reach. */
             503: {
                 headers: {
@@ -13047,7 +13057,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The connect-run login did not complete within the timeout */
+            /** @description The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`. */
             504: {
                 headers: {
                     [name: string]: unknown;

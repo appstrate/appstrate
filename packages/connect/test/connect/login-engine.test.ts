@@ -66,8 +66,8 @@ describe("runLogin — declarative login (AFPS)", () => {
     expect(res.outputs.access_token).toBe("TOK-123");
     // expiresAt computed from expires_in seconds.
     expect(res.expiresAt).toBe(new Date(1_000_000 + 3600 * 1000).toISOString());
-    // The login request received the substituted secret in the body.
-    expect(calls[0]!.init.body).toBe("grant_type=password&username=a@b.co&password=s3cr3t");
+    // The login request received the substituted secret in the body, form-encoded.
+    expect(calls[0]!.init.body).toBe("grant_type=password&username=a%40b.co&password=s3cr3t");
   });
 
   it("non-leak: the bootstrap secret never lands in outputs", async () => {
@@ -324,7 +324,8 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
+    expect((err as LoginError).upstreamStatus).toBe(401);
     expect((err as Error).message).not.toContain("secret-error-detail");
   });
 
@@ -342,7 +343,40 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
+  });
+
+  it("classifies a 5xx that fails the criteria as `upstream_failed`, not a refusal", async () => {
+    const { impl } = fakeFetch([{ status: 503, body: "maintenance" }]);
+    const err = await runLogin(
+      { login: baseLogin },
+      {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+    expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 503 });
+  });
+
+  it("classifies a request that never reached the target as `upstream_failed`", async () => {
+    const refused = (async () => {
+      throw new TypeError("connect ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    await expect(
+      runLogin(
+        { login: baseLogin },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: refused,
+          resolveHost: TEST_RESOLVE,
+        },
+      ),
+    ).rejects.toMatchObject({ reason: "upstream_failed" });
   });
 
   it("rejects an oversized response body", async () => {
@@ -824,7 +858,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
     expect(res.outputs.access_token).toBe("TOK");
   });
 
-  it("integration: runLogin fails with bad_status when a regex criterion does NOT match", async () => {
+  it("integration: runLogin fails with rejected when a regex criterion does NOT match", async () => {
     const { impl } = fakeFetch([
       { status: 200, body: JSON.stringify({ token: "TOK", status: "fail" }) },
     ]);
@@ -843,7 +877,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
   });
 });
 
@@ -929,5 +963,341 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
   it("$response.body as an output yields the body text", async () => {
     const res = await run({ raw: "$response.body" }, { body: "opaque-token" });
     expect(res.outputs.raw).toBe("opaque-token");
+  });
+});
+
+describe("runLogin — input encoding (AFPS §7.7 request)", () => {
+  const PASSWORD = "p&ss=w+rd %x";
+
+  async function sent(
+    request: LoginConfig["login"]["request"],
+    inputs: Record<string, unknown>,
+  ): Promise<{ url: string; init: RequestInit }> {
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
+    await runLogin(
+      { login: { request, outputs: { t: "$response.body#/t" } } },
+      {
+        inputs,
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    );
+    return calls[0]!;
+  }
+
+  const refusal = (request: LoginConfig["login"]["request"], inputs: Record<string, unknown>) => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
+    const err = runLogin(
+      { login: { request, outputs: { t: "$response.body#/t" } } },
+      {
+        inputs,
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+    return { err, calls };
+  };
+
+  it("form body: each value is one form component, never a separator", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: "grant_type=password&username={{username}}&password={{password}}",
+        content_type: "application/x-www-form-urlencoded",
+      },
+      { username: "a b&admin=1", password: PASSWORD },
+    );
+    const params = new URLSearchParams(String(init.body));
+    expect([...params.keys()]).toEqual(["grant_type", "username", "password"]);
+    expect(params.getAll("password")).toEqual([PASSWORD]);
+    expect(params.get("username")).toBe("a b&admin=1");
+    // The WHATWG serializer: a space is `+`, a `+` is `%2B`.
+    expect(String(init.body)).toContain("username=a+b%26admin%3D1");
+  });
+
+  it("form body: the media type is read from a Content-Type header, any case, parameters ignored", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+        body: "password={{password}}",
+        content_type: "application/x-www-form-urlencoded",
+      },
+      { password: PASSWORD },
+    );
+    expect(new URLSearchParams(String(init.body)).getAll("password")).toEqual([PASSWORD]);
+    // The declared header is the one sent: `content_type` adds no second one.
+    expect(Object.keys(init.headers as Record<string, string>)).toEqual(["content-type"]);
+  });
+
+  it("JSON body: a value is escaped inside its string literal and adds no member", async () => {
+    const hostile = 'a"b\\c\n","admin":true,"x":"';
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: '{"username":"{{username}}","password":"{{password}}"}',
+        content_type: "application/json",
+      },
+      { username: hostile, password: PASSWORD },
+    );
+    expect(JSON.parse(String(init.body))).toEqual({ username: hostile, password: PASSWORD });
+  });
+
+  it("JSON body: a placeholder outside a string literal becomes a whole JSON string", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: '{"password":{{password}},"remember":true}',
+        content_type: "application/vnd.api+json",
+      },
+      { password: '1,"admin":true' },
+    );
+    expect(JSON.parse(String(init.body))).toEqual({ password: '1,"admin":true', remember: true });
+  });
+
+  it("XML body: a value is entity-escaped, and only `]]>` is split inside CDATA", async () => {
+    const hostile = "</p><admin/>&]]>";
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: '<login u="{{username}}"><p>{{password}}</p><c><![CDATA[{{password}}]]></c></login>',
+        content_type: "text/xml",
+      },
+      { username: 'x"y', password: hostile },
+    );
+    expect(String(init.body)).toBe(
+      '<login u="x&quot;y"><p>&lt;/p&gt;&lt;admin/&gt;&amp;]]&gt;</p>' +
+        "<c><![CDATA[</p><admin/>&]]]]><![CDATA[>]]></c></login>",
+    );
+  });
+
+  it("a body with no known media type is sent as is", async () => {
+    const { init } = await sent(
+      { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
+      { password: PASSWORD },
+    );
+    expect(init.body).toBe(`p=${PASSWORD}`);
+  });
+
+  it("URL: a value is one path segment or one query component", async () => {
+    const { url } = await sent(
+      {
+        method: "GET",
+        url: "https://idp.example.com/users/{{username}}/login?password={{password}}&v=1",
+      },
+      { username: "a/b?c#d", password: PASSWORD },
+    );
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe("/users/a%2Fb%3Fc%23d/login");
+    expect([...parsed.searchParams.keys()]).toEqual(["password", "v"]);
+    expect(parsed.searchParams.get("password")).toBe(PASSWORD);
+  });
+
+  it("URL: a leading value fills the base URL as is", async () => {
+    const { url } = await sent(
+      { method: "POST", url: "{{base_url}}/login?u={{username}}" },
+      { base_url: "https://idp.example.com/app", username: "a&b" },
+    );
+    expect(url).toBe("https://idp.example.com/app/login?u=a%26b");
+  });
+
+  it("header: a value carrying CR/LF is refused before any request, naming only the field", async () => {
+    const { err, calls } = refusal(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { "X-Api-Key": "{{api_key}}" },
+      },
+      { api_key: "k\r\nX-Admin: 1" },
+    );
+    const e = await err;
+    expect(e).toBeInstanceOf(LoginError);
+    expect(e).toMatchObject({ reason: "invalid_input", field: "api_key" });
+    expect((e as Error).message).not.toContain("X-Admin");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("header: a valid value is sent as is", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { Authorization: "Basic {{token}}" },
+      },
+      { token: "a b=c&d" },
+    );
+    expect((init.headers as Record<string, string>).Authorization).toBe("Basic a b=c&d");
+  });
+
+  it("refuses a value that is not well-formed Unicode", async () => {
+    const { err, calls } = refusal(
+      { method: "GET", url: "https://idp.example.com/token?p={{password}}" },
+      { password: "a\uD800b" },
+    );
+    expect(await err).toMatchObject({ reason: "invalid_input", field: "password" });
+    expect(calls).toHaveLength(0);
+  });
+  it("JSON body: a string that is a JSON scalar fills a bare position as that scalar", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: '{"pin":{{pin}},"remember":{{remember}},"name":{{name}},"pin_text":"{{pin}}"}',
+        content_type: "application/json",
+      },
+      { pin: "1234", remember: "false", name: "1234x" },
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      pin: 1234,
+      remember: false,
+      name: "1234x",
+      pin_text: "1234",
+    });
+  });
+
+  it("header: a Cookie value outside cookie-octet is refused, naming the field", async () => {
+    const { err, calls } = refusal(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { Cookie: "sid={{sid}}" },
+      },
+      { sid: "x; admin=1" },
+    );
+    expect(await err).toMatchObject({ reason: "invalid_input", field: "sid" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("JSON body: a typed value keeps its JSON type in a bare position, its text in a string", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body:
+          '{"pin":{{pin}},"remember":{{remember}},"profile":{{profile}},"name":{{name}},' +
+          '"pin_text":"{{pin}}","profile_text":"{{profile}}","name_text":"{{name}}"}',
+        content_type: "application/json",
+      },
+      { pin: 1234, remember: true, profile: { a: 'x"y' }, name: 'a"b' },
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      pin: 1234,
+      remember: true,
+      profile: { a: 'x"y' },
+      name: 'a"b',
+      pin_text: "1234",
+      profile_text: '{"a":"x\\"y"}',
+      name_text: 'a"b',
+    });
+  });
+
+  it("multipart body: a value carrying CR or LF is refused, before any request", async () => {
+    const request = {
+      method: "POST" as const,
+      url: "https://idp.example.com/token",
+      body: '--B\r\nContent-Disposition: form-data; name="password"\r\n\r\n{{password}}\r\n--B--\r\n',
+      content_type: "multipart/form-data; boundary=B",
+    };
+    for (const hostile of ['pw\r\n--B\r\nContent-Disposition: form-data; name="admin"', "pw\nx"]) {
+      const { err, calls } = refusal(request, { password: hostile });
+      expect(await err).toMatchObject({ reason: "invalid_input", field: "password" });
+      expect(calls).toHaveLength(0);
+    }
+    const { init } = await sent(request, { password: PASSWORD });
+    expect(String(init.body)).toContain(`\r\n\r\n${PASSWORD}\r\n--B--`);
+  });
+
+  it("URL: a placeholder after a literal host is a path value, never raw", async () => {
+    const { err, calls } = refusal(
+      { method: "POST", url: "https://idp.example.com{{path}}" },
+      { path: "/login?admin=1#" },
+    );
+    // Encoded, the value cannot open a query: what is left is no URL this login may reach.
+    expect(await err).toMatchObject({ reason: "url_not_allowed", fields: ["path"] });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("URL: a base URL the submitter chose outside the allowlist is refused naming that input", async () => {
+    const { err, calls } = refusal(
+      { method: "POST", url: "{{base_url}}/login" },
+      { base_url: "https://elsewhere.example.org" },
+    );
+    expect(await err).toMatchObject({ reason: "url_not_allowed", fields: ["base_url"] });
+    expect(calls).toHaveLength(0);
+    const malformed = refusal({ method: "POST", url: "{{base_url}}/login" }, { base_url: "nope" });
+    expect(await malformed.err).toMatchObject({ reason: "url_not_allowed", fields: ["base_url"] });
+    const port = refusal(
+      { method: "POST", url: "https://idp.example.com:{{port}}/login" },
+      { port: "443@elsewhere.example.org" },
+    );
+    expect(await port.err).toMatchObject({ reason: "url_not_allowed", fields: ["port"] });
+  });
+});
+
+describe("runLogin — what a failed answer means", () => {
+  const login = (status: number, success_criteria?: { condition: string }[]) =>
+    runLogin(
+      {
+        login: {
+          request: { method: "POST", url: "https://idp.example.com/login", body: "x=1" },
+          ...(success_criteria ? { success_criteria } : {}),
+          outputs: { sid: { from: "cookie", name: "sid" } },
+        },
+      },
+      {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: fakeFetch([{ status }]).impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+
+  for (const status of [400, 401, 403, 422]) {
+    it(`${status} with no success_criteria: the credentials were refused`, async () => {
+      expect(await login(status)).toMatchObject({ reason: "rejected", upstreamStatus: status });
+    });
+  }
+
+  for (const status of [302, 404, 405]) {
+    it(`${status} with no success_criteria: a defect of the integration, not a refusal`, async () => {
+      expect(await login(status)).toMatchObject({
+        reason: "unexpected_status",
+        upstreamStatus: status,
+      });
+    });
+  }
+
+  it("an answer below 500 that fails declared success_criteria is a refusal", async () => {
+    for (const status of [200, 302, 400]) {
+      expect(await login(status, [{ condition: "$statusCode == 201" }])).toMatchObject({
+        reason: "rejected",
+        upstreamStatus: status,
+      });
+    }
+  });
+
+  for (const status of [404, 405, 410]) {
+    it(`${status} is no login endpoint, whatever the criteria`, async () => {
+      expect(await login(status, [{ condition: "$statusCode == 302" }])).toMatchObject({
+        reason: "unexpected_status",
+      });
+    });
+  }
+
+  it("429 is the service turning the login away for now, whatever the criteria", async () => {
+    expect(await login(429)).toMatchObject({ reason: "upstream_failed", upstreamStatus: 429 });
+    expect(await login(429, [{ condition: "$statusCode == 302" }])).toMatchObject({
+      reason: "upstream_failed",
+    });
   });
 });

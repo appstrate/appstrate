@@ -23,6 +23,7 @@
 import { resolveAfpsHttpDelivery, type AfpsHttpDelivery } from "@appstrate/connect/afps-delivery";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import {
+  CONNECT_LOGIN_INPUT_REFUSED_PREFIX,
   CONNECT_LOGIN_TOOL_ERROR_PREFIX,
   type ManifestDeliveryHttp,
 } from "@appstrate/core/sidecar-types";
@@ -97,9 +98,22 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
   try {
     // The secret is delivered ONLY via proxy-side substitution — the tool
     // is called with empty arguments (security contract).
-    const result = await opts.client.callTool({ name: opts.toolName, arguments: {} }, {});
-
-    const parsed = parseLoginToolResult(result);
+    // An input the listener refused to send outranks whatever the tool made of that refusal.
+    const refusedInput = () => {
+      const field = opts.source.refusedActiveInput(opts.authKey);
+      return field === undefined
+        ? null
+        : new Error(`${CONNECT_LOGIN_INPUT_REFUSED_PREFIX}: ${field}`);
+    };
+    let parsed: LoginToolResult;
+    try {
+      const result = await opts.client.callTool({ name: opts.toolName, arguments: {} }, {});
+      parsed = parseLoginToolResult(result);
+    } catch (err) {
+      throw refusedInput() ?? err;
+    }
+    const refused = refusedInput();
+    if (refused) throw refused;
 
     // Validate the outputs against the declared `produces` allowlist.
     if (Object.keys(parsed.outputs).length === 0) {

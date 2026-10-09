@@ -63,6 +63,7 @@ import { activatePackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
+  collectLoginCriteriaWarnings,
   collectMetaWarnings,
   collectRetiredDependencyKeyWarnings,
 } from "./integration-import-warnings.ts";
@@ -464,6 +465,9 @@ export async function importBundle(
     // warning is how the operator learns the dependencies declared under it
     // were never honoured and that a republish removes the key.
     for (const w of collectRetiredDependencyKeyWarnings(parsedZip.manifest)) {
+      warnings.push(`${identity}: ${w}`);
+    }
+    for (const w of collectLoginCriteriaWarnings(parsedZip.manifest)) {
       warnings.push(`${identity}: ${w}`);
     }
 

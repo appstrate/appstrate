@@ -577,7 +577,8 @@ const connectRunResponses = {
     },
   },
   "504": {
-    description: "The connect-run login did not complete within the timeout",
+    description:
+      "The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -593,6 +594,15 @@ const connectRunResponses = {
       },
     },
   },
+} as const;
+
+/** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
+const CONNECT_LOGIN_400 =
+  "A login the service refused — a `connect.tool` that reports it, or a declarative `connect.login` whose declared success criteria failed on an answer below 500 other than 404, 405, 410 or 429, or that has none and got a 400, 401, 403 or 422 — is `invalid_request` with `param: credentials` and a `detail` starting `Login failed:`. A credential value the login request cannot carry where it is placed (a line break in a header value or a multipart body), or a submitted base URL that is malformed or outside `authorized_uris`, is `invalid_request` naming `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+const CONNECT_LOGIN_502 =
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
+const problemJson = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
 
 export const integrationsPaths = {
@@ -966,9 +976,13 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": { description: CONNECT_LOGIN_502, content: problemJson },
         ...connectRunResponses,
       },
     },
@@ -1267,8 +1281,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail.",
+          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives: the form can be submitted again.`,
         },
         "403": {
           description:
@@ -1283,11 +1296,8 @@ export const integrationsPaths = {
             "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
         },
         "502": {
-          description:
-            "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,

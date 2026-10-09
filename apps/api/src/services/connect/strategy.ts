@@ -17,7 +17,7 @@
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
 
 export type { CredentialBundle };
 
@@ -101,6 +101,36 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
   if (!credentials || Object.keys(credentials).length === 0) {
     throw invalidRequest("credentials payload cannot be empty", "credentials");
   }
+}
+
+/**
+ * A login the service refused the submitted credentials to — the submitter's own input, so a 400
+ * on `credentials` naming the remedy. `diagnostic` is one sentence, never a credential value.
+ */
+export function loginRejected(diagnostic: string): ApiError {
+  return invalidRequest(
+    `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
+    "credentials",
+  );
+}
+
+/** A login input the login request cannot carry where it sits (a line break in a header value). */
+export function loginInputRefused(field: string): ApiError {
+  return invalidRequest(
+    `The value of '${field}' contains a character this request cannot carry where it is placed.`,
+    `credentials.${field}`,
+  );
+}
+
+/** A login the service did not finish in time: not a server bug, retrying is the remedy. */
+export function loginTimedOut(timeoutMs?: number): ApiError {
+  const after = timeoutMs === undefined ? "" : ` after ${timeoutMs}ms`;
+  return new ApiError({
+    status: 504,
+    code: "timeout",
+    title: "Gateway Timeout",
+    detail: `The connection attempt timed out${after} — the login did not complete in time. Please try again.`,
+  });
 }
 
 /**

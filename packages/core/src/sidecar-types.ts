@@ -762,6 +762,13 @@ export type CredentialFailureCause = (typeof CREDENTIAL_FAILURE_CAUSES)[number];
 export const CONNECT_LOGIN_TOOL_ERROR_PREFIX = "connect-login: login tool reported an error";
 
 /**
+ * Prefix of the connect-run error naming a login input the sidecar refused to send where the
+ * login tool placed it (a line break in a header value): `<prefix>: <field>`. Same producer,
+ * consumer and silent-drift hazard as {@link CONNECT_LOGIN_TOOL_ERROR_PREFIX}.
+ */
+export const CONNECT_LOGIN_INPUT_REFUSED_PREFIX = "connect-login: login input cannot be sent";
+
+/**
  * One ordered, human-readable line in the integration boot trail. The sidecar
  * (which owns the per-phase timings) formats the message; the agent relays it
  * verbatim into the run-event pipeline as an `appstrate.progress` breadcrumb so

@@ -22,15 +22,25 @@
 export function substituteVars(
   input: string,
   fields: Readonly<Record<string, string>>,
-  opts?: { keepUnresolved?: boolean },
+  opts?: {
+    keepUnresolved?: boolean;
+    /** Renders a value for the place its placeholder takes in `input` (at `offset`); as is when absent. */
+    encode?: PlaceholderEncoder;
+  },
 ): string {
   const keep = opts?.keepUnresolved === true;
-  return input.replace(VAR_PLACEHOLDER, (match, key: string) => {
+  const encode = opts?.encode;
+  return input.replace(VAR_PLACEHOLDER, (match, key: string, offset: number) => {
     // Own properties only: `{{constructor}}` must not resolve to Object.prototype's.
-    if (Object.hasOwn(fields, key)) return fields[key]!;
+    if (Object.hasOwn(fields, key)) {
+      return encode ? encode(fields[key]!, key, offset) : fields[key]!;
+    }
     return keep ? match : "";
   });
 }
+
+/** Renders the value of placeholder `key`, found at `offset` of the template, into that template. */
+export type PlaceholderEncoder = (value: string, key: string, offset: number) => string;
 
 /**
  * Canonical `{{ key }}` placeholder grammar — single source for every scanner
@@ -47,11 +57,22 @@ const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
  */
 export function unresolvedPlaceholders(
   template: string,
-  fields: Readonly<Record<string, string>>,
+  fields: Readonly<Record<string, unknown>>,
 ): string[] {
   return [...template.matchAll(VAR_PLACEHOLDER)]
     .map((match) => match[1]!)
     .filter((key) => !Object.hasOwn(fields, key));
+}
+
+/** The `{{key}}` placeholder starting exactly at `offset` of `template`, or `null`. */
+export function placeholderAt(
+  template: string,
+  offset: number,
+): { key: string; length: number } | null {
+  const sticky = new RegExp(VAR_PLACEHOLDER.source, "y");
+  sticky.lastIndex = offset;
+  const match = sticky.exec(template);
+  return match ? { key: match[1]!, length: match[0].length } : null;
 }
 
 /**

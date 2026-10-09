@@ -14,6 +14,7 @@ import {
   type ActiveConnectInputs,
 } from "../integration-mitm-listener.ts";
 import { runConnectLogin } from "../connect-login.ts";
+import { CONNECT_LOGIN_INPUT_REFUSED_PREFIX } from "@appstrate/core/sidecar-types";
 import {
   coerceExpiresAtToEpochMs,
   createIntegrationCredentialsSource,
@@ -35,7 +36,7 @@ describe("applyConnectInputSubstitution", () => {
       { username: "alice", password: "s3cret", token: "tok-123" },
     );
     expect("failed" in result).toBe(false);
-    if ("failed" in result) throw new Error("unexpected failure");
+    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
     expect(result.url).toBe("https://api.example.com/login?u=alice");
     expect(result.bodyText).toBe('{"password":"s3cret"}');
     expect(result.headers["X-Token"]).toBe("tok-123");
@@ -68,10 +69,83 @@ describe("applyConnectInputSubstitution", () => {
     };
     const result = applyConnectInputSubstitution(parts, { username: "alice" });
     expect("failed" in result).toBe(false);
-    if ("failed" in result) throw new Error("unexpected failure");
+    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
     expect(result.url).toBe(parts.url);
     expect(result.bodyText).toBe(parts.bodyText);
     expect(result.headers).toEqual(parts.headers);
+  });
+});
+
+describe("applyConnectInputSubstitution — each value encoded for its place", () => {
+  const PASSWORD = "p&ss=w+rd %x";
+  const substituted = (result: ReturnType<typeof applyConnectInputSubstitution>) => {
+    if ("failed" in result || "refused" in result) throw new Error(JSON.stringify(result));
+    return result;
+  };
+
+  it("form body (by the request's own Content-Type): a value is one form component", () => {
+    const result = substituted(
+      applyConnectInputSubstitution(
+        {
+          url: "https://api.example.com/login",
+          bodyText: "username={{username}}&password={{password}}",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+        },
+        { username: "a b&admin=1", password: PASSWORD },
+      ),
+    );
+    const params = new URLSearchParams(result.bodyText!);
+    expect([...params.keys()]).toEqual(["username", "password"]);
+    expect(params.getAll("password")).toEqual([PASSWORD]);
+    expect(params.get("username")).toBe("a b&admin=1");
+  });
+
+  it("JSON body: a quote in a value stays inside its string literal", () => {
+    const hostile = 'a"b\\c","admin":true,"x":"';
+    const result = substituted(
+      applyConnectInputSubstitution(
+        {
+          url: "https://api.example.com/login",
+          bodyText: '{"password":"{{password}}"}',
+          headers: { "content-type": "application/json; charset=utf-8" },
+        },
+        { password: hostile },
+      ),
+    );
+    expect(JSON.parse(result.bodyText!)).toEqual({ password: hostile });
+  });
+
+  it("JSON body: a string that is a JSON scalar fills a bare position as that scalar, as in connect.login", () => {
+    const result = substituted(
+      applyConnectInputSubstitution(
+        {
+          url: "https://api.example.com/login",
+          bodyText: '{"pin":{{pin}},"user":{{user}}}',
+          headers: { "content-type": "application/json" },
+        },
+        { pin: "1234", user: "alice" },
+      ),
+    );
+    expect(JSON.parse(result.bodyText!)).toEqual({ pin: 1234, user: "alice" });
+  });
+
+  it("URL: a value is one query component", () => {
+    const result = substituted(
+      applyConnectInputSubstitution(
+        { url: "https://api.example.com/login?p={{password}}&v=1", bodyText: null, headers: {} },
+        { password: PASSWORD },
+      ),
+    );
+    expect(new URL(result.url).searchParams.getAll("p")).toEqual([PASSWORD]);
+    expect(new URL(result.url).searchParams.get("v")).toBe("1");
+  });
+
+  it("refuses a value carrying CR/LF into a header, naming only the field", () => {
+    const result = applyConnectInputSubstitution(
+      { url: "https://api.example.com/login", bodyText: null, headers: { "x-pw": "{{password}}" } },
+      { password: "pw\r\nX-Admin: 1" },
+    );
+    expect(result).toEqual({ refused: "password" });
   });
 });
 
@@ -268,6 +342,48 @@ describe("runConnectLogin", () => {
     ).rejects.toThrow("boom");
     expect(source.activeInputs()).toBeNull();
   });
+
+  it("records a refused input on the window whose envelope admits the refused request", () => {
+    const source = makeSource();
+    source.setActiveInputs({ password: "a" }, "a", ["https://a.example/**"]);
+    source.setActiveInputs({ password: "b" }, "b", ["https://b.example/**"]);
+    source.setActiveInputs({ token: "t" }, "c", ["https://a.example/**"]);
+    source.refuseActiveInput("password", "https://a.example/login");
+    expect(source.refusedActiveInput("a")).toBe("password");
+    expect(source.refusedActiveInput("b")).toBeUndefined();
+    expect(source.refusedActiveInput("c")).toBeUndefined();
+    source.clearActiveInputs();
+  });
+
+  for (const outcome of ["reports an error", "returns a session"] as const) {
+    it(`names the input the listener refused to send when the tool ${outcome}`, async () => {
+      const source = makeSource();
+      const client = {
+        callTool() {
+          // The listener refused the tool's login request for this input.
+          source.refuseActiveInput("password", "https://api.example.com/login");
+          return Promise.resolve(
+            outcome === "reports an error"
+              ? { isError: true, content: [{ type: "text", text: "HTTP 403 from proxy" }] }
+              : { content: [{ type: "text", text: JSON.stringify({ outputs: { t: "x" } }) }] },
+          );
+        },
+      };
+      const err = await runConnectLogin({
+        client: client as any,
+        namespace: "ns",
+        toolName: "login",
+        inputs: { password: "pw\r\nX" },
+        source,
+        authKey: "primary",
+        authType: "oauth2",
+        authorizedUris: ["https://api.example.com/**"],
+        deliveryHttp: DELIVERY_HTTP,
+      }).catch((e: unknown) => e);
+      expect((err as Error).message).toBe(`${CONNECT_LOGIN_INPUT_REFUSED_PREFIX}: password`);
+      expect(source.activeInputs()).toBeNull();
+    });
+  }
 
   it("rejects an output not in the produces allowlist", async () => {
     const source = makeSource();

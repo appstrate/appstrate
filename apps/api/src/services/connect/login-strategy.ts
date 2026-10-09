@@ -14,8 +14,9 @@
  * `{{placeholder}}`s; the trusted engine substitutes the transient inputs.
  */
 
-import { runLogin, type LoginConfig } from "@appstrate/connect/connect";
-import { invalidRequest } from "../../lib/errors.ts";
+import { LoginError, runLogin, type LoginConfig } from "@appstrate/connect/connect";
+import { badGateway, invalidRequest } from "../../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
 import {
   assertRequiredIdentityClaims,
   extractIdentity,
@@ -28,9 +29,58 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
-import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import {
+  assertFieldsInput,
+  loginInputRefused,
+  loginRejected,
+  loginTimedOut,
+  requireNonEmptyCredentials,
+} from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
+
+/**
+ * The answer to a login that failed for a reason the submitter can act on: credentials refused, a
+ * value the request cannot carry, a target down or slow. Any other failure is a defect of the
+ * integration and stays the caller's generic 500. Neither the inputs nor the upstream body are
+ * ever echoed.
+ */
+function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
+  if (!(err instanceof LoginError)) return err;
+  if (err.reason === "upstream_failed" || err.reason === "timeout") {
+    // The operator's half of a 502/504 whose body says nothing of the cause. The message names a
+    // status, a delay or an error class — never a request URL, an input or the upstream body.
+    logger.warn("connect.login did not complete", {
+      integrationId: ctx.integrationId,
+      authKey: ctx.authKey,
+      reason: err.reason,
+      error: err.message,
+    });
+  }
+  switch (err.reason) {
+    case "rejected":
+      return loginRejected(
+        `the service refused the submitted credentials (HTTP ${err.upstreamStatus}).`,
+      );
+    case "invalid_input":
+      return loginInputRefused(err.field!);
+    case "url_not_allowed": {
+      const fields = err.fields ?? [];
+      if (fields.length === 0) return err;
+      const named = fields.map((f) => `'${f}'`).join(", ");
+      return invalidRequest(
+        `The ${fields.length === 1 ? "value" : "values"} of ${named} ${fields.length === 1 ? "does" : "do"} not give an address this login may reach.`,
+        fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
+      );
+    }
+    case "upstream_failed":
+      return badGateway("The service could not complete the login. Try again later.");
+    case "timeout":
+      return loginTimedOut();
+    default:
+      return err;
+  }
+}
 
 export class LoginStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -44,25 +94,18 @@ export class LoginStrategy implements IntegrationConnectStrategy {
     }
     requireNonEmptyCredentials(credentials);
 
-    // LoginStrategy substitutes `{{name}}` placeholders into HTTP request URLs,
-    // headers, and bodies — only string-valued bootstrap inputs are meaningful.
-    // Non-string values from the widened `ConnectCompleteInput.credentials`
-    // shape get stringified so they still flow through (JSON-encoded objects
-    // round-trip cleanly), but the canonical contract here is strings.
-    const stringInputs: Record<string, string> = {};
-    for (const [k, v] of Object.entries(credentials)) {
-      stringInputs[k] = typeof v === "string" ? v : JSON.stringify(v);
-    }
-
     const variables = await resolveConnectionVariables(
       manifest,
       auth as unknown as AfpsManifestAuth,
       ctx.variables,
     );
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
-      inputs: stringInputs,
+      // As submitted: the engine encodes each value, a typed one as JSON where the body is JSON.
+      inputs: credentials,
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
       allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
+    }).catch((err: unknown) => {
+      throw loginRefusal(err, ctx);
     });
 
     // Identity source = injectable outputs + engine-promoted identity claims,

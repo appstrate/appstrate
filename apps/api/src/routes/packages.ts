@@ -143,7 +143,10 @@ import {
   PACKAGE_MANIFEST_FILE,
   PACKAGE_TYPE_ROUTE_SEGMENT,
 } from "@appstrate/core/package-files";
-import { collectMetaWarnings } from "../services/integration-import-warnings.ts";
+import {
+  collectLoginCriteriaWarnings,
+  collectMetaWarnings,
+} from "../services/integration-import-warnings.ts";
 import { collectAgentImportWarnings } from "../services/agent-import-warnings.ts";
 import {
   ApiError,
@@ -2646,6 +2649,7 @@ export function createPackagesRouter() {
     const importWarnings = [
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
+      ...collectLoginCriteriaWarnings(manifest),
     ];
     return c.json(
       {

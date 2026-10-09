@@ -87,11 +87,12 @@ import {
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { substituteVars } from "@appstrate/connect/proxy-primitives";
 import {
   beyondBoundReason,
   credentialStaysWithinBound,
   HOP_BY_HOP_HEADERS,
+  substituteRequest,
+  UnencodableInputError,
   unresolvedPlaceholders,
 } from "@appstrate/afps-runtime/resolvers";
 import {
@@ -172,6 +173,13 @@ export interface MitmCredentialSource {
    * {@link ActiveConnectInputs}).
    */
   activeInputs?(): ActiveConnectInputs | null;
+  /**
+   * The listener refused a login request to `url` because input `field` cannot be encoded where
+   * the login tool placed it (a line break in a header value): recorded on the open windows whose
+   * `authorizedUris` admit `url`, so the login primitive reports the field, not the tool's own
+   * account of a refused request.
+   */
+  refuseActiveInput?(field: string, url: string): void;
 }
 
 interface CreateMitmListenerOptions {
@@ -737,19 +745,24 @@ export function extractSni(buf: Buffer): string | null {
 /**
  * Result of {@link applyConnectInputSubstitution}: either the substituted
  * request parts, or a fail-closed marker carrying the first unresolved
- * placeholder name.
+ * placeholder name (`failed`) or the input that cannot be encoded (`refused`).
  */
 type ConnectInputSubstitutionResult =
-  { url: string; bodyText: string | null; headers: Record<string, string> } | { failed: string };
+  | { url: string; bodyText: string | null; headers: Record<string, string> }
+  | { failed: string }
+  | { refused: string };
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
- * substitution: {@link substituteVars} over the URL, body, and each header
- * value using `inputs`.
+ * substitution: `substituteRequest` over the URL, body, and each header
+ * value using `inputs`, each value encoded for the place it takes (the
+ * request's own `Content-Type` decides the body's encoding).
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream. A request with no placeholders is returned verbatim.
+ * upstream; a value the request cannot carry (a line break in a header
+ * value) returns `{ refused: <name> }`. A request with no placeholders is
+ * returned verbatim.
  */
 export function applyConnectInputSubstitution(
   parts: { url: string; bodyText: string | null; headers: Record<string, string> },
@@ -759,13 +772,16 @@ export function applyConnectInputSubstitution(
     const [missing] = unresolvedPlaceholders(template, inputs);
     if (missing !== undefined) return { failed: missing };
   }
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(parts.headers)) headers[k] = substituteVars(v, inputs);
-  return {
-    url: substituteVars(parts.url, inputs),
-    bodyText: parts.bodyText === null ? null : substituteVars(parts.bodyText, inputs),
-    headers,
-  };
+  try {
+    const { url, headers, body } = substituteRequest(
+      { url: parts.url, headers: parts.headers, body: parts.bodyText },
+      inputs,
+    );
+    return { url, bodyText: body, headers };
+  } catch (err) {
+    if (err instanceof UnencodableInputError) return { refused: err.field };
+    throw err;
+  }
 }
 
 /**
@@ -908,6 +924,11 @@ async function forwardInnerRequest(
       emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
     }
+    if ("refused" in result) {
+      credentials.refuseActiveInput?.(result.refused, targetUrl);
+      emit({ kind: "request-refused", url, reason: LOGIN_INPUT_NOT_CARRIED });
+      return new Response(`MITM listener: ${LOGIN_INPUT_NOT_CARRIED}`, { status: 403 });
+    }
     const substituted =
       result.url !== targetUrl ||
       result.bodyText !== bodyText ||
@@ -921,11 +942,11 @@ async function forwardInnerRequest(
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
+    // Every value is an HTTP field value: the literal parts passed Bun's request parser,
+    // which refuses a control character on the wire, and `substituteRequest` refused any
+    // substituted value that is not one.
     const subbed = new Headers();
-    for (const [k, v] of Object.entries(result.headers)) {
-      if (!isHttpFieldValue(v)) return refuseInvalidCredential(url, emit);
-      subbed.set(k, v);
-    }
+    for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
     headersForOutbound = subbed;
   }
 
@@ -1092,6 +1113,9 @@ async function forwardInnerRequest(
 }
 
 const INVALID_CREDENTIAL = "credential is not a valid header value";
+/** A login input refused where the login tool placed it (a header line break, a multipart CRLF…). */
+const LOGIN_INPUT_NOT_CARRIED =
+  "login input contains a character this request cannot carry where it is placed";
 
 interface BoundRefusal {
   reason: string;

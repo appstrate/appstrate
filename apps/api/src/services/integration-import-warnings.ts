@@ -2,6 +2,8 @@
 
 import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
 import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
+import { normalizeMime } from "@appstrate/core/mime";
+import { headerNamed } from "@appstrate/afps-runtime/resolvers";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
@@ -52,5 +54,35 @@ export function collectMetaWarnings(manifest: unknown): string[] {
     }
   }
 
+  return warnings;
+}
+
+interface LoginShape {
+  request?: { headers?: Record<string, string>; content_type?: string };
+  success_criteria?: unknown[];
+}
+
+/**
+ * Warn on a `connect.login` that posts a form and declares no `success_criteria`. Any 2xx then
+ * counts as success, and a web app commonly answers a wrong password with `200` and its login
+ * page: the connection would be stored with a dead session. Pure; `[]` for any other manifest.
+ */
+export function collectLoginCriteriaWarnings(manifest: unknown): string[] {
+  const auths = (manifest as { auths?: unknown } | null)?.auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const warnings: string[] = [];
+  for (const [key, auth] of Object.entries(auths)) {
+    const login = (auth as { connect?: { login?: LoginShape } } | null)?.connect?.login;
+    if (!login?.request || (login.success_criteria?.length ?? 0) > 0) continue;
+    const header = headerNamed(login.request.headers ?? {}, "content-type");
+    if (
+      normalizeMime(header ?? login.request.content_type) !== "application/x-www-form-urlencoded"
+    ) {
+      continue;
+    }
+    warnings.push(
+      `auths.${key}.connect.login: a form login with no success_criteria counts any 2xx as success — declare what only a logged-in answer has (a cookie, a redirect target, a body marker), or a refused login is stored as a connection`,
+    );
+  }
   return warnings;
 }
