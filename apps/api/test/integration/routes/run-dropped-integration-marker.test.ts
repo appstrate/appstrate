@@ -25,7 +25,7 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { runLogs } from "@appstrate/db/schema";
+import { runLogs, runs } from "@appstrate/db/schema";
 import {
   createFakeOrchestrator,
   inlineAgentManifest as inlineManifest,
@@ -37,6 +37,7 @@ import {
 import { seedMcpServer } from "../../helpers/seed.ts";
 import { INTEGRATION_DROPPED_EVENT } from "../../../src/services/run-context-builder.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { deactivatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -91,6 +92,47 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     expect(rows[0]!.data?.integrationId).toBe(INTEGRATION);
     expect(rows[0]!.data?.reason).toBe("mcp_server_unresolved");
     expect(rows[0]!.message).toContain(INTEGRATION);
+  });
+
+  it("records an `unbound` marker when a non-required integration has no connection", async () => {
+    // Absence degrades: the cascade binds `[]`, the run launches, and the
+    // spawn resolver drops the integration as unbound rather than erroring.
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+
+    const res = await launch();
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const rows = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data?.reason).toBe("unbound");
+    expect(rows[0]!.message).toContain("has no connection bound to this run");
+    // A chosen absence, not a failure to start.
+    expect(rows[0]!.level).toBe("info");
+  });
+
+  it("records `not_active`, not `unbound`, for a non-required integration switched off here", async () => {
+    // The snapshot binds it to none (`[]`); the spawn's activation check runs first.
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+
+    const res = await launch();
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+
+    const [run] = await db.select().from(runs).where(eq(runs.id, created.id));
+    expect(run!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+    const rows = await db
+      .select()
+      .from(runLogs)
+      .where(and(eq(runLogs.runId, created.id), eq(runLogs.event, INTEGRATION_DROPPED_EVENT)));
+    expect(rows.map((r) => r.data?.reason)).toEqual(["not_active"]);
   });
 
   it("writes no marker when every declared integration spawns", async () => {

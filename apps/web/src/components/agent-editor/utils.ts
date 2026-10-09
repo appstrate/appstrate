@@ -279,6 +279,7 @@ export function getResourceEntries(
         : {}),
       ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
+      ...(e.required !== undefined ? { required: e.required } : {}),
     }));
   }
   const deps = getDeps(m);
@@ -307,6 +308,7 @@ export function setResourceEntries(
             : {}),
           ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
           ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
+          ...(e.required !== undefined ? { required: e.required } : {}),
         })),
     );
     return;

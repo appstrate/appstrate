@@ -356,18 +356,9 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/connection-readiness — bulk integration
-  // connection readiness for the agent: run-blocking CONNECTION verdict + the
-  // per-integration management DTO.
-  //
-  // Same resolver, same pinned manifests as the run-kickoff 409 — but not the
-  // whole kickoff gate: readiness also refuses an integration that is not
-  // active in the space and excludes those ids from the resolver
-  // (`skipIntegrationIds`). This endpoint runs no activation gate, so such
-  // an integration surfaces here as a connection problem. Adding the skip alone
-  // would make it worse (the item would drop out of `blocks_run` while the run
-  // still refuses it); closing the gap means giving this DTO the activation
-  // verdict too — a wire change to the Connexions tab. The kickoff remains the
-  // authority; this is what the badge renders.
+  // connection readiness for the agent: run-blocking verdict (activation and
+  // connections, the resolver the run-kickoff 409 uses, on the same pinned
+  // manifests) + the per-integration management DTO.
   // Reporting on `?version=draft` is the author's view, gated in the handler by
   // the package's home space (`assertDraftSelectorAllowed`).
   router.get(

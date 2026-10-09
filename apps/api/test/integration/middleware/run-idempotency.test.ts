@@ -19,6 +19,25 @@ import { computeRequestHash, storeIdempotencyResult } from "../../../src/lib/ide
 const app = getTestApp();
 beforeEach(truncateAll);
 
+const WARNING = {
+  field: "integrations.@idem-review/svc",
+  code: "integration_unbound",
+  title: "Integration Not Bound — Run Proceeds Without It",
+  message: "Integration '@idem-review/svc' has no connection accessible to this actor.",
+};
+
+function cacheLaunch(ctx: TestContext, key: string, path: string, body: unknown) {
+  return storeIdempotencyResult(ctx.orgId, ctx.defaultSpaceId, key, {
+    statusCode: 201,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    requestHash: computeRequestHash(
+      new Request(`http://localhost${path}`, { method: "POST" }),
+      "{}",
+    ),
+  });
+}
+
 describe("run replay respects current permissions on the real test application", () => {
   it("withholds imposed input on cached replay and rejects a viewer", async () => {
     const owner = await createTestContext({ orgSlug: "idem-review" });
@@ -49,15 +68,8 @@ describe("run replay respects current permissions on the real test application",
     const fullText = await full.text();
     expect(JSON.parse(fullText).input).toEqual({ imposed: "SYNTHETIC-IMPOSED-VALUE" });
     const key = crypto.randomUUID();
-    await storeIdempotencyResult(owner.orgId, owner.defaultSpaceId, key, {
-      statusCode: 201,
-      headers: { "content-type": "application/json" },
-      body: fullText,
-      requestHash: computeRequestHash(
-        new Request(`http://localhost${path}`, { method: "POST" }),
-        "{}",
-      ),
-    });
+    // A launch response: the run plus the launch's `warnings`.
+    await cacheLaunch(owner, key, path, { ...JSON.parse(fullText), warnings: [WARNING] });
     for (const alternate of [
       "/api/runs/remote",
       "/api/runs/inline",
@@ -83,7 +95,7 @@ describe("run replay respects current permissions on the real test application",
     const hidden = await replayAs(outsider);
     expect(hidden.status).toBe(404);
     const replay = await replayAs(runner);
-    const replayBody = (await replay.json()) as { id: string; input: unknown };
+    const replayBody = (await replay.json()) as { id: string; input: unknown; warnings: unknown };
     const viewerReplay = await replayAs(viewer);
     const viewerDirect = await app.request(path, {
       method: "POST",
@@ -94,6 +106,7 @@ describe("run replay respects current permissions on the real test application",
     expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
     expect(replayBody.id).toBe(run.id);
     expect(replayBody.input).toBeNull();
+    expect(replayBody.warnings).toEqual([WARNING]);
     expect(viewerDirect.status).toBe(403);
     const again = await replayAs(owner);
     expect(again.status).toBe(201);
@@ -106,5 +119,38 @@ describe("run replay respects current permissions on the real test application",
     const deleted = await replayAs(owner);
     expect(deleted.status).toBe(404);
     await assertDbCount(runs, eq(runs.orgId, owner.orgId), 0);
+  });
+
+  it("replays the cached body with its run fields re-read", async () => {
+    const owner = await createTestContext({ orgSlug: "idem-shape" });
+    const packageId = "@idem-shape/agent";
+    const path = `/api/agents/${packageId}/run`;
+    await seedAgent({
+      id: packageId,
+      orgId: owner.orgId,
+      homeSpaceId: owner.defaultSpaceId,
+      createdBy: owner.user.id,
+    });
+    await seedSpacePackage(owner.defaultSpaceId, packageId);
+    const run = await seedRun({
+      orgId: owner.orgId,
+      spaceId: owner.defaultSpaceId,
+      packageId,
+      userId: owner.user.id,
+      status: "failed",
+    });
+    const key = crypto.randomUUID();
+    await cacheLaunch(owner, key, path, { id: run.id, status: "pending", warnings: [WARNING] });
+
+    const replay = await app.request(path, {
+      method: "POST",
+      headers: { ...authHeaders(owner), "Idempotency-Key": key },
+      body: "{}",
+    });
+    expect(replay.status).toBe(201);
+    const body = (await replay.json()) as Record<string, unknown>;
+    expect(body.id).toBe(run.id);
+    expect(body.status).toBe("failed"); // re-read, not the cached value
+    expect(body.warnings).toEqual([WARNING]);
   });
 });

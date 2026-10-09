@@ -676,7 +676,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         {
           ...publishedManifest("1.2.3"),
           dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
-          integrations_configuration: { [INTEG]: { tools: ["search"] } },
+          integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
         } as unknown as Record<string, unknown>,
         "1.2.3",
       );
@@ -761,7 +761,57 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     it("creates the run once the set is narrowed to one (control)", async () => {
       await pinMine([b]);
-      expect((await launch()).status).toBe(201);
+      const res = await launch();
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as { warnings: unknown[] }).warnings).toEqual([]);
+    });
+
+    it("creates the run with an empty set when a pin names none", async () => {
+      await pinMine([]);
+      const res = await launch();
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [run] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(run!.resolvedConnections).toEqual({ [INTEG]: [] });
+    });
+  });
+
+  describe("a non-required integration nobody connected", () => {
+    const INTEG = "@acme/optional-svc";
+
+    it("creates the run without it and names it in warnings", async () => {
+      await seedConnectionTestIntegration(ctx, INTEG);
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest("1.2.3"),
+          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          integrations_configuration: { [INTEG]: { tools: ["search"] } },
+        } as unknown as Record<string, unknown>,
+        "1.2.3",
+      );
+
+      const res = await post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: "1.2.3",
+        },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        id: string;
+        warnings: { field: string; code: string }[];
+      };
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${INTEG}`, "integration_unbound"],
+      ]);
+      const [run] = await db.select().from(runs).where(eq(runs.id, body.id));
+      expect(run!.resolvedConnections).toEqual({ [INTEG]: [] });
     });
   });
 

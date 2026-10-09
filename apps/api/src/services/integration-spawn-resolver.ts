@@ -130,6 +130,7 @@ export type IntegrationDropReason =
   | "mcp_server_not_runnable"
   | "no_delivery"
   | "bound_set_incomplete"
+  | "unbound"
   | "resolve_error";
 
 /** One declared integration the run will start WITHOUT, plus why. */
@@ -227,8 +228,8 @@ async function renderConnectionRemoteUrl(
  * agent whose integrations are only partly connected (the pre-flight picker
  * models it explicitly via the readiness verdict's `error_code`), so this must not throw.
  * But the caller MUST carry `dropped` somewhere the user can see it;
- * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a
- * `warn` run log. This function itself stays pure of DB writes so it remains
+ * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a run
+ * log (`warn`, `info` for an unbound one). This function itself stays pure of DB writes so it remains
  * unit-testable without a run row.
  */
 export async function resolveIntegrationSpawns(
@@ -351,15 +352,21 @@ async function resolveOne(
   // api_call filter (below) and the sidecar `toolAllowlist` (Phase 3) so the
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
+  const wildcardSelection = isToolsWildcard(effectiveSelection);
+  const exposesTools = wildcardSelection || !!effectiveSelection?.length;
 
   // (b) Active in the space
   if (!(await isIntegrationActive(integrationId, spaceId))) {
+    // Inert (no verdict, no tool): nothing would start, switched on or off.
+    if (!boundConnections && !exposesTools) return { specs: [], drops: [] };
     logger.info("integration not active in space; skipping", {
       integrationId,
       spaceId,
     });
     return drop("not_active");
   }
+  // `[]`: the cascade bound none on purpose — the run starts without it, tools or none.
+  if (boundConnections?.length === 0) return drop("unbound");
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
   // AND httpDeliveryAuths from delivery.http (Phase 1.5).
@@ -377,7 +384,6 @@ async function resolveOne(
   // privilege: the catch-all tool is never auto-granted). `authorized_uris`
   // come from each api_call auth. Each api_call belongs to ONE auth: a spec
   // keeps only its connection's (below).
-  const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
     (cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -547,9 +553,9 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
-  if (!boundConnections?.length) {
+  if (!boundConnections) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
-    if (!wildcardSelection && !effectiveSelection?.length) return { specs: [], drops: [] };
+    if (!exposesTools) return { specs: [], drops: [] };
     throw new Error(
       `integration '${integrationId}' exposes tools but the run's connection snapshot binds no connection to it`,
     );

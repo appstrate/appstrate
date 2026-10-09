@@ -198,6 +198,8 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
+  // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
+  "integration_unbound",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",
@@ -319,6 +321,17 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe(
       "Action refusée : Insufficient permissions: members:invite required",
     );
+  });
+
+  it("says what to change for a refused connection choice, not the server's English", async () => {
+    await i18n.changeLanguage("fr");
+    const detail =
+      '`connection_overrides["@acme/crm"]` is empty, but the agent marks it `required`';
+    const err = await problem({ code: "invalid_request", detail, param: "connection_overrides" });
+    expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
+    // Control: the same code blaming another member keeps the generic lead.
+    const other = await problem({ code: "invalid_request", detail, param: "input" });
+    expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
   });
 
   it("names the field of a validation failure, keeps its reason and counts the rest", async () => {

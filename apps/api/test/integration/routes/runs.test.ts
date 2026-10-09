@@ -1722,6 +1722,44 @@ describe("Runs API", () => {
       expect(JSON.stringify(body.connections_used)).not.toContain(
         "22222222-2222-2222-2222-222222222222",
       );
+      expect(body.integrations_unbound).toEqual([]);
+    });
+
+    it("GET /api/runs/:id lists the integrations the run started without in integrations_unbound", async () => {
+      await seedAgent({ id: "@runorg/unbound-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/unbound-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        resolvedConnections: {
+          "@acme/slack": [],
+          "@acme/gmail": [
+            {
+              connectionId: "11111111-1111-1111-1111-111111111111",
+              source: "fallback_auto",
+              label: "Gmail Boulot",
+              accountId: "dt@tractr.net",
+            },
+          ],
+          "@acme/notion": [],
+        },
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.integrations_unbound).toEqual(["@acme/notion", "@acme/slack"]);
+      expect(body.connections_used).toEqual([
+        {
+          integration_package_id: "@acme/gmail",
+          label: "Gmail Boulot",
+          account_id: "dt@tractr.net",
+          source: "fallback_auto",
+        },
+      ]);
     });
 
     it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {
@@ -1739,6 +1777,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.connections_used).toBeNull();
+      expect(body.integrations_unbound).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {

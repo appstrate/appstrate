@@ -31,11 +31,13 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  UNAVAILABLE_INTEGRATION_REASONS,
   type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
+import type { DroppedIntegration, IntegrationDropReason } from "../integration-spawn-resolver.ts";
 import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
 /**
@@ -80,19 +82,22 @@ export async function buildPlatformSystemPrompt(
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
   // at import time by `core/zip.ts`) — never re-fetched from storage.
+  // One section per integration: a multi-connection integration spawns one spec per connection.
   let integrations: PlatformPromptIntegration[] | undefined;
-  if (plan.integrations && plan.integrations.length > 0) {
-    const docs = await fetchIntegrationPromptDocs(plan.integrations.map((i) => i.integrationId));
+  const integrationIds = [...new Set(plan.integrations?.map((spec) => spec.integrationId))];
+  if (integrationIds.length > 0) {
+    const docs = await fetchIntegrationPromptDocs(integrationIds);
     const docsById = new Map(docs.map((d) => [d.packageId, d]));
-    integrations = plan.integrations.map((spec) => {
-      const found = docsById.get(spec.integrationId);
+    integrations = integrationIds.map((id) => {
+      const found = docsById.get(id);
       return {
-        id: spec.integrationId,
+        id,
         ...(found?.description ? { description: found.description } : {}),
         ...(found?.doc ? { doc: found.doc } : {}),
       };
     });
   }
+  const unavailableIntegrations = unavailableIntegrationsOf(plan.droppedIntegrations ?? []);
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
@@ -115,7 +120,8 @@ export async function buildPlatformSystemPrompt(
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,
     ...(uploads ? { uploads } : {}),
-    ...(integrations && integrations.length > 0 ? { integrations } : {}),
+    ...(integrations ? { integrations } : {}),
+    ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
@@ -128,4 +134,20 @@ export async function buildPlatformSystemPrompt(
   // signature and avoids a stale/partial in-prompt list that would
   // contradict the live tool set.
   return renderPlatformPrompt(inputs);
+}
+
+/** A drop as the agent reads it; the raw reason stays in the run log. */
+const DROP_REASON_TEXT: Record<IntegrationDropReason, string> = UNAVAILABLE_INTEGRATION_REASONS;
+
+/** One entry per integration id, its causes joined (a set drops one entry per connection). */
+function unavailableIntegrationsOf(
+  dropped: readonly DroppedIntegration[],
+): Array<{ id: string; reason: string }> {
+  const reasons = new Map<string, Set<string>>();
+  for (const entry of dropped) {
+    const text = DROP_REASON_TEXT[entry.reason];
+    const reason = entry.connectionLabel ? `connection '${entry.connectionLabel}': ${text}` : text;
+    reasons.set(entry.integrationId, (reasons.get(entry.integrationId) ?? new Set()).add(reason));
+  }
+  return [...reasons].map(([id, set]) => ({ id, reason: [...set].join("; ") }));
 }

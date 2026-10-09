@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { collectAgentReadinessErrors } from "../../../src/services/agent-readiness.ts";
+import { collectAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
@@ -43,13 +43,13 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
     ctx = await createTestContext({ orgSlug: "readyorg" });
   });
 
-  /** Readiness with no actor — integration gating off, skills gate on. */
+  /** Readiness for an agent declaring no integration: only the skills gate can fail. */
   async function skillErrors(agent: LoadedPackage): Promise<string[]> {
-    const errors = await collectAgentReadinessErrors({
+    const { errors } = await collectAgentReadiness({
       agent,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
     return errors.filter((e) => e.code === "missing_skill").map((e) => e.field);
   }

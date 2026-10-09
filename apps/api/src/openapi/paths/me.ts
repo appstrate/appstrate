@@ -273,7 +273,9 @@ export const mePaths = {
         "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
         "to an admin pin, an enforced org default and the launch override (the run's or " +
         "the schedule's `connection_overrides`). " +
-        "The body carries the WHOLE set and this write replaces it; `DELETE` clears it. " +
+        "The body carries the WHOLE set and this write replaces it — `[]` pins none: the run " +
+        "starts without the integration, or is refused when the agent requires it; `DELETE` " +
+        "clears the pin. " +
         "Idempotent — repeated calls rewrite the same set. Path-addressed like the admin " +
         "pins; encode each id with `encodePackageIdPath`.",
       parameters: [

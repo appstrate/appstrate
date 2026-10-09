@@ -15,12 +15,15 @@
 
 import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 import { readConnectOffers } from "../connect-offer.ts";
+import { asRecord, unwrapResult } from "./tool-result.ts";
 
 export interface AuthOffer {
   authUrl: string;
   state?: string;
   /** Integration the link connects — drives the card's icon, name and resume claim. */
   packageId?: string;
+  /** RFC 3339 expiry of the connect session behind `authUrl`. */
+  expiresAt?: string;
 }
 
 /** Payload the connect surfaces broadcast — defined in `@appstrate/core`. */
@@ -116,5 +119,32 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
     authUrl: offer.connect_url,
     ...(offer.state ? { state: offer.state } : {}),
     ...(offer.packageId ? { packageId: offer.packageId } : {}),
+    ...(offer.expiresAt ? { expiresAt: offer.expiresAt } : {}),
   }));
+}
+
+/** A started run's offers are shown when it ends, so they can lapse; no valid expiry = live. */
+export function isOfferExpired(expiresAt: string | undefined, now = Date.now()): boolean {
+  if (!expiresAt) return false;
+  const at = Date.parse(expiresAt);
+  return Number.isFinite(at) && at <= now;
+}
+
+/** Withheld while the run is in flight: a connect mid-run would append a resume turn over it. */
+export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
+  const payload = asRecord(unwrapResult(result));
+  if (payload?.done === false && payload.error === undefined) return [];
+  return extractAuthOffers(result);
+}
+
+/** A started run (it has an id), not a refused launch. */
+export function isStartedRunResult(result: unknown): boolean {
+  return typeof asRecord(unwrapResult(result))?.id === "string";
+}
+
+/** The resume turn's instruction: a run that started anyway is re-run only if the user asks. */
+export function resumeInstruction(label: string, runStarted: boolean): string {
+  return runStarted
+    ? `L'intégration ${label} est maintenant connectée. Ne relance pas l'agent : propose-le, l'utilisateur décide.`
+    : `L'intégration ${label} est maintenant connectée. Continue la tâche.`;
 }

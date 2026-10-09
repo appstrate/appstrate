@@ -40,7 +40,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedPublishedVersion, seedSpace } from "../../helpers/seed.ts";
-import { collectAgentReadinessErrors } from "../../../src/services/agent-readiness.ts";
+import { collectAgentReadiness } from "../../../src/services/agent-readiness.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 
 const app = getTestApp();
@@ -64,11 +64,11 @@ async function detail(): Promise<{ status: number; text: string; skills: unknown
 
 async function readiness(): Promise<string[]> {
   const agent = await getPackage(AGENT, ctx.orgId);
-  const errors = await collectAgentReadinessErrors({
+  const { errors } = await collectAgentReadiness({
     agent: agent!,
     orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
-    actor: null,
+    actor: { type: "user", id: ctx.user.id },
   });
   return errors.filter((e) => e.code === "missing_skill").map((e) => e.field);
 }
@@ -190,19 +190,19 @@ describe("readiness — the gate every run origin passes", () => {
         dependencies: { skills: { "@stranger/no-such-skill": "*" } },
       },
     };
-    const errors = await collectAgentReadinessErrors({
+    const { errors } = await collectAgentReadiness({
       agent: ghost,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
     const ghostMessage = errors.find((e) => e.code === "missing_skill")!.message;
 
-    const hiddenErrors = await collectAgentReadinessErrors({
+    const { errors: hiddenErrors } = await collectAgentReadiness({
       agent: agent!,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
     const hiddenMessage = hiddenErrors.find((e) => e.code === "missing_skill")!.message;
 
@@ -225,13 +225,13 @@ describe("the anchor is the declaring agent's HOME, not the launching space", ()
     await db.insert(packageShares).values({ packageId: AGENT, spaceId: recipient.id });
 
     const agent = await getPackage(AGENT, ctx.orgId);
-    const errors = await collectAgentReadinessErrors({
+    const { errors } = await collectAgentReadiness({
       agent: agent!,
       orgId: ctx.orgId,
       // The launching space, which holds no offer for the SKILL — only for the
       // agent that declares it.
       spaceId: recipient.id,
-      actor: null,
+      actor: { type: "user", id: ctx.user.id },
     });
 
     expect(errors.filter((e) => e.code === "missing_skill")).toEqual([]);

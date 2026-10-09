@@ -6,7 +6,9 @@
  * `run_override`, a schedule fire's as `schedule_override`. Read off
  * `runs.resolved_connections`, the audit trail the credentials route and the
  * run's connections panel trust. An override naming what governance outranks or
- * the caller cannot reach is refused before any run row exists.
+ * the caller cannot reach is refused before any run row exists. An override
+ * naming no connection (`[]`) binds none, and a non-required integration
+ * nobody connected, or switched off in the space, starts the run with a warning.
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -21,7 +23,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import {
@@ -36,6 +39,29 @@ const app = getTestApp();
 
 const AGENT = "@launchorg/agent";
 const INTEGRATION = "@launchorg/svc";
+const OPTIONAL_AGENT = "@launchorg/optional-agent";
+const UNCONNECTED = "@launchorg/unconnected";
+
+/** One-integration agent manifest; `required` marks it so in `integrations_configuration`. */
+function agentManifest(name: string, integration: string, required = false) {
+  return {
+    name,
+    version: "1.0.0",
+    type: "agent",
+    schema_version: "0.2",
+    display_name: "Launch Override Agent",
+    dependencies: { integrations: { [integration]: "^1.0.0" } },
+    integrations_configuration: { [integration]: { tools: ["search"], required } },
+  };
+}
+
+interface LaunchWarning {
+  field: string;
+  code: string;
+  auth_key?: string;
+  required_scopes?: string[];
+  connect_url?: string;
+}
 
 describe("launch override — the bound set names the launch it came from", () => {
   let ctx: TestContext;
@@ -60,15 +86,7 @@ describe("launch override — the bound set names the launch it came from", () =
       homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
-      draftManifest: {
-        name: AGENT,
-        version: "1.0.0",
-        type: "agent",
-        schema_version: "0.2",
-        display_name: "Launch Override Agent",
-        dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-        integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
-      },
+      draftManifest: agentManifest(AGENT, INTEGRATION),
       draftContent: "Search for something.",
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
@@ -78,10 +96,10 @@ describe("launch override — the bound set names the launch it came from", () =
     other = await seedIntegrationConnection(ctx, INTEGRATION);
   });
 
-  function launch(ids: string[]) {
+  function launch(ids: string[], headers: Record<string, string> = {}) {
     return app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
       body: JSON.stringify({ connection_overrides: { [INTEGRATION]: ids } }),
     });
   }
@@ -229,5 +247,208 @@ describe("launch override — the bound set names the launch it came from", () =
     // The pick lives on the schedule row; the run keeps only the caller's own overrides.
     expect(row!.connectionOverrides).toBeNull();
     await waitForRunPipelineSettled();
+  });
+
+  describe("explicit none", () => {
+    it("an empty override binds no connection, warned without a connect link", async () => {
+      const res = await launch([], { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
+      expect(body.warnings).toHaveLength(1);
+      const [warning] = body.warnings;
+      expect(warning).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+        message: expect.stringContaining("this run's connection_overrides"),
+      });
+      // The absence was chosen: nothing to connect.
+      expect(warning!.auth_key).toBeUndefined();
+      expect(warning!.required_scopes).toBeUndefined();
+      expect(warning!.connect_url).toBeUndefined();
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+      expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+      await waitForRunPipelineSettled();
+    });
+
+    it("an empty override narrows an admin pin to none on a non-required integration", async () => {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: null,
+        connectionIds: [picked],
+      });
+
+      const res = await launch([]);
+      expect(res.status).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+      await waitForRunPipelineSettled();
+    });
+
+    it("refuses an empty override on a required integration (400) and creates no run", async () => {
+      const required = "@launchorg/required-agent";
+      await seedAgent({
+        id: required,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest(required, INTEGRATION, true),
+        draftContent: "Search for something.",
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, required);
+
+      const res = await app.request(`/api/agents/${required}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [] } }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param?: string; detail: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("connection_overrides");
+      expect(body.detail).toContain(INTEGRATION);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  describe("a non-required integration nobody connected", () => {
+    beforeEach(async () => {
+      await seedConnectionTestIntegration(ctx, UNCONNECTED);
+    });
+
+    async function seedOptionalAgent(required: boolean) {
+      await seedAgent({
+        id: OPTIONAL_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest(OPTIONAL_AGENT, UNCONNECTED, required),
+        draftContent: "Search for something.",
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OPTIONAL_AGENT);
+    }
+
+    function launchOptional(headers: Record<string, string> = {}) {
+      return app.request(`/api/agents/${OPTIONAL_AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({}),
+      });
+    }
+
+    it("starts the run without it, warning integration_unbound and snapshotting an empty set", async () => {
+      await seedOptionalAgent(false);
+
+      const res = await launchOptional();
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${UNCONNECTED}`, "integration_unbound"],
+      ]);
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
+      expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });
+      await waitForRunPipelineSettled();
+    });
+
+    it("replays the same warnings on an idempotent retry", async () => {
+      await seedOptionalAgent(false);
+      const headers = { "Idempotency-Key": crypto.randomUUID() };
+
+      const first = (await (await launchOptional(headers)).json()) as {
+        id: string;
+        warnings: LaunchWarning[];
+      };
+      const replay = await launchOptional(headers);
+      expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+      const replayed = (await replay.json()) as { id: string; warnings: LaunchWarning[] };
+      expect(replayed.id).toBe(first.id);
+      expect(replayed.warnings).toEqual(first.warnings);
+      await waitForRunPipelineSettled();
+    });
+
+    it("refuses the launch when the agent marks it required (409 not_connected)", async () => {
+      await seedOptionalAgent(true);
+
+      const res = await launchOptional();
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { errors: LaunchWarning[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${UNCONNECTED}`, "not_connected"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+
+    it("a schedule fire starts without it", async () => {
+      await seedOptionalAgent(false);
+      const schedule = await seedSchedule({
+        packageId: OPTIONAL_AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        versionOverride: "draft",
+      });
+
+      await triggerScheduledRun(schedule.id);
+
+      const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });
+      await waitForRunPipelineSettled();
+    });
+  });
+  describe("an integration switched off in the space", () => {
+    beforeEach(async () => {
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    });
+
+    it("non-required: starts the run without it, warning integration_not_active", async () => {
+      // Two own connections would be `must_choose_connection` were it active: the snapshot
+      // pass must not judge an integration the run will not start.
+      const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
+      const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+      const read = await app.request(`/api/runs/${body.id}`, { headers: authHeaders(ctx) });
+      expect(
+        ((await read.json()) as { integrations_unbound: string[] }).integrations_unbound,
+      ).toEqual([INTEGRATION]);
+      await waitForRunPipelineSettled();
+    });
+
+    it("required: refuses the launch (409 integration_not_active) and creates no run", async () => {
+      const required = "@launchorg/required-agent";
+      await seedAgent({
+        id: required,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: agentManifest(required, INTEGRATION, true),
+        draftContent: "Search for something.",
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, required);
+
+      const res = await app.request(`/api/agents/${required}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [picked] } }),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { errors: LaunchWarning[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "integration_not_active"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
   });
 });

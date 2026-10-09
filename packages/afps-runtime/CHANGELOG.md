@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the integrations a run starts without (#1830)
+
+- `PlatformPromptOptions.unavailableIntegrations` (`./bundle`):
+  `{ id, reason }[]`, the declared integrations this run starts without, one
+  entry per integration id, `reason` a short human-readable cause.
+  `renderPlatformPrompt` renders them as an `## Unavailable Integrations`
+  section that tells the agent never to present data as coming from them and
+  to report them as unavailable when the task needs them. Absent or empty: no
+  section, the prompt is unchanged.
+
+### Changed — `integrations_configuration.<id>.required` (#1830, afps-spec#28)
+
+- Requires `@afps-spec/schema` `^0.9.0` (was `^0.8.0`), which declares
+  `integrations_configuration.<id>.required` (AFPS §4.4) as a boolean: a
+  manifest whose `required` is not a boolean now fails validation. The L1.8
+  conformance case asserts the agent schema preserves `required: true`.
+
 ### Changed — `appstrate.metric` usage carries price-tier bands (#1552)
 
 - `isCanonicalRunEvent` accepts an optional `usage.tiers` (`TokenUsage.tiers`),

@@ -39,7 +39,11 @@ import {
   picksAfterActorChange,
   refusalForActor,
 } from "../lib/connection-choice";
-import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
+import {
+  withConnectionOverride,
+  withDeclaredConnections,
+  type ConnectionSet,
+} from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
@@ -277,7 +281,7 @@ export function ScheduleForm({
     });
     setActor(next);
   };
-  const setConnectionPick = (integrationId: string, connectionIds: string[]) =>
+  const setConnectionPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
@@ -568,6 +572,7 @@ export function ScheduleForm({
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice
                     choices={refused}
+                    integrations={firedIntegrations ?? []}
                     value={declaredOverrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />

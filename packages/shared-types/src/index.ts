@@ -168,6 +168,8 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
+  /** Declared integrations the run started bound to no connection, sorted; null with no snapshot. */
+  integrations_unbound: string[] | null;
   /**
    * True when the requesting recipient has an unread notification for this run
    * (issue #667). Per-recipient: derived from the `notifications` table for the
@@ -277,6 +279,8 @@ export interface ResourceEntry {
    * Ignored for non-integration resource types.
    */
   auth_key?: string;
+  /** AFPS §4.4 — no run starts without a connection for it. Integration resources only. */
+  required?: boolean;
 }
 
 // --- Run Types ---

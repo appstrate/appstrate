@@ -591,6 +591,55 @@ describe("runRemote — happy path", () => {
   });
 });
 
+// #1830: a run that starts without a non-required integration says so.
+describe("runRemote — launch warnings", () => {
+  const WARNING = {
+    field: "integrations.@appstrate/gmail",
+    code: "integration_unbound",
+    message: "Integration '@appstrate/gmail' is not connected",
+  };
+  function fetchWithWarning(): typeof fetch {
+    return makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 201,
+          body: { id: "run_test_1", warnings: [WARNING] },
+        },
+        "GET /api/runs/run_test_1/logs": {
+          status: 200,
+          body: { object: "list", data: [], hasMore: false },
+        },
+        "GET /api/runs/run_test_1": { status: 200, body: recordSummary() },
+      },
+      [],
+    );
+  }
+
+  it("prints one ⚠ line per warning after the preamble", async () => {
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl: fetchWithWarning() })),
+      new AbortController().signal,
+    );
+    expect(writers.stderr.join("")).toContain(
+      "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (integration_unbound)\n",
+    );
+  });
+
+  it("carries the wire items on the --json triggered envelope", async () => {
+    await runToTerminal(
+      withCapturedWriters(buildBaseOpts({ fetchImpl: fetchWithWarning(), json: true })),
+      new AbortController().signal,
+    );
+    const triggered = writers.stdout
+      .join("")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type?: string; warnings?: unknown })
+      .find((event) => event.type === "appstrate.remote.triggered");
+    expect(triggered?.warnings).toEqual([WARNING]);
+  });
+});
+
 describe("runRemote — scope headers", () => {
   it("sends no X-Space-Id / X-Org-Id when none is set: an API key pins its own", async () => {
     const calls: FetchCall[] = [];
@@ -937,6 +986,40 @@ describe("runRemote — error paths", () => {
       if (!(err instanceof RemoteRunError)) throw err;
       expect(err.hint).toMatch(/not found/);
     }
+  });
+
+  it("lists the items of a 409 missing_integration_connection in the hint", async () => {
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 409,
+          contentType: "application/problem+json",
+          body: {
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/gmail",
+                code: "not_connected",
+                message: "Integration '@appstrate/gmail' is not connected",
+              },
+              { field: "integrations.@appstrate/clickup", code: "must_choose_connection" },
+            ],
+          },
+        },
+      },
+      [],
+    );
+
+    const err = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RemoteRunError);
+    expect((err as RemoteRunError).hint).toBe(
+      "the launch was refused:\n" +
+        "  @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n" +
+        "  @appstrate/clickup: must_choose_connection (must_choose_connection)",
+    );
   });
 
   it("throws RemoteRunError when trigger response lacks an id", async () => {

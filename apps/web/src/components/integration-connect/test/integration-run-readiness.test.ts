@@ -2,23 +2,49 @@
 
 /**
  * Unit tests for `describeResolution` — the one reading of the server verdict
- * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
- * recovery modal and the agent's integrations block share. This is where the
- * mapping from the resolver's codes to what the UI shows is pinned.
+ * (`source` + `error_code`, the resolver's vocabulary) the picker and the
+ * agent's integrations block share. This is where the
+ * mapping from the resolver's codes to what the UI shows is pinned — and
+ * `unboundReason`, why a run starts without a declared integration, and
+ * `requiredNoneReason`, who chose none for one the agent requires.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { describeResolution } from "../integration-run-readiness";
+import {
+  describeResolution,
+  requiredNoneReason,
+  unboundReason,
+} from "../integration-run-readiness";
+
+function candidate(): IntegrationAgentResolution["candidates"][number] {
+  return {
+    id: "conn_1",
+    auth_key: "oauth",
+    account_id: "me@acme.test",
+    label: "Moi",
+    owner_user_id: "usr_me",
+    owner_end_user_id: null,
+    owner_name: "Moi",
+    scopes_granted: [],
+    shared_with_org: false,
+    needs_reconnection: false,
+    missing_scopes: [],
+    is_own: true,
+  };
+}
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
     source: "fallback_auto",
     error_code: null,
+    warning_code: null,
+    required_auth_key: null,
+    available_auth_keys: [],
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
-    admin_pinned_connection_ids: [],
-    member_pinned_connection_ids: [],
+    admin_pinned_connection_ids: null,
+    member_pinned_connection_ids: null,
     org_default_connection_ids: [],
     org_default_enforced: false,
     can_add_connection: true,
@@ -64,6 +90,18 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
     expect(view.lockedConnectionIds).toEqual(["a"]);
   });
 
+  it("an admin pin to none locks too — to nothing, over an enforced default", () => {
+    const view = describeResolution(
+      resolution({
+        admin_pinned_connection_ids: [],
+        org_default_connection_ids: ["d"],
+        org_default_enforced: true,
+      }),
+    );
+    expect(view.lockedBy).toBe("admin_pin");
+    expect(view.lockedConnectionIds).toEqual([]);
+  });
+
   it("a soft org default does not lock", () => {
     const view = describeResolution(
       resolution({ source: "org_default", org_default_connection_ids: ["d"] }),
@@ -95,7 +133,7 @@ describe("describeResolution — resolved", () => {
 
   it("does not hold when there is no verdict at all (no manifest loaded)", () => {
     // `source` and `error_code` both null: nothing bound, nothing refused —
-    // the recovery modal and the reuse hint must not read that as "ready".
+    // the agent block's reuse hint must not read that as "ready".
     expect(
       describeResolution(
         resolution({ source: null, error_code: null, resolved_connection_ids: [] }),
@@ -151,5 +189,165 @@ describe("describeResolution — empty picker prompt", () => {
     for (const [error_code, prompt] of cases) {
       expect(describeResolution(resolution({ error_code })).emptyPickerPrompt).toBe(prompt);
     }
+  });
+
+  it("asks for a pick when only colleagues' shared connections are reachable", () => {
+    const unbound = {
+      source: null,
+      warning_code: "integration_unbound" as const,
+      resolved_connection_ids: [],
+    };
+    const shared = { ...candidate(), is_own: false };
+    expect(
+      describeResolution(resolution({ ...unbound, candidates: [shared] })).emptyPickerPrompt,
+    ).toBe("choose");
+    // Control: nothing reachable at all asks for a connection.
+    expect(describeResolution(resolution(unbound)).emptyPickerPrompt).toBe("connect");
+  });
+});
+
+describe("unboundReason", () => {
+  const entry = (run_blocking: boolean, over: Partial<IntegrationAgentResolution>) => ({
+    run_blocking,
+    resolution: resolution(over),
+  });
+  const empty = {
+    source: null,
+    error_code: null,
+    warning_code: "integration_unbound" as const,
+    resolved_connection_ids: [],
+  };
+  const shared = { ...candidate(), is_own: false };
+
+  it("is null while a set binds with no error", () => {
+    expect(unboundReason(entry(false, {}))).toBeNull();
+  });
+
+  it("names an integration switched off in the space before any pin", () => {
+    expect(
+      unboundReason(
+        entry(false, {
+          ...empty,
+          warning_code: "integration_not_active",
+          admin_pinned_connection_ids: [],
+          candidates: [{ ...candidate(), is_own: false }],
+        }),
+      ),
+    ).toBe("inactive");
+  });
+
+  it("names a pin to none — an admin's over the member's", () => {
+    expect(unboundReason(entry(false, { ...empty, admin_pinned_connection_ids: [] }))).toBe(
+      "admin_none",
+    );
+    expect(
+      unboundReason(
+        entry(false, {
+          ...empty,
+          admin_pinned_connection_ids: [],
+          member_pinned_connection_ids: [],
+        }),
+      ),
+    ).toBe("admin_none");
+    expect(unboundReason(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+  });
+
+  it("names connections on another auth method, after a deliberate none", () => {
+    const otherAuth = { ...empty, required_auth_key: "oauth", available_auth_keys: ["pat"] };
+    expect(unboundReason(entry(false, otherAuth))).toBe("other_auth");
+    expect(unboundReason(entry(false, { ...otherAuth, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+    expect(
+      unboundReason(entry(false, { ...otherAuth, warning_code: "integration_not_active" })),
+    ).toBe("inactive");
+  });
+
+  it("asks to connect, not to choose, when the actor's connections are on another auth", () => {
+    const view = describeResolution(
+      resolution({ ...empty, required_auth_key: "oauth", available_auth_keys: ["pat"] }),
+    );
+    expect(view.emptyPickerPrompt).toBe("connect");
+  });
+
+  it("tells only-shared connections from nothing usable", () => {
+    expect(unboundReason(entry(false, { ...empty, candidates: [shared] }))).toBe("shared_only");
+    expect(unboundReason(entry(false, empty))).toBe("not_connected");
+    // Control: an own candidate left unbound is no shared-only case.
+    expect(unboundReason(entry(false, { ...empty, candidates: [candidate()] }))).toBe(
+      "not_connected",
+    );
+  });
+
+  it("is null whenever the server says the run is refused over it", () => {
+    expect(
+      unboundReason(entry(true, { ...empty, error_code: "required_integration_unbound" })),
+    ).toBeNull();
+    expect(unboundReason(entry(true, empty))).toBeNull();
+  });
+
+  it("is null for an empty set carrying no warning: an inert integration the run never needed", () => {
+    expect(unboundReason(entry(false, { ...empty, warning_code: null }))).toBeNull();
+    expect(
+      unboundReason(
+        entry(false, { ...empty, warning_code: null, member_pinned_connection_ids: [] }),
+      ),
+    ).toBeNull();
+    // Control: the same state with the warning reads unbound.
+    expect(unboundReason(entry(false, { ...empty, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+  });
+
+  it("is null for a non-blocking error: an inert integration's verdict is no unbound state", () => {
+    expect(
+      unboundReason(entry(false, { ...empty, error_code: "must_choose_connection" })),
+    ).toBeNull();
+  });
+});
+
+describe("requiredNoneReason", () => {
+  const refused = {
+    source: null,
+    error_code: "required_integration_unbound" as const,
+    resolved_connection_ids: [],
+  };
+
+  it("names an admin's pin to none over the member's", () => {
+    expect(
+      requiredNoneReason(
+        resolution({
+          ...refused,
+          admin_pinned_connection_ids: [],
+          member_pinned_connection_ids: [],
+        }),
+      ),
+    ).toBe("admin_none");
+    expect(requiredNoneReason(resolution({ ...refused, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+  });
+
+  it("still says none was chosen when no pin tells who", () => {
+    expect(requiredNoneReason(resolution(refused))).toBe("none");
+  });
+
+  it("is null for any other verdict, a pin to none included", () => {
+    expect(requiredNoneReason(resolution({}))).toBeNull();
+    expect(
+      requiredNoneReason(
+        resolution({
+          ...refused,
+          error_code: null,
+          warning_code: "integration_unbound",
+          member_pinned_connection_ids: [],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      requiredNoneReason(resolution({ ...refused, error_code: "must_choose_connection" })),
+    ).toBeNull();
   });
 });

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`required?: boolean`** on `ManifestIntegrationEntry` and
+  `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
+  afps-spec#28): the agent needs at least one connection of that integration
+  to run. Read by `parseManifestIntegrations`, written by
+  `writeManifestIntegrations`. Unrelated to an integration auth's
+  `_meta["dev.appstrate/auth"].required`. (#1830)
+- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`integration_unbound`,
+  `integration_not_active`), **`ConnectionResolutionWarningCode`** and
+  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a declared,
+  non-required integration the run starts without — nothing usable to bind or
+  a layer bound none, or switched off in the space — with the same
+  `authKey`, `requiredScopes`, `requiredAuthKey`, `availableAuthKeys` and
+  `candidateConnections` an error carries. (#1830)
+- **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
+  the launch's `warnings`** onto every payload it returns (preliminary,
+  terminal and timed out) when the launch reported some; absent otherwise.
+  The documented payload becomes
+  `{ id, packageId, status, done, result?, error?, warnings? }`. (#1830)
+
 - **`tokenUsageSchema`** (`@appstrate/core/token-usage`) validates the optional
   `tiers` of a `TokenUsage` (`@appstrate/afps-shared` `TokenUsage.tiers`) with
   afps-shared's `isTokenUsageTiers` (at most 16 bands, strict keys, a positive
@@ -35,6 +54,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **Requires `@afps-spec/schema` `^0.9.0`** (was `^0.8.0`), which declares
+  `integrations_configuration.<id>.required` as a boolean (afps-spec#28): a
+  manifest whose `required` is not a boolean fails validation. (#1830)
+- **BREAKING: `ConnectionResolutionErrorCode` gains
+  `required_integration_unbound` and `integration_not_active`**
+  (`@appstrate/core/integration`, both in `CONNECTION_RESOLUTION_ERROR_CODES`):
+  an integration the agent marks `required` whose winning cascade layer binds
+  no connection (`[]`), or which is switched off in the space. Exhaustive
+  switches over the union must handle both. (#1830)
+- **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
+  (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
+  `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
+  connection (a non-required integration switched off in the space included).
+  A missing key still means inert. A producer of the result must set
+  `warnings`. (#1830)
+- **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
+  configuration onto the one already in the manifest**: keys it does not
+  model (`_meta`, extensions) are kept instead of dropped. (#1830)
+- **`ResolutionFieldError` (`@appstrate/core/api-errors`) also describes a
+  launch response's `warnings` items**: `auth_key`, `required_scopes`,
+  `required_auth_key`, `available_auth_keys`, `candidate_connections` and
+  `connect_url` may ride an `integration_unbound` warning. Documentation only:
+  the type is unchanged. (#1830)
 
 - **`modelCostSchema`** (`@appstrate/core/module`) refuses a rate card whose
   tiers break the rule its usage bands follow: `inputTokensAbove` must be an

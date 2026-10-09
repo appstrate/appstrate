@@ -26,8 +26,9 @@
  */
 
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
-import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
+import { connectionRefusalLines } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -74,6 +75,8 @@ export interface ReportSession {
    * session boundary makes its use auditable.
    */
   runSecret: string;
+  /** The registration's `warnings`: integrations the run starts without. */
+  warnings: unknown[];
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -187,21 +190,21 @@ export async function startReportSession(
   });
 
   if (!res.ok) {
-    const snippet = await readSnippet(res);
+    const text = await res.text().catch(() => null);
     throw new ReportStartError(
       `POST /api/runs/remote failed with HTTP ${res.status}`,
-      snippet ?? "(no response body)",
+      refusalSummary(text) ?? snippet(text) ?? "(no response body)",
     );
   }
 
-  // Operation envelope: one-time sink credentials + the created run's `id`
-  // (the legacy `runId` alias was removed — #657).
+  // Operation envelope: one-time sink credentials + the created run's `id`.
   const payload = (await res.json()) as {
     id: string;
     url: string;
     finalize_url: string;
     secret: string;
     expiresAt: string;
+    warnings?: unknown;
   };
 
   const httpSink = new HttpSink({
@@ -216,7 +219,50 @@ export async function startReportSession(
     proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
     runSecret: payload.secret,
+    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
   };
+}
+
+/** The agent-facing reason per warning code, worded as the platform's own prompt words it. */
+const UNAVAILABLE_REASON: Record<string, string> = {
+  integration_unbound: UNAVAILABLE_INTEGRATION_REASONS.unbound,
+  integration_not_active: UNAVAILABLE_INTEGRATION_REASONS.not_active,
+};
+
+/** Integrations the run is bound to none of, one per id, for "Unavailable Integrations". */
+export function unavailableIntegrations(
+  warnings: readonly unknown[],
+): Array<{ id: string; reason: string }> {
+  const byId = new Map<string, string>();
+  for (const item of warnings) {
+    if (item === null || typeof item !== "object") continue;
+    const { field, code, message } = item as Record<string, unknown>;
+    if (typeof field !== "string" || !field.startsWith("integrations.")) continue;
+    const id = field.slice("integrations.".length);
+    const reason =
+      (typeof code === "string" ? UNAVAILABLE_REASON[code] : undefined) ??
+      (typeof message === "string" && message.length > 0 ? message : "it is not available");
+    if (!byId.has(id)) byId.set(id, reason);
+  }
+  return [...byId].map(([id, reason]) => ({ id, reason }));
+}
+
+/** The bundle minus the root's `ids` integrations, whose proxy calls would be refused. */
+export function withoutIntegrations(bundle: Bundle, ids: readonly string[]): Bundle {
+  const root = bundle.packages.get(bundle.root);
+  const manifest = root?.manifest as
+    { dependencies?: { integrations?: Record<string, unknown> } } | undefined;
+  const declared = manifest?.dependencies?.integrations;
+  if (!root || !manifest || !declared || !ids.some((id) => id in declared)) return bundle;
+  const integrations = Object.fromEntries(
+    Object.entries(declared).filter(([id]) => !ids.includes(id)),
+  );
+  const packages = new Map(bundle.packages);
+  packages.set(bundle.root, {
+    ...root,
+    manifest: { ...manifest, dependencies: { ...manifest.dependencies, integrations } },
+  } as typeof root);
+  return { ...bundle, packages };
 }
 
 // ---------------------------------------------------------------------------
@@ -293,13 +339,19 @@ function truncateSnapshot(snap: ReportContextSnapshot): Record<string, unknown> 
   return obj;
 }
 
-async function readSnippet(res: Response): Promise<string | null> {
+/** A 409 `missing_integration_connection`, one item per line at the snippet's indent. */
+function refusalSummary(text: string | null): string | null {
+  if (text === null) return null;
   try {
-    const text = await res.text();
-    return text.length > 512 ? `${text.slice(0, 512)}…` : text;
+    return connectionRefusalLines(JSON.parse(text))?.join("\n    ") ?? null;
   } catch {
     return null;
   }
+}
+
+function snippet(text: string | null): string | null {
+  if (text === null) return null;
+  return text.length > 512 ? `${text.slice(0, 512)}…` : text;
 }
 
 /**

@@ -54,6 +54,24 @@ export interface PlatformPromptSchema {
   required?: readonly string[];
 }
 
+/** Why a declared integration is unavailable, as the agent reads it; every host shares it. */
+export const UNAVAILABLE_INTEGRATION_REASONS = {
+  unbound: "no connection is bound to this run",
+  not_active: "it is switched off in this space",
+  not_found: "its package does not exist",
+  not_integration: "the declared package is not an integration",
+  invalid_manifest: "its manifest is invalid",
+  remote_source_invalid: "its server address is invalid",
+  remote_url_unrenderable: "its server address cannot be built from the connection",
+  remote_url_blocked: "its server address is blocked",
+  local_server_ref_missing: "its server package is missing",
+  mcp_server_unresolved: "its server package cannot be found",
+  mcp_server_not_runnable: "its server package cannot run",
+  no_delivery: "the connection's credentials cannot be delivered",
+  bound_set_incomplete: "another connection bound with it failed to start",
+  resolve_error: "it failed to start",
+} as const;
+
 export interface PlatformPromptOptions {
   /** Raw prompt template from the bundle's root package (`prompt.md`). */
   template: string;
@@ -104,6 +122,9 @@ export interface PlatformPromptOptions {
    * `{ns}__*` tools advertised via MCP `tools/list`. AFPS §3.5.
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
+
+  /** Integrations the run starts without, one per id ({@link UNAVAILABLE_INTEGRATION_REASONS}). */
+  unavailableIntegrations?: ReadonlyArray<{ id: string; reason: string }>;
 
   /** Input schema — drives the `## User Input` section. */
   inputSchema?: PlatformPromptSchema;
@@ -316,6 +337,19 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         sections.push("");
       }
     }
+  }
+  if (opts.unavailableIntegrations && opts.unavailableIntegrations.length > 0) {
+    sections.push("## Unavailable Integrations\n");
+    sections.push(
+      "The following integrations declared by this agent are not available in this run:\n",
+    );
+    for (const entry of opts.unavailableIntegrations) {
+      sections.push(`- **${entry.id}**: ${entry.reason}`);
+    }
+    sections.push(
+      "\nNever present data or results as coming from these integrations. " +
+        "If the task needs them, report them as unavailable in this run.\n",
+    );
   }
 
   // --- User input ---

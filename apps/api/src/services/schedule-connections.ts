@@ -18,14 +18,14 @@ import {
   unavailableMemberError,
 } from "./integration-connection-resolver.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
-import type { ValidationFieldError } from "../lib/errors.ts";
+import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 
 /**
  * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, a set
- * an admin pin or enforced default outranks, and a pick on an auth serving no selected tool when
- * the schedule's OWN set bound it.
+ * an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
+ * pick on an auth serving no selected tool or no pick at all for a required integration.
  */
 function isScheduleOwned(e: ConnectionResolutionError): boolean {
   switch (e.code) {
@@ -34,6 +34,7 @@ function isScheduleOwned(e: ConnectionResolutionError): boolean {
     case "override_outranked":
       return true;
     case "auth_serves_no_selected_tool":
+    case "required_integration_unbound":
       return e.source === "schedule_override";
     default:
       return false;
@@ -114,7 +115,8 @@ function sameSet(a: readonly string[], b: readonly string[] | undefined): boolea
  * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
  * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
  * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
- * ({@link scheduleWriteFor}).
+ * ({@link scheduleWriteFor}). Returns the fire's warnings — none to a caller writing for another
+ * member, who must not learn how many connections the actor holds.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -128,9 +130,9 @@ export async function assertScheduleConnectionsChosen(params: {
   /** The overrides this write stores — already judged by {@link assertScheduleOverridesReachable}. */
   connectionOverrides: ConnectionOverrides | null;
   dependencyOverrides: Record<string, string> | null;
-}): Promise<void> {
+}): Promise<ResolutionFieldError[]> {
   const manifestCache = await seedPinnedIntegrationManifests(params);
-  const { resolutionErrors } = await collectAgentReadiness({
+  const { resolutionErrors, warnings } = await collectAgentReadiness({
     agent: params.agent,
     orgId: params.orgId,
     spaceId: params.spaceId,
@@ -138,9 +140,10 @@ export async function assertScheduleConnectionsChosen(params: {
     launchOverrides: toLaunchOverrides(params.connectionOverrides, "schedule_override"),
     manifestCache,
   });
+  const writeFor = scheduleWriteFor(params.caller, params.actor);
   const unchosen = resolutionErrors.filter(isScheduleOwned);
-  if (unchosen.length === 0) return;
-  switch (scheduleWriteFor(params.caller, params.actor)) {
+  if (unchosen.length === 0) return writeFor === "member" ? [] : warnings;
+  switch (writeFor) {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));
     case "member":
@@ -169,7 +172,7 @@ export async function assertScheduleConnectionsChosen(params: {
 async function withSharedCandidatesOnly(
   errors: ConnectionResolutionError[],
   spaceId: string,
-): Promise<ValidationFieldError[]> {
+): Promise<ResolutionFieldError[]> {
   const shared = await sharedConnections(
     spaceId,
     errors.flatMap((e) => [

@@ -61,8 +61,8 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 
 /**
  * The locked set, read-only. A stored override within it narrows it, so that subset is what
- * binds; one reaching outside it is refused (`override_outranked`) and offered its only fix,
- * being cleared.
+ * binds (`[]`: none); one reaching outside it is refused (`override_outranked`). Either can be
+ * cleared back to the locked set; in override mode, `[]` (if not required) narrows any lock.
  */
 export function LockedPicker({
   integrationId,
@@ -80,12 +80,16 @@ export function LockedPicker({
     lockedBy,
     candidateIds,
     runBlocking,
+    required,
     setLabel,
   } = picker;
-  const storedOverride = overrideMode ? explicitIds : [];
-  const outranked = storedOverride.some((id) => !lockedConnectionIds.includes(id));
-  const bindingIds = storedOverride.length > 0 && !outranked ? storedOverride : lockedConnectionIds;
+  const storedOverride = overrideMode ? explicitIds : null;
+  const outranked = storedOverride?.some((id) => !lockedConnectionIds.includes(id)) ?? false;
+  const bindingIds = storedOverride !== null && !outranked ? storedOverride : lockedConnectionIds;
   const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
+  const clearable = outranked || storedOverride?.length === 0;
+  const offersNone =
+    overrideMode && !required && lockedConnectionIds.length > 0 && storedOverride?.length !== 0;
   return (
     <div data-testid={`member-picker-${integrationId}`}>
       <Button
@@ -96,7 +100,11 @@ export function LockedPicker({
         data-testid={`member-pick-locked-${integrationId}`}
       >
         {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
-        <span className="truncate">{setLabel(bindingIds, lockedUnavailableIds)}</span>
+        <span className="truncate">
+          {bindingIds.length === 0
+            ? t("detail.integrationMemberPicker.none")
+            : setLabel(bindingIds, lockedUnavailableIds)}
+        </span>
         <Badge variant="secondary" className="ml-1 text-[0.6rem]">
           {t(
             lockedBy === "org_default"
@@ -106,9 +114,20 @@ export function LockedPicker({
           )}
         </Badge>
       </Button>
-      {overrideMode && outranked && (
-        <ClearChoiceButton
+      {offersNone && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
           onClick={() => void persist([])}
+          data-testid={`member-pick-none-${integrationId}`}
+        >
+          {t("detail.integrationMemberPicker.none")}
+        </Button>
+      )}
+      {clearable && (
+        <ClearChoiceButton
+          onClick={() => void persist(null)}
           testId={`member-pick-clear-${integrationId}`}
         />
       )}

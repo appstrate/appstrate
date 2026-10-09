@@ -3,6 +3,10 @@
 import { describe, it, expect } from "bun:test";
 import {
   extractAuthOffers,
+  extractRunAndWaitAuthOffers,
+  isOfferExpired,
+  isStartedRunResult,
+  resumeInstruction,
   encodeResume,
   parseResume,
   INTEGRATION_RESUME_MARKER,
@@ -21,7 +25,7 @@ describe("extractAuthOffers", () => {
       extractAuthOffers({
         output: { connectOffers: [{ ...OFFER, expiresAt: "2026-07-15T19:08:49.000Z" }] },
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    ).toEqual([{ authUrl: OFFER.connect_url, expiresAt: "2026-07-15T19:08:49.000Z" }]);
   });
 
   // Issue #1207: a readiness error carries one link per integration to connect,
@@ -47,7 +51,13 @@ describe("extractAuthOffers", () => {
           { ...OFFER, packageId: "@appstrate/gmail", expiresAt: "2026-07-15T19:08:49.000Z" },
         ],
       }),
-    ).toEqual([{ authUrl: OFFER.connect_url, packageId: "@appstrate/gmail" }]);
+    ).toEqual([
+      {
+        authUrl: OFFER.connect_url,
+        packageId: "@appstrate/gmail",
+        expiresAt: "2026-07-15T19:08:49.000Z",
+      },
+    ]);
     // Absent, not empty: an offer minted by a surface that names no package
     // leaves the card on its `packageId`-less path.
     expect(extractAuthOffers({ connectOffers: [OFFER] })).toEqual([{ authUrl: OFFER.connect_url }]);
@@ -147,5 +157,68 @@ describe("extractAuthOffers", () => {
     for (const [name, shape] of legacyShapes) {
       expect(extractAuthOffers(shape), `scraped a URL out of: ${name}`).toEqual([]);
     }
+  });
+});
+
+describe("extractRunAndWaitAuthOffers", () => {
+  const step = (payload: Record<string, unknown>) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    connectOffers: [OFFER],
+  });
+
+  it("withholds a started run's offers until the run ends (#1830)", () => {
+    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: false }))).toEqual([]);
+    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: true }))).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
+  });
+
+  it("shows them on a timed-out wait and on a refused launch", () => {
+    expect(
+      extractRunAndWaitAuthOffers(step({ id: "run_1", done: false, error: "timed out" })),
+    ).toEqual([{ authUrl: OFFER.connect_url }]);
+    expect(extractRunAndWaitAuthOffers(step({ status: 409, body: {} }))).toEqual([
+      { authUrl: OFFER.connect_url },
+    ]);
+  });
+});
+
+describe("isOfferExpired", () => {
+  const now = Date.parse("2026-10-09T12:00:00.000Z");
+
+  // #1830: a started run's offer is minted at launch and shown at the end.
+  it("is expired at and after the session's expiry", () => {
+    expect(isOfferExpired("2026-10-09T12:00:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T11:50:00.000Z", now)).toBe(true);
+    expect(isOfferExpired("2026-10-09T12:00:01.000Z", now)).toBe(false);
+  });
+
+  it("treats an absent or unparseable expiry as live", () => {
+    expect(isOfferExpired(undefined, now)).toBe(false);
+    expect(isOfferExpired("not a date", now)).toBe(false);
+  });
+});
+
+describe("resuming after a connect from run_and_wait", () => {
+  const result = (payload: Record<string, unknown>) => ({
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+
+  it("tells a started run from a refused launch", () => {
+    expect(isStartedRunResult(result({ id: "run_1", done: true }))).toBe(true);
+    expect(isStartedRunResult(result({ id: "run_1", done: false, error: "timed out" }))).toBe(true);
+    expect(isStartedRunResult(result({ status: 409, body: {} }))).toBe(false);
+  });
+
+  // #1830: a run that already finished without the integration is not re-run on
+  // the model's initiative; a refused launch still continues the task.
+  it("continues the task only after a refused launch", () => {
+    expect(resumeInstruction("Gmail", false)).toBe(
+      "L'intégration Gmail est maintenant connectée. Continue la tâche.",
+    );
+    const afterRun = resumeInstruction("Gmail", true);
+    expect(afterRun).toStartWith("L'intégration Gmail est maintenant connectée.");
+    expect(afterRun).not.toContain("Continue la tâche");
+    expect(afterRun).toContain("Ne relance pas l'agent");
   });
 });

@@ -11,7 +11,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { inheritedEntry, launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
+import {
+  inheritedEntry,
+  launchedVersion,
+  launchFromOptions,
+  launchFlight,
+  retryLaunch,
+} from "../run-launch.ts";
 
 describe("launchFlight", () => {
   /** A launch whose request the test settles by hand. */
@@ -89,6 +95,16 @@ describe("launchFlight", () => {
     const next = pendingLaunch();
     flight.run(next.start, {});
     expect(next.started()).toBe(1);
+  });
+});
+
+describe("launchedVersion", () => {
+  it("names the version a refused launch ran, so recovery reads that version's readiness", () => {
+    expect(launchedVersion({ version: "draft" })).toBe("draft");
+    expect(launchedVersion({ version: "1.2.0" })).toBe("1.2.0");
+    // An omitted selector runs the latest published version; readiness would read the
+    // draft for a writer, so it is spelled out.
+    expect(launchedVersion({})).toBe("published");
   });
 });
 
@@ -190,6 +206,12 @@ describe("retryLaunch", () => {
     ).toEqual(connectionOverrides);
   });
 
+  it("carries a recovery pick of 'no connection' as `[]`", () => {
+    expect(retryLaunch({}, { "@acme/crm": [] }, []).connectionOverrides).toEqual({
+      "@acme/crm": [],
+    });
+  });
+
   it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
     // The launcher keeps each retried launch, so the next retry starts from it.
     const first = retryLaunch(
@@ -211,6 +233,12 @@ describe("launchFromOptions", () => {
 
   it("sends only the version when nothing was set, like plain Lancer", () => {
     expect(launchFromOptions(untouched)).toEqual({ version: "draft" });
+  });
+
+  it("sends an override of 'no connection' as an empty set", () => {
+    expect(
+      launchFromOptions({ ...untouched, overrides: { connection_overrides: { "@acme/crm": [] } } }),
+    ).toEqual({ version: "draft", connectionOverrides: { "@acme/crm": [] } });
   });
 
   it("maps every set option onto its launch field", () => {

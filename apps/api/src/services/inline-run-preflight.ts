@@ -6,7 +6,8 @@
  * Runs every validation that has no durable side effect:
  *   1. Manifest shape (AFPS + inline caps)
  *   1b. Integration tool/scope selections against each integration's PINNED catalog
- *   1c. `connection_overrides` keys against the integrations the manifest declares
+ *   1c. `connection_overrides` keys against the integrations the manifest declares,
+ *       and no `[]` for one it marks `required`
  *   2. input against the manifest's own AJV schema
  *   3. Agent readiness (prompt, skills, tools, integrations)
  *
@@ -33,6 +34,7 @@ import {
   ApiError,
   internalError,
   validationFailed,
+  type ResolutionFieldError,
   type ValidationFieldError,
 } from "../lib/errors.ts";
 import { parsePathMessage } from "../lib/field-errors.ts";
@@ -48,10 +50,10 @@ import {
 } from "./integration-service.ts";
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
-import { validateAgentReadiness, collectAgentReadinessErrors } from "./agent-readiness.ts";
+import { validateAgentReadiness, collectAgentReadiness } from "./agent-readiness.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
-import { assertConnectionOverrideKeysDeclared } from "../lib/launch-schemas.ts";
+import { connectionOverrideRefusals } from "../lib/launch-schemas.ts";
 
 export interface InlineRunPreflightResult {
   manifest: AgentManifest;
@@ -77,6 +79,8 @@ export interface InlineRunPreflightResult {
    * second time.
    */
   manifestCache: IntegrationManifestCache;
+  /** Readiness warnings (`integration_unbound`) — the launch / validate response's `warnings`. */
+  warnings: ResolutionFieldError[];
 }
 
 type Mode = "fail-fast" | "accumulate";
@@ -84,7 +88,7 @@ type Mode = "fail-fast" | "accumulate";
 export async function runInlinePreflight(params: {
   orgId: string;
   spaceId: string;
-  actor: Actor | null;
+  actor: Actor;
   body: InlineRunBody;
   mode?: Mode;
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
@@ -200,17 +204,27 @@ export async function runInlinePreflight(params: {
   }
 
   // ----- 1c. `connection_overrides` keys against the declared integrations -----
+  // A refused key is left out of readiness, which would report its `[]` again.
+  let readinessOverrides = body.connection_overrides;
   if (manifest) {
-    try {
-      assertConnectionOverrideKeysDeclared(
-        manifest as unknown as Record<string, unknown>,
-        body.connection_overrides,
+    const refusals = connectionOverrideRefusals(
+      manifest as unknown as Record<string, unknown>,
+      body.connection_overrides,
+    );
+    if (refusals.length > 0) {
+      if (mode === "fail-fast") throw refusals[0]!.error;
+      push(
+        refusals.map(({ error }) => ({
+          field: "connection_overrides",
+          code: error.code,
+          title: error.title,
+          message: error.message,
+        })),
       );
-    } catch (err) {
-      if (mode === "fail-fast" || !(err instanceof ApiError)) throw err;
-      push([
-        { field: "connection_overrides", code: err.code, title: err.title, message: err.message },
-      ]);
+      const refused = new Set(refusals.map((r) => r.key));
+      readinessOverrides = Object.fromEntries(
+        Object.entries(body.connection_overrides ?? {}).filter(([key]) => !refused.has(key)),
+      );
     }
   }
 
@@ -263,34 +277,36 @@ export async function runInlinePreflight(params: {
   // This stage requires a parsed manifest. In accumulate mode, skip cleanly
   // when structural validation failed — the manifest-shape errors already
   // explain why. Fail-fast has thrown long before reaching here.
+  let warnings: ResolutionFieldError[] = [];
   if (manifest) {
     const probeAgent = buildShadowLoadedPackage(generateShadowPackageId(), manifest, prompt);
+    const readinessLaunch = toLaunchOverrides(readinessOverrides, "run_override");
 
     // Readiness is the single source of truth for prompt emptiness — stage 1's
     // structural check only covers prompt type and byte size, not emptiness.
     // Fail-fast throws the first readiness error; accumulate folds every
     // readiness entry into the shared accumulator.
     if (mode === "fail-fast") {
-      await validateAgentReadiness({
+      warnings = await validateAgentReadiness({
         agent: probeAgent,
         orgId,
         spaceId,
         actor,
         manifestCache,
-        ...(launchOverrides ? { launchOverrides } : {}),
+        ...(readinessLaunch ? { launchOverrides: readinessLaunch } : {}),
         ...(params.connectOffers ? { connectOffers: params.connectOffers } : {}),
       });
     } else {
-      push(
-        await collectAgentReadinessErrors({
-          agent: probeAgent,
-          orgId,
-          spaceId,
-          actor,
-          manifestCache,
-          ...(launchOverrides ? { launchOverrides } : {}),
-        }),
-      );
+      const readiness = await collectAgentReadiness({
+        agent: probeAgent,
+        orgId,
+        spaceId,
+        actor,
+        manifestCache,
+        ...(readinessLaunch ? { launchOverrides: readinessLaunch } : {}),
+      });
+      push(readiness.errors);
+      warnings = readiness.warnings;
     }
   }
 
@@ -321,6 +337,7 @@ export async function runInlinePreflight(params: {
     proxyIdOverride,
     launchOverrides,
     manifestCache,
+    warnings,
   };
 }
 

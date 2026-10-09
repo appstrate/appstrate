@@ -840,9 +840,22 @@ Exit codes on the signal path are the conventional POSIX ones (128 + signal numb
 | `--proxy <id>`          | Proxy id to associate with the run (overrides the per-space inherited value).                                                                                                                                                                                |
 | `--[no-]cancel-on-exit` | Remote runs only: whether SIGINT/SIGTERM/SIGHUP cancels the platform-side run. Default: on when stdin is a TTY and `--json` is not set (interactive Ctrl-C cancels), off otherwise — the CLI detaches and the run keeps going, like closing a dashboard tab. |
 | `--no-inherit`          | Skip per-space run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                                    |
-| `--json`                | Emit canonical RunEvents as JSONL on stdout.                                                                                                                                                                                                                 |
+| `--json`                | Emit canonical RunEvents as JSONL on stdout, plus the CLI's own envelopes (below).                                                                                                                                                                           |
 | `-v, --verbose`         | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`.                                                                                                       |
 | `-q, --quiet`           | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                                                                                                                              |
+
+**`--json` envelopes**
+
+Besides the canonical RunEvents, `--json` writes four envelopes of the CLI's own, one JSON object per line, told apart by `type`:
+
+| `type`                       | When                                                                           | Fields                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `appstrate.remote.triggered` | `--remote`: the instance created the run, before the first event               | `runId`, `instance`, `warnings` (only when there are some) |
+| `appstrate.report.started`   | `--report`: the instance registered the locally executed run, before it starts | `runId`, `instance`, `warnings` (only when there are some) |
+| `appstrate.remote.detached`  | `--remote`: a signal detached the CLI from a run that keeps going              | `runId`, `instance`                                        |
+| `appstrate.finalize`         | Every mode: the run reached a terminal status (a detached run has none)        | `result` (the run's `RunResult`)                           |
+
+`warnings` holds the launch's items as the API returns them (`{ field, code, message, … }`), for the integrations the run starts without.
 
 **Tool-call rendering**
 
@@ -860,7 +873,7 @@ The full flag set is documented under `appstrate run --help`.
 
 **Connection readiness**
 
-Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 409 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
+Connection readiness is enforced server-side at run-trigger time. A run is rejected with HTTP 409 (`missing_integration_connection`) before the container launches when an integration it binds is broken (expired, under-scoped, unavailable), when several of your connections are open to choose from, or when an integration the agent marks `required` (`integrations_configuration.<id>.required`) has nothing to bind or is inactive in the space; the CLI prints the refused items one per line. An integration the agent does not mark `required` never blocks for lack of a connection: the run starts without it and the CLI prints one `⚠` line per launch warning (`integration_unbound`: nothing usable to bind, or bound to no connection on purpose; `integration_not_active`: inactive in the space). With `--json` the warnings ride the launch envelope instead (above). Under `--report`, the locally executed agent is told which integrations it runs without, and their tools are not exposed to it. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
 
 ---
 

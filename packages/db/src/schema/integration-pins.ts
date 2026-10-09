@@ -48,6 +48,7 @@ export const integrationPins = pgTable(
      * pick agents — see the table-level doc).
      */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    /** The bound set; `{}` pins to no connection (no row = no pin). */
     connectionIds: uuid("connection_ids").array().notNull(),
     /**
      * Who set the pin — admin id for admin pins, same as `user_id` for member
@@ -81,9 +82,10 @@ export const integrationPins = pgTable(
       .on(table.userId)
       .where(sql`${table.userId} IS NOT NULL`),
     // 20 = MAX_CONNECTIONS_PER_INTEGRATION, spelled out for drizzle-kit; no FK on elements, by design.
+    // 0 is a pin to no connection: the layer wins and binds nothing.
     check(
       "integration_pins_connection_ids_cardinality",
-      sql`cardinality(connection_ids) BETWEEN 1 AND 20`,
+      sql`cardinality(connection_ids) BETWEEN 0 AND 20`,
     ),
   ],
 );

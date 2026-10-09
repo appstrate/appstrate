@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mint a hosted-connect link into the run-kickoff 409 (issue #1207).
+ * Mint a hosted-connect link into the run-kickoff 409 (issue #1207), and into
+ * the `integration_unbound` warnings of a launch that started without one.
  *
  * The readiness gate already names WHICH auth a connect flow must target and
  * WHICH scopes it must request (`auth_key` + `required_scopes`, relayed by
@@ -23,8 +24,8 @@
  * the same scope-catalog check the route applies to `body.scopes`, and the
  * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
  * reaching this function are the ones readiness just resolved for this org and
- * space (the agent declared them and `listActiveIntegrationIds` confirmed each
- * is ACTIVE HERE).
+ * space (the agent declared them, and the resolver emits a connect-flow item only
+ * for one ACTIVE HERE).
  */
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
@@ -57,11 +58,13 @@ const FIELD_PREFIX = "integrations.";
  */
 const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
 
+const FRESH_CONNECT_CODES: ReadonlySet<string> = new Set(["not_connected", "integration_unbound"]);
+
 /**
  * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * `not_connected` qualifies outright (a fresh connect, no `connection_id`).
+ * `not_connected` / `integration_unbound` qualify outright (a fresh connect, no `connection_id`).
  * The two {@link IN_PLACE_CODES} qualify only on a connection the actor OWNS
  * and only with an id to re-consent: a foreign-owned row is somebody else's
  * account, and minting against it would let the caller re-consent a
@@ -77,7 +80,7 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
   if (!integrationId || !e.auth_key) return null;
   const scopes = e.required_scopes ?? [];
 
-  if (e.code === "not_connected") {
+  if (FRESH_CONNECT_CODES.has(e.code)) {
     return { integrationId, authKey: e.auth_key, scopes };
   }
   if (IN_PLACE_CODES.has(e.code) && e.owned_by_actor === true && e.connection_id) {
@@ -176,4 +179,18 @@ export async function attachConnectOffers(params: {
       }
     }),
   );
+}
+
+/**
+ * `items` without the fields {@link attachConnectOffers} adds: a link connects as the actor it
+ * was minted for, and a stored response is replayed to whoever reuses its `Idempotency-Key`.
+ */
+export function withoutConnectOffers(items: ResolutionFieldError[]): ResolutionFieldError[] {
+  return items.map((item) => {
+    const copy = { ...item };
+    delete copy.connect_url;
+    delete copy.expiresAt;
+    delete copy.packageId;
+    return copy;
+  });
 }

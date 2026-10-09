@@ -3,6 +3,7 @@
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 import { integrationIdOfField, type MissingIntegrationFieldError } from "./connection-choice";
+import { VERSION_PUBLISHED } from "./version-selector";
 
 /** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
@@ -113,6 +114,14 @@ export function retryLaunch(
   );
   const kept = Object.entries(own).filter(([id]) => !refused.has(id));
   return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
+}
+
+/**
+ * The version a launch runs, spelled out: an omitted `?version=` runs the latest published,
+ * while readiness reads it as the draft for a caller who can write the agent.
+ */
+export function launchedVersion(launch: RunLaunch): string {
+  return launch.version ?? VERSION_PUBLISHED;
 }
 
 /**

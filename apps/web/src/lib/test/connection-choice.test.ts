@@ -55,11 +55,17 @@ describe("scheduleConnectionChoices", () => {
         code: "auth_serves_no_selected_tool",
         message: "unserving",
       },
+      {
+        field: "integrations.@acme/crm",
+        code: "required_integration_unbound",
+        message: "required",
+      },
     ]);
     expect(scheduleConnectionChoices(err)).toEqual([
       { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
       { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
       { integrationId: "@acme/ssh", code: "auth_serves_no_selected_tool", candidates: [] },
+      { integrationId: "@acme/crm", code: "required_integration_unbound", candidates: [] },
     ]);
   });
 
@@ -92,10 +98,13 @@ describe("pendingConnectionChoices", () => {
   });
 
   it("brings it back when the pick is undone", () => {
-    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual([
-      "@acme/gmail",
-      "@acme/notion",
-    ]);
+    // Undoing a pick removes the key: back to what the refused save sent.
+    expect(ids({ "@acme/notion": ["gone"] })).toEqual(["@acme/gmail", "@acme/notion"]);
+  });
+
+  it("takes 'no connection' as an answer — `[]` is not the absent pick the save sent", () => {
+    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual(["@acme/notion"]);
+    expect(ids({ "@acme/gmail": ["c1"], "@acme/notion": [] })).toEqual([]);
   });
 });
 
@@ -165,6 +174,7 @@ describe("refusalReasonKey", () => {
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
+    expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
 
   it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {

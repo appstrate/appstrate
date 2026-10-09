@@ -112,6 +112,18 @@ describe("connectOfferTarget", () => {
     });
   });
 
+  it("accepts an integration_unbound warning exactly like not_connected", () => {
+    expect(connectOfferTarget({ ...notConnected(), code: "integration_unbound" })).toEqual({
+      integrationId: INTEGRATION,
+      authKey: "primary",
+      scopes: ["mail.read", "mail.send"],
+    });
+    // No auth_key relayed: no flow to target, as for not_connected.
+    const noAuthKey = { ...notConnected(), code: "integration_unbound" };
+    delete noAuthKey.auth_key;
+    expect(connectOfferTarget(noAuthKey)).toBeNull();
+  });
+
   it("accepts an in-place code on the actor's OWN connection — upgrade or reconnect", () => {
     // Both codes end at the same consent screen on the same row; ownership is
     // what makes signing claims against it safe.
@@ -318,19 +330,24 @@ describe("attachConnectOffers", () => {
   it("leaves the item alone when the auth is not oauth2, or the manifest is gone", async () => {
     const others = manifestCache({
       "@offers/keyed": authManifest("api_key"),
+      "@offers/basic": authManifest("basic"),
+      "@offers/custom": authManifest("custom"),
       "@offers/gone": "missing",
     });
-    for (const id of ["@offers/keyed", "@offers/gone"]) {
-      const errors = [notConnected(id)];
-      expect(
-        await attachConnectOffers({
-          errors,
-          scope: SCOPE,
-          actor: ACTOR,
-          policy: CONNECT,
-          manifestCache: others,
-        }),
-      ).toEqual(errors);
+    for (const id of ["@offers/keyed", "@offers/basic", "@offers/custom", "@offers/gone"]) {
+      for (const code of ["not_connected", "integration_unbound"]) {
+        const errors = [{ ...notConnected(id), code }];
+        expect(
+          await attachConnectOffers({
+            errors,
+            scope: SCOPE,
+            actor: ACTOR,
+            policy: CONNECT,
+            manifestCache: others,
+          }),
+          `${id} ${code}`,
+        ).toEqual(errors);
+      }
     }
   });
 

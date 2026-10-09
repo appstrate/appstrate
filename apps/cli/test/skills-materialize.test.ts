@@ -436,6 +436,11 @@ describe("materializeAgent", () => {
     expect(body).toContain("`no_published_version`");
     expect(body).toContain(`never call \`${pluginTool("run_and_wait")}\` again`);
     expect(body).toContain("Never call `getRun` on a finished run.");
+    expect(body).toContain("`warnings` items (`integration_unbound`, `integration_not_active`)");
+    // MCP warnings never carry a link: connecting is minted on request.
+    expect(body).toContain("They carry no link");
+    expect(body).toContain("`initiateIntegrationConnect`");
+    expect(body).not.toContain("hand over any `connect_url`");
     // run_and_wait's time cap answers `done: false` WITH an `error`: waiting must win.
     const waitRule = body.indexOf("`done: false`, even with an `error`");
     expect(waitRule).toBeGreaterThan(0);

@@ -41,8 +41,10 @@ import {
   waitForRunAndWaitCompletion,
   fetchRunFiles,
   type RunAndWaitFile,
+  type RunAndWaitLaunch,
   type RunAndWaitStep,
 } from "@appstrate/core/run-and-wait-client";
+import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
@@ -55,6 +57,7 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -1002,11 +1005,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
-      "status. If its wait ends first, it returns `done:false` with the run `id` and an `error` " +
-      "saying so: the run is still going — never call `run_and_wait` again for it; read its " +
-      "outcome with `getRun` on that `id`. After `done:true`, do NOT call `getRun` to wait; the " +
-      "run is over. " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings? }` when the run reaches a " +
+      "terminal status; `warnings`, present only when the launch reported some, lists the " +
+      "integrations the run started without (`integration_unbound`: nothing bound; " +
+      "`integration_not_active`: switched off in the space). If its wait ends first, it " +
+      "returns `done:false` with the run `id` and an `error` saying so: the run is still " +
+      "going — never call `run_and_wait` again for it; read its outcome with `getRun` on " +
+      "that `id`. After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
@@ -1082,15 +1087,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: {
             type: "array",
             items: { type: "string" },
-            minItems: 1,
+            minItems: 0,
             maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
           },
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
-            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "`[]` runs without that integration — only for one the agent does not mark " +
+            "`required` (a 400 otherwise). " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
@@ -1153,7 +1160,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // readable with `runs:read-all`. Not a new exposure class —
       // `initiateIntegrationConnect` already returns a bearer `connect_url` on
       // this very path — but any change to how these links are scoped or
-      // expired has to account for run logs, not only IDE transcripts.
+      // expired has to account for run logs, not only IDE transcripts. Only the
+      // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
     if (!launched.ok) {
@@ -1180,7 +1188,11 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return jsonResult(launched.step.payload, true);
     }
 
-    const runId = launched.launch.runId;
+    // Any caller of this handler (an agent run included) may persist what it returns; the
+    // in-app chat launches through its own extension instead. A mint writes nothing, so the
+    // stripped links leave nothing behind.
+    const launch = withoutWarningOffers(launched.launch);
+    const runId = launch.runId;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
@@ -1192,7 +1204,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const stopHeartbeat = startProgressHeartbeat(extra, runId);
     let final: RunAndWaitStep;
     try {
-      final = await waitForRunAndWaitCompletion(launched.launch, {
+      final = await waitForRunAndWaitCompletion(launch, {
         origin: ctx.origin,
         headers: dispatchHeaders,
         fetch: dispatchFetch,
@@ -1240,6 +1252,18 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
   };
 
   return { descriptor, handler };
+}
+
+function withoutWarningOffers(launch: RunAndWaitLaunch): RunAndWaitLaunch {
+  const strip = (record: Record<string, unknown>) =>
+    Array.isArray(record.warnings)
+      ? { ...record, warnings: withoutConnectOffers(record.warnings as ResolutionFieldError[]) }
+      : record;
+  return {
+    ...launch,
+    launchRecord: strip(launch.launchRecord),
+    preliminary: strip(launch.preliminary),
+  };
 }
 
 // --- list_files --------------------------------------------------------

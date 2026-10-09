@@ -6,7 +6,147 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Before the deploy, mark `required: true` on every agent integration a run
+  cannot do without** (#1830). After it, a declared integration blocks a run
+  only when the agent marks it `required` (below): an agent whose user has no
+  connection for it runs without it instead of being refused.
+  1. Run the read-only pre-flight
+     `bun scripts/migration/0039-report-integration-deps.ts` with the env
+     loaded (it writes nothing). Per organization and space it lists the
+     agents declaring integrations (draft and latest published version), each
+     integration with its `required` flag, and the enabled schedules firing
+     those agents, with their `version_override`.
+  2. For each agent that means nothing without an integration, set
+     `integrations_configuration.<id>.required: true` in its manifest JSON and
+     publish a version. Before the deploy, write it only through the
+     manifest itself: the agent editor's JSON tab (apply, then save), or
+     `PATCH /api/packages/agents/{scope}/{name}` with the whole manifest, then
+     `POST /api/packages/agents/{scope}/{name}/versions`. The `PATCH` requires
+     an `If-Match` header (`428 precondition_required` without it) carrying
+     the `ETag` that `GET /api/packages/agents/{scope}/{name}` (the draft)
+     answers; a `412` means the draft moved since, so read it again. Both
+     store the key as given; the running release accepts it as an unknown
+     key. Do not touch
+     those agents' Integrations tab in the editor until the deploy: before
+     this release it rewrites `integrations_configuration` and drops
+     `required`.
+  3. A schedule whose `version_override` pins an older version keeps firing
+     that version, without `required`: move its override to the new version,
+     or clear it.
+  4. An agent the organization cannot publish (it does not own the package)
+     stays optional until its owner publishes a version marking `required`.
+     To enforce it sooner, fork it (`POST /api/packages/{scope}/{name}/fork`),
+     mark the fork and point the schedules at it.
+
+  Migration `0084` only relaxes the `integration_pins` cardinality CHECK to
+  `0..20`; it rewrites no data.
+
+### Changed
+
+- **BREAKING (API): a declared integration blocks a run only when the agent
+  marks it `required`** (#1830, afps-spec#28). A non-required integration
+  binds 0..N connections and never blocks for lack of one; the run starts
+  without it and the launch answers a `warnings[]` item naming it (`field`
+  `integrations.<id>`):
+  - `integration_unbound` when the fallback finds nothing usable (today's
+    `not_connected` and `auth_key_mismatch`) or only connections other
+    members share, carrying `auth_key` and `required_scopes`,
+    `candidate_connections`, or `required_auth_key` and
+    `available_auth_keys`, plus a `connect_url` when the caller sent
+    `X-Appstrate-Connect-Offers` (never stored with an idempotent response,
+    the `201` or a `409`, so a replay carries none; MCP `run_and_wait` warnings
+    carry no connect link, so an MCP client gets the warning and can call
+    `initiateIntegrationConnect`, and the in-app chat gets them through its own
+    launcher); and when a cascade layer holds `[]` (below),
+    with a message naming that layer and no connect target, since the choice
+    was deliberate;
+  - `integration_not_active` when the integration is switched off in the
+    space; the run's `integrations_unbound` lists it too. An inert one
+    (selecting no tool or scope, needing no auth) is skipped first and
+    yields nothing, as the run would not start it anyway.
+
+  A `required` integration keeps the old behaviour: a
+  `409 missing_integration_connection` with `not_connected`,
+  `auth_key_mismatch` or `integration_not_active`, and `required` also makes an integration that
+  selects no tool or scope count, where it used to be skipped as inert.
+  Breakage and ambiguity refuse for every integration, `required` or not: a
+  missing or invalid integration package, `must_choose_connection` over
+  several own connections, and a bound connection that is dead, outranked,
+  unavailable, under-scoped or on an auth serving none of the selected tools.
+  The `run.connection_missing` webhook still fires for blocking refusals only.
+
+- **BREAKING (API): success responses gain `warnings`** (#1830), always
+  present, possibly empty: `POST /api/agents/{scope}/{name}/run` (201),
+  `POST /api/runs/inline` (201), `POST /api/runs/inline/validate` (200, now
+  `{ valid: true, warnings }`), `POST /api/runs/remote` (201), schedule
+  create (201) and update (200). A schedule written for another member always
+  answers `warnings: []`: the caller cannot act on that member's connections
+  and must not learn which ones they hold; its errors keep the shared-only
+  filtering. The MCP and chat `run_and_wait` results carry the launch's
+  `warnings` when there are some.
+- **BREAKING (API): connection sets accept `[]`, "use none"** (#1830): admin
+  pins, member pins, run and schedule `connection_overrides`, and MCP
+  `run_and_wait`'s `connection_overrides`. A layer holding `[]` wins and stops
+  the cascade: the integration starts with no connection, with an
+  `integration_unbound` warning, and the agent is told it runs without it
+  whatever its tool selection. `[]` in `connection_overrides` for an
+  integration the launched manifest marks `required` is refused
+  (`400 invalid_request`, `param` `connection_overrides`) at a run launch and
+  at a schedule write. A pin accepts `[]` whatever the manifest says; a run
+  whose version marks the integration `required` then fails with a new `409`
+  item `required_integration_unbound`. Org defaults stay `1..20`. A layer
+  with no row or no key is still absent and passes to the next, as is a
+  schedule update's `connection_overrides: null`, which clears them all; a
+  `null` set for one integration is refused (`400`).
+- **BREAKING (API): the connection readiness DTO**
+  (`GET /api/agents/{scope}/{name}/connection-readiness`) gains `required`
+  per integration, and `admin_pinned_connection_ids` /
+  `member_pinned_connection_ids` become `string[] | null` (`null` = no pin,
+  `[]` = pinned to none). It also gains `warning_code` per integration: the
+  code of the launch's `warnings[]` item (`integration_unbound` or
+  `integration_not_active`), `null` when the run binds the integration, is
+  refused over it, or never needed it. A non-required integration the run
+  starts without reads `run_blocking: false`, `error_code: null`,
+  `resolved_connection_ids: []` and a non-null `warning_code` (#1830).
+- **BREAKING (API): integration status reads an auth's
+  `_meta["dev.appstrate/auth"].required` as absent = `false`** (#1830), like
+  the rest of the platform, instead of absent = `true`: `auths[].required` on
+  the integration status no longer reports an auth as required when its
+  manifest does not say so.
+- **`@afps-spec/schema` `^0.9.0`** (was `^0.8.0`; root, `@appstrate/core`,
+  `@appstrate/afps-runtime`), which declares
+  `integrations_configuration.<id>.required` as a boolean (afps-spec#28): an
+  agent manifest whose `required` is not a boolean is now refused at publish,
+  import and inline launch (#1830).
+
 ### Added
+
+- **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
+  the agent needs at least one connection of that integration to run (#1830).
+  The agent editor has a "required" toggle per integration, and the
+  connection pickers a « Aucune connexion » ("No connection") option that
+  pins no connection.
+- **The agent is told which declared integrations it runs without** (#1830):
+  its system prompt lists each integration unavailable in the run and why,
+  and tells it not to claim results from them. A run started without one
+  shows it on the run page; the chat renders a connect card from an
+  `integration_unbound` warning that carries a `connect_url`, the CLI prints
+  one `⚠` line per warning, and the MCP server instructions explain both.
+- **The run resource gains `integrations_unbound`** (#1830): the sorted ids of
+  the declared integrations the run bound to no connection, those switched
+  off in the space included (`[]` when none,
+  `null` when the run has no connection snapshot), which `connections_used`
+  cannot carry.
+- **`appstrate run --report --json` announces the run** with an
+  `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
+  registration reported some), as `--remote --json` does with
+  `appstrate.remote.triggered` (#1830). A refused launch prints its items one
+  per line. The locally executed agent is told which integrations the
+  platform bound to none, and their tools are not exposed to it.
+- **The agent detail's integrations carry `required` and `auth_key`** (#1830),
+  as the manifest's `integrations_configuration.<id>` declares them.
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
   hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
@@ -61,6 +201,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Saving an agent in the editor no longer drops the
+  `integrations_configuration` keys it does not edit**, such as `_meta`
+  (#1830): `writeManifestIntegrations` merges onto the stored configuration.
+- **The agent's system prompt carries one `## Integration` section per
+  integration** instead of one per bound connection (#1830).
 - **MCP `run_and_wait` no longer times out client-side on long runs**
   (#1844). The endpoint answered every POST as one JSON body, so a call sent
   no byte until the run ended and clients and proxies cut it after 60-100 s.

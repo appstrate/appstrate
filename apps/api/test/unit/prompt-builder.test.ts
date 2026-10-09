@@ -113,6 +113,7 @@ interface PromptContext {
   packageDocs?: Array<{ id: string; content: string }>;
   runtimeTools?: string[];
   resources?: AppstrateRunPlan["resources"];
+  droppedIntegrations?: AppstrateRunPlan["droppedIntegrations"];
 }
 
 function splitLegacy(ctx: PromptContext): {
@@ -149,6 +150,7 @@ function splitLegacy(ctx: PromptContext): {
     timeout: ctx.timeout ?? 0,
     resources: ctx.resources ?? defaultTestAgentResources(),
     files: ctx.files,
+    ...(ctx.droppedIntegrations ? { droppedIntegrations: ctx.droppedIntegrations } : {}),
   };
   return { context, plan };
 }
@@ -408,6 +410,38 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Research procedure");
     expect(prompt).not.toContain("Step 1: gather sources.");
+  });
+});
+
+// ─── Unavailable integrations ──────────────────────────────
+
+describe("buildEnrichedPrompt — unavailable integrations", () => {
+  it("names every dropped integration, telling absence apart from breakage", async () => {
+    const prompt = await buildEnrichedPrompt(
+      baseContext({
+        droppedIntegrations: [
+          { integrationId: "@org/gmail", reason: "unbound" },
+          { integrationId: "@org/ssh", reason: "no_delivery", connectionLabel: "db" },
+          { integrationId: "@org/ssh", reason: "bound_set_incomplete", connectionLabel: "prod" },
+          { integrationId: "@org/drive", reason: "not_active" },
+        ],
+      }),
+    );
+    expect(prompt).toContain("## Unavailable Integrations");
+    expect(prompt).toContain("- **@org/gmail**: no connection is bound to this run");
+    // One line per integration, however many of its connections dropped.
+    expect(prompt).toContain(
+      "- **@org/ssh**: connection 'db': the connection's credentials cannot be delivered; " +
+        "connection 'prod': another connection bound with it failed to start",
+    );
+    expect(prompt).toContain("- **@org/drive**: it is switched off in this space");
+    expect(prompt).not.toMatch(/no_delivery|not_active|bound_set_incomplete/);
+    expect(prompt).toContain("report them as unavailable in this run");
+  });
+
+  it("renders no such section when nothing was dropped", async () => {
+    const prompt = await buildEnrichedPrompt(baseContext({ droppedIntegrations: [] }));
+    expect(prompt).not.toContain("## Unavailable Integrations");
   });
 });
 

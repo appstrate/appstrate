@@ -193,7 +193,7 @@ The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a **version contract**, not thr
 
 Outbound third-party API access flows through **integrations** (agent-driven connection model). An integration declares `source.kind: "local"` (sandboxed runner container per integration, `node|python|binary|uv`) or `"remote"` (Streamable HTTP / SSE MCP). Credentials injected sidecar-side (env-delivery or per-run MITM proxy), never read by the integration's MCP server. OAuth scopes inferred per-agent from `tools[]` selection.
 
-Agent manifest splits dependency from config: version on `dependencies.integrations.<id>` (flat semver), tool/scope/auth selection in top-level `integrations_configuration.<id>`. Single read/write path: `parseManifestIntegrations` / `writeManifestIntegrations` (`@appstrate/core/dependencies`).
+Agent manifest splits dependency from config: version on `dependencies.integrations.<id>` (flat semver), tool/scope/auth selection and `required` in top-level `integrations_configuration.<id>`. A declared integration binds 0..N connections — a run with nothing to bind, a layer set to `[]` or an integration switched off in the space starts without it, and its launch answers an `integration_unbound` / `integration_not_active` warning — and 1..N only when `required: true`, which turns that absence into a 409 and makes the integration count even when it selects no tool or scope. Single read/write path: `parseManifestIntegrations` / `writeManifestIntegrations` (`@appstrate/core/dependencies`).
 
 **Full detail** (runtime spawn, MITM, niveau-2 scope phases, remote HTTP, MCP transport retry): `docs/architecture/INTEGRATIONS_RUNTIME.md`. AFPS wire spec (canonical): <https://github.com/appstrate/afps-spec/blob/main/spec.md>.
 

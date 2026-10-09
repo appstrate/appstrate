@@ -63,12 +63,15 @@ import {
   bundleIdentity,
   ReportConfigError,
   ReportStartError,
+  unavailableIntegrations,
+  withoutIntegrations,
   type ReportMode,
   type ReportFallback,
   type ReportContext,
   type ReportSession,
   type ReportSource,
 } from "./run/report.ts";
+import { announceLaunch } from "./run/launch-warnings.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -314,8 +317,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   };
   const snapshot = opts.snapshot ? await loadSnapshotFile(path.resolve(opts.snapshot)) : {};
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
+  // The integrations the platform bound this run to none of: told to the agent, tools withheld.
+  const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
   const promptInputs = buildPlatformPromptInputs(bundle, context, {
     platformName: "Appstrate CLI",
+    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
   });
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
@@ -343,7 +349,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // execution mode. Pure MCP-server integrations are skipped here (no
   // generic call surface in-process).
   const apiCallFactories = await buildApiCallExtensionFactory({
-    bundle,
+    bundle: withoutIntegrations(
+      bundle,
+      unavailable.map((entry) => entry.id),
+    ),
     integrationResolver,
     runId,
     workspace: workspaceDir,
@@ -448,12 +457,15 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     bridge.writeRaw(chunk);
   };
   const sink: EventSink = bridge.sink;
-  if (!opts.json) {
-    const reportNote = reportSession
-      ? ` (reporting to ${resolverInputsInstance(resolverInputs)} as ${reportSession.runId})`
-      : "";
-    process.stderr.write(`→ running ${bundleLabel}${reportNote}\n`);
-  }
+  announceLaunch({
+    type: "appstrate.report.started",
+    json: opts.json,
+    bundleLabel,
+    instance: resolverInputsInstance(resolverInputs),
+    run: reportSession,
+    writeStdout,
+    writeStderr: (chunk) => process.stderr.write(chunk),
+  });
 
   // Heartbeat is lifted out of the `try` so the cleanup hook can stop
   // it whether or not the runner ever started. The shutdown coordinator

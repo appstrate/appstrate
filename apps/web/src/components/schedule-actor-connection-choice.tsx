@@ -6,7 +6,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import type { ConnectionChoice } from "../lib/connection-choice";
-import { toggleCapped } from "../lib/connection-set";
+import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
 
 /**
@@ -15,22 +15,26 @@ import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
  * control instead — only connections the viewer reaches too, so the list can be empty: the
  * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
  * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable.
+ * read-only, each integration's clearable. "No connection" (`[]`) is a toggle of its own, for each
+ * integration the agent does not require.
  */
 export function ScheduleActorConnectionChoice({
   choices,
+  integrations,
   value,
   onChange,
 }: {
   /** What the last save was refused over — kept on screen while it is answered. */
   choices: readonly ConnectionChoice[];
+  /** The integrations the fired version declares. */
+  integrations: readonly { id: string; required?: boolean }[];
   value: Readonly<Record<string, string[]>>;
-  onChange: (integrationId: string, connectionIds: string[]) => void;
+  onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const storedOnly = Object.keys(value).filter(
-    (integrationId) => !choices.some((c) => c.integrationId === integrationId),
-  );
+  const optional = new Set(integrations.filter((i) => i.required !== true).map((i) => i.id));
+  const refused = (integrationId: string) => choices.some((c) => c.integrationId === integrationId);
+  const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !refused(id));
   return (
     <div className="space-y-2" data-testid="schedule-actor-connections">
       <Label>{t("schedule.connectionOverrides.label")}</Label>
@@ -57,9 +61,10 @@ export function ScheduleActorConnectionChoice({
                     checked={isPicked}
                     // A dead connection fails the fire it is picked for; unticking stays open.
                     disabled={(c.needs_reconnection || atCap) && !isPicked}
-                    onCheckedChange={() =>
-                      onChange(choice.integrationId, toggleCapped(picked, c.id))
-                    }
+                    onCheckedChange={() => {
+                      const next = toggleCapped(picked, c.id);
+                      onChange(choice.integrationId, next.length > 0 ? next : null);
+                    }}
                   />
                   <Label htmlFor={id} className="font-normal">
                     {c.label}
@@ -87,22 +92,69 @@ export function ScheduleActorConnectionChoice({
                 })}
               </p>
             )}
+            {optional.has(choice.integrationId) && (
+              <NoConnectionToggle
+                integrationId={choice.integrationId}
+                value={value}
+                onChange={onChange}
+              />
+            )}
             {/* No candidates travel with an unreachable pick: clearing it lets
                 the next save resolve again, and ask again if it must. */}
-            {choice.candidates.length === 0 && picked.length > 0 && (
-              <ClearChoiceButton onClick={() => onChange(choice.integrationId, [])} />
+            {choice.candidates.length === 0 && value[choice.integrationId] !== undefined && (
+              <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
             )}
           </div>
         );
       })}
-      {storedOnly.map((integrationId) => (
-        <StoredChoice
-          key={integrationId}
-          integrationId={integrationId}
-          connectionIds={value[integrationId] ?? []}
-          onClear={() => onChange(integrationId, [])}
-        />
-      ))}
+      {others.map((integrationId) =>
+        (value[integrationId]?.length ?? 0) > 0 ? (
+          <StoredChoice
+            key={integrationId}
+            integrationId={integrationId}
+            connectionIds={value[integrationId]!}
+            onClear={() => onChange(integrationId, null)}
+          />
+        ) : (
+          <div
+            key={integrationId}
+            className="border-border bg-card space-y-1.5 rounded-md border p-3"
+            data-testid={`schedule-actor-none-${integrationId}`}
+          >
+            <div className="font-mono text-xs font-medium">{integrationId}</div>
+            <NoConnectionToggle integrationId={integrationId} value={value} onChange={onChange} />
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
+function NoConnectionToggle({
+  integrationId,
+  value,
+  onChange,
+}: {
+  integrationId: string;
+  value: Readonly<Record<string, string[]>>;
+  onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const id = `sched-none-${integrationId}`;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <Checkbox
+        id={id}
+        checked={value[integrationId]?.length === 0}
+        onCheckedChange={(checked) => onChange(integrationId, checked === true ? [] : null)}
+      />
+      <Label htmlFor={id} className="font-normal">
+        {t("detail.integrationMemberPicker.none")}
+        <span className="text-muted-foreground">
+          {" "}
+          · {t("detail.integrationMemberPicker.noneHint")}
+        </span>
+      </Label>
     </div>
   );
 }

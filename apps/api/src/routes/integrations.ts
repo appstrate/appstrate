@@ -116,7 +116,7 @@ import {
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
-import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deletePin,
@@ -238,7 +238,7 @@ export const setPinSchema = z
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_ids: connectionIdSetSchema,
+    connection_ids: nonEmptyConnectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();

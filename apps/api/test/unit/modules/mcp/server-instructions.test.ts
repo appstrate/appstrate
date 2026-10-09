@@ -95,6 +95,43 @@ describe("MCP server instructions — connect bullet", () => {
       expect(bullet).toMatch(/authKey: "<the error's auth_key/);
     }
   });
+
+  // #1830: only a `required` integration blocks the launch when nothing is
+  // connected; an optional one lets the run start and comes back as a warning.
+  it("tells a refused launch from a started run that lacks an integration", () => {
+    const chat = connectBullet(true);
+    const external = connectBullet(false);
+    for (const bullet of [chat, external]) {
+      expect(bullet).toMatch(/marks it `required`/);
+      expect(bullet).toContain("`integration_unbound`");
+      // An explicit `[]` and an inactive integration warn too, without a connect target.
+      expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
+      expect(bullet).toContain("`integration_not_active`");
+      expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
+      // Another member's schedule: the caller must not learn what their connections lack.
+      expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);
+    }
+    // A started run's warning never carries a link from this server; the chat renders its own card.
+    for (const bullet of [chat, external]) {
+      expect(bullet).not.toMatch(/a `connect_url` only when the response carries one/);
+      expect(bullet).not.toMatch(/from the warning's `connect_url`/);
+    }
+    expect(chat).toMatch(/the chat client renders a connect button under the run itself/);
+    expect(chat).toMatch(/do NOT paste or promise a link/);
+    expect(external).toMatch(/a warning here never carries a `connect_url`/);
+    expect(external).toMatch(
+      /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
+    );
+    expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
+  });
+
+  it("names the layers a `required_integration_unbound` comes from and what clears it", () => {
+    const bullet = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- Code `required_integration_unbound`"));
+    expect(bullet).toContain("a stored schedule's `connection_overrides`");
+    expect(bullet).toContain("a run override outranks a member pin, not an admin pin");
+  });
 });
 
 describe("MCP server instructions — named operations follow their grant", () => {
@@ -156,6 +193,7 @@ describe("MCP server instructions — run guidance", () => {
       "Shortcut —",
       "Connecting or reconnecting an integration before a run",
       "must_choose_connection",
+      "required_integration_unbound",
       // What a still-running run's result tells the model to do.
       "`done:false`",
     ]) {
@@ -258,6 +296,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
     expect(without).not.toContain("building or configuring an agent");
+  });
+
+  it("teaches `required` alongside the tool selection", () => {
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    expect(withWrite).toContain("`integrations_configuration[id].required`");
+    expect(instructionsFor(permissions, true)).not.toContain(
+      "`integrations_configuration[id].required`",
+    );
   });
 
   it("withholds it from a caller who may author but not invoke", () => {

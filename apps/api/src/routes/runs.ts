@@ -22,7 +22,13 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { invalidRequest, notFound, conflict, internalError } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  conflict,
+  internalError,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import {
   runVisibilityFilter,
   ownRunsFilter,
@@ -33,7 +39,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import {
-  assertConnectionOverrideKeysDeclared,
+  assertConnectionOverridesAllowed,
   connectionOverridesSchema,
 } from "../lib/launch-schemas.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
@@ -62,6 +68,7 @@ import {
 } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
@@ -217,12 +224,25 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
+/** A launch body as the idempotency cache keeps it: no connect link on `warnings` or `errors`. */
+function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown> {
+  const stripped = { ...body };
+  for (const key of ["warnings", "errors"] as const) {
+    const items = body[key];
+    if (Array.isArray(items)) stripped[key] = withoutConnectOffers(items as ResolutionFieldError[]);
+  }
+  return stripped;
+}
+
+const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
+
+/** The stored 201 body with its run fields re-read; launch-time `warnings` are kept as stored. */
 async function replayRun(c: Context<AppEnv>, response: Response): Promise<Response> {
   if (response.status !== 201) return response;
-  const { id } = z.object({ id: z.string() }).parse(await response.json());
+  const cached = z.looseObject({ id: z.string() }).parse(await response.json());
   const run = await getRunFull(
     getSpaceScope(c),
-    id,
+    cached.id,
     getActor(c),
     runVisibilityFilter(c),
     !agentReadIsSummary(c),
@@ -230,7 +250,7 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
   if (!run || (c.get("package") && run.packageId !== c.get("package").id)) {
     throw notFound("Run not found");
   }
-  return c.json(run, 201, { "Idempotent-Replayed": "true" });
+  return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
 }
 
 export function createRunsRouter() {
@@ -250,7 +270,7 @@ export function createRunsRouter() {
     // switched off does not run, a rerun of one of its past runs included —
     // `rerun_from` is a body field of THIS route, so it passes the same door.
     requireActiveAgent(),
-    idempotency(replayRun),
+    runLaunchIdempotency(),
     async (c) => {
       const agent = c.get("package");
       const orgId = c.get("orgId");
@@ -322,7 +342,7 @@ export function createRunsRouter() {
           dependencyOverrides,
         } = inputResult;
 
-        assertConnectionOverrideKeysDeclared(
+        assertConnectionOverridesAllowed(
           effectiveAgent.manifest as unknown as Record<string, unknown>,
           connectionOverrides,
         );
@@ -357,7 +377,7 @@ export function createRunsRouter() {
         const manifestCache: IntegrationManifestCache = new Map();
         const launchOverrides = toLaunchOverrides(connectionOverrides, "run_override");
 
-        await resolveRunPreflight({
+        const warnings = await resolveRunPreflight({
           agent: effectiveAgent,
           spaceId: c.get("spaceId"),
           orgId,
@@ -440,7 +460,7 @@ export function createRunsRouter() {
           // half-resource. Effectively unreachable in normal operation.
           throw internalError();
         }
-        return c.json(row, 201);
+        return c.json({ ...row, warnings }, 201);
       } catch (err) {
         // Roll back any input files streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
@@ -735,7 +755,7 @@ export function createRunsRouter() {
     // The two guards say the caller may compose; every package the posted
     // manifest DEPENDS on is then judged one by one in the handler
     // (`assertPackageDependenciesAccessible`).
-    idempotency(replayRun),
+    runLaunchIdempotency(),
     async (c) => {
       const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
@@ -839,7 +859,7 @@ export function createRunsRouter() {
           // Effectively unreachable in normal operation.
           throw internalError();
         }
-        return c.json(row, 201);
+        return c.json({ ...row, warnings: preflight.warnings }, 201);
       } catch (err) {
         // Roll back any input files streamed into the run workspace before
         // the run launched — same pre-launch teardown as the agent route. Once
@@ -876,7 +896,7 @@ export function createRunsRouter() {
       const actor = getActor(c);
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      await runInlinePreflight({
+      const { warnings } = await runInlinePreflight({
         orgId,
         spaceId,
         actor,
@@ -889,11 +909,9 @@ export function createRunsRouter() {
       assertContextFilesFieldAvailable(body.manifest, body.input);
       normalizeContextFileUris(body.context_files);
 
-      // Structured validation result. Failures never reach this line — the
-      // preflight throws problem+json ApiErrors (accumulated) — so a 200
-      // always means `valid: true`; the shape leaves room for non-fatal
-      // detail (warnings) later without another wire break.
-      return c.json({ valid: true });
+      // Failures never reach this line — the preflight throws problem+json
+      // ApiErrors (accumulated) — so a 200 always means `valid: true`.
+      return c.json({ valid: true, warnings });
     },
   );
 

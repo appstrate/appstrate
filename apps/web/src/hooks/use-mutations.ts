@@ -18,9 +18,10 @@ import {
   persistenceKeys,
   invalidatePackageFiles,
 } from "../lib/query-keys";
-import { launchFlight, retryLaunch, type RunLaunch } from "../lib/run-launch";
+import { launchFlight, launchedVersion, retryLaunch, type RunLaunch } from "../lib/run-launch";
 import type { MissingIntegrationFieldError } from "../lib/connection-choice";
 import { missingConnectionErrors } from "../lib/connection-choice";
+import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
 // NOTE on query keys: run-cache keys (["paginated-runs"], ["run"])
 // are PINNED legacy keys — use-global-run-sync.ts patches them from SSE
@@ -52,6 +53,7 @@ export function useSaveInputSettings(packageId: string) {
 function useRunAgent(packageId: string) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async (params?: RunLaunch) => {
       const {
@@ -99,8 +101,15 @@ function useRunAgent(packageId: string) {
       // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
       navigate(`/agents/${packageId}/runs/${data.id}`);
+      toastWarnings({ kind: "run" }, packageId, data.warnings);
     },
   });
+}
+
+/** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
+interface LaunchRefusal {
+  errors: MissingIntegrationFieldError[];
+  version: string;
 }
 
 /**
@@ -113,7 +122,7 @@ function useRunAgent(packageId: string) {
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
-  const [missingErrors, setMissingErrors] = useState<MissingIntegrationFieldError[] | null>(null);
+  const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
   const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
@@ -126,13 +135,13 @@ export function useRunLauncher(packageId: string) {
       },
       {
         onSuccess: () => {
-          setMissingErrors(null);
+          setRefusal(null);
           onSuccess?.();
         },
         // The mutation cache reports every failure; this picks up the 409.
         onError: (err) => {
           const errors = missingConnectionErrors(err);
-          if (errors) setMissingErrors(errors);
+          if (errors) setRefusal({ errors, version: launchedVersion(launch) });
         },
       },
     );
@@ -140,17 +149,18 @@ export function useRunLauncher(packageId: string) {
 
   return {
     isPending,
-    missingErrors,
+    missingErrors: refusal?.errors ?? null,
+    missingVersion: refusal?.version,
     /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
     launch: send,
     retry: (picks: Record<string, string[]>) => {
       const { launch, onSuccess } = lastLaunch.current;
-      send(retryLaunch(launch, picks, missingErrors ?? []), onSuccess);
+      send(retryLaunch(launch, picks, refusal?.errors ?? []), onSuccess);
     },
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();
-      setMissingErrors(null);
+      setRefusal(null);
       runAgent.reset();
     },
   };
