@@ -236,9 +236,10 @@ export function buildServerInstructions(
   const connectFlow = connects
     ? ` When it does NOT, you MUST start the connect flow yourself (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "${authKeySource}" }\` and \`body: { scopes: <the error's required_scopes, verbatim>, connection_id: <the error's connection_id, when it carries one — the existing connection is then reconnected/upgraded in place instead of duplicated> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn.`
     : "";
-  // Only the chat keeps the connect link on a started run's warnings (`run_and_wait`, tools.ts).
+  // This server's `run_and_wait` strips the link from a started run's warnings for every caller
+  // (tools.ts); only the chat's own launcher keeps it, for the connect card it renders.
   const warningConnect = contextInjected
-    ? ", and a `connect_url` only when the response carries one). Report the result as lacking that integration and offer to connect it when the warning carries a connect target (the client renders the connect button from the warning's `connect_url`; do NOT paste the link)"
+    ? "; the chat client renders a connect button under the run itself when connecting would help). Report the result as lacking that integration and offer to connect it when that button appears — do NOT paste or promise a link"
     : `; a warning here never carries a \`connect_url\`). Report the result as lacking that integration and offer to connect it when the warning carries a connect target — ${connects ? "when the caller asks, start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`, as for an error item below" : "connecting it is for the user to do"}`;
   const connectBullets = runs
     ? `

@@ -228,14 +228,13 @@ function closedSetQuery<T extends string>(
  * A launch body as the idempotency cache keeps it: the 201's `warnings` and the
  * 409's `errors` without connect links.
  */
-function storedLaunchBody(body: string): string {
-  const parsed = JSON.parse(body) as Record<string, unknown>;
-  const stripped = { ...parsed };
+function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown> {
+  const stripped = { ...body };
   for (const key of ["warnings", "errors"] as const) {
-    const items = parsed[key];
+    const items = body[key];
     if (Array.isArray(items)) stripped[key] = withoutConnectOffers(items as ResolutionFieldError[]);
   }
-  return JSON.stringify(stripped);
+  return stripped;
 }
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });

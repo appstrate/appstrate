@@ -3,8 +3,8 @@
 /**
  * Migration `0039` against the test database: the report lists the integrations each agent
  * declares (draft, `latest`, and the version an enabled schedule pins, by exact version or
- * range), the enabled schedules firing one, and counts the enabled schedules holding an empty
- * connection set.
+ * range), the enabled schedules firing one, and counts every schedule holding an empty
+ * connection set, enabled and disabled apart, past rows whose overrides are not an object.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -91,6 +91,15 @@ describe("0039 — integration dependency report", () => {
       connectionOverrides: { [SVC]: ["00000000-0000-4000-8000-000000000039"] },
     });
     await schedule(PLAIN, { name: "plain" });
+    // Not objects: `jsonb_each` would raise on either, aborting the whole report.
+    await schedule(PLAIN, { name: "array" });
+    await schedule(PLAIN, { name: "json-null", enabled: false });
+    await run(
+      `UPDATE package_schedules SET connection_overrides = '[[]]'::jsonb WHERE name = 'array'`,
+    );
+    await run(
+      `UPDATE package_schedules SET connection_overrides = 'null'::jsonb WHERE name = 'json-null'`,
+    );
     await schedule(NOW_OPTIONAL, {
       name: "off",
       enabled: false,
@@ -122,7 +131,7 @@ describe("0039 — integration dependency report", () => {
 
     expect(lines.slice(-2)).toEqual([
       "2 agent(s) declare integrations: 3 declaration(s), 2 optional; 4 enabled schedule(s) fire one of them.",
-      "1 enabled schedule(s) hold an empty connection set (expected 0).",
+      "Schedules holding an empty connection set (expected 0 each): 1 enabled, 1 disabled.",
     ]);
   });
 });

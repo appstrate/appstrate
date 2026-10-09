@@ -1124,8 +1124,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // readable with `runs:read-all`. Not a new exposure class —
       // `initiateIntegrationConnect` already returns a bearer `connect_url` on
       // this very path — but any change to how these links are scoped or
-      // expired has to account for run logs, not only IDE transcripts. A
-      // started run's `warnings` keep theirs for the chat only (below).
+      // expired has to account for run logs, not only IDE transcripts. Only the
+      // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
     if (!launched.ok) {
@@ -1152,9 +1152,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return jsonResult(launched.step.payload, true);
     }
 
-    // A started run's links reach only the in-process chat, which renders them as cards and keeps
-    // them out of the model's text; any other caller, an agent run included, may persist them.
-    const launch = ctx.contextInjected ? launched.launch : withoutWarningOffers(launched.launch);
+    // A started run's warnings never carry a link from here, whoever calls: the in-app chat
+    // launches through its own extension (module-chat `pi-chat/mcp-tools.ts`), not this handler,
+    // and any caller reaching it — an agent run included — may persist what it returns. Stripped
+    // rather than never minted: the route's only signal for "this is the MCP re-entry" is the
+    // internal-dispatch marker, whose contract is confinement and nothing else, and a mint is a
+    // pure signature with no store write, so the discarded links leave nothing behind.
+    const launch = withoutWarningOffers(launched.launch);
     const runId = launch.runId;
     emit(ctx, {
       tool: "run_and_wait",

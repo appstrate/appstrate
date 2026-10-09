@@ -44,6 +44,26 @@ export function isIdempotencyAware(handler: unknown): boolean {
 }
 
 /**
+ * `resBody` rewritten by `storedBody` when it parses as a JSON object, else unchanged. Never
+ * throws on the body's shape: it runs after the handler has committed (a launch has created its
+ * run), so a parse failure here would turn that success into a 500 and strand the lock.
+ */
+function storableBody(
+  resBody: string,
+  storedBody: ((body: Record<string, unknown>) => Record<string, unknown>) | undefined,
+): string {
+  if (!storedBody) return resBody;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resBody);
+  } catch {
+    return resBody;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return resBody;
+  return JSON.stringify(storedBody(parsed as Record<string, unknown>));
+}
+
+/**
  * Idempotency middleware factory. Apply to POST routes that create resources.
  *
  * If `Idempotency-Key` header is absent, the request proceeds normally (opt-in).
@@ -58,8 +78,11 @@ export function isIdempotencyAware(handler: unknown): boolean {
 export function idempotency(
   options: {
     replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
-    /** The response body as it may be stored, and so replayed to any caller reusing the key. */
-    storedBody?: (body: string) => string;
+    /**
+     * A JSON-object response body as it may be stored, and so replayed to any caller reusing the
+     * key. Any other body (plain text, an array, invalid JSON) is stored unchanged.
+     */
+    storedBody?: (body: Record<string, unknown>) => Record<string, unknown>;
   } = {},
 ) {
   const { replay, storedBody } = options;
@@ -162,7 +185,7 @@ export function idempotency(
     cloned.headers.forEach((v, k) => {
       resHeaders[k] = v;
     });
-    const body = storedBody ? storedBody(resBody) : resBody;
+    const body = storableBody(resBody, storedBody);
     if (body !== resBody) delete resHeaders["content-length"];
 
     await storeIdempotencyResult(orgId, spaceId, key, {

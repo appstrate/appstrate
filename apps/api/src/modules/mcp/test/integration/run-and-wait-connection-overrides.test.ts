@@ -294,9 +294,10 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 
-  // Only the in-process chat (`?context=injected`) renders a link as a card; any other caller,
-  // an agent run among them, may persist what the tool returns.
-  it("keeps a started run's connect link for the chat only", async () => {
+  // The in-app chat launches through its own extension, never this handler, and whoever reaches
+  // it may persist what it returns: a started run's warnings carry no link, under either context.
+  // The 409 that blocks a launch keeps its link — that remedy is the tool's to hand over.
+  it("drops a started run's warning links, keeps the blocking 409's", async () => {
     const OAUTH = "@mcpconn/oauth-svc";
     const manifest = localIntegrationManifest({
       name: OAUTH,
@@ -324,25 +325,37 @@ describe("mcp run_and_wait — connection_overrides", () => {
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
     await seedDefaultOrgModel(ctx);
 
-    const warningOf = async (query: string) => {
-      const result = await callTool(
+    const launch = (query: string, required: boolean) => {
+      const agent = inlineAgentManifest([OAUTH]);
+      if (required) {
+        (agent.integrations_configuration as Record<string, Record<string, unknown>>)[
+          OAUTH
+        ]!.required = true;
+      }
+      return callTool(
         headers,
         "run_and_wait",
-        { kind: "inline", manifest: inlineAgentManifest([OAUTH]), prompt: "do the thing" },
+        { kind: "inline", manifest: agent, prompt: "do the thing" },
         query,
       );
-      expect(result.data.done).toBe(true);
-      const warnings = result.data.warnings as Array<Record<string, unknown>>;
-      return warnings.find((w) => w.field === `integrations.${OAUTH}`)!;
     };
 
-    const chat = await warningOf("?context=injected");
-    expect(chat).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
-    expect(chat.connect_url).toStartWith("http");
+    for (const query of ["?context=injected", ""]) {
+      const result = await launch(query, false);
+      expect(result.data.done).toBe(true);
+      const warnings = result.data.warnings as Array<Record<string, unknown>>;
+      const warning = warnings.find((w) => w.field === `integrations.${OAUTH}`)!;
+      expect(warning).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+      expect(warning).not.toHaveProperty("connect_url");
+      expect(warning).not.toHaveProperty("expiresAt");
+    }
 
-    const external = await warningOf("");
-    expect(external).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
-    expect(external).not.toHaveProperty("connect_url");
-    expect(external).not.toHaveProperty("expiresAt");
+    const blocked = await launch("", true);
+    expect(blocked.isError).toBe(true);
+    expect(blocked.data.status).toBe(409);
+    const errors = (blocked.data.body as ProblemDetails).errors ?? [];
+    const item = errors.find((e) => e.field === `integrations.${OAUTH}`) as
+      (ValidationFieldError & { connect_url?: string }) | undefined;
+    expect(item?.connect_url).toStartWith("http");
   }, 60_000);
 });

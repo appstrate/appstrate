@@ -29,6 +29,16 @@ function createApp() {
     callCount++;
     throw new Error("server error");
   });
+  // The response keeps `secret`; what is stored (and replayed) does not.
+  const storedBody = ({ secret: _secret, ...rest }: Record<string, unknown>) => rest;
+  app.post("/test-stored", idempotency({ storedBody }), async (c) => {
+    callCount++;
+    return c.json({ ok: true, secret: "link", callCount }, 201);
+  });
+  app.post("/test-stored-text", idempotency({ storedBody }), async (c) => {
+    callCount++;
+    return c.text("created, not JSON", 201);
+  });
   return app;
 }
 
@@ -120,6 +130,34 @@ describe("idempotency middleware", () => {
     const key255 = "a".repeat(255);
     const res = await post(app, "/test", { name: "Alice" }, key255);
     expect(res.status).toBe(201);
+  });
+
+  it("stores a JSON-object body as `storedBody` rewrites it", async () => {
+    const app = createApp();
+
+    const res1 = await post(app, "/test-stored", { name: "Alice" }, "key-stored");
+    expect(res1.status).toBe(201);
+    expect(await res1.json()).toEqual({ ok: true, secret: "link", callCount: 1 });
+
+    const res2 = await post(app, "/test-stored", { name: "Alice" }, "key-stored");
+    expect(res2.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await res2.json()).toEqual({ ok: true, callCount: 1 });
+    expect(callCount).toBe(1);
+  });
+
+  // The handler has already committed: a body `storedBody` cannot read must not become a 500.
+  it("stores any other body unchanged, never failing the committed response", async () => {
+    const app = createApp();
+
+    const res1 = await post(app, "/test-stored-text", { name: "Alice" }, "key-text");
+    expect(res1.status).toBe(201);
+    expect(await res1.text()).toBe("created, not JSON");
+
+    const res2 = await post(app, "/test-stored-text", { name: "Alice" }, "key-text");
+    expect(res2.status).toBe(201);
+    expect(res2.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await res2.text()).toBe("created, not JSON");
+    expect(callCount).toBe(1);
   });
 
   it("releases lock on 5xx so retry is possible", async () => {

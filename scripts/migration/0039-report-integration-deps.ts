@@ -11,10 +11,11 @@
  * declaring integrations, with each one's `integrations_configuration.<id>.required`, then every
  * ENABLED schedule firing such an agent — the version its `version_override` names included,
  * which is listed with the agents. An integration printed `optional` used to refuse a run with
- * no usable connection; after the deploy that run starts without it. Also counts the enabled
- * schedules whose `connection_overrides` hold an empty set: no write could store one before the
- * deploy, so anything but 0 is a row to inspect. Writes nothing (one READ ONLY transaction);
- * exits 0, 2 without `DATABASE_URL`.
+ * no usable connection; after the deploy that run starts without it. Also counts the schedules,
+ * enabled and disabled apart, whose `connection_overrides` hold an empty set: no write could
+ * store one before the deploy, and a disabled schedule fires again the day it is re-enabled, so
+ * anything but 0 is a row to inspect. Writes nothing (one READ ONLY transaction); exits 0, 2
+ * without `DATABASE_URL`.
  */
 
 import { SQL } from "bun";
@@ -37,7 +38,12 @@ interface ScheduleRow {
   package_id: string;
   version_override: string | null;
   connection_overrides: string | null;
-  has_empty_set: boolean;
+}
+
+/** Schedules whose `connection_overrides` hold at least one `[]`, by `enabled`. */
+interface EmptySetCounts {
+  enabled: number;
+  disabled: number;
 }
 
 interface VersionRow {
@@ -60,6 +66,7 @@ export interface ReportSnapshot {
   /** Every version of an agent an enabled schedule pins with `version_override`. */
   versions: VersionRow[];
   distTags: DistTagRow[];
+  emptySets: EmptySetCounts;
 }
 
 const AGENT_MANIFESTS_QUERY = `
@@ -81,14 +88,25 @@ const AGENT_MANIFESTS_QUERY = `
 
 const ENABLED_SCHEDULES_QUERY = `
   SELECT o.slug AS org, s.name AS space, sc.id, sc.name, sc.package_id,
-         sc.version_override, sc.connection_overrides::text AS connection_overrides,
-         EXISTS (SELECT 1 FROM jsonb_each(sc.connection_overrides) e
-                  WHERE e.value = '[]'::jsonb) AS has_empty_set
+         sc.version_override, sc.connection_overrides::text AS connection_overrides
     FROM package_schedules sc
     JOIN organizations o ON o.id = sc.org_id
     JOIN spaces s ON s.id = sc.space_id
    WHERE sc.enabled
    ORDER BY 1, 2, 5, 3`;
+
+// Every schedule, enabled or not. `jsonb_each` raises on anything but an object (a JSON `null`,
+// an array, a scalar), and a CASE — unlike an AND, which the planner may reorder — evaluates the
+// type test first, so a malformed row counts as no empty set instead of aborting the report.
+const EMPTY_SETS_QUERY = `
+  SELECT (count(*) FILTER (WHERE sc.enabled))::int AS enabled,
+         (count(*) FILTER (WHERE NOT sc.enabled))::int AS disabled
+    FROM package_schedules sc
+   WHERE EXISTS (SELECT 1
+                   FROM jsonb_each(CASE WHEN jsonb_typeof(sc.connection_overrides) = 'object'
+                                        THEN sc.connection_overrides
+                                        ELSE '{}'::jsonb END) e
+                  WHERE e.value = '[]'::jsonb)`;
 
 const PINNED_PACKAGES = `
   SELECT package_id FROM package_schedules WHERE enabled AND version_override IS NOT NULL`;
@@ -112,6 +130,7 @@ export async function readSnapshot(
     schedules: (await run(ENABLED_SCHEDULES_QUERY)) as ScheduleRow[],
     versions: (await run(PINNED_VERSIONS_QUERY)) as VersionRow[],
     distTags: (await run(PINNED_DIST_TAGS_QUERY)) as DistTagRow[],
+    emptySets: ((await run(EMPTY_SETS_QUERY)) as EmptySetCounts[])[0]!,
   };
 }
 
@@ -157,7 +176,13 @@ function table(header: string[], rows: string[][]): string[] {
 }
 
 /** The report's lines: the agents declaring integrations, then the enabled schedules firing one. */
-export function report({ agents, schedules, versions, distTags }: ReportSnapshot): string[] {
+export function report({
+  agents,
+  schedules,
+  versions,
+  distTags,
+  emptySets,
+}: ReportSnapshot): string[] {
   const listed = new Set(agents.map((a) => `${a.id}@${a.version}`));
   const homeOf = new Map(agents.map((a) => [a.id, a]));
   const pinned = schedules.flatMap((s): AgentManifestRow[] => {
@@ -192,7 +217,6 @@ export function report({ agents, schedules, versions, distTags }: ReportSnapshot
       s.version_override ?? "(default)",
       s.connection_overrides ?? "",
     ]);
-  const emptySets = schedules.filter((s) => s.has_empty_set).length;
   return [
     ...table(["org", "home space", "agent", "version", "integration"], agentRows),
     "",
@@ -203,7 +227,8 @@ export function report({ agents, schedules, versions, distTags }: ReportSnapshot
     "",
     `${declaring.size} agent(s) declare integrations: ${agentRows.length} declaration(s), ` +
       `${optional} optional; ${scheduleRows.length} enabled schedule(s) fire one of them.`,
-    `${emptySets} enabled schedule(s) hold an empty connection set (expected 0).`,
+    `Schedules holding an empty connection set (expected 0 each): ${emptySets.enabled} enabled, ` +
+      `${emptySets.disabled} disabled.`,
   ];
 }
 

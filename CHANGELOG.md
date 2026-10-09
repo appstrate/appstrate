@@ -56,9 +56,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `candidate_connections`, or `required_auth_key` and
     `available_auth_keys`, plus a `connect_url` when the caller sent
     `X-Appstrate-Connect-Offers` (never stored with an idempotent response,
-    the `201` or a `409`, so a replay carries none; over MCP `run_and_wait`, only the in-app chat
-    receives it, and an external MCP client gets the warning and can call
-    `initiateIntegrationConnect`); and when a cascade layer holds `[]` (below),
+    the `201` or a `409`, so a replay carries none; MCP `run_and_wait` warnings
+    carry no connect link, so an MCP client gets the warning and can call
+    `initiateIntegrationConnect`, and the in-app chat gets them through its own
+    launcher); and when a cascade layer holds `[]` (below),
     with a message naming that layer and no connect target, since the choice
     was deliberate;
   - `integration_not_active` when the integration is switched off in the

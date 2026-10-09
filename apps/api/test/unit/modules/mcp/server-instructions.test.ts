@@ -111,9 +111,13 @@ describe("MCP server instructions — connect bullet", () => {
       // Another member's schedule: the caller must not learn what their connections lack.
       expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);
     }
-    // Only the chat keeps the link on a started run's warnings; elsewhere it is minted on request.
-    expect(chat).toMatch(/a `connect_url` only when the response carries one/);
-    expect(chat).toMatch(/connect button from the warning's `connect_url`; do NOT paste/);
+    // A started run's warning never carries a link from this server; the chat renders its own card.
+    for (const bullet of [chat, external]) {
+      expect(bullet).not.toMatch(/a `connect_url` only when the response carries one/);
+      expect(bullet).not.toMatch(/from the warning's `connect_url`/);
+    }
+    expect(chat).toMatch(/the chat client renders a connect button under the run itself/);
+    expect(chat).toMatch(/do NOT paste or promise a link/);
     expect(external).toMatch(/a warning here never carries a `connect_url`/);
     expect(external).toMatch(
       /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
