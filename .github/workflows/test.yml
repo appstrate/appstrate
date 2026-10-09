@@ -533,3 +533,15 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+      # The API server's full output (stdout + stderr), written by the
+      # `webServer` command in e2e/playwright.config.ts. A server crash fails
+      # every later test with ECONNRESET; this log holds the Bun crash report
+      # and its bun.report link needed to report it upstream (#1710).
+      - name: Upload API server log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-server-log
+          path: data/e2e/server.log
+          retention-days: 7
