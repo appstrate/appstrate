@@ -19,6 +19,7 @@
  */
 
 import { z } from "zod";
+import type { TokenUsageTier } from "@appstrate/afps-shared/token-usage";
 // Type-only imports (erased at emit), so the `module.ts` ↔ `chat-contract.ts`
 // pair carries no runtime cycle. Both symbols are the canonical, already
 // published ones — re-declaring them here is what let the chat surface drift
@@ -131,6 +132,8 @@ export interface ChatUsageRecord {
   outputTokens: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
+  /** The turn's tier bands (`TokenUsage.tiers`): its summed counters lose which call hit a tier. */
+  tiers?: TokenUsageTier[];
   /**
    * Model's catalog per-1M-token rates, or null when the catalog has none. The
    * platform seam computes the equivalent USD cost from this + the token counts

@@ -17,6 +17,7 @@ import {
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
@@ -299,13 +300,27 @@ export const schemas = {
     type: "object",
     required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
     description:
-      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card.",
     properties: {
-      inputTokensAbove: { type: "number" },
+      inputTokensAbove: { type: "integer", minimum: 1 },
       input: { type: "number" },
       output: { type: "number" },
       cacheRead: { type: "number" },
       cacheWrite: { type: "number" },
+    },
+  },
+  TokenUsageTier: {
+    type: "object",
+    additionalProperties: false,
+    required: ["input_tokens_above"],
+    description:
+      "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request.",
+    properties: {
+      input_tokens_above: { type: "integer", minimum: 1 },
+      input_tokens: { type: "integer", minimum: 0 },
+      output_tokens: { type: "integer", minimum: 0 },
+      cache_creation_input_tokens: { type: "integer", minimum: 0 },
+      cache_read_input_tokens: { type: "integer", minimum: 0 },
     },
   },
   ModelGenerationCapabilities: {
@@ -1145,17 +1160,21 @@ export const schemas = {
       token_usage: {
         type: ["object", "null"],
         description:
-          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
+          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB.",
         properties: {
           input_tokens: { type: "integer", minimum: 0 },
           output_tokens: { type: "integer", minimum: 0 },
           cache_creation_input_tokens: { type: "integer", minimum: 0 },
           cache_read_input_tokens: { type: "integer", minimum: 0 },
+          tiers: {
+            type: "array",
+            description:
+              "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+            maxItems: MAX_TOKEN_USAGE_TIERS,
+            items: { $ref: "#/components/schemas/TokenUsageTier" },
+          },
         },
-        // Stored verbatim from the runner's JSONB — a runner may emit provider-
-        // specific extra keys beyond the four documented above. additionalProperties
-        // stays `true` so those pass-through keys don't fail spec==runtime validation.
-        additionalProperties: true,
+        additionalProperties: false,
       },
       started_at: { type: ["string", "null"], format: "date-time" },
       completed_at: { type: ["string", "null"], format: "date-time" },
@@ -1785,7 +1804,11 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
-          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
+          tiers: {
+            type: "array",
+            maxItems: MAX_TOKEN_USAGE_TIERS,
+            items: { $ref: "#/components/schemas/ModelCostTier" },
+          },
         },
       },
       created_by: { type: ["string", "null"] },

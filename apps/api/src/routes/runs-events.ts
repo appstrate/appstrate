@@ -43,10 +43,11 @@ import {
   downloadRunFileStream,
 } from "../services/run-workspace-storage.ts";
 import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
+import { parseTokenUsage } from "@appstrate/core/token-usage";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
+import { logger } from "../lib/logger.ts";
 import type { AppEnv } from "../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -169,7 +170,8 @@ export const RunResultSchema = z
     durationMs: z.number().int().nonnegative().optional().catch(undefined),
     // Authoritative token usage for finalize liveness and the terminal
     // `runs.tokenUsage` write. Required on a success (refinement below).
-    usage: tokenUsageSchema.optional().catch(undefined),
+    // Parsed here with its dropped-bands flag, which the handler logs.
+    usage: z.unknown().transform(parseTokenUsage).optional(),
     // Authoritative LLM cost in USD for the runner-source contribution.
     // When present, finalize synthesises a runner-source `llm_usage`
     // ledger row from this value if no metric event has landed yet, so
@@ -218,7 +220,7 @@ export const RunResultSchema = z
   })
   .passthrough()
   .superRefine((body, ctx) => {
-    if (body.status === "success" && body.usage === undefined) {
+    if (body.status === "success" && !body.usage?.usage) {
       ctx.addIssue({
         code: "custom",
         path: ["usage"],
@@ -308,6 +310,10 @@ export function createRunsEventsRouter() {
     // we project explicitly to the runtime's RunResult shape so the
     // service's type checks are enforced without a cast.
     const d = await readJsonBody(c, RunResultSchema);
+    const usage = d.usage?.usage ?? undefined;
+    if (d.usage?.tiersDropped) {
+      logger.warn("usage: malformed tier bands dropped", { runId: run.id, seam: "finalize" });
+    }
     const result: TerminalRunResult = {
       memories: d.memories,
       ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
@@ -316,7 +322,7 @@ export function createRunsEventsRouter() {
       ...(d.error ? { error: d.error } : {}),
       status: d.status,
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
-      ...(d.usage !== undefined ? { usage: d.usage } : {}),
+      ...(usage ? { usage } : {}),
       ...(d.cost !== undefined ? { cost: d.cost } : {}),
       ...(d.artifacts !== undefined ? { artifacts: d.artifacts } : {}),
     };

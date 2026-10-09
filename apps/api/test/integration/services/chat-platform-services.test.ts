@@ -13,7 +13,7 @@
  * message).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { chatSessions, llmUsage } from "@appstrate/db/schema";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
@@ -24,6 +24,7 @@ import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
+import { logger } from "../../../src/lib/logger.ts";
 
 // `resolveChatModel` reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -221,7 +222,7 @@ describe("recordChatUsage — pricing provenance", () => {
     expect(row!.pricingStatus).toBe("partial");
   });
 
-  it("prices a turn at the BASE rate: its usage is summed over requests, so no price tier applies", async () => {
+  it("prices a turn without tier bands at the BASE rate, however large its sum", async () => {
     const sessionId = await seedSession("chs_pricing_tiered");
     await recordChatUsage(
       record({
@@ -245,5 +246,65 @@ describe("recordChatUsage — pricing provenance", () => {
 
     // 0.4M×5 + 0.02M×30 = 2 + 0.6 — never the tier's 4 + 0.9.
     expect((await storedRow(sessionId))!.costUsd).toBeCloseTo(2.6, 9);
+  });
+
+  /** Haiku-5.5-like card: every rate ×5 above 100k prompt tokens. */
+  const TIERED_COST = {
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    tiers: [
+      { inputTokensAbove: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 },
+    ],
+  };
+  /** Two calls: 20k in / 1k out (base), then 30k in + 80k cached / 2k out (tier). */
+  const tieredTurn = {
+    modelId: "claude-haiku-5-5",
+    inputTokens: 50_000,
+    outputTokens: 3_000,
+    cacheReadTokens: 80_000,
+    cacheWriteTokens: 0,
+    cost: TIERED_COST,
+  };
+  const TIER_BAND = {
+    input_tokens_above: 100_000,
+    input_tokens: 30_000,
+    output_tokens: 2_000,
+    cache_read_input_tokens: 80_000,
+    cache_creation_input_tokens: 0,
+  };
+
+  it("prices each call of a turn at its tier from the record's bands", async () => {
+    const sessionId = await seedSession("chs_pricing_bands");
+    await recordChatUsage(record({ chatSessionId: sessionId, ...tieredTurn, tiers: [TIER_BAND] }));
+
+    // Band at the tier: 0.03M×0.5 + 0.002M×2.5 + 0.08M×0.05 = 0.024.
+    // Rest at base:     0.02M×0.1 + 0.001M×0.5               = 0.0025.
+    const row = await storedRow(sessionId);
+    expect(row!.costUsd).toBeCloseTo(0.0265, 12);
+    // The ledger columns stay the turn's totals.
+    expect(row!.inputTokens).toBe(50_000);
+    expect(row!.cacheReadTokens).toBe(80_000);
+  });
+
+  it("drops invalid bands and prices the turn at the base rate", async () => {
+    const sessionId = await seedSession("chs_pricing_bad_bands");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await recordChatUsage(
+        record({
+          chatSessionId: sessionId,
+          ...tieredTurn,
+          tiers: [{ ...TIER_BAND, input_tokens: -30_000 }],
+        }),
+      );
+      expect(warn.mock.calls.map(([msg]) => msg)).toContain("usage: malformed tier bands dropped");
+    } finally {
+      warn.mockRestore();
+    }
+
+    // 0.05M×0.1 + 0.003M×0.5 + 0.08M×0.01 = 0.0073.
+    expect((await storedRow(sessionId))!.costUsd).toBeCloseTo(0.0073, 12);
   });
 });

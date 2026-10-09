@@ -878,17 +878,9 @@ function buildRunResultPayload(
   }
   if (record.duration != null) result.durationMs = record.duration;
   if (record.cost != null) result.cost = record.cost;
+  // As stored (cache counters, tier bands), the two required counters zeroed when absent.
   const u = record.token_usage;
-  result.usage = {
-    input_tokens: u?.input_tokens ?? 0,
-    output_tokens: u?.output_tokens ?? 0,
-    ...(u?.cache_creation_input_tokens != null
-      ? { cache_creation_input_tokens: u.cache_creation_input_tokens }
-      : {}),
-    ...(u?.cache_read_input_tokens != null
-      ? { cache_read_input_tokens: u.cache_read_input_tokens }
-      : {}),
-  };
+  result.usage = { ...u, input_tokens: u?.input_tokens ?? 0, output_tokens: u?.output_tokens ?? 0 };
   return result;
 }
 

@@ -90,8 +90,6 @@ Catalog lookups take a scope, `all` (bundled plus live) or `bundled`.
   `SYSTEM_PROVIDER_KEYS` models), `verify:system-models`, and a system model's
   price, limits and dialect at run time. Remote data decides neither whether an
   instance starts nor what a model the platform pays for costs.
-- A **subscription provider** (`authMode: "oauth2"`) is offered no live record
-  with a price tier one request can reach (#1552).
 
 ## Sync
 
