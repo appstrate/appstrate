@@ -432,6 +432,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Runner egress tunnels relay a half-close, and the http relay cancels an
+  abandoned upstream request** (#1878). On the egress CONNECT listener, the
+  transparent plane and the agent's forward proxy, a client's FIN reaches the
+  upstream as a FIN, so a reply sent after it now arrives instead of being cut;
+  a half-open tunnel stays bounded by the idle timeout, and a FIN before the
+  tunnel's first bytes closes it at once. A client that leaves before the whole
+  answer cancels the upstream request instead of letting it run to the upstream
+  timeout. Pipelined `http://` requests are vetted one by one and answered in
+  order, and one pipelined behind a refusal is dropped, never relayed.
+
 - **A proxy-aware local runner reaches `http://` targets through its egress
   listener** (#1819). The listener of a runner with nothing to inject
   answered 405 to the absolute-form `http://` request such a client sends to
