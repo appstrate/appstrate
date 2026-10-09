@@ -173,11 +173,12 @@ export function IntegrationDetailPage() {
 
   const active = detail.active;
   const m = detail.manifest;
-  const source = pkg?.source ?? "local";
+  // Only the package detail knows the source. Unknown (read refused or failed) is not owned.
+  const source = pkg?.source;
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
-  const isOwned = !isBuiltIn;
+  const isOwned = source === "local";
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
     setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
@@ -191,7 +192,7 @@ export function IntegrationDetailPage() {
           id: packageId,
           displayName: m.display_name ?? packageId,
           description: m.description ?? "",
-          source,
+          source: source ?? "",
           type: "integration",
           version,
           icon: typeof m.icon === "string" ? m.icon : undefined,
@@ -291,7 +292,7 @@ export function IntegrationDetailPage() {
             <TabsTrigger value="content" data-testid="tab-content">
               {t("detail.tabFiles", { ns: "agents" })}
             </TabsTrigger>
-            {!isBuiltIn && (
+            {isOwned && (
               <TabsTrigger value="versions" data-testid="tab-versions">
                 {t("integration.tabs.versions")}
               </TabsTrigger>
@@ -461,7 +462,7 @@ export function IntegrationDetailPage() {
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}
-        {!isBuiltIn && (
+        {isOwned && (
           <TabsContent value="versions" className="mt-4">
             <VersionHistory
               packageId={packageId}

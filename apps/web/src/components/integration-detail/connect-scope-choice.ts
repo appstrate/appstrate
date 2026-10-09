@@ -8,6 +8,7 @@ import type {
 } from "../../hooks/use-integrations";
 
 type ScopeCatalogEntry = NonNullable<IntegrationManifestAuth["scope_catalog"]>[number];
+type AgentDeclaration = Pick<AgentIntegrationEntry, "id" | "tools" | "scopes">;
 
 /**
  * What "+ Ajouter" offers for one auth. Every connect requests
@@ -52,6 +53,27 @@ export function scopesForAgent(
     }),
   );
   return choice.selectable.filter((entry) => required.has(entry.value)).map((e) => e.value);
+}
+
+/**
+ * A pick in the agent quick-fill: the agent's selectable scopes for this integration added to
+ * `ticked`. `added` is false when nothing new is ticked: the baseline covers the agent, it
+ * uses another auth, or the definition read does not declare the integration.
+ */
+export async function tickAgentScopes(input: {
+  loadAgent: () => Promise<{ dependencies: { integrations: readonly AgentDeclaration[] } }>;
+  integrationId: string;
+  manifest: IntegrationManifestView;
+  authKey: string;
+  choice: ScopeChoice;
+  ticked: readonly string[];
+}): Promise<{ ticked: string[]; added: boolean }> {
+  const { choice, manifest, authKey, ticked } = input;
+  const agent = await input.loadAgent();
+  const entry = agent.dependencies.integrations.find((i) => i.id === input.integrationId);
+  const scopes = entry ? scopesForAgent(choice, { manifest, authKey, agent: entry }) : [];
+  const fresh = scopes.filter((scope) => !ticked.includes(scope));
+  return { ticked: [...ticked, ...fresh], added: fresh.length > 0 };
 }
 
 /** The ticked scopes to request, in catalog order; `[]` connects with the baseline alone. */

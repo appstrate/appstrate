@@ -27,6 +27,7 @@ import {
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { AMBER_TEXT } from "./connection-picker-states";
 import { NoConnectionLabel } from "./no-connection-label";
+import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
 /** What the closed trigger shows, first match wins. */
@@ -208,11 +209,12 @@ export function PickerMenu({
                   className="pointer-events-none"
                 />
               )}
-              <div
-                className={`flex min-w-0 flex-1 flex-col ${fit === "missing" ? "opacity-60" : ""}`}
-              >
+              <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate font-medium">{c.label}</span>
+                  {/* An incompatible row is muted on its name; its reason stays legible. */}
+                  <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
+                    {c.label}
+                  </span>
                   {tl && (
                     <Badge variant="outline" className="text-[0.6rem]">
                       {tl}
@@ -242,12 +244,11 @@ export function PickerMenu({
                     {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
                   </span>
                 ) : summary ? (
-                  <span
-                    className="text-muted-foreground truncate text-[0.65rem]"
+                  <ScopeSummaryText
+                    summary={summary}
                     title={summary.title}
-                  >
-                    {summary.text ?? t("settings:integration.connection.defaultPermissions")}
-                  </span>
+                    className="text-muted-foreground truncate text-[0.65rem]"
+                  />
                 ) : null}
                 {fit === "broader" && (
                   <span className="text-muted-foreground truncate text-[0.65rem] italic">

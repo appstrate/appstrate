@@ -14,6 +14,7 @@ import {
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { useSetPackageActive } from "../../hooks/use-library";
+import { ApiError } from "../../api/errors";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
@@ -87,17 +88,31 @@ function IntegrationConnectionCard({
   required,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
+  const { data: detail, isLoading, error } = useIntegrationDetail(packageId);
   const displayName = detail?.manifest.display_name ?? packageId;
 
-  if (detailPending || !detail) {
-    return (
-      <CardShell
-        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
-        title={displayName}
-        subtitle={packageId}
-      />
-    );
+  if (!detail) {
+    // A spinner only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
+    if (isLoading) {
+      return (
+        <CardShell
+          icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
+          title={displayName}
+          subtitle={packageId}
+        />
+      );
+    }
+    // 404: the integration is not placed in this space, which is what activating it fixes.
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        <InactiveIntegrationCard
+          packageId={packageId}
+          displayName={displayName}
+          required={required}
+        />
+      );
+    }
+    return <CardShell title={displayName} subtitle={packageId} />;
   }
 
   // Not active in this space (the integration's own detail says so) → no

@@ -120,6 +120,8 @@ export function useConnectionPicker(
   // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
   const [open, setOpen] = useState(false);
+  // The connection whose in-place upgrade awaits confirmation.
+  const [upgradeTargetId, setUpgradeTarget] = useState<string | null>(null);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setDraft(null);
@@ -366,5 +368,7 @@ export function useConnectionPicker(
     triggerConnect,
     renewConnection,
     upgradeScopes,
+    upgradeTargetId,
+    setUpgradeTargetId: (id: string | null) => setUpgradeTarget(id),
   };
 }

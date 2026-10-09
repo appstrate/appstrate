@@ -81,7 +81,7 @@
   "detail.integrationMemberPicker.blockedByRole": "Your role cannot add connections",
   "detail.integrationMemberPicker.missingScopesOwn": "This connection lacks some permissions the agent requires.",
   "detail.integrationMemberPicker.upgradeButton": "Upgrade",
-  "detail.integrationMemberPicker.missingScopes": "Missing: {{scopes}}",
+  "detail.integrationMemberPicker.missingScopes": "Missing permissions: {{scopes}}",
   "detail.integrationMemberPicker.broaderThanAgent": "Grants more than the agent asks for",
   "detail.integrationMemberPicker.newWithAgentScopes": "New connection with this agent's permissions",
   "detail.integrationMemberPicker.newWithAgentScopesVia": "New connection via {{label}} with this agent's permissions",

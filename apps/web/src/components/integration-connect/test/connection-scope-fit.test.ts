@@ -57,20 +57,41 @@ describe("summarizeScopes", () => {
   it("shows what the grant adds to the defaults, folding the rest into +N", () => {
     expect(summarizeScopes(MANIFEST, "oauth", ["openid", READ, SEND, LABELS, MODIFY])).toEqual({
       text: "Send · Labels +1",
+      lacking: null,
       title: "Identity, Read, Send, Labels, Read & write",
     });
   });
 
   it("leaves out what the catalog does not declare, the IdP's echo", () => {
-    expect(summarizeScopes(MANIFEST, "oauth", ["profile", READ, SEND])).toEqual({
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", "profile", READ, SEND])).toEqual({
       text: "Send",
-      title: "profile, Read, Send",
+      lacking: null,
+      title: "Identity, profile, Read, Send",
     });
   });
 
-  it("has no text for a grant of the defaults alone, and nothing for an empty grant", () => {
+  it("names the defaults a grant lacks, so a short grant never reads as the defaults", () => {
+    // Read unticked at consent.
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", "email"])).toEqual({
+      text: null,
+      lacking: "Read",
+      title: "Identity, email",
+    });
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", SEND])?.lacking).toBe("Read");
+  });
+
+  it("holds a default through a granted scope that implies it", () => {
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", MODIFY])).toEqual({
+      text: "Read & write",
+      lacking: null,
+      title: "Identity, Read & write",
+    });
+  });
+
+  it("has neither text nor lack for the defaults alone, and nothing for an empty grant", () => {
     expect(summarizeScopes(MANIFEST, "oauth", ["openid", READ, "email"])).toEqual({
       text: null,
+      lacking: null,
       title: "Identity, Read, email",
     });
     expect(summarizeScopes(MANIFEST, "oauth", [])).toBeNull();
@@ -79,6 +100,7 @@ describe("summarizeScopes", () => {
   it("keeps every non-default scope, raw, when the auth declares no catalog", () => {
     expect(summarizeScopes(undefined, "oauth", ["a", "b"])).toEqual({
       text: "a · b",
+      lacking: null,
       title: "a, b",
     });
   });

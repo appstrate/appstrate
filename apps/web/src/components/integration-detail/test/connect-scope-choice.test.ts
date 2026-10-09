@@ -5,7 +5,12 @@ import type {
   IntegrationManifestAuth,
   IntegrationManifestView,
 } from "../../../hooks/use-integrations";
-import { requestedScopes, scopeChoiceFor, scopesForAgent } from "../connect-scope-choice";
+import {
+  requestedScopes,
+  scopeChoiceFor,
+  scopesForAgent,
+  tickAgentScopes,
+} from "../connect-scope-choice";
 
 const GOOGLE = {
   type: "oauth2",
@@ -101,6 +106,57 @@ describe("scopesForAgent", () => {
         agent: { tools: ["read_email"] },
       }),
     ).toEqual([]);
+  });
+});
+
+describe("tickAgentScopes", () => {
+  const INTEGRATION = "@acme/gmail";
+
+  function pick(
+    integrations: { id: string; tools?: string[]; scopes?: string[] }[],
+    ticked: string[] = [],
+  ) {
+    const loaded: string[] = [];
+    return tickAgentScopes({
+      loadAgent: async () => {
+        loaded.push("agent");
+        return { dependencies: { integrations } };
+      },
+      integrationId: INTEGRATION,
+      manifest: MANIFEST,
+      authKey: "google",
+      choice: choice(),
+      ticked,
+    }).then((result) => ({ ...result, loaded }));
+  }
+
+  it("reads the agent and ticks the scopes its entry for this integration needs", async () => {
+    const result = await pick([
+      { id: "@acme/other", tools: ["send_email"], scopes: ["gmail.compose"] },
+      { id: INTEGRATION, tools: ["send_email"] },
+    ]);
+    expect(result).toEqual({ ticked: ["gmail.send"], added: true, loaded: ["agent"] });
+  });
+
+  it("adds to what is already ticked", async () => {
+    const result = await pick([{ id: INTEGRATION, tools: ["send_email"] }], ["gmail.compose"]);
+    expect(result.ticked).toEqual(["gmail.compose", "gmail.send"]);
+    expect(result.added).toBe(true);
+  });
+
+  it("adds nothing for an agent the baseline covers", async () => {
+    const result = await pick([{ id: INTEGRATION, tools: ["read_email"] }]);
+    expect(result).toMatchObject({ ticked: [], added: false });
+  });
+
+  it("adds nothing when the definition read does not declare the integration", async () => {
+    const result = await pick([{ id: "@acme/other", tools: ["send_email"] }], ["gmail.compose"]);
+    expect(result).toMatchObject({ ticked: ["gmail.compose"], added: false });
+  });
+
+  it("adds nothing when everything the agent needs is already ticked", async () => {
+    const result = await pick([{ id: INTEGRATION, tools: ["send_email"] }], ["gmail.send"]);
+    expect(result).toMatchObject({ ticked: ["gmail.send"], added: false });
   });
 });
 

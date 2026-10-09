@@ -27,6 +27,7 @@ import {
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
 import { summarizeScopes } from "../integration-connect/connection-scope-fit";
+import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -285,7 +286,6 @@ function ConnectionTableRow({
                       // (integration-connections.ts:721 "explicit connectionId
                       // = update; no id = insert").
                       connectionId={connection.id}
-                      lockToAuthKey
                       size="sm"
                     />
                   )}
@@ -310,12 +310,11 @@ function ConnectionTableRow({
         <TableCell className="max-w-[16rem]">
           {scopes ? (
             // The labels name the grant; the raw values stay one hover away.
-            <span
-              className="text-muted-foreground block truncate text-[0.65rem]"
+            <ScopeSummaryText
+              summary={scopes}
               title={connection.scopes_granted.join(" ")}
-            >
-              {scopes.text ?? t("integration.connection.defaultPermissions")}
-            </span>
+              className="text-muted-foreground block truncate text-[0.65rem]"
+            />
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
           )}

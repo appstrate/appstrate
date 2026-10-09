@@ -12,7 +12,7 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
 import type { IntegrationManifestView } from "../../../hooks/use-integrations.ts";
-import { ConnectScopesForm } from "../connect-scopes-dialog.tsx";
+import { AgentQuickFillMenu, ConnectScopesForm } from "../connect-scopes-dialog.tsx";
 import { useConnectWithScopes, type ConnectWithScopesDeps } from "../use-connect-with-scopes.ts";
 import { scopeChoiceFor } from "../connect-scope-choice.ts";
 
@@ -123,5 +123,48 @@ describe("useConnectWithScopes", () => {
         forceAccountSelect: true,
       },
     ]);
+  });
+});
+
+describe("AgentQuickFillMenu", () => {
+  const AGENTS = [{ agent_package_id: "@acme/triage", display_name: "Tri" }];
+
+  function renderMenu(over: Partial<Parameters<typeof AgentQuickFillMenu>[0]> = {}): string {
+    return render(
+      <AgentQuickFillMenu
+        authKey="google"
+        agents={AGENTS}
+        listLoading={false}
+        listError={null}
+        picking={false}
+        nothingToAdd={false}
+        onPick={() => {}}
+        {...over}
+      />,
+    );
+  }
+
+  it("offers the agents behind an action button", () => {
+    const html = renderMenu();
+    expect(html).toContain('data-testid="connect-scopes-agent-google"');
+    expect(html).toContain(i18n.t("settings:integration.auth.scopeChoice.forAgentPlaceholder"));
+    expect(html).not.toContain(i18n.t("settings:integration.auth.scopeChoice.nothingToAdd"));
+  });
+
+  it("says when the last pick added nothing", () => {
+    expect(renderMenu({ nothingToAdd: true })).toContain(
+      i18n.t("settings:integration.auth.scopeChoice.nothingToAdd"),
+    );
+  });
+
+  it("says the agent list is loading, then that it failed", () => {
+    expect(renderMenu({ agents: [], listLoading: true })).toContain(i18n.t("common:loading"));
+    const failed = renderMenu({ agents: [], listError: new Error("boom") });
+    expect(failed).toContain('data-testid="connect-scopes-agent-google-error"');
+    expect(failed).not.toContain('data-testid="connect-scopes-agent-google"');
+  });
+
+  it("renders nothing when no agent of the space declares the integration", () => {
+    expect(renderMenu({ agents: [] })).toBe("");
   });
 });

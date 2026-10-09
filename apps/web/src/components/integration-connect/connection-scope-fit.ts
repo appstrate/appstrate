@@ -2,19 +2,20 @@
 
 import { expandScopesGranted, type IntegrationManifest } from "@appstrate/core/integration";
 
-/**
- * How a connection's grant compares with what an agent needs:
- *  - `exact`    — covers the agent and grants no declared scope beyond it and `default_scopes`;
- *  - `unjudged` — covers the agent, breadth unknown: a non-oauth2 auth or one with no catalog;
- *  - `broader`  — covers the agent but grants more;
- *  - `missing`  — lacks some of the agent's scopes (the server's `missing_scopes`).
- */
+/** `unjudged`: covers the agent, but the auth (non-oauth2, or no catalog) gives no breadth. */
 export type ScopeFit = "exact" | "unjudged" | "broader" | "missing";
 
 const FIT_RANK: Record<ScopeFit, number> = { exact: 0, unjudged: 1, broader: 2, missing: 3 };
 
-/** How many labels a summary shows before folding the rest into `+N`. */
 const SUMMARY_MAX = 2;
+
+export interface ScopeSummary {
+  /** What the grant adds to `default_scopes`, `+N`-folded; `null` when nothing. */
+  text: string | null;
+  /** The `default_scopes` the grant lacks; `null` when it holds them all. */
+  lacking: string | null;
+  title: string;
+}
 
 /** The manifest's `scope_catalog` label of each scope, the raw scope when it declares none. */
 export function scopeLabels(
@@ -27,37 +28,34 @@ export function scopeLabels(
   return scopes.map((s) => labelOf.get(s) ?? s);
 }
 
-/**
- * A short line for a granted set: what it grants beyond the auth's `default_scopes`, the first
- * labels and `+N`. Under a catalog, scopes it does not declare (an IdP's echo) are left out.
- * `text` is `null` when nothing is left — the caller names the defaults — and the whole set is
- * `null` for an empty grant. `title` labels every granted scope.
- */
+/** A grant told by what sets it apart; an IdP's echo the catalog does not declare is left out. */
 export function summarizeScopes(
   manifest: IntegrationManifest | undefined,
   authKey: string,
   scopes: readonly string[],
-): { text: string | null; title: string } | null {
+): ScopeSummary | null {
   if (scopes.length === 0) return null;
   const auth = manifest?.auths?.[authKey];
-  const defaults = new Set(auth?.default_scopes ?? []);
+  const defaults = auth?.default_scopes ?? [];
   const declared = auth?.scope_catalog?.length
     ? new Set(auth.scope_catalog.map((entry) => entry.value))
     : null;
-  const telling = scopes.filter((s) => !defaults.has(s) && (declared?.has(s) ?? true));
+  const telling = scopes.filter((s) => !defaults.includes(s) && (declared?.has(s) ?? true));
+  const held = new Set(manifest ? expandScopesGranted(scopes, manifest, authKey) : scopes);
+  const lacking = defaults.filter((s) => !held.has(s));
   const labels = scopeLabels(manifest, authKey, telling);
   const more = labels.length - SUMMARY_MAX;
   const shown = labels.slice(0, SUMMARY_MAX).join(" · ");
   return {
     text: labels.length === 0 ? null : more > 0 ? `${shown} +${more}` : shown,
+    lacking: lacking.length === 0 ? null : scopeLabels(manifest, authKey, lacking).join(", "),
     title: scopeLabels(manifest, authKey, scopes).join(", "),
   };
 }
 
 /**
- * Where a connection stands for an agent. Coverage is the server's verdict (`missing`). Breadth
- * compares the granted scopes the auth's catalog declares with `required ∪ default_scopes`,
- * expanded through `scope_catalog[].implies`; an undeclared scope is the IdP's echo, not a grant.
+ * Coverage is the server's verdict (`missing`). Breadth compares the granted scopes the catalog
+ * declares with `required ∪ default_scopes`, expanded through `implies`.
  */
 export function scopeFit(input: {
   manifest: IntegrationManifest;
@@ -80,7 +78,7 @@ export function scopeFit(input: {
   return input.granted.some((s) => declared.has(s) && !allowed.has(s)) ? "broader" : "exact";
 }
 
-/** `items` ordered exact → unjudged → broader → missing, keeping the given order within each. */
+/** Stable: exact → unjudged → broader → missing. */
 export function sortByScopeFit<T>(items: readonly T[], fitOf: (item: T) => ScopeFit): T[] {
   return [...items].sort((a, b) => FIT_RANK[fitOf(a)] - FIT_RANK[fitOf(b)]);
 }

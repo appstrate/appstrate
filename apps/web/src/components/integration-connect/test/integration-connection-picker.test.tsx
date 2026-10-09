@@ -28,6 +28,8 @@ import { ConfirmModal } from "../../confirm-modal.tsx";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
+import { ScopeSummaryText } from "../scope-summary-text.tsx";
+import type { ScopeSummary } from "../connection-scope-fit.ts";
 import {
   useConnectionPicker,
   type ConnectionPicker,
@@ -963,31 +965,41 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     expect(blocked).not.toContain(`member-pick-new-for-agent-${WEB}`);
   });
 
-  it("opens a confirmation on 'Mettre à niveau', and upgrades only once it is confirmed", () => {
+  it("'Mettre à niveau' asks for a confirmation, and only a confirmed upgrade writes", () => {
     const conn = scoped(WEB, ["read"], ["send"]);
+    const asked: Array<string | null> = [];
     const upgraded: Candidate[] = [];
-    const picker = {
+    const picker: ConnectionPicker = {
       ...withConnect(pickerOver([conn])),
-      upgradeScopes: async (c: Candidate) => {
+      setUpgradeTargetId: (id) => asked.push(id),
+      upgradeScopes: async (c) => {
         upgraded.push(c);
         return true;
       },
     };
-    const tree = warningTree(conn, picker);
-    const button = propsOf(tree, `member-pick-upgrade-${WEB}`);
-    (button?.onClick as () => void)();
+    // The click names the connection to confirm, and writes nothing.
+    const idle = warningTree(conn, picker);
+    expect(confirmModalProps(idle)?.open).toBe(false);
+    (propsOf(idle, `member-pick-upgrade-${WEB}`)?.onClick as () => void)();
+    expect(asked).toEqual([WEB]);
     expect(upgraded).toEqual([]);
-    const modal = confirmModalProps(tree);
-    expect(modal?.open).toBe(false);
+    // Named, it opens the confirmation; confirming upgrades and closes it.
+    const confirming = warningTree(conn, { ...picker, upgradeTargetId: WEB });
+    const modal = confirmModalProps(confirming);
+    expect(modal?.open).toBe(true);
     (modal?.onConfirm as () => void)();
     expect(upgraded).toEqual([conn]);
+    expect(asked).toEqual([WEB, null]);
+    // Another connection's pending confirmation is not this one's.
+    const other = warningTree(conn, { ...picker, upgradeTargetId: DB });
+    expect(confirmModalProps(other)?.open).toBe(false);
   });
 
-  it("sends the agent's scopes only to a new connection or a confirmed upgrade, never a renew", async () => {
-    const conn = scoped(WEB, ["read"], ["send"]);
+  it("a renew sends no scopes, an upgrade only the missing ones, a new connection the agent's", async () => {
+    const conn = scoped(WEB, ["read", "labels"], ["send"]);
     const opened: Array<Parameters<OpenPopup>[0]> = [];
     const picker = pickerOver([conn], {
-      agentScopes: ["send"],
+      agentScopes: ["send", "labels"],
       openPopup: async (input) => {
         opened.push(input);
         return false;
@@ -999,7 +1011,55 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     expect(opened).toEqual([
       { packageId: INTEGRATION, authKey: "primary", connectionId: WEB },
       { packageId: INTEGRATION, authKey: "primary", scopes: ["send"], connectionId: WEB },
-      { packageId: INTEGRATION, authKey: "primary", scopes: ["send"], forceAccountSelect: true },
+      {
+        packageId: INTEGRATION,
+        authKey: "primary",
+        scopes: ["send", "labels"],
+        forceAccountSelect: true,
+      },
     ]);
   });
+
+  it("shows each row's grant against the agent, and offers a connection with its scopes", () => {
+    const exact = scoped(DB, ["read", "send"]);
+    const broader = scoped(LABELS, ["read", "send", "labels"]);
+    const short = scoped(WEB, ["read"], ["send"]);
+    const picker = pickerOver([short, broader, exact], { agentScopes: ["send"] });
+    const trees: ReactNode[] = [];
+    render(<MenuProbe picker={picker} onTree={(tree) => trees.push(tree)} />);
+    const row = (id: string) => propsOf(trees[0], `member-pick-option-${id}`)?.children;
+    const add = propsOf(trees[0], `member-pick-add-${INTEGRATION}-primary`)?.children;
+    const t = (key: string, opts?: Record<string, unknown>) =>
+      i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+
+    expect(summaryOf(row(DB))?.text).toBe("Send");
+    expect(textsOf(row(DB))).not.toContain(t("broaderThanAgent"));
+    expect(summaryOf(row(LABELS))?.text).toBe("Send · Labels");
+    expect(textsOf(row(LABELS))).toContain(t("broaderThanAgent"));
+    expect(textsOf(row(WEB))).toContain(t("missingScopes", { scopes: "Send" }));
+    expect(summaryOf(row(WEB))).toBeUndefined();
+    expect(textsOf(add)).toContain(t("newWithAgentScopes"));
+  });
 });
+
+/** Every string rendered literally in an element tree. */
+function textsOf(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+  if (Array.isArray(node)) return node.flatMap(textsOf);
+  if (!isValidElement<{ children?: unknown }>(node)) return [];
+  return textsOf(node.props.children);
+}
+
+/** The `summary` a row hands to `ScopeSummaryText`, if it shows one. */
+function summaryOf(node: unknown): ScopeSummary | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = summaryOf(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement<{ children?: unknown; summary?: ScopeSummary }>(node)) return undefined;
+  if (node.type === ScopeSummaryText) return node.props.summary;
+  return summaryOf(node.props.children);
+}

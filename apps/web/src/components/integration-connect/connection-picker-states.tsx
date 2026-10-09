@@ -2,7 +2,7 @@
 
 /** The connection picker's states besides the dropdown, and the warnings shown under it. */
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Loader2, Lock, Plus, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -231,9 +231,10 @@ export function UnderScopedWarning({
     oauthPending,
     triggerConnect,
     upgradeScopes,
+    upgradeTargetId,
+    setUpgradeTargetId,
     missingScopeLabels,
   } = picker;
-  const [confirmUpgrade, setConfirmUpgrade] = useState(false);
   const missing = missingScopeLabels(conn).join(", ");
   const canCreate = canAddConnection && authKeys.includes(conn.auth_key);
   const canUpgrade = canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
@@ -276,7 +277,7 @@ export function UnderScopedWarning({
               size="sm"
               variant="outline"
               disabled={oauthPending}
-              onClick={() => setConfirmUpgrade(true)}
+              onClick={() => setUpgradeTargetId(conn.id)}
               data-testid={`member-pick-upgrade-${conn.id}`}
             >
               <RefreshCw className="mr-1 size-3" />
@@ -286,10 +287,10 @@ export function UnderScopedWarning({
         </div>
       )}
       <ConfirmModal
-        open={confirmUpgrade}
-        onClose={() => setConfirmUpgrade(false)}
+        open={upgradeTargetId === conn.id}
+        onClose={() => setUpgradeTargetId(null)}
         onConfirm={() => {
-          setConfirmUpgrade(false);
+          setUpgradeTargetId(null);
           void upgradeScopes(conn);
         }}
         title={t("detail.integrationMemberPicker.upgradeConfirmTitle")}

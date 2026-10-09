@@ -96,7 +96,6 @@ export function ConnectAuthBlock({
             intent="connect"
             label={t("integration.auth.addAccount")}
             forceAccountSelect={ownConnectionCount > 0}
-            lockToAuthKey
           />
         )}
       </div>

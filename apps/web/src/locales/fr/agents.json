@@ -81,7 +81,7 @@
   "detail.integrationMemberPicker.blockedByRole": "Votre rôle ne permet pas d'ajouter de connexion",
   "detail.integrationMemberPicker.missingScopesOwn": "Cette connexion n'a pas toutes les permissions requises par l'agent.",
   "detail.integrationMemberPicker.upgradeButton": "Mettre à niveau",
-  "detail.integrationMemberPicker.missingScopes": "Manquant : {{scopes}}",
+  "detail.integrationMemberPicker.missingScopes": "Permissions manquantes : {{scopes}}",
   "detail.integrationMemberPicker.broaderThanAgent": "Accorde plus que ce que l'agent demande",
   "detail.integrationMemberPicker.newWithAgentScopes": "Nouvelle connexion avec les permissions de cet agent",
   "detail.integrationMemberPicker.newWithAgentScopesVia": "Nouvelle connexion via {{label}} avec les permissions de cet agent",
