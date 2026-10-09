@@ -49,9 +49,8 @@ import type { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   createMcpServer,
-  isSseResponse,
   parseMcpPost,
-  releaseWhenSettled,
+  serveStatelessPost,
   type McpPost,
   ErrorCode,
   McpError,
@@ -1834,9 +1833,9 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     const hostError = validateMcpHostHeader(c.req.raw);
     if (hostError) return hostError;
 
-    // Body-size guard: the SDK transport calls `await req.json()`
-    // unconditionally on POST. We pre-read the body (bounded), then
-    // hand a fresh Request to the transport. `Content-Length`, when
+    // Body-size guard: we pre-read the body (bounded) and parse it once
+    // here; the SDK reads the bytes itself only when they did not parse,
+    // from the fresh Request we hand it. `Content-Length`, when
     // declared, is enforced up-front; otherwise we stream and abort if
     // the cap is exceeded mid-read. Either way the SDK never sees a
     // body larger than MAX_MCP_REQUEST_BODY_SIZE.
@@ -1886,7 +1885,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
         headers: c.req.raw.headers,
         body: bodyBytes,
       });
-      post = parseMcpPost(bodyBytes);
+      if (method === "POST") post = parseMcpPost(bodyBytes);
     }
 
     // Wait for the integration runtime to finish its first bootstrap
@@ -1947,25 +1946,16 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       // 4 MB default rejects it first and the tool never answers 413 itself.
       maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
-    const release = async () => {
-      await transport.close();
-      await server.close();
-    };
-    let response: Response;
+    // A POST may be answered over SSE, so the pair lives until its stream is
+    // over. Any other verb (a GET would otherwise hold its standalone stream
+    // open for the whole run) is answered and torn down at once.
+    if (method === "POST") return serveStatelessPost(server, transport, forwarded, post);
     try {
       await server.connect(transport);
-      response = await transport.handleRequest(
-        forwarded,
-        post ? { parsedBody: post.payload } : undefined,
-      );
-    } catch (err) {
-      await release();
-      throw err;
+      return await transport.handleRequest(forwarded);
+    } finally {
+      await transport.close();
+      await server.close();
     }
-    // A JSON answer is complete here. An SSE one is still being written by the
-    // tool, so closing now would abort the call: release once the stream is over.
-    if (isSseResponse(response)) return releaseWhenSettled(response, release);
-    await release();
-    return response;
   });
 }

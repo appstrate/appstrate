@@ -252,9 +252,12 @@ function buildIntegrationToolFactories(
               throw err;
             }
           }
+          // Requesting progress keeps a long call (a `run_and_wait` sub-run) alive:
+          // the sidecar relays the upstream's progress, and each one restarts the
+          // per-call timeout. Pi's `signal` bounds the call as a whole.
           const result = await opts.mcp.callTool(
             { name: tool.name, arguments: args },
-            { ...(signal ? { signal } : {}) },
+            { ...(signal ? { signal } : {}), onProgress: () => {} },
           );
           opts.emit({
             type: `integration_tool.completed`,

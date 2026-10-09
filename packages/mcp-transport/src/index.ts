@@ -64,6 +64,20 @@ import {
  * `{ content: [...], isError: true }` instead of being thrown.
  */
 export type AppstrateRequestExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+
+/**
+ * Send `notification` on the request's stream without awaiting it: a failed
+ * send — the client went away — goes to `onError` and never fails the handler.
+ */
+export function notifyDetached(
+  extra: AppstrateRequestExtra,
+  notification: ServerNotification,
+  onError: (err: unknown) => void,
+): void {
+  Promise.resolve()
+    .then(() => extra.sendNotification(notification))
+    .catch(onError);
+}
 export type AppstrateToolHandler = (
   args: Record<string, unknown>,
   extra: AppstrateRequestExtra,
@@ -294,12 +308,7 @@ export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./clie
 
 // Serving one stateless Streamable HTTP POST: JSON unless progress was asked
 // for, and a server kept alive until its SSE answer is over.
-export {
-  isSseResponse,
-  parseMcpPost,
-  releaseWhenSettled,
-  type McpPost,
-} from "./streamable-post.ts";
+export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible

@@ -434,17 +434,17 @@ describe("McpHost — buildTools", () => {
 });
 
 describe("McpHost — progress relay", () => {
-  /** An upstream tool reporting two steps of progress when the caller asked for it. */
-  const reportingTool = (): AppstrateToolDefinition[] => [
+  /** An upstream tool reporting `steps` of progress when the caller asked for it. */
+  const reportingTool = (steps: Array<Record<string, unknown>>): AppstrateToolDefinition[] => [
     {
       descriptor: { name: "long", inputSchema: { type: "object" } },
       handler: async (_args, extra) => {
         const progressToken = extra._meta?.progressToken;
         if (progressToken !== undefined) {
-          for (const progress of [1, 2]) {
+          for (const step of steps) {
             await extra.sendNotification({
               method: "notifications/progress",
-              params: { progressToken, progress, message: `step ${progress}` },
+              params: { progressToken, ...step } as never,
             });
           }
         }
@@ -453,8 +453,14 @@ describe("McpHost — progress relay", () => {
     },
   ];
 
-  async function callLong(extra: Partial<AppstrateRequestExtra>) {
-    const upstream = await makeUpstream(reportingTool());
+  async function callLong(
+    extra: Partial<AppstrateRequestExtra>,
+    steps: Array<Record<string, unknown>> = [1, 2].map((progress) => ({
+      progress,
+      message: `step ${progress}`,
+    })),
+  ) {
+    const upstream = await makeUpstream(reportingTool(steps));
     try {
       const host = new McpHost();
       await host.register({ connection: CONN_A, namespace: "up", client: upstream.client });
@@ -480,6 +486,25 @@ describe("McpHost — progress relay", () => {
         params: { progress, message: `step ${progress}`, progressToken: "agent_tok" },
       })),
     );
+  });
+
+  it("relays only the spec fields, with the message capped", async () => {
+    const sent: unknown[] = [];
+    await callLong(
+      {
+        _meta: { progressToken: "agent_tok" },
+        sendNotification: async (n) => {
+          sent.push(n);
+        },
+      },
+      [{ progress: 1, total: 4, message: "x".repeat(5000), vendor: "leak", _meta: { a: 1 } }],
+    );
+    expect(sent).toEqual([
+      {
+        method: "notifications/progress",
+        params: { progressToken: "agent_tok", progress: 1, total: 4, message: "x".repeat(1024) },
+      },
+    ]);
   });
 
   it("relays nothing when the agent asked for no progress", async () => {

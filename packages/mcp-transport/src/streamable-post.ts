@@ -7,6 +7,8 @@
  * `Server` + `WebStandardStreamableHTTPServerTransport` per request.
  */
 
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isJSONRPCRequest } from "@modelcontextprotocol/sdk/types.js";
 
 /** A POSTed MCP body, parsed once for both the transport choice and the SDK. */
@@ -55,7 +57,7 @@ const SSE_OPEN_COMMENT = ": stream open\n\n";
  * `release` closing the transport then aborts the in-flight handler's
  * `extra.signal`, so a gone client stops the work.
  */
-export function releaseWhenSettled(response: Response, release: () => Promise<void>): Response {
+function releaseWhenSettled(response: Response, release: () => Promise<void>): Response {
   // An SSE response: the SDK always gives it a body.
   const reader = response.body!.getReader();
   let released = false;
@@ -90,9 +92,46 @@ export function releaseWhenSettled(response: Response, release: () => Promise<vo
 }
 
 /** Whether `response` is an SSE answer, i.e. one still being written after it is returned. */
-export function isSseResponse(response: Response): boolean {
+function isSseResponse(response: Response): boolean {
   return (
     response.body !== null &&
     (response.headers.get("content-type")?.startsWith("text/event-stream") ?? false)
   );
+}
+
+/**
+ * Serve one POST on a fresh `server` + stateless `transport` pair, handing the
+ * SDK the body already parsed as `post` (`null`: the SDK reads `request` itself).
+ *
+ * A JSON answer is complete when returned, so the pair is closed at once. An
+ * SSE one is not — the SDK hands the stream back and the tool fills it later —
+ * so the pair lives until that stream is over ({@link releaseWhenSettled}).
+ */
+export async function serveStatelessPost(
+  server: Server,
+  transport: WebStandardStreamableHTTPServerTransport,
+  request: Request,
+  post: McpPost | null,
+): Promise<Response> {
+  const release = async () => {
+    try {
+      await transport.close();
+    } finally {
+      await server.close();
+    }
+  };
+  let response: Response;
+  try {
+    await server.connect(transport);
+    response = await transport.handleRequest(
+      request,
+      post ? { parsedBody: post.payload } : undefined,
+    );
+  } catch (err) {
+    await release();
+    throw err;
+  }
+  if (isSseResponse(response)) return releaseWhenSettled(response, release);
+  await release();
+  return response;
 }

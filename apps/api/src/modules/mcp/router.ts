@@ -54,12 +54,7 @@ import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `@better-auth/core/oauth2` here.
 import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
-import {
-  createMcpServer,
-  isSseResponse,
-  parseMcpPost,
-  releaseWhenSettled,
-} from "@appstrate/mcp-transport";
+import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
@@ -594,30 +589,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // parse here, and takes the parsed payload otherwise.
     const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
 
-    // Called on exactly one of the three exits below.
-    const release = async () => {
-      await transport.close();
-      await server.close();
-    };
-    let response: Response;
-    try {
-      await server.connect(transport);
-      // Any audit insert the tool layer triggered is already tracked (see
-      // `observe` above) and flushed at shutdown, not here.
-      response = await transport.handleRequest(
-        forwarded,
-        post ? { parsedBody: post.payload } : undefined,
-      );
-    } catch (err) {
-      await release();
-      throw err;
-    }
-    // A JSON answer is complete here. An SSE one is not: the SDK hands the
-    // stream back at once and the tool fills it later, so closing now would
-    // abort the call — the server lives until the stream is over.
-    if (isSseResponse(response)) return releaseWhenSettled(response, release);
-    await release();
-    return response;
+    // Any audit insert the tool layer triggered is already tracked (see
+    // `observe` above) and flushed at shutdown, not here.
+    return serveStatelessPost(server, transport, forwarded, post);
   });
 
   // The stateless transport serves no standalone server→client SSE stream

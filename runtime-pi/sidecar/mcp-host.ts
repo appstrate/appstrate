@@ -41,6 +41,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_TOOL_DESCRIPTION_BYTES,
+  notifyDetached,
   sanitiseTextField,
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
@@ -51,10 +52,14 @@ import {
 } from "@appstrate/mcp-transport";
 import { logger } from "./logger.ts";
 
+/** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
+const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
+
 /**
  * Relay the upstream's progress for one call to the agent under the agent's own
  * `progressToken`, so its client's timeout restarts too; `undefined` when the
- * agent asked for none. A failed send is logged and never fails the call.
+ * agent asked for none. Only the spec fields cross, the message capped. A failed
+ * send is logged and never fails the call.
  */
 function relayProgress(
   extra: AppstrateRequestExtra,
@@ -62,19 +67,25 @@ function relayProgress(
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return undefined;
   return {
-    onProgress: (progress) => {
-      Promise.resolve()
-        .then(() =>
-          extra.sendNotification({
-            method: "notifications/progress",
-            params: { ...progress, progressToken },
-          }),
-        )
-        .catch((err: unknown) => {
+    onProgress: ({ progress, total, message }) => {
+      notifyDetached(
+        extra,
+        {
+          method: "notifications/progress",
+          params: {
+            progressToken,
+            progress,
+            ...(total !== undefined ? { total } : {}),
+            ...(message !== undefined
+              ? { message: message.slice(0, RELAYED_PROGRESS_MESSAGE_MAX_CHARS) }
+              : {}),
+          },
+        },
+        (err) =>
           logger.debug("mcp: progress relay to the agent failed", {
             error: err instanceof Error ? err.message : String(err),
-          });
-        });
+          }),
+      );
     },
   };
 }

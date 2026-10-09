@@ -189,7 +189,12 @@ Progress only helps a client that resets its request timeout on it: the MCP
 TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
 `false`). A client that sends a token without resetting its timeout on progress
 hits its own timeout on a long run, not the `done:false` fallback: the server
-cannot tell it apart from one that does.
+cannot tell it apart from one that does. A client that gives up on a streamed
+call without closing its HTTP connection (MCP SDK clients: their per-call
+timeout only sends `notifications/cancelled` in a new POST, which a stateless
+server cannot match to the call) leaves the server waiting until the run ends,
+30 min at most; the run itself is unaffected, so read it back with `getRun`
+rather than launching it again.
 
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you

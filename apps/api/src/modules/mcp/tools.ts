@@ -29,11 +29,12 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  AppstrateRequestExtra,
-  AppstrateResourceProvider,
-  AppstrateToolDefinition,
-  ReadResourceResult,
+import {
+  notifyDetached,
+  type AppstrateRequestExtra,
+  type AppstrateResourceProvider,
+  type AppstrateToolDefinition,
+  type ReadResourceResult,
 } from "@appstrate/mcp-transport";
 import {
   launchRunAndWait,
@@ -888,41 +889,35 @@ export const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
 /**
  * Emit `notifications/progress` every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS}
  * while a run is waited on, when the request carried a `progressToken`; returns
- * the stop function, or `null` without a token. A failed send is logged and never fails the tool call.
+ * the stop function, or `null` without a token. A failed send is logged and
+ * never fails the tool call.
  */
 function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
   let progress = 0;
-  // A tick already queued when the wait ends must not report after the result.
-  let stopped = false;
   const timer = setInterval(() => {
-    if (stopped) return;
     progress += 1;
     const elapsedS = Math.round((performance.now() - startedAt) / 1000);
-    Promise.resolve()
-      .then(() =>
-        extra.sendNotification({
-          method: "notifications/progress",
-          params: {
-            progressToken,
-            progress,
-            message: `Waiting for run ${runId} (${elapsedS}s elapsed)`,
-          },
-        }),
-      )
-      .catch((err: unknown) => {
+    notifyDetached(
+      extra,
+      {
+        method: "notifications/progress",
+        params: {
+          progressToken,
+          progress,
+          message: `Waiting for run ${runId} (${elapsedS}s elapsed)`,
+        },
+      },
+      (err) =>
         logger.debug("mcp: run_and_wait progress notification failed", {
           runId,
           error: err instanceof Error ? err.message : String(err),
-        });
-      });
+        }),
+    );
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
-  return () => {
-    stopped = true;
-    clearInterval(timer);
-  };
+  return () => clearInterval(timer);
 }
 
 /**
