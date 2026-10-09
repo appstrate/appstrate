@@ -18,6 +18,8 @@
  *  - No trust-on-first-use: the connection carries the host's public key
  *    (`SSH_HOST_KEY`), written to a private `known_hosts`, and
  *    `StrictHostKeyChecking=yes` refuses anything else.
+ *  - Calls share one authenticated connection: channels on a ControlMaster
+ *    that idles up to `CONTROL_PERSIST_S`, closed when the process ends.
  *
  * Boot is lazy: `initialize` / `tools/list` answer with no env at all (the
  * conformance probe spawns the server that way); a bad configuration is
@@ -28,7 +30,7 @@
  * over line-delimited JSON-RPC.
  */
 
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -100,11 +102,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SshConfig {
 /** Directory holding this file — `proxy-connect.ts` sits next to it. */
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
+export interface SessionPaths {
+  knownHosts: string;
+  /** The multiplexing master's socket: whoever can connect to it is logged in. */
+  controlPath: string;
+  proxyLog: string;
+}
+
+export function sessionPaths(dir: string): SessionPaths {
+  return {
+    knownHosts: join(dir, "known_hosts"),
+    controlPath: join(dir, "cm"),
+    proxyLog: join(dir, "proxy.log"),
+  };
+}
+
+// The master binds `<ControlPath>.<16 random characters>`, and ssh exits 255 past
+// sockaddr_un's `sun_path`: 104 bytes on macOS and the BSDs, 108 on Linux.
+const SUN_PATH_BYTES = 104;
+const CONTROL_PATH_MAX_BYTES = SUN_PATH_BYTES - ".0123456789abcdef".length - 1;
+
+const CONTROL_PERSIST_S = 300;
+
+/** ssh percent-expands paths and ProxyCommand; a literal `%` is `%%`. */
+const sshLiteral = (s: string) => s.replaceAll("%", "%%");
+const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+
 export interface SshOptionOverrides {
   /** `VERBOSE` for the probe, which reads its success off stderr; `ERROR` otherwise. */
   logLevel?: "ERROR" | "VERBOSE";
   /** `-N`: authenticate, open no session. An option, so it must precede the `--`. */
   noSession?: boolean;
+  /** Dial a connection of its own instead of going through the shared master. */
+  dedicated?: boolean;
 }
 
 /**
@@ -112,13 +142,17 @@ export interface SshOptionOverrides {
  * the image carries, so this table is the whole policy: no prompts (there is no
  * terminal), auth pinned to the delivered key, no forwarding of any kind.
  *
+ * Every call is a channel on one master (`ControlMaster=auto`): a target
+ * rate-limiting new connections (`ufw limit`, fail2ban) would otherwise ban the
+ * runner. A missing or stale socket makes the next call the new master.
+ *
  * Each key is emitted exactly once: for `-o` OpenSSH keeps the FIRST value and
  * ignores later ones (measured — an appended `LogLevel=VERBOSE` after `ERROR`
  * produced no output), so an override replaces a value, never appends one.
  */
 export function buildSshOptions(
   cfg: SshConfig,
-  knownHostsPath: string,
+  paths: SessionPaths,
   overrides: SshOptionOverrides = {},
 ): string[] {
   const opts = [
@@ -127,9 +161,9 @@ export function buildSshOptions(
     ...Object.entries({
       BatchMode: "yes",
       StrictHostKeyChecking: "yes",
-      UserKnownHostsFile: knownHostsPath,
+      UserKnownHostsFile: sshLiteral(paths.knownHosts),
       IdentitiesOnly: "yes",
-      IdentityFile: cfg.privateKeyPath,
+      IdentityFile: sshLiteral(cfg.privateKeyPath),
       PasswordAuthentication: "no",
       KbdInteractiveAuthentication: "no",
       ForwardAgent: "no",
@@ -139,12 +173,20 @@ export function buildSshOptions(
       ServerAliveInterval: "15",
       ServerAliveCountMax: "3",
       LogLevel: overrides.logLevel ?? "ERROR",
+      ...(!overrides.dedicated && {
+        ControlMaster: "auto",
+        ControlPath: sshLiteral(paths.controlPath),
+        ControlPersist: `${CONTROL_PERSIST_S}s`,
+      }),
     }).flatMap(([key, value]) => ["-o", `${key}=${value}`]),
   ];
   if (overrides.noSession) opts.push("-N");
   if (cfg.proxyUrl) {
-    // ssh expands %h/%p itself; the helper reads the proxy URL from env.
-    opts.push("-o", `ProxyCommand=bun ${join(SERVER_DIR, "proxy-connect.ts")} %h %p`);
+    // ssh expands %h/%p itself; the helper reads the proxy URL from env. Under
+    // ControlPersist ssh sends its stderr to /dev/null, hence the log.
+    const helper = shellQuote(sshLiteral(join(SERVER_DIR, "proxy-connect.ts")));
+    const log = shellQuote(sshLiteral(paths.proxyLog));
+    opts.push("-o", `ProxyCommand=bun ${helper} %h %p 2>>${log}`);
   }
   return opts;
 }
@@ -156,12 +198,12 @@ export function buildSshOptions(
  */
 export function buildSshArgs(
   cfg: SshConfig,
-  knownHostsPath: string,
+  paths: SessionPaths,
   command?: string,
   overrides: SshOptionOverrides = {},
 ): string[] {
   const args = [
-    ...buildSshOptions(cfg, knownHostsPath, overrides),
+    ...buildSshOptions(cfg, paths, overrides),
     "-p",
     String(cfg.port),
     "--",
@@ -172,12 +214,24 @@ export function buildSshArgs(
 }
 
 /** `sftp -b - … -- user@host`, batch commands arrive on stdin. Same `--` rule. */
-export function buildSftpArgs(cfg: SshConfig, knownHostsPath: string): string[] {
+export function buildSftpArgs(cfg: SshConfig, paths: SessionPaths): string[] {
   return [
-    ...buildSshOptions(cfg, knownHostsPath),
+    ...buildSshOptions(cfg, paths),
     "-b",
     "-",
     "-P",
+    String(cfg.port),
+    "--",
+    `${cfg.user}@${cfg.host}`,
+  ];
+}
+
+export function buildMasterExitArgs(cfg: SshConfig, paths: SessionPaths): string[] {
+  return [
+    ...buildSshOptions(cfg, paths),
+    "-O",
+    "exit",
+    "-p",
     String(cfg.port),
     "--",
     `${cfg.user}@${cfg.host}`,
@@ -503,6 +557,23 @@ function stringArg(value: unknown, name: string): string {
   return value;
 }
 
+/**
+ * sftp starts in the account's home directory, so `~` and `~/…` become `.` and
+ * `./…`, relative whatever follows. Another account's home (`~user`) is refused.
+ */
+function remotePath(value: unknown): string {
+  const path = stringArg(value, "path");
+  if (path === "~") return ".";
+  if (path.startsWith("~/")) return `.${path.slice(1)}`;
+  if (path.startsWith("~")) {
+    throw new ProtocolError(
+      `\`~user\` paths are not expanded (${JSON.stringify(path)}); give an absolute path, ` +
+        "or `~/…` for this account's home",
+    );
+  }
+  return path;
+}
+
 function intArg(value: unknown, name: string, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
@@ -524,29 +595,57 @@ function logLine(fields: Record<string, string | number | boolean>): void {
 
 // ─────────────────────────── session material ─────────────────────────
 
-/** Per-process 0700 directory for `known_hosts` and sftp scratch files, under HOME or tmpdir. */
+/** Per-process 0700 directory: known_hosts, control socket, scratch files. */
 let sessionDir: string | null = null;
-let knownHostsPath: string | null = null;
 let exitHookInstalled = false;
 
-async function ensureSession(cfg: SshConfig): Promise<string> {
-  if (knownHostsPath) return knownHostsPath;
-  const root = process.env.HOME && process.env.HOME !== "" ? homedir() : tmpdir();
-  sessionDir = await mkdtemp(join(root, ".appstrate-ssh-"));
-  await chmod(sessionDir, 0o700);
-  if (!exitHookInstalled) {
-    // The only cleanup: the server ends when stdin does, and `exit` is the last
-    // moment anything runs — so the unlink must be synchronous. Once per process.
-    process.on("exit", () => {
-      if (sessionDir) rmSync(sessionDir, { recursive: true, force: true });
+function sessionRoot(): string {
+  const roots = [process.env.HOME ? homedir() : null, tmpdir(), "/tmp"];
+  // mkdtemp appends 6 characters to the prefix.
+  const fits = (root: string) =>
+    Buffer.byteLength(sessionPaths(join(root, ".appstrate-ssh-XXXXXX")).controlPath) <=
+    CONTROL_PATH_MAX_BYTES;
+  const root = roots.find((r): r is string => r !== null && fits(r));
+  if (!root) throw new Error(`no directory short enough for the ssh control socket`);
+  return root;
+}
+
+function endSession(): void {
+  if (!sessionDir) return;
+  const paths = sessionPaths(sessionDir);
+  if (cachedConfig && existsSync(paths.controlPath)) {
+    Bun.spawnSync(["ssh", ...buildMasterExitArgs(cachedConfig, paths)], {
+      env: { ...process.env },
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      timeout: 5_000,
     });
+  }
+  rmSync(sessionDir, { recursive: true, force: true });
+}
+
+async function ensureSession(cfg: SshConfig): Promise<string> {
+  if (sessionDir) return sessionDir;
+  const dir = await mkdtemp(join(sessionRoot(), ".appstrate-ssh-"));
+  await chmod(dir, 0o700);
+  sessionDir = dir;
+  if (!exitHookInstalled) {
+    // The server ends when stdin does, or on a signal; both reach `exit`.
+    process.on("exit", endSession);
+    for (const [signal, code] of [
+      ["SIGTERM", 143],
+      ["SIGINT", 130],
+      ["SIGHUP", 129],
+    ] as const) {
+      process.on(signal, () => process.exit(code));
+    }
     exitHookInstalled = true;
   }
-  knownHostsPath = join(sessionDir, "known_hosts");
-  await writeFile(knownHostsPath, renderKnownHosts(cfg.host, cfg.port, cfg.hostKey), {
+  await writeFile(sessionPaths(dir).knownHosts, renderKnownHosts(cfg.host, cfg.port, cfg.hostKey), {
     mode: 0o600,
   });
-  return knownHostsPath;
+  return dir;
 }
 
 let cachedConfig: SshConfig | null = null;
@@ -570,38 +669,45 @@ export async function _resetForTests(): Promise<void> {
   configError = null;
   if (sessionDir) await rm(sessionDir, { recursive: true, force: true }).catch(() => {});
   sessionDir = null;
-  knownHostsPath = null;
 }
 
 // ──────────────────────────────── tools ───────────────────────────────
 
 export interface Deps {
   run?: Runner;
-  /** Test hook — where the known_hosts file goes instead of a session dir. */
-  knownHostsPath?: string;
+  /** Test hook — an existing directory used as the session directory, known_hosts left unwritten. */
+  sessionDir?: string;
 }
 
 interface Session {
   cfg: SshConfig;
-  kh: string;
+  dir: string;
+  paths: SessionPaths;
   run: Runner;
+}
+
+/** A failed call carries what the ProxyCommand logged. Calls are serial: the log is this call's. */
+function withProxyLog(run: Runner, proxyLog: string): Runner {
+  return async (argv, opts) => {
+    const res = await run(argv, opts);
+    if (res.code === 0) return res;
+    const said = await readFile(proxyLog, "utf8").catch(() => "");
+    if (said.trim() === "") return res;
+    await rm(proxyLog, { force: true });
+    return { ...res, stderr: `${said.trim()}\n${res.stderr}` };
+  };
 }
 
 async function session(deps: Deps): Promise<Session> {
   const cfg = getConfig();
-  return {
-    cfg,
-    kh: deps.knownHostsPath ?? (await ensureSession(cfg)),
-    run: deps.run ?? runProcess,
-  };
+  const dir = deps.sessionDir ?? (await ensureSession(cfg));
+  const paths = sessionPaths(dir);
+  return { cfg, dir, paths, run: withProxyLog(deps.run ?? runProcess, paths.proxyLog) };
 }
 
 /** Staging path for one sftp `get`/`put`, inside the 0700 session dir. */
-function scratchPath(prefix: string): string {
-  return join(
-    sessionDir ?? tmpdir(),
-    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+function scratchPath(s: Session, prefix: string): string {
+  return join(s.dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 }
 
 /** The target refused the credential itself (only a reconnect fixes it), unlike a network failure. */
@@ -661,20 +767,27 @@ function sshFailure(what: string, res: RunResult): Error {
 }
 
 export async function probeTool(deps: Deps = {}): Promise<Record<string, unknown>> {
-  const { cfg, kh, run } = await session(deps);
+  const { cfg, paths, run } = await session(deps);
   // `-N` runs nothing on the target (no forced command either) but then HOLDS
   // the connection, so success is read off stderr — at VERBOSE ssh prints
   // `Authenticated to <host> … using "publickey"` — and the process is killed.
-  // Failure still exits 255.
+  // Failure still exits 255. Its own connection: a channel on the master proves nothing.
   const res = await run(
-    ["ssh", ...buildSshArgs(cfg, kh, undefined, { logLevel: "VERBOSE", noSession: true })],
+    [
+      "ssh",
+      ...buildSshArgs(cfg, paths, undefined, {
+        logLevel: "VERBOSE",
+        noSession: true,
+        dedicated: true,
+      }),
+    ],
     {
       untilStderr: /^Authenticated to .+ using "publickey"/m,
       ceilingMs: 20_000,
     },
   );
   if (res.code !== 0) throw sshFailure("ssh probe", res);
-  const fp = await run(["ssh-keygen", "-lf", kh], {});
+  const fp = await run(["ssh-keygen", "-lf", paths.knownHosts], {});
   const fingerprint = fp.stdout.match(/SHA256:[A-Za-z0-9+/]+/)?.[0] ?? null;
   return {
     reachable: true,
@@ -701,37 +814,116 @@ export async function execTool(
     1,
     EXEC_TIMEOUT_MAX_S,
   );
-  const { cfg, kh, run } = await session(deps);
+  const s = await session(deps);
   logLine({ op: "exec", timeout_s: timeoutS });
-  const res = await run(["ssh", ...buildSshArgs(cfg, kh, command)], {
-    ceilingMs: timeoutS * 1000,
-  });
+  // sshd runs each command as the leader of a new session, so the login shell's
+  // `$$` is the command's process group — the handle a timeout kills it by.
+  const marker = `appstrate-ssh-pid-${crypto.randomUUID().replaceAll("-", "")}=`;
+  const res = await s.run(
+    ["ssh", ...buildSshArgs(s.cfg, s.paths, `echo ${marker}$$\n${command}`)],
+    {
+      ceilingMs: timeoutS * 1000,
+    },
+  );
+  const { stdout, pid } = takePidMarker(res.stdout, marker);
   const timedOut = res.timedOut === true;
   // A non-zero exit from the COMMAND is a result, not a transport failure, and
   // must reach the agent as data. Only ssh's own failures (255) are thrown —
   // which a command exiting 255 is indistinguishable from.
   if (res.code === 255 && !timedOut) throw sshFailure("ssh", res);
   return {
-    // Echoed so the run journal records exactly what crossed the wire.
+    // Echoed for the run journal; on the wire it follows the pid `echo` above.
     command_sent: command,
     timeout_seconds: timeoutS,
     exit_code: res.code, // null on timeout: the killed client never learnt it
     timed_out: timedOut,
-    stdout: res.stdout,
+    stdout,
     stderr: res.stderr,
     truncated: res.stdoutTruncated === true || res.stderrTruncated === true,
-    // Killing the local client drops the connection; with no pty the remote
-    // side gets no signal, so the command itself may run on.
-    ...(timedOut && {
-      note:
-        `the call returned after ${timeoutS} s and the connection was dropped, but the remote ` +
-        "process may still be running; wrap long commands in `timeout` on the target",
-    }),
+    ...(timedOut && (await stopRemote(s, pid, timeoutS))),
   };
 }
 
-async function sftpBatch({ cfg, kh, run }: Session, commands: string[]): Promise<RunResult> {
-  const res = await run(["sftp", ...buildSftpArgs(cfg, kh)], {
+export function takePidMarker(
+  stdout: string,
+  marker: string,
+): { stdout: string; pid: number | null } {
+  const at = `\n${stdout}`.indexOf(`\n${marker}`);
+  if (at === -1) return { stdout, pid: null };
+  const end = stdout.indexOf("\n", at);
+  const value = stdout.slice(at + marker.length, end === -1 ? undefined : end);
+  if (!/^\d+$/.test(value)) return { stdout, pid: null };
+  const pid = Number(value);
+  // `kill -TERM -1` would signal every process of the account, `-0` the killer's own group.
+  if (!Number.isSafeInteger(pid) || pid < 2) return { stdout, pid: null };
+  return { stdout: stdout.slice(0, at) + (end === -1 ? "" : stdout.slice(end + 1)), pid };
+}
+
+const TERM_GRACE_S = 5;
+// 22 s, quoted by the ssh_exec description.
+const STOP_CEILING_MS = (TERM_GRACE_S + 2) * 1000 + 15_000;
+
+/**
+ * SIGTERM, then SIGKILL; exits 0 (gone), 3 (gone already), 4 (survived). The group `pid` leads,
+ * else `pid` alone (a wrapper's child leads none). `kill -SIG -PGID`: dash refuses `--`.
+ */
+export function stopScript(pid: number): string {
+  return (
+    `if kill -TERM -${pid}; then t=-${pid}; elif kill -TERM ${pid}; then t=${pid}; else exit 3; fi; ` +
+    `n=0; while kill -0 $t; do ` +
+    `[ "$n" -lt ${TERM_GRACE_S} ] || { kill -KILL $t; sleep 1; kill -0 $t && exit 4; exit 0; }; ` +
+    `sleep 1; n=$((n + 1)); done`
+  );
+}
+
+/** Killing the local client only closes its channel: no pty, so nothing signals the remote side. */
+async function stopRemote(
+  s: Session,
+  pid: number | null,
+  timeoutS: number,
+): Promise<Record<string, unknown>> {
+  const after = `the call returned after ${timeoutS} s`;
+  if (pid === null) {
+    return {
+      remote_pid: null,
+      remote_process: "unknown",
+      note:
+        `${after}, but the target did not report the command's pid, so it was not stopped ` +
+        "and may still be running",
+    };
+  }
+  const res = await s.run(["ssh", ...buildSshArgs(s.cfg, s.paths, stopScript(pid))], {
+    ceilingMs: STOP_CEILING_MS,
+  });
+  const outcome =
+    { 0: "terminated", 3: "already_exited", 4: "still_running" }[res.code ?? -1] ?? "unknown";
+  logLine({ op: "exec-stop", pid, outcome });
+  const notes: Record<string, string> = {
+    terminated: `${after} and the command was terminated on the target`,
+    already_exited: `${after}; the command had already ended on the target`,
+    still_running: `${after}; the command survived SIGKILL on the target`,
+    unknown:
+      `${after}, but stopping the command failed (${res.code === null ? "timed out" : `exit ${res.code}`}); ` +
+      `it may still be running as pid ${pid}`,
+  };
+  return { remote_pid: pid, remote_process: outcome, note: notes[outcome] };
+}
+
+/**
+ * sftp passes `ControlMaster=no` ahead of our options, so it never becomes the
+ * master: an `ssh -N` goes first, instant through a live master, else it opens one.
+ */
+async function ensureMaster({ cfg, paths, run }: Session): Promise<void> {
+  const res = await run(["ssh", ...buildSshArgs(cfg, paths, undefined, { noSession: true })], {
+    ceilingMs: 20_000,
+  });
+  if (res.code !== 0) throw sshFailure("ssh", res);
+}
+
+async function sftpBatch(s: Session, commands: string[]): Promise<RunResult> {
+  await ensureMaster(s);
+  const { cfg, paths, run } = s;
+  const res = await run(["sftp", ...buildSftpArgs(cfg, paths)], {
     stdin: commands.join("\n") + "\n",
     ceilingMs: SFTP_CEILING_MS,
     outputBytes: SFTP_OUTPUT_BYTES,
@@ -769,7 +961,7 @@ async function fetchText(
         "use ssh_exec (sed -n, head, tail, grep) on it",
     );
   if (size > FILE_BYTES_MAX) throw tooBig(size);
-  const scratch = scratchPath("get");
+  const scratch = scratchPath(s, "get");
   try {
     await sftpBatch(s, [`get ${quoteSftpPath(path)} ${quoteSftpPath(scratch)}`]);
     const bytes = await readFile(scratch);
@@ -790,7 +982,7 @@ class WriteRefused extends Error {}
  * created with the scratch file's 0600.
  */
 async function putFile(s: Session, path: string, data: string | Uint8Array): Promise<void> {
-  const scratch = scratchPath("put");
+  const scratch = scratchPath(s, "put");
   try {
     await writeFile(scratch, data, { mode: 0o600 });
     await sftpBatch(s, [`put ${quoteSftpPath(scratch)} ${quoteSftpPath(path)}`]);
@@ -832,7 +1024,7 @@ export async function readTool(
   args: { path?: unknown; offset?: unknown; limit?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const path = stringArg(args.path, "path");
+  const path = remotePath(args.path);
   const quoted = quoteSftpLsPath(path);
   const offset = intArg(args.offset, "offset", 1, 1, Number.MAX_SAFE_INTEGER);
   const limit = intArg(args.limit, "limit", READ_LIMIT_DEFAULT, 1, READ_LIMIT_MAX);
@@ -866,7 +1058,7 @@ export async function writeFileTool(
   args: { path?: unknown; content?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const path = stringArg(args.path, "path");
+  const path = remotePath(args.path);
   const quoted = quoteSftpLsPath(path);
   const content = stringArg(args.content, "content");
   const bytes = Buffer.byteLength(content, "utf8");
@@ -900,7 +1092,7 @@ export async function editFileTool(
   args: { path?: unknown; old_str?: unknown; new_str?: unknown; replace_all?: unknown },
   deps: Deps = {},
 ): Promise<Record<string, unknown>> {
-  const path = stringArg(args.path, "path");
+  const path = remotePath(args.path);
   const quoted = quoteSftpLsPath(path);
   if (typeof args.old_str !== "string" || args.old_str === "") {
     throw new ProtocolError(
@@ -1016,7 +1208,7 @@ export const TOOLS = [
   {
     name: "ssh_exec",
     description:
-      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the call returns with `timed_out: true` and `exit_code: null`, and the connection is dropped, but the remote process may keep running — wrap long commands in `timeout` on the target. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
+      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most 22 s past `timeout_seconds` with `timed_out: true`, `exit_code: null`, and `remote_process` saying whether it ended (`terminated`, `already_exited`, `still_running` or `unknown`), next to its `remote_pid`. A process that leaves the group (`setsid`, a daemon) is not reached. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1036,7 +1228,7 @@ export const TOOLS = [
   {
     name: "ssh_read",
     description:
-      "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Symlinks are followed. Relative paths start at the account's home directory; `~` is not expanded. Read-only.",
+      "Read a remote path over SFTP. A directory returns its entries, dotfiles included, sorted by name, cut at 256 KiB with a note saying so; `offset`/`limit` are refused on a directory. A UTF-8 text file returns its lines numbered like `cat -n`, from `offset` (1-based) for `limit` lines, at most 256 KiB per call; when more remains, the reply ends with the offset to read next. Binary or non-UTF-8 files and files over 8 MiB are refused — use ssh_exec for those. Symlinks are followed. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. Read-only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1062,7 +1254,7 @@ export const TOOLS = [
   {
     name: "ssh_write_file",
     description:
-      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
+      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
@@ -1073,7 +1265,7 @@ export const TOOLS = [
   {
     name: "ssh_edit_file",
     description:
-      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths start at the account's home directory; `~` is not expanded. WRITES — withhold it from an agent that must not change the target.",
+      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1123,7 +1315,7 @@ export async function handleRequest(
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "appstrate-ssh-mcp", version: "1.0.1" },
+        serverInfo: { name: "appstrate-ssh-mcp", version: "1.0.2" },
       },
     };
   }

@@ -22,11 +22,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { statSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 
 // Resolved, not hard-coded: the source directory carries the package version
 // in its name, so a static import breaks on every version bump.
@@ -45,6 +45,10 @@ const {
   renderKnownHosts,
   buildSshArgs,
   buildSftpArgs,
+  buildMasterExitArgs,
+  sessionPaths,
+  takePidMarker,
+  stopScript,
   quoteSftpPath,
   parseSftpLs,
   classifyLs,
@@ -59,6 +63,9 @@ const { parseConnectResponse, proxyUrlFromEnv } = await import(
 
 /** The one accepted form: `<type> <base64>`, exactly what the manifest's pattern admits. */
 const HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFmvXHvkoa0xnL5aW6L2fPdQ8Q0m2p8Zt1YxV3q7uJ9k";
+
+/** Session paths for the argv tests: what each option names is the point, not where. */
+const PATHS = sessionPaths("/s");
 
 const ENV = {
   SSH_HOST: "example.com",
@@ -95,29 +102,51 @@ interface Call {
 type Answer = {
   stdout?: string;
   stderr?: string;
-  code?: number;
+  code?: number | null;
   timedOut?: boolean;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
 };
 
-/** Runner stub: records every invocation, answers from a queue. */
-function stubRunner(answers: Answer[]) {
+/**
+ * The `ssh -N` each sftp batch is preceded by, to make sure a master runs
+ * (sftp never becomes one). Distinct from the probe's `-N`, which dials its own
+ * connection and so carries no `ControlMaster`.
+ */
+const isMasterCheck = (argv: string[]) =>
+  argv[0] === "ssh" && argv.includes("-N") && argv.includes("ControlMaster=auto");
+
+/** The pid marker `ssh_exec` prefixes its command with, read back off the argv. */
+const markerOf = (argv: string[]) =>
+  /^echo (appstrate-ssh-pid-[0-9a-f]{32}=)\$\$\n/.exec(argv.at(-1)!)?.[1];
+
+/**
+ * Runner stub: records every invocation, answers from a queue. Master checks
+ * succeed without being recorded or consuming an answer.
+ */
+function stubRunner(answers: Array<Answer | ((argv: string[]) => Answer)>) {
   const calls: Call[] = [];
   const run = async (
     argv: string[],
     opts: { stdin?: string; untilStderr?: RegExp; ceilingMs?: number; outputBytes?: number },
   ) => {
+    if (isMasterCheck(argv)) return { stdout: "", stderr: "", code: 0 };
     calls.push({ argv, ...opts });
-    const a = answers.shift() ?? {};
-    return { ...a, stdout: a.stdout ?? "", stderr: a.stderr ?? "", code: a.code ?? 0 };
+    const next = answers.shift() ?? {};
+    const a = typeof next === "function" ? next(argv) : next;
+    return {
+      ...a,
+      stdout: a.stdout ?? "",
+      stderr: a.stderr ?? "",
+      code: a.code === undefined ? 0 : a.code,
+    };
   };
   return { run, calls };
 }
 
 type Deps = {
   run: (argv: string[], opts: Omit<Call, "argv">) => Promise<Answer & { code: number | null }>;
-  knownHostsPath: string;
+  sessionDir: string;
 };
 
 /** `tools/call` through the real dispatcher; `payload` is the parsed result text. */
@@ -162,9 +191,14 @@ function fakeHost(fs: {
   const sizes = { ...fs.sizes };
   const written: Record<string, string> = {};
   const calls: Call[] = [];
+  let masterChecks = 0;
   const lsLine = (type: string, size: number, path: string) =>
     `${type}rw-r--r--    ? agent    agent    ${String(size).padStart(8)} Sep 18 08:40 ${path}`;
   const run = async (argv: string[], opts: Omit<Call, "argv">) => {
+    if (isMasterCheck(argv)) {
+      masterChecks++;
+      return { stdout: "", stderr: "", code: 0 };
+    }
     calls.push({ argv, ...opts });
     const out: string[] = [];
     const fail = (msg: string) => ({ stdout: out.join("\n"), stderr: `${msg}\n`, code: 1 });
@@ -176,8 +210,11 @@ function fakeHost(fs: {
       if (cmd === "ls -la") {
         if (a in files) out.push(lsLine("-", sizes[a] ?? Buffer.byteLength(files[a]!), a));
         else if (a in dirs) {
-          out.push(lsLine("d", 4096, `${a}/.`), lsLine("d", 4096, `${a}/..`));
-          for (const e of dirs[a]!) out.push(lsLine(e.startsWith(".") ? "d" : "-", 1, `${a}/${e}`));
+          // sftp joins with a `/` unless the path already ends in one.
+          const dir = a.endsWith("/") ? a : `${a}/`;
+          out.push(lsLine("d", 4096, `${dir}.`), lsLine("d", 4096, `${dir}..`));
+          for (const e of dirs[a]!)
+            out.push(lsLine(e.startsWith(".") ? "d" : "-", 1, `${dir}${e}`));
         } else return fail(`Can't ls: "${a}" not found`);
       } else if (cmd === "get") {
         if (!(a in files)) return fail(`File "${a}" not found.`);
@@ -207,8 +244,9 @@ function fakeHost(fs: {
     files,
     putModes,
     calls,
+    masterChecks: () => masterChecks,
     batches: () => calls.map((c) => c.stdin),
-    deps: (): Deps => ({ run, knownHostsPath: join(scratch, "kh") }),
+    deps: (): Deps => ({ run, sessionDir: scratch }),
   };
 }
 
@@ -403,12 +441,12 @@ describe("buildSshArgs — the connection policy", () => {
 
   it("emits the options in one fixed order, each exactly once", () => {
     const o = (kv: string) => ["-o", kv];
-    expect(buildSshArgs(loadConfig(ENV), "/kh", undefined, { noSession: true })).toEqual([
+    expect(buildSshArgs(loadConfig(ENV), PATHS, undefined, { noSession: true })).toEqual([
       "-F",
       "/dev/null",
       ...o("BatchMode=yes"),
       ...o("StrictHostKeyChecking=yes"),
-      ...o("UserKnownHostsFile=/kh"),
+      ...o("UserKnownHostsFile=/s/known_hosts"),
       ...o("IdentitiesOnly=yes"),
       ...o("IdentityFile=/run/secrets/ssh_key"),
       ...o("PasswordAuthentication=no"),
@@ -419,6 +457,9 @@ describe("buildSshArgs — the connection policy", () => {
       ...o("ServerAliveInterval=15"),
       ...o("ServerAliveCountMax=3"),
       ...o("LogLevel=ERROR"),
+      ...o("ControlMaster=auto"),
+      ...o("ControlPath=/s/cm"),
+      ...o("ControlPersist=300s"),
       "-N",
       "-p",
       "22",
@@ -428,7 +469,7 @@ describe("buildSshArgs — the connection policy", () => {
   });
 
   it("appends the command string as the last argv entry, and nothing else", () => {
-    const args = buildSshArgs(loadConfig(ENV), "/kh", "hostname");
+    const args = buildSshArgs(loadConfig(ENV), PATHS, "hostname");
     expect(args.at(-1)).toBe("hostname");
     expect(args.at(-2)).toBe("agent@example.com");
   });
@@ -437,25 +478,58 @@ describe("buildSshArgs — the connection policy", () => {
   // option (`-w…` lands as `Bad tun device`), and only the manifest's pattern
   // stands between a connect form and that. `--` is the argv-level floor.
   it("terminates the options with `--` immediately before the destination", () => {
-    expect(buildSshArgs(loadConfig(ENV), "/kh").slice(-2)).toEqual(["--", "agent@example.com"]);
-    expect(buildSshArgs(loadConfig(ENV), "/kh", "hostname").slice(-3)).toEqual([
+    expect(buildSshArgs(loadConfig(ENV), PATHS).slice(-2)).toEqual(["--", "agent@example.com"]);
+    expect(buildSshArgs(loadConfig(ENV), PATHS, "hostname").slice(-3)).toEqual([
       "--",
       "agent@example.com",
       "hostname",
     ]);
-    expect(buildSftpArgs(loadConfig(ENV), "/kh").slice(-2)).toEqual(["--", "agent@example.com"]);
+    expect(buildSftpArgs(loadConfig(ENV), PATHS).slice(-2)).toEqual(["--", "agent@example.com"]);
   });
 
   it("adds a ProxyCommand only when a proxy is configured", () => {
-    const direct = buildSshArgs(loadConfig(ENV), "/kh");
+    const direct = buildSshArgs(loadConfig(ENV), PATHS);
     expect(direct.some((a: string) => a.startsWith("ProxyCommand="))).toBe(false);
-    const proxied = buildSshArgs(loadConfig({ ...ENV, HTTPS_PROXY: "http://sidecar:8080" }), "/kh");
+    const proxied = buildSshArgs(loadConfig({ ...ENV, HTTPS_PROXY: "http://sidecar:8080" }), PATHS);
     const pc = proxied.find((a: string) => a.startsWith("ProxyCommand="));
-    expect(pc).toMatch(/^ProxyCommand=bun .*proxy-connect\.ts %h %p$/);
+    expect(pc).toMatch(/^ProxyCommand=bun '[^']*\/proxy-connect\.ts' %h %p 2>>'\/s\/proxy\.log'$/);
+  });
+
+  // One master per process: a target that rate-limits new connections
+  // (`ufw limit`, fail2ban) bans a runner that dials once per call.
+  it("puts ssh, sftp and the master's exit on one master; the probe dials its own", () => {
+    const cfg = loadConfig(ENV);
+    const mux = ["ControlMaster=auto", "ControlPath=/s/cm", "ControlPersist=300s"];
+    const opts = (args: string[]) => args.filter((_, i) => args[i - 1] === "-o");
+    for (const args of [
+      buildSshArgs(cfg, PATHS, "hostname"),
+      buildSftpArgs(cfg, PATHS),
+      buildMasterExitArgs(cfg, PATHS),
+    ]) {
+      expect(opts(args)).toEqual(expect.arrayContaining(mux));
+    }
+    const exit = buildMasterExitArgs(cfg, PATHS);
+    expect(exit.slice(exit.indexOf("-O"), exit.indexOf("-O") + 2)).toEqual(["-O", "exit"]);
+    expect(exit.indexOf("-O")).toBeLessThan(exit.indexOf("--"));
+    const probe = opts(buildSshArgs(cfg, PATHS, undefined, { noSession: true, dedicated: true }));
+    expect(probe.filter((o) => o.startsWith("Control"))).toEqual([]);
+  });
+
+  // ssh percent-expands ControlPath, UserKnownHostsFile and ProxyCommand, and
+  // hands ProxyCommand to `/bin/sh -c`: a HOME holding `%` or `'` must not
+  // turn into another path or a broken command.
+  it("escapes `%` for ssh and quotes the ProxyCommand's paths for sh", () => {
+    const paths = sessionPaths("/h%d/it's dir");
+    const args = buildSshArgs(loadConfig({ ...ENV, HTTPS_PROXY: "http://s:1" }), paths);
+    expect(has(args, "ControlPath=/h%%d/it's dir/cm")).toBe(true);
+    expect(has(args, "UserKnownHostsFile=/h%%d/it's dir/known_hosts")).toBe(true);
+    expect(args.find((a: string) => a.startsWith("ProxyCommand="))).toEndWith(
+      ` %h %p 2>>'/h%%d/it'\\''s dir/proxy.log'`,
+    );
   });
 
   it("sftp uses -P for the port and reads its batch from stdin", () => {
-    const args = buildSftpArgs(loadConfig({ ...ENV, SSH_PORT: "2222" }), "/kh");
+    const args = buildSftpArgs(loadConfig({ ...ENV, SSH_PORT: "2222" }), PATHS);
     expect(args.slice(-6)).toEqual(["-b", "-", "-P", "2222", "--", "agent@example.com"]);
     expect(has(args, "StrictHostKeyChecking=yes")).toBe(true);
   });
@@ -469,14 +543,11 @@ describe("ssh_exec via injected runner", () => {
   it("hands the command to the login shell and returns its exit code as data", async () => {
     restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([{ stdout: "web-01\n", code: 42 }]);
-    const res = await callTool(
-      "ssh_exec",
-      { command: "hostname" },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
+    const res = await callTool("ssh_exec", { command: "hostname" }, { run, sessionDir: scratch });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.argv[0]).toBe("ssh");
-    expect(calls[0]!.argv.at(-1)).toBe("hostname");
+    // One `echo` of the shell's pid first, then the command verbatim.
+    expect(calls[0]!.argv.at(-1)).toMatch(/^echo appstrate-ssh-pid-[0-9a-f]{32}=\$\$\nhostname$/);
     expect(calls[0]!.argv.filter((a) => a.startsWith("LogLevel="))).toEqual(["LogLevel=ERROR"]);
     expect(res.isError).toBeUndefined();
     expect(res.payload).toMatchObject({
@@ -489,11 +560,7 @@ describe("ssh_exec via injected runner", () => {
   it("refuses a malformed request BEFORE spawning anything", async () => {
     restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([]);
-    const res = await callTool(
-      "ssh_exec",
-      { command: "" },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
+    const res = await callTool("ssh_exec", { command: "" }, { run, sessionDir: scratch });
     expect(calls).toHaveLength(0);
     expect(res.isError).toBe(true);
     expect(res.text).toContain("non-empty string");
@@ -504,11 +571,7 @@ describe("ssh_exec via injected runner", () => {
   it("reports a host-key mismatch with a hint and never retries", async () => {
     restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([{ stderr: "Host key verification failed.\n", code: 255 }]);
-    const res = await callTool(
-      "ssh_exec",
-      { command: "hostname" },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
+    const res = await callTool("ssh_exec", { command: "hostname" }, { run, sessionDir: scratch });
     expect(calls).toHaveLength(1);
     expect(res.isError).toBe(true);
     expect(res.text).toContain("ssh failed (exit 255)");
@@ -529,7 +592,7 @@ describe("ssh_exec via injected runner", () => {
     const res = await callTool(
       "ssh_read",
       { path: "f" },
-      { run: rejected.run, knownHostsPath: join(scratch, "kh") },
+      { run: rejected.run, sessionDir: scratch },
     );
     expect(res.isError).toBe(true);
     expect(res.meta).toEqual({
@@ -542,7 +605,7 @@ describe("ssh_exec via injected runner", () => {
     const net = await callTool(
       "ssh_exec",
       { command: "true" },
-      { run: down.run, knownHostsPath: join(scratch, "kh") },
+      { run: down.run, sessionDir: scratch },
     );
     expect(net.isError).toBe(true);
     expect(net.meta).toBeUndefined();
@@ -551,7 +614,7 @@ describe("ssh_exec via injected runner", () => {
   it("kills after 120 s by default and after `timeout_seconds` when given", async () => {
     restoreEnv = withEnv(ENV);
     const { run, calls } = stubRunner([{}, {}]);
-    const deps = { run, knownHostsPath: join(scratch, "kh") };
+    const deps = { run, sessionDir: scratch };
     const first = await callTool("ssh_exec", { command: "true" }, deps);
     const second = await callTool("ssh_exec", { command: "true", timeout_seconds: 600 }, deps);
     expect(calls.map((c) => c.ceilingMs)).toEqual([120_000, 600_000]);
@@ -567,7 +630,7 @@ describe("ssh_exec via injected runner", () => {
       const res = await callTool(
         "ssh_exec",
         { command: "true", timeout_seconds: timeout },
-        { run, knownHostsPath: join(scratch, "kh") },
+        { run, sessionDir: scratch },
       );
       expect(calls).toHaveLength(0);
       expect(res.isError).toBe(true);
@@ -578,11 +641,11 @@ describe("ssh_exec via injected runner", () => {
   /** Stands a real local process in for `ssh`, through the real runner. */
   const localProcess = (script: string): Deps => ({
     run: (_argv, opts) => runProcess(["bun", "-e", script], opts),
-    knownHostsPath: join(scratch, "kh"),
+    sessionDir: scratch,
   });
 
-  // Measured on OpenSSH 9.2: killing the local client after `sleep 30` left the
-  // remote sleep running. The call reports that instead of claiming a kill.
+  // A stand-in that never echoes the pid is a forced command, or a shell that
+  // is not POSIX: nothing can be killed, and the call says so.
   it("returns on timeout with what was written so far, flagged timed_out", async () => {
     restoreEnv = withEnv(ENV);
     const res = await callTool(
@@ -598,8 +661,68 @@ describe("ssh_exec via injected runner", () => {
       timed_out: true,
       stdout: "partial-out\n",
       stderr: "partial-err\n\n(killed after 1000 ms)",
+      remote_pid: null,
+      remote_process: "unknown",
     });
-    expect(res.payload.note).toContain("the remote process may still be running");
+    expect(res.payload.note).toContain("did not report the command's pid");
+    expect(res.payload.note).toContain("may still be running");
+  });
+
+  it("cuts the pid line out of stdout, wherever a login script put it", async () => {
+    restoreEnv = withEnv(ENV);
+    const { run } = stubRunner([
+      (argv) => ({ stdout: `motd\n${markerOf(argv)}4242\nout\n`, code: 3 }),
+    ]);
+    const res = await callTool("ssh_exec", { command: "x" }, { run, sessionDir: scratch });
+    expect(res.payload).toMatchObject({ stdout: "motd\nout\n", exit_code: 3, timed_out: false });
+    expect(res.payload.remote_pid).toBeUndefined();
+  });
+
+  // Killing the local client only closes its channel: the command runs on.
+  // Its process group is killed from a second channel on the same master.
+  it.each([
+    [0, "terminated", "was terminated"],
+    [3, "already_exited", "had already ended"],
+    [4, "still_running", "survived SIGKILL"],
+    [255, "unknown", "stopping the command failed (exit 255)"],
+    [null, "unknown", "stopping the command failed (timed out)"],
+  ])(
+    "stops a timed-out command's process group (stop exits %p → %s)",
+    async (code, outcome, note) => {
+      restoreEnv = withEnv(ENV);
+      const { run, calls } = stubRunner([
+        (argv) => ({ stdout: `${markerOf(argv)}4242\npartial\n`, code: null, timedOut: true }),
+        { code, timedOut: code === null },
+      ]);
+      const res = await callTool(
+        "ssh_exec",
+        { command: "sleep 150", timeout_seconds: 2 },
+        { run, sessionDir: scratch },
+      );
+      expect(res.payload).toMatchObject({
+        exit_code: null,
+        timed_out: true,
+        stdout: "partial\n",
+        remote_pid: 4242,
+        remote_process: outcome,
+      });
+      expect(res.payload.note).toContain(note);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.argv.at(-1)).toBe(stopScript(4242));
+      // Same master as the command it stops: no new connection to the target.
+      const controlPath = (c: Call) => c.argv.find((a) => a.startsWith("ControlPath="));
+      expect(controlPath(calls[1]!)).toBe(controlPath(calls[0]!));
+    },
+  );
+
+  it("reads the pid off its own marker only, never a group-wide or bogus one", () => {
+    const m = "appstrate-ssh-pid-ab=";
+    expect(takePidMarker(`${m}77\nout`, m)).toEqual({ stdout: "out", pid: 77 });
+    expect(takePidMarker(`${m}77`, m)).toEqual({ stdout: "", pid: 77 });
+    // `kill -TERM -1` signals every process of the account; `-0` the killer's group.
+    for (const bogus of [`${m}1\n`, `${m}0\n`, `${m}-5\n`, `${m}7x\n`, `x${m}9\n`, "out\n"]) {
+      expect(takePidMarker(bogus, m)).toEqual({ stdout: bogus, pid: null });
+    }
   });
 
   it("does not flag a command that exits 124 by itself as timed out", async () => {
@@ -628,6 +751,91 @@ describe("ssh_exec via injected runner", () => {
     expect(res.payload.stderr).toBe("short\n");
     expect(res.payload.truncated).toBe(true);
     expect(res.payload.exit_code).toBe(2);
+  });
+});
+
+// sshd runs the command string through the login shell as the leader of a new
+// session. This stand-in does exactly that with the local `/bin/sh` (bash in
+// POSIX mode on macOS, dash on Debian/Ubuntu), so the pid marker and the stop
+// script run in a real shell against real processes.
+const FAKE_SSHD = `
+  const { spawn } = require("node:child_process");
+  const child = spawn("/bin/sh", ["-c", process.argv.at(-1)], { detached: true, stdio: "inherit" });
+  child.on("exit", (code, signal) => process.exit(signal ? 255 : code));
+`;
+
+describe("ssh_exec against a real shell", () => {
+  const viaShell = (): Deps => ({
+    run: (argv, opts) => runProcess(["bun", "-e", FAKE_SSHD, argv.at(-1)!], opts),
+    sessionDir: scratch,
+  });
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("keeps the command's exit status and output, without the pid line", async () => {
+    restoreEnv = withEnv(ENV);
+    const res = await callTool(
+      "ssh_exec",
+      { command: "echo hi; echo oops >&2; exit 7" },
+      viaShell(),
+    );
+    expect(res.payload).toMatchObject({ exit_code: 7, stdout: "hi\n", stderr: "oops\n" });
+  });
+
+  it("kills a timed-out command's whole process group, background jobs included", async () => {
+    restoreEnv = withEnv(ENV);
+    const res = await callTool(
+      "ssh_exec",
+      { command: "sleep 30 & sleep 30; echo done", timeout_seconds: 1 },
+      viaShell(),
+    );
+    const pid = res.payload.remote_pid as number;
+    expect(res.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+    expect(pid).toBeGreaterThan(1);
+    expect(alive(pid)).toBe(false);
+    expect(alive(-pid)).toBe(false); // no member of the group is left
+  });
+
+  it("sends SIGKILL when SIGTERM is ignored", async () => {
+    restoreEnv = withEnv(ENV);
+    const res = await callTool(
+      "ssh_exec",
+      { command: "trap '' TERM; sleep 30; echo done", timeout_seconds: 1 },
+      viaShell(),
+    );
+    expect(res.payload.remote_process).toBe("terminated");
+    expect(alive(-(res.payload.remote_pid as number))).toBe(false);
+  }, 15_000);
+
+  // A forced command that runs `sh -c "$SSH_ORIGINAL_COMMAND"` leads the group
+  // itself: the shell that reports its pid is a child, and leads none.
+  it("kills the command itself when its shell leads no group", async () => {
+    restoreEnv = withEnv(ENV);
+    const wrapped = FAKE_SSHD.replace(
+      `["-c", process.argv.at(-1)]`,
+      `["-c", 'sh -c "$0"; exit $?', process.argv.at(-1)]`,
+    );
+    const res = await callTool(
+      "ssh_exec",
+      { command: "exec sleep 30", timeout_seconds: 1 },
+      {
+        run: (argv, opts) => runProcess(["bun", "-e", wrapped, argv.at(-1)!], opts),
+        sessionDir: scratch,
+      },
+    );
+    expect(res.payload.remote_process).toBe("terminated");
+    expect(alive(res.payload.remote_pid as number)).toBe(false);
+  });
+
+  it("reports a group that ended before the stop as already exited", async () => {
+    const res = await runProcess(["/bin/sh", "-c", stopScript(2 ** 22 - 3)], {});
+    expect(res.code).toBe(3);
   });
 });
 
@@ -869,11 +1077,7 @@ describe("ssh_read", () => {
         stdoutTruncated: true,
       },
     ]);
-    const res = await callTool(
-      "ssh_read",
-      { path: "/d" },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
+    const res = await callTool("ssh_read", { path: "/d" }, { run, sessionDir: scratch });
     expect(res.payload.truncated).toBe(true);
     expect((res.payload.entries as Array<{ name: string }>).map((e) => e.name)).toEqual(["a", "b"]);
   });
@@ -882,11 +1086,7 @@ describe("ssh_read", () => {
     restoreEnv = withEnv(ENV);
     const row = "-rw-r--r--    ? a        a               1 Sep 18 08:40 /d/a";
     const { run } = stubRunner([{ stdout: `${row}\n`, stderrTruncated: true }]);
-    const res = await callTool(
-      "ssh_read",
-      { path: "/d" },
-      { run, knownHostsPath: join(scratch, "kh") },
-    );
+    const res = await callTool("ssh_read", { path: "/d" }, { run, sessionDir: scratch });
     expect(res.payload.truncated).toBe(false);
   });
 
@@ -914,9 +1114,7 @@ describe("ssh_read", () => {
   const failWith = async (stderr: string): Promise<string> => {
     restoreEnv = withEnv(ENV);
     const { run } = stubRunner([{ stderr, code: 255 }]);
-    return (
-      await callTool("ssh_read", { path: "/data" }, { run, knownHostsPath: join(scratch, "kh") })
-    ).text;
+    return (await callTool("ssh_read", { path: "/data" }, { run, sessionDir: scratch })).text;
   };
 
   it("names a forced command when the closed channel is all the target said", async () => {
@@ -930,6 +1128,118 @@ describe("ssh_read", () => {
     const text = await failWith("hostname contains invalid characters\r\nConnection closed\r\n");
     expect(text).toContain("invalid characters");
     expect(text).not.toMatch(/forced command/);
+  });
+});
+
+// sftp starts in the account's home directory, so `~` is `.` and `~/x` is
+// `./x` — relative, so nothing after the tilde can re-root the path.
+describe("`~` in a path", () => {
+  it.each([
+    ["~", "."],
+    ["~/", "./"],
+    ["~/notes", "./notes"],
+    ["~//etc", ".//etc"],
+  ])("reads %p as %p, from the home directory", async (path, remote) => {
+    restoreEnv = withEnv(ENV);
+    const host = fakeHost({ dirs: { [remote]: ["a"] } });
+    const res = await callTool("ssh_read", { path }, host.deps());
+    expect(host.batches()).toEqual([`ls -la "${remote}"\n`]);
+    expect(res.payload).toMatchObject({
+      path: remote,
+      type: "directory",
+      entries: [{ name: "a" }],
+    });
+  });
+
+  it("writes and edits under the home directory, a leading `-` included", async () => {
+    restoreEnv = withEnv(ENV);
+    const host = fakeHost({ files: { "./-x.conf": "a=1\n" } });
+    await callTool("ssh_write_file", { path: "~/new.txt", content: "n" }, host.deps());
+    await callTool("ssh_edit_file", { path: "~/-x.conf", old_str: "1", new_str: "2" }, host.deps());
+    expect(host.written).toEqual({ "./new.txt": "n", "./-x.conf": "a=2\n" });
+  });
+
+  // `~user` would name another account's home; it is not looked up.
+  it.each(["~root", "~root/.ssh/authorized_keys", "~+", "~-/x"])(
+    "refuses %p before spawning anything",
+    async (path) => {
+      restoreEnv = withEnv(ENV);
+      const host = fakeHost({});
+      for (const [tool, args] of [
+        ["ssh_read", { path }],
+        ["ssh_write_file", { path, content: "x" }],
+        ["ssh_edit_file", { path, old_str: "a", new_str: "b" }],
+      ] as const) {
+        const res = await callTool(tool, args, host.deps());
+        expect(res.payload).toMatchObject({ refused: true });
+        expect(res.text).toContain("`~user` paths are not expanded");
+      }
+      expect(host.calls).toHaveLength(0);
+      expect(host.masterChecks()).toBe(0);
+    },
+  );
+
+  it("leaves a `~` that does not lead the path alone", async () => {
+    restoreEnv = withEnv(ENV);
+    const host = fakeHost({ files: { "a/~/b": "x\n", "/srv/~x": "y\n" } });
+    await callTool("ssh_read", { path: "a/~/b" }, host.deps());
+    await callTool("ssh_read", { path: "/srv/~x" }, host.deps());
+    expect(host.batches().filter((b) => b?.startsWith("ls"))).toEqual([
+      'ls -la "a/~/b"\n',
+      'ls -la "/srv/~x"\n',
+    ]);
+  });
+});
+
+describe("the shared master", () => {
+  // sftp passes `ControlMaster=no` ahead of our options, so it never becomes
+  // the master itself: without the `ssh -N` first, a run made only of SFTP
+  // tools would still dial once per batch.
+  it("precedes every sftp batch with an `ssh -N` on the same master", async () => {
+    restoreEnv = withEnv(ENV);
+    const host = fakeHost({ files: { "/etc/app.conf": "a\n" } });
+    await callTool(
+      "ssh_edit_file",
+      { path: "/etc/app.conf", old_str: "a", new_str: "b" },
+      host.deps(),
+    );
+    expect(host.batches()).toHaveLength(3);
+    expect(host.masterChecks()).toBe(3);
+  });
+
+  it("reports a master that cannot be opened as the ssh failure it is, before any sftp", async () => {
+    restoreEnv = withEnv(ENV);
+    const calls: string[][] = [];
+    const run = async (argv: string[]) => {
+      calls.push(argv);
+      return { stdout: "", stderr: "Host key verification failed.\n", code: 255 };
+    };
+    const res = await callTool("ssh_read", { path: "/etc" }, { run, sessionDir: scratch });
+    expect(calls.map((a) => a[0])).toEqual(["ssh"]);
+    expect(isMasterCheck(calls[0]!)).toBe(true);
+    expect(res.text).toContain("ssh failed (exit 255): Host key verification failed.");
+    expect(res.meta).toEqual({
+      "dev.appstrate/credential": { status: "rejected", reason: "host_key_mismatch" },
+    });
+  });
+
+  // Under ControlPersist ssh sends the ProxyCommand's stderr to /dev/null; the
+  // helper's refusal reaches the agent through the session's proxy log.
+  it("adds what the ProxyCommand logged to a failed call, once", async () => {
+    restoreEnv = withEnv({ ...ENV, HTTPS_PROXY: "http://sidecar:1" });
+    const log = sessionPaths(scratch).proxyLog;
+    await writeFile(log, "proxy-connect: CONNECT refused by proxy: HTTP/1.1 403 Forbidden\n");
+    const { run } = stubRunner([
+      { stderr: "Connection closed by UNKNOWN port 65535\r\n", code: 255 },
+      { stderr: "Connection closed by UNKNOWN port 65535\r\n", code: 255 },
+    ]);
+    const deps = { run, sessionDir: scratch };
+    const first = await callTool("ssh_exec", { command: "true" }, deps);
+    expect(first.text).toContain("CONNECT refused by proxy: HTTP/1.1 403 Forbidden");
+    expect(first.text).toContain("the egress proxy refused the target");
+    expect(existsSync(log)).toBe(false);
+    const second = await callTool("ssh_exec", { command: "true" }, deps);
+    expect(second.text).not.toContain("CONNECT refused");
   });
 });
 
@@ -1094,7 +1404,7 @@ describe("ssh_probe", () => {
       { code: 0 },
       { stdout: "256 SHA256:e9BAhcGr5z9zvM6nYcXrEt2BkBrTfpCQ/QSvw/h2INc example.com (ED25519)\n" },
     ]);
-    const res = await callTool("ssh_probe", {}, { run, knownHostsPath: join(scratch, "kh") });
+    const res = await callTool("ssh_probe", {}, { run, sessionDir: scratch });
     expect(calls[0]!.argv[0]).toBe("ssh");
     // `-N` is an option: past the `--` it would be sent as the remote command,
     // which is the one thing the probe must not do.
@@ -1340,7 +1650,8 @@ describe("proxy-connect as a ProxyCommand subprocess", () => {
 // this server, and an in-process test never reaches it.
 describe("session directory", () => {
   it("is removed when the process ends", async () => {
-    const home = await mkdtemp(join(tmpdir(), "ssh-mcp-home-"));
+    // Under /tmp: a HOME too deep for the control socket is passed over.
+    const home = await mkdtemp("/tmp/ssh-mcp-home-");
     const child = Bun.spawn(
       [
         "bun",
@@ -1368,4 +1679,204 @@ describe("session directory", () => {
     expect(await readdir(home)).toEqual([]);
     await rm(home, { recursive: true, force: true });
   });
+});
+
+// ──────────────────────────── shutdown ───────────────────────────────
+
+// The master outlives every call by ControlPersist, so the server closes it
+// when it ends — on stdin's end and on a signal — with the same options the
+// calls used. The real entry point runs with a fake `ssh` on PATH: it records
+// each invocation and, like a master, leaves a file at the ControlPath.
+describe("server shutdown", () => {
+  const FAKE_SSH = `#!/bin/sh
+printf '%s\\n' "$@" ::end:: >> "$FAKE_SSH_LOG"
+for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; done
+[ -n "$cp" ] && [ -z "$ctl" ] && : > "$cp"
+exit 0
+`;
+
+  async function spawnServer(extra: Record<string, string> = {}) {
+    const bin = join(scratch, "bin");
+    const log = join(scratch, "ssh.log");
+    await Bun.write(join(bin, "ssh"), FAKE_SSH);
+    await chmod(join(bin, "ssh"), 0o755);
+    const child = Bun.spawn(["bun", join(SOURCES, serverDir!, "server/index.ts")], {
+      env: {
+        ...process.env,
+        ...ENV,
+        HOME: scratch,
+        PATH: `${bin}:${process.env.PATH}`,
+        FAKE_SSH_LOG: log,
+        ...extra,
+      },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const call = { name: "ssh_exec", arguments: { command: "true" } };
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call })}\n`,
+    );
+    child.stdin.flush();
+    await child.stdout.getReader().read(); // the answer: the call is over
+    // One `::end::`-terminated record per invocation.
+    const invocations = () =>
+      readFileSync(log, "utf8")
+        .split("\n::end::\n")
+        .filter((r) => r.trim() !== "")
+        .map((r) => r.split("\n"));
+    const known = invocations()[0]!.find((a) => a.startsWith("UserKnownHostsFile="))!;
+    const dir = known.slice("UserKnownHostsFile=".length).replace(/\/known_hosts$/, "");
+    return { child, dir, invocations };
+  }
+
+  it.each([
+    ["stdin ends", undefined, 0],
+    ["SIGTERM", "SIGTERM", 143],
+    ["SIGINT", "SIGINT", 130],
+    ["SIGHUP", "SIGHUP", 129],
+  ] as const)(
+    "closes the master and removes the session directory when %s",
+    async (_, signal, code) => {
+      const { child, dir, invocations } = await spawnServer();
+      expect(existsSync(join(dir, "cm"))).toBe(true);
+      if (signal) child.kill(signal);
+      else child.stdin.end();
+      expect(await child.exited).toBe(code);
+      const last = invocations().at(-1)!;
+      expect(last.slice(last.indexOf("-O"), last.indexOf("-O") + 2)).toEqual(["-O", "exit"]);
+      expect(last).toContain(`ControlPath=${dir}/cm`);
+      expect(last.at(-1)).toBe("agent@example.com");
+      expect(existsSync(dir)).toBe(false);
+    },
+  );
+
+  // The master binds `<ControlPath>.<16 characters>`, and the bind fails past
+  // sockaddr_un's 104 bytes (macOS): a HOME that deep is passed over.
+  it("keeps the control socket path short enough to bind", async () => {
+    const deep = join(scratch, "d".repeat(80));
+    const { child, dir } = await spawnServer({ HOME: deep });
+    child.stdin.end();
+    await child.exited;
+    expect(dir.startsWith(deep)).toBe(false);
+    expect(Buffer.byteLength(join(dir, "cm.0123456789abcdef"))).toBeLessThan(104);
+  });
+});
+
+// ─────────────────────────── a real sshd ─────────────────────────────
+
+// End to end against an unprivileged sshd on the loopback: calls in a row
+// authenticate ONCE, a timed-out command is killed on the target, and `~` lists
+// the home directory through real sftp. Skipped on a workstation without sshd;
+// on CI (test.yml installs openssh-server) a missing sshd fails.
+const SSHD = ["/usr/sbin/sshd", "/usr/bin/sshd"].find((p) => existsSync(p));
+
+describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
+  let dir = "";
+  let sshd: ReturnType<typeof Bun.spawn> | null = null;
+  let port = 0;
+
+  const freePort = () =>
+    new Promise<number>((resolve) => {
+      const srv = createServer().listen(0, "127.0.0.1", () => {
+        const p = (srv.address() as { port: number }).port;
+        srv.close(() => resolve(p));
+      });
+    });
+
+  beforeEach(async () => {
+    // Short, for the control socket.
+    if (!SSHD) throw new Error("no sshd on this CI runner; test.yml installs openssh-server");
+    dir = await mkdtemp("/tmp/ssh-mcp-sshd-");
+    for (const name of ["host", "client"]) {
+      const kg = Bun.spawnSync([
+        "ssh-keygen",
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-f",
+        join(dir, name),
+      ]);
+      expect(kg.exitCode).toBe(0);
+    }
+    await writeFile(join(dir, "ak"), `restrict ${readFileSync(join(dir, "client.pub"), "utf8")}`);
+    port = await freePort();
+    await writeFile(
+      join(dir, "sshd_config"),
+      [
+        `Port ${port}`,
+        "ListenAddress 127.0.0.1",
+        `HostKey ${join(dir, "host")}`,
+        `AuthorizedKeysFile ${join(dir, "ak")}`,
+        "PasswordAuthentication no",
+        "KbdInteractiveAuthentication no",
+        "UsePAM no",
+        "StrictModes no",
+        `PidFile ${join(dir, "sshd.pid")}`,
+        "Subsystem sftp internal-sftp",
+        "",
+      ].join("\n"),
+    );
+    sshd = Bun.spawn([SSHD!, "-D", "-e", "-f", join(dir, "sshd_config")], {
+      stdout: "ignore",
+      stderr: Bun.file(join(dir, "sshd.log")),
+    });
+    for (let i = 0; i < 50; i++) {
+      const up = await new Promise<boolean>((resolve) => {
+        const sock = connect(port, "127.0.0.1", () => resolve(sock.end() !== null));
+        sock.once("error", () => resolve(false));
+      });
+      if (up) break;
+      await Bun.sleep(100);
+    }
+  });
+
+  afterEach(async () => {
+    sshd?.kill();
+    await sshd?.exited;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("authenticates once for calls a moment apart, and kills what times out", async () => {
+    const hostKey = readFileSync(join(dir, "host.pub"), "utf8").split(" ").slice(0, 2).join(" ");
+    restoreEnv = withEnv({
+      SSH_HOST: "127.0.0.1",
+      SSH_PORT: String(port),
+      SSH_USER: userInfo().username,
+      SSH_PRIVATE_KEY_PATH: join(dir, "client"),
+      SSH_HOST_KEY: hostKey,
+    });
+    const session = join(dir, "s");
+    await Bun.write(join(session, "known_hosts"), `[127.0.0.1]:${port} ${hostKey}\n`);
+    const deps = { sessionDir: session } as unknown as Deps;
+    const file = join(dir, "notes.txt");
+    try {
+      // sftp first: it cannot become the master itself.
+      expect(
+        (await callTool("ssh_write_file", { path: file, content: "a=1\n" }, deps)).payload,
+      ).toEqual({ path: file, bytes: 4 });
+      expect((await callTool("ssh_read", { path: "~" }, deps)).payload.type).toBe("directory");
+      await callTool("ssh_edit_file", { path: file, old_str: "1", new_str: "2" }, deps);
+      expect(readFileSync(file, "utf8")).toBe("a=2\n");
+      const exec = await callTool("ssh_exec", { command: "echo out; exit 4" }, deps);
+      expect(exec.payload).toMatchObject({ exit_code: 4, stdout: "out\n" });
+      const slow = await callTool(
+        "ssh_exec",
+        { command: "sleep 30; echo done", timeout_seconds: 1 },
+        deps,
+      );
+      expect(slow.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+      expect(() => process.kill(slow.payload.remote_pid as number, 0)).toThrow();
+
+      const log = readFileSync(join(dir, "sshd.log"), "utf8");
+      expect(log.match(/Accepted publickey/g)).toHaveLength(1);
+    } finally {
+      const cfg = loadConfig(process.env);
+      Bun.spawnSync(["ssh", ...buildMasterExitArgs(cfg, sessionPaths(session))], {
+        timeout: 5_000,
+      });
+    }
+  }, 30_000);
 });
