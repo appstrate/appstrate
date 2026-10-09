@@ -263,7 +263,11 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   MissingIntegrationConnectionProblem:
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   LaunchWarnings:
-    "`warnings` envelope merged by allOf into the launch/schedule success bodies; its items are ConnectionResolutionWarning, no shared-type",
+    "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
+  RunAndWaitResult:
+    "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
+  RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",
+  RunAndWaitTerminal: "RunAndWaitResult branch for `done: true`; no shared-type",
   // Canonical TS shape: `HandoffStep` in services/connect/provisioning.ts.
   HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
   HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",

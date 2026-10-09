@@ -247,6 +247,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   passed, launch included, before the 60 s timeout of MCP clients. The run
   keeps going: continue with `getRun` (`query: { wait: true }`), never with a
   second `run_and_wait`.
+- **MCP `run_and_wait` declares an `outputSchema`** (#1851):
+  `RunAndWaitResult`, pending or terminal, and the server validates every
+  `structuredContent` against the tool's declared schema. `done:false`
+  carries no `error`, and the next step comes as a second text block;
+  `warnings` is always present. The result is truncated on the MCP path too,
+  and files are fetched only once `done`. The 15 s heartbeat and the 45 s
+  unstreamed wait derive from the SDK's 60 s request timeout.
+- **`GET /api/runs/{id}?wait` documentation names the cap from its single
+  constant** (#1851).
+- **The chat holds back a `run_and_wait` call's connect offers only while its
+  live (preliminary) updates stream** (#1851).
 
 - **Firecracker guest artifacts join the version contract** (#1852). The
   runner daemon reports the release of its installed kernel and rootfs on
@@ -367,6 +378,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The sidecar `/mcp` transport's `maxRequestBodySize` option** (#1857). It
   had no effect: the sidecar bounds request bodies before the MCP SDK reads
   them.
+- **The platform MCP transport's dead `maxRequestBodySize` option** (#1851).
 
 ## [1.0.0-beta.66] - 2026-10-08
 

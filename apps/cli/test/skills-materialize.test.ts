@@ -445,8 +445,8 @@ describe("materializeAgent", () => {
     expect(body).toContain("They carry no link");
     expect(body).toContain("`initiateIntegrationConnect`");
     expect(body).not.toContain("hand over any `connect_url`");
-    // run_and_wait's time cap answers `done: false` WITH an `error`: waiting must win.
-    const waitRule = body.indexOf("`done: false`, even with an `error`");
+    // `done: false` alone means the wait ended: the run is still going, and waiting must win.
+    const waitRule = body.indexOf("`done: false`: the run is still going");
     expect(waitRule).toBeGreaterThan(0);
     expect(waitRule).toBeLessThan(body.indexOf("Anything else"));
     expect(body).not.toContain("Weekly report");

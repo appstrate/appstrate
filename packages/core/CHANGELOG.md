@@ -43,9 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   internal credential `410`/`502`. (#1853)
 - **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
   the launch's `warnings`** onto every payload it returns (preliminary,
-  terminal and timed out) when the launch reported some; absent otherwise.
+  terminal and timed out), `[]` when none, as REST `LaunchWarnings` does.
   The documented payload becomes
-  `{ id, packageId, status, done, result?, error?, warnings? }`. (#1830)
+  `{ id, packageId, status, done, result?, error?, warnings }`. (#1830, #1851)
+- **`enrichTerminalRunAndWaitStep`** and **`RUN_AND_WAIT_RESUME_INSTRUCTION`**
+  (`@appstrate/core/run-and-wait-client`): the files and truncation of a
+  terminal step (applied only when `done`), and the next-step instruction of a
+  `done: false` step. (#1851)
 
 - **`parseTokenUsage`** (`@appstrate/core/token-usage`), re-exported from
   `@appstrate/afps-shared/token-usage`, the rule's single home: the
@@ -120,13 +124,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`
   is its own. (#1552, #1846)
 
-- **`waitForRunAndWaitCompletion`** (`@appstrate/core/run-and-wait-client`): the
-  `error` of a `done: false` step — the wait ended before the run reached a
-  terminal status — now reads "run_and_wait stopped waiting … the run is still in
-  progress. Do not launch it again — read its outcome later with `getRun` on this
-  `id`." instead of "run_and_wait timed out …". It is not a run outcome (the old
-  wording read like the run's own `timeout` status), and a caller that relaunched
-  on it duplicated a run still going. (#1844)
+- **BREAKING: a `done: false` step carries no `error`**
+  (`waitForRunAndWaitCompletion`, `projectRunAndWaitPayload`,
+  `@appstrate/core/run-and-wait-client`). `done` is the only discriminant:
+  `result` and `error` are set only when `done`, and `error` only reports the
+  run's failure. The old "run_and_wait timed out …" error read like the run's
+  own `timeout` status, and a caller that relaunched on it duplicated a run
+  still going. (#1844, #1851)
+- **The wait poll sends the remaining seconds and the server clamps them**
+  (`@appstrate/core/run-and-wait-client`). (#1851)
+
+### Removed
+
+- **BREAKING: `RUN_GET_WAIT_MAX_SECONDS`** (`@appstrate/core/run-and-wait-client`):
+  the wait poll no longer caps its own request; the server clamps. (#1851)
 
 ## [15.0.0] — 2026-10-08
 

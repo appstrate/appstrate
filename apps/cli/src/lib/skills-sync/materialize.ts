@@ -260,7 +260,7 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
     [`Call \`${RUN_AND_WAIT}\` with:`, "", "```json", call, "```"],
     [
       "On its answer:",
-      `- \`done: false\`, even with an \`error\`: the run is still going. Wait with ` +
+      "- `done: false`: the run is still going, with no outcome yet. Wait with " +
         `\`${INVOKE_OPERATION}\` \`${GET_RUN}\` until it ends, then list its files with ` +
         `\`${LIST_FILES}\` \`{ "runId": "<id>" }\`. Never call \`getRun\` on a finished run.`,
       "- `connect_url` or `must_choose_connection`: follow the Appstrate server's instructions.",

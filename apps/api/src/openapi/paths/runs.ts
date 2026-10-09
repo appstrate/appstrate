@@ -4,6 +4,7 @@ import { connectionConflictContent, problemContent } from "../responses.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
 
 const inlineDependencyAuthorization =
@@ -874,8 +875,7 @@ const canonicalRunsPaths = {
       operationId: "getRun",
       tags: ["Runs"],
       summary: "Get run status/result (optionally long-poll until terminal)",
-      description:
-        "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).\n\n**Concurrency bound:** each identity (user or API key) may hold at most **10** concurrent waits across all runs. Beyond the cap the request degrades to the immediate no-wait response (`wait` is ignored) — a non-terminal `status` means poll again, and capacity self-heals as earlier waits resolve.",
+      description: `Get run details including status, result, input, and duration.\n\nPass \`?wait=<seconds>\` (or \`?wait=true\` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (\`success\`, \`failed\`, \`timeout\`, \`cancelled\`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **${MAX_WAIT_SECONDS} seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx \`proxy_read_timeout\`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal \`status\` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).\n\n**Concurrency bound:** each identity (user or API key) may hold at most **10** concurrent waits across all runs. Beyond the cap the request degrades to the immediate no-wait response (\`wait\` is ignored) — a non-terminal \`status\` means poll again, and capacity self-heals as earlier waits resolve.`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -886,16 +886,18 @@ const canonicalRunsPaths = {
           required: false,
           schema: {
             oneOf: [
-              { type: "boolean", description: "`true` waits the maximum 55 s; `false` disables." },
+              {
+                type: "boolean",
+                description: `\`true\` waits the maximum ${MAX_WAIT_SECONDS} s; \`false\` disables.`,
+              },
               {
                 type: "integer",
                 minimum: 0,
-                description: "Wait budget in seconds. Values above 55 are clamped to 55.",
+                description: `Wait budget in seconds. Values above ${MAX_WAIT_SECONDS} are clamped to ${MAX_WAIT_SECONDS}.`,
               },
             ],
           },
-          description:
-            "Hold the request until the run reaches a terminal status or this many seconds elapse (capped at 55, see operation description), then return the run object. `0`/`false`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if `wait` were 0 (degrade-to-immediate, see operation description).",
+          description: `Hold the request until the run reaches a terminal status or this many seconds elapse (capped at ${MAX_WAIT_SECONDS}, see operation description), then return the run object. \`0\`/\`false\`/absent = return immediately (default). Negative, fractional, or non-numeric values return 400. At most 10 concurrent waits per identity — beyond the cap the request returns immediately as if \`wait\` were 0 (degrade-to-immediate, see operation description).`,
         },
       ],
       responses: {
@@ -972,8 +974,7 @@ const canonicalRunsPaths = {
                 type: "about:blank",
                 title: "Bad Request",
                 status: 400,
-                detail:
-                  "Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max 55)",
+                detail: `Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max ${MAX_WAIT_SECONDS})`,
                 code: "invalid_request",
                 request_id: "req_abc123",
               },

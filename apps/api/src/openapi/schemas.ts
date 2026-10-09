@@ -9,6 +9,10 @@ import {
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
 import { runStatusValues } from "@appstrate/core/run-status";
+import {
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+  RUN_RESULT_INLINE_MAX_BYTES,
+} from "@appstrate/core/run-and-wait-client";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import {
@@ -139,6 +143,19 @@ export const AGENT_INPUT_SETTINGS_PROPERTIES = {
     items: { type: "string", minLength: 1 },
     description:
       "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
+  },
+};
+
+/** What every `run_and_wait` result carries, whether the run ended or the wait did. */
+const RUN_AND_WAIT_REQUIRED = ["id", "packageId", "status", "done", "warnings"];
+const RUN_AND_WAIT_COMMON_PROPERTIES = {
+  id: { type: ["string", "null"], description: "The run id." },
+  packageId: { type: ["string", "null"], description: "The run's agent (`@scope/name`)." },
+  status: { type: ["string", "null"], enum: [...runStatusValues, null] },
+  warnings: {
+    type: "array",
+    description: "The launch's `warnings` (see LaunchWarnings); `[]` when none.",
+    items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
   },
 };
 

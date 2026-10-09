@@ -28894,6 +28894,129 @@
           }
         }
       },
+      "RunAndWaitResult": {
+        "type": "object",
+        "description": "The `run_and_wait` MCP tool's result. `done` is its only discriminant: `true` once the run reached a terminal status, `false` when the wait ended first — the run is still going, and the payload carries no outcome. The run is still going: never call `run_and_wait` again for it — read its outcome with `getRun` on its `id`.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RunAndWaitPending"
+          },
+          {
+            "$ref": "#/components/schemas/RunAndWaitTerminal"
+          }
+        ]
+      },
+      "RunAndWaitPending": {
+        "type": "object",
+        "required": ["id", "packageId", "status", "done", "warnings"],
+        "properties": {
+          "id": {
+            "type": ["string", "null"],
+            "description": "The run id."
+          },
+          "packageId": {
+            "type": ["string", "null"],
+            "description": "The run's agent (`@scope/name`)."
+          },
+          "status": {
+            "type": ["string", "null"],
+            "enum": ["pending", "running", "success", "failed", "timeout", "cancelled", null]
+          },
+          "warnings": {
+            "type": "array",
+            "description": "The launch's `warnings` (see LaunchWarnings); `[]` when none.",
+            "items": {
+              "$ref": "#/components/schemas/ConnectionResolutionWarning"
+            }
+          },
+          "done": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunAndWaitTerminal": {
+        "type": "object",
+        "required": ["id", "packageId", "status", "done", "warnings"],
+        "properties": {
+          "id": {
+            "type": ["string", "null"],
+            "description": "The run id."
+          },
+          "packageId": {
+            "type": ["string", "null"],
+            "description": "The run's agent (`@scope/name`)."
+          },
+          "status": {
+            "type": ["string", "null"],
+            "enum": ["pending", "running", "success", "failed", "timeout", "cancelled", null]
+          },
+          "warnings": {
+            "type": "array",
+            "description": "The launch's `warnings` (see LaunchWarnings); `[]` when none.",
+            "items": {
+              "$ref": "#/components/schemas/ConnectionResolutionWarning"
+            }
+          },
+          "done": {
+            "type": "boolean",
+            "const": true
+          },
+          "result": {
+            "description": "The run's output payload. Absent when `truncated` replaces it."
+          },
+          "error": {
+            "type": "string",
+            "description": "The run's own failure; never a wait outcome."
+          },
+          "files": {
+            "type": "array",
+            "description": "Files the run published; absent when it published none.",
+            "items": {
+              "type": "object",
+              "required": ["id", "uri", "name", "mime", "size"],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string",
+                  "description": "`appfile://` URI."
+                },
+                "name": {
+                  "type": "string"
+                },
+                "mime": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "const": true,
+            "description": "`result` was over 32768 bytes of JSON: `result_head` holds its prefix, `getRun` the whole of it."
+          },
+          "result_size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "result_head": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "How to read a truncated result."
+          }
+        },
+        "additionalProperties": false
+      },
       "ModelGenerationSettings": {
         "type": "object",
         "additionalProperties": false,

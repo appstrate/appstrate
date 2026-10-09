@@ -31,7 +31,6 @@
 
 import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import { getEnv } from "@appstrate/env";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -57,6 +56,7 @@ import { APIError } from "better-auth/api";
 import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
@@ -78,6 +78,7 @@ import {
   buildFileResourceProvider,
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
+  RUN_AND_WAIT_LONG_POLL_RESUME,
   type Dispatch,
   type McpObserver,
   type McpSurface,
@@ -229,11 +230,11 @@ export function buildServerInstructions(
   // A `done:false` run is still going. An external client waits on it; the chat
   // gets `done:false` at the end of its turn budget, too late for a long-poll.
   const doneFalseFollowUp = contextInjected
-    ? "read its outcome with `getRun` on that `id`"
-    : "wait for it with `getRun` (`query: { wait: true }`) on that `id`";
+    ? RUN_AND_WAIT_RESUME_INSTRUCTION
+    : RUN_AND_WAIT_LONG_POLL_RESUME;
   const runBullets = runs
     ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; for a run \`run_and_wait\` returned with \`done:false\`, see the shortcut below.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings? }\` once the run is terminal (\`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` (with an \`error\`) means the run is still going: never call \`run_and_wait\` again for it — ${doneFalseFollowUp}.${inlineShortcut}
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings }\` once the run is terminal (\`error\`: the run's own failure; \`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` means its wait ended first. ${doneFalseFollowUp}${inlineShortcut}
 `
     : "";
   const authKeySource = listsIntegrations
@@ -250,7 +251,7 @@ export function buildServerInstructions(
   const warningCodes = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ");
   const connectBullets = runs
     ? `
-- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${warningCodes}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A schedule written for another member answers \`warnings: []\` whatever its fires will lack. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
+- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${warningCodes}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A schedule write answers \`warnings: null\` when it judged nothing (disabled, no resolution-affecting change, or written for another member, whose connections it never reveals) and \`[]\` only when it judged and found nothing to report. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
 - The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, tell the user to reconnect it. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters.
 - Code \`auth_serves_no_selected_tool\` on \`integrations.<id>\` is not a connect problem either: the connection its \`connection_id\` names was explicitly bound (your \`connection_overrides\`, or a pin or default) and was made on an auth that exposes none of the agent's selected tools, so reconnecting it changes nothing. When you passed \`connection_overrides\`, retry without that id; when a pin or default binds it, tell the user which connection to take out of the set.
 - Code \`auth_key_serves_no_selected_tool\` on \`integrations.<id>\` is not a connection problem at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
@@ -585,9 +586,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
       // or a SameSite session cookie), so a cross-site page cannot drive it.
       enableDnsRebindingProtection: false,
-      // The global `bodyLimit` already bounds this request; match it so the
-      // SDK's own 4 MB default does not become a second, lower, hidden cap.
-      maxRequestBodySize: getEnv().API_BODY_LIMIT_BYTES,
     });
 
     // The SDK reads these bytes only when they did not parse here.

@@ -6616,6 +6616,54 @@ export interface components {
                 source: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto" | null;
             }[] | null;
         };
+        RunAndWaitPending: {
+            /** @description The run id. */
+            id: string | null;
+            /** @description The run's agent (`@scope/name`). */
+            packageId: string | null;
+            /** @enum {string|null} */
+            status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
+            /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
+            warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @constant */
+            done: false;
+        };
+        /** @description The `run_and_wait` MCP tool's result. `done` is its only discriminant: `true` once the run reached a terminal status, `false` when the wait ended first — the run is still going, and the payload carries no outcome. The run is still going: never call `run_and_wait` again for it — read its outcome with `getRun` on its `id`. */
+        RunAndWaitResult: components["schemas"]["RunAndWaitPending"] | components["schemas"]["RunAndWaitTerminal"];
+        RunAndWaitTerminal: {
+            /** @description The run id. */
+            id: string | null;
+            /** @description The run's agent (`@scope/name`). */
+            packageId: string | null;
+            /** @enum {string|null} */
+            status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
+            /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
+            warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @constant */
+            done: true;
+            /** @description The run's output payload. Absent when `truncated` replaces it. */
+            result?: unknown;
+            /** @description The run's own failure; never a wait outcome. */
+            error?: string;
+            /** @description Files the run published; absent when it published none. */
+            files?: {
+                id: string;
+                /** @description `appfile://` URI. */
+                uri: string;
+                name: string;
+                mime: string;
+                size: number;
+            }[];
+            /**
+             * @description `result` was over 32768 bytes of JSON: `result_head` holds its prefix, `getRun` the whole of it.
+             * @constant
+             */
+            truncated?: true;
+            result_size_bytes?: number;
+            result_head?: string;
+            /** @description How to read a truncated result. */
+            message?: string;
+        };
         RunLog: {
             /** Format: int64 */
             id: number;
@@ -14816,6 +14864,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        result?: {
+                            /** @description A `tools/call` result's structured payload. A tool declaring an `outputSchema` returns one matching it — `run_and_wait`'s is RunAndWaitResult — or the call fails with a JSON-RPC internal error. */
+                            structuredContent?: components["schemas"]["RunAndWaitResult"] | {
+                                [key: string]: unknown;
+                            };
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    } & {
                         [key: string]: unknown;
                     };
                     "text/event-stream": string;

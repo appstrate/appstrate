@@ -5,6 +5,7 @@
  * joined onto their routes' guards, so the index and tools read the enforcing table.
  */
 
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
 
@@ -201,4 +202,38 @@ export function collectReferencedSchemas(
   }
 
   return resolved;
+}
+
+const outputSchemas = new WeakMap<Record<string, unknown>, Map<string, ToolOutputSchema>>();
+
+type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
+
+/**
+ * Component `name` as a self-contained JSON Schema, for a tool's `outputSchema`:
+ * the components it references move under `$defs` and every ref is rewritten to
+ * point there. Annotations (`description`) are dropped: `tools/list` sits in the
+ * model's context, and the tool's own description carries the meaning. Memoized
+ * per spec, so one object per schema reaches the server's validator cache.
+ */
+export function componentJsonSchema(
+  name: string,
+  componentSchemas: Record<string, unknown>,
+): ToolOutputSchema {
+  const bySpec = outputSchemas.get(componentSchemas) ?? new Map<string, ToolOutputSchema>();
+  outputSchemas.set(componentSchemas, bySpec);
+  const cached = bySpec.get(name);
+  if (cached) return cached;
+
+  const root = componentSchemas[name] as Record<string, unknown> | undefined;
+  if (root?.type !== "object") throw new Error(`Spec has no \`${name}\` object schema`);
+  const defs = collectReferencedSchemas(root, componentSchemas);
+  const schema = JSON.parse(JSON.stringify({ ...root, $defs: defs }), (key, value: unknown) => {
+    if (typeof value !== "string") return value;
+    if (key === "description") return undefined;
+    return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+      ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+      : value;
+  }) as ToolOutputSchema;
+  bySpec.set(name, schema);
+  return schema;
 }

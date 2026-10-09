@@ -98,7 +98,30 @@ export const mcpPaths = {
             "`params._meta.progressToken`: its progress notifications, then its result, as SSE " +
             "events; as `application/json` otherwise.",
           content: {
-            "application/json": { schema: { type: "object", additionalProperties: true } },
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: true,
+                properties: {
+                  result: {
+                    type: "object",
+                    additionalProperties: true,
+                    properties: {
+                      structuredContent: {
+                        description:
+                          "A `tools/call` result's structured payload. A tool declaring an " +
+                          "`outputSchema` returns one matching it — `run_and_wait`'s is " +
+                          "RunAndWaitResult — or the call fails with a JSON-RPC internal error.",
+                        anyOf: [
+                          { $ref: "#/components/schemas/RunAndWaitResult" },
+                          { type: "object", additionalProperties: true },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
             "text/event-stream": { schema: { type: "string" } },
           },
         },
