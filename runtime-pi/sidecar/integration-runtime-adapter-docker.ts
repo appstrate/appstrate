@@ -766,7 +766,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
-      if (!runNetwork) {
+      if (!runNetwork || !peers) {
         throw new Error("docker integration adapter: spawn() called before prepare()");
       }
       const plan = planContainer(spec, bundleRoot);
@@ -905,7 +905,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       containerIds.push(containerId);
-      peers?.register(containerName, runnerKeyOf(spec));
+      peers.register(containerName, runnerKeyOf(spec));
       if (egress && egress.caCertHostPath === null) {
         transparentPolicies.set(runnerKeyOf(spec), egress.policy);
       }

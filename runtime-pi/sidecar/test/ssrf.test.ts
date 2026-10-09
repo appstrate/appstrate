@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "bun:test";
 
-import { isSelfHost, ssrfFloorFor } from "../helpers.ts";
+import { isSelfHost, ownAddresses, ssrfFloorFor } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { privateIpv4 } from "./helpers/private-ipv4.ts";
 
@@ -111,6 +111,6 @@ describe("compileRunnerEgressPolicy — skipsSsrfFloor", () => {
   it("reads this process's interfaces, IPv4-mapped forms included", () => {
     const ip = privateIpv4();
     const forms = [ip, `::ffff:${ip}`, `[::FFFF:${ip}]`, `${ip}.`];
-    expect(forms.map((h) => isSelfHost(h))).toEqual(forms.map(() => true));
+    expect(forms.map((h) => isSelfHost(h, ownAddresses))).toEqual(forms.map(() => true));
   });
 });

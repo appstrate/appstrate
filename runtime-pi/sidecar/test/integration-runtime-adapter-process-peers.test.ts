@@ -396,6 +396,7 @@ describe("process adapter — transparent egress plane (#779)", () => {
     allowsAuthority: (host) => host === ALLOWED,
     allowsUrl: () => true,
     skipsSsrfFloor: () => false,
+    isSelf: () => false,
   };
   const connectEgress: RuntimeEgressContext = {
     proxyUrl: "http://127.0.0.1:1",

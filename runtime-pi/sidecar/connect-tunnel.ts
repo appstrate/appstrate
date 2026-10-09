@@ -86,13 +86,13 @@ export function tieSockets(s1: Socket, s2: Socket): void {
   closeWith(s2, s1);
 }
 
-export function destroyBothWhenIdle(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
+export function destroyBothWhenIdle(s1: Socket, s2: Socket): void {
   const destroyBoth = () => {
     s1.destroy();
     s2.destroy();
   };
-  s1.setTimeout(idleMs, destroyBoth);
-  s2.setTimeout(idleMs, destroyBoth);
+  s1.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, destroyBoth);
+  s2.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, destroyBoth);
 }
 
 /** Blind bidirectional relay with an idle timeout; teardown is {@link tieSockets}' job. */

@@ -124,6 +124,7 @@ describe("MITM listener — subprocess end-to-end", () => {
           allowsAuthority: () => true,
           allowsUrl: () => true,
           skipsSsrfFloor: () => false,
+          isSelf: () => false,
         },
         isPeerAllowed: async () => true,
       });

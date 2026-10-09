@@ -257,7 +257,12 @@ describe("process adapter — privilege-drop gate", () => {
     const egress: RuntimeEgressContext = {
       proxyUrl: "http://127.0.0.1:1",
       caCertHostPath,
-      policy: { allowsAuthority: () => true, allowsUrl: () => true, skipsSsrfFloor: () => false },
+      policy: {
+        allowsAuthority: () => true,
+        allowsUrl: () => true,
+        skipsSsrfFloor: () => false,
+        isSelf: () => false,
+      },
     };
     const mode = async (path: string) => (await stat(path)).mode & 0o777;
     const spawnOnce = (adapter: ReturnType<typeof createHermeticProcessAdapter>) =>

@@ -1276,10 +1276,9 @@ export async function bootIntegrations(
   // it. NEVER derive it from RUN_TOKEN: labels are readable by anyone who can reach the daemon.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
-  // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`
-  // (the launching orchestrator pins it to mirror `RUN_ADAPTER` — no probing).
-  // The selection logic is in {@link selectIntegrationRuntimeAdapter}; adding a
-  // new backend (firecracker, podman) means dropping a new
+  // Pick the runtime backend from `INTEGRATION_RUNTIME_ADAPTER`, pinned by the
+  // launching orchestrator — no probing. The selection logic is in
+  // {@link selectIntegrationRuntimeAdapter}; a new backend (podman, say) is a new
   // `integration-runtime-adapter-*.ts` module that calls
   // `registerIntegrationRuntimeAdapter()`.
   let adapter: IntegrationRuntimeAdapter;

@@ -75,7 +75,12 @@ const stubResolveHost = async () => ["203.0.113.10"];
 
 /** Allow-all egress gates for tests about something else; the #1458 describe overrides them. */
 const permissiveEgress = {
-  egressPolicy: { allowsAuthority: () => true, allowsUrl: () => true, skipsSsrfFloor: () => false },
+  egressPolicy: {
+    allowsAuthority: () => true,
+    allowsUrl: () => true,
+    skipsSsrfFloor: () => false,
+    isSelf: () => false,
+  },
   isPeerAllowed: async () => true,
 };
 
@@ -1489,6 +1494,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         },
         allowsUrl: () => true,
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       },
       resolveHostFn: async (host) => {
         resolved.push(host);
@@ -1529,6 +1535,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
           allowsAuthority: () => true,
           allowsUrl: (url) => url.startsWith("https://api.test.local/allowed/"),
           skipsSsrfFloor: () => false,
+          isSelf: () => false,
         },
       });
       try {

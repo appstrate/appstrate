@@ -267,7 +267,11 @@ function makeListener(
     isBlockedHostFn: () => false,
     onEvent: (e) => events.push(e),
     // Permissive by default; the allowlist tests below override these.
-    egressPolicy: { allowsAuthority: () => true, skipsSsrfFloor: () => false },
+    egressPolicy: {
+      allowsAuthority: () => true,
+      skipsSsrfFloor: () => false,
+      isSelf: () => false,
+    },
     isPeerAllowed: async () => true,
     ...overrides,
   });
@@ -396,6 +400,7 @@ describe("integration-egress-listener (#543)", () => {
       egressPolicy: {
         allowsAuthority: (h) => h === "allowed.example.com",
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       },
       resolveHostFn: async () => {
         resolved = true;
@@ -423,6 +428,7 @@ describe("integration-egress-listener (#543)", () => {
           return h === "allowed.example.com" && p === 443;
         },
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       },
       resolveHostFn: async () => ["127.0.0.1"],
     });
@@ -451,6 +457,7 @@ describe("integration-egress-listener (#543)", () => {
           return true;
         },
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       },
     });
 
@@ -550,6 +557,7 @@ describe("integration-egress-listener (#543)", () => {
         egressPolicy: {
           allowsAuthority: (h, p) => h === "allowed.example.com" && p === 80,
           skipsSsrfFloor: () => false,
+          isSelf: () => false,
         },
         resolveHostFn: async () => {
           resolved = true;
@@ -627,6 +635,7 @@ describe("integration-egress-listener (#543)", () => {
         egressPolicy: {
           allowsAuthority: () => (consulted = true),
           skipsSsrfFloor: () => (consulted = true),
+          isSelf: () => (consulted = true),
         },
         resolveHostFn: async () => {
           consulted = true;
@@ -794,6 +803,7 @@ describe("integration-egress-listener (#543)", () => {
         egressPolicy: {
           allowsAuthority: (h, p) => h === "allowed.example.com" && p === echoPort,
           skipsSsrfFloor: () => false,
+          isSelf: () => false,
         },
         resolveHostFn: async () => ["127.0.0.1"],
         ...extra,

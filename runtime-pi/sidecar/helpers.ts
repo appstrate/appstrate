@@ -381,8 +381,8 @@ export type PeerCheck = (peer: Peer) => Promise<boolean>;
 /** TCP-level half of the egress policy — all a blind tunnel can check. */
 export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority"> & {
   skipsSsrfFloor(host: string, port: number): boolean;
-  /** The floor an exempt target still gets; {@link isSelfHost} when absent. */
-  isSelf?(host: string): boolean;
+  /** The floor an exempt target still gets. */
+  isSelf(host: string): boolean;
 };
 
 export type RunnerEgressPolicy = EgressPolicy & AuthorityPolicy;
@@ -413,10 +413,7 @@ export function ownAddresses(): ReadonlySet<string> {
 }
 
 /** Loopback or one of `addresses`: dialled from the sidecar, either reaches its own listeners. */
-export function isSelfHost(
-  host: string,
-  addresses: () => ReadonlySet<string> = ownAddresses,
-): boolean {
+export function isSelfHost(host: string, addresses: () => ReadonlySet<string>): boolean {
   const canonical = canonicalHost(host);
   return isLoopbackHost(host) || canonical === null || addresses().has(canonical);
 }
@@ -432,7 +429,7 @@ export function ssrfFloorFor(
   isBlockedHostFn: (host: string) => boolean,
 ): (host: string) => boolean {
   if (!policy.skipsSsrfFloor(host, port)) return isBlockedHostFn;
-  return policy.isSelf ?? isSelfHost;
+  return policy.isSelf;
 }
 
 /** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */

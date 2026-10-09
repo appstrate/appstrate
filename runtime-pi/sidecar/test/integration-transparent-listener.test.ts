@@ -52,7 +52,11 @@ async function startTcpEcho(host = "127.0.0.1"): Promise<{ port: number; receive
 }
 
 type PeerPolicy = AuthorityPolicy;
-const allowAll: PeerPolicy = { allowsAuthority: () => true, skipsSsrfFloor: () => false };
+const allowAll: PeerPolicy = {
+  allowsAuthority: () => true,
+  skipsSsrfFloor: () => false,
+  isSelf: () => false,
+};
 
 async function makeListener(
   opts: {
@@ -228,6 +232,7 @@ describe("transparent egress listener — TLS SNI path", () => {
       policyForPeer: async () => ({
         allowsAuthority: (host) => host === "allowed.test.local",
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       }),
       resolveHostFn: async (host) => {
         resolved.push(host);
@@ -258,6 +263,7 @@ describe("transparent egress listener — TLS SNI path", () => {
           return port === 443;
         },
         skipsSsrfFloor: () => false,
+        isSelf: () => false,
       }),
       onEvent: (e) => events.push(e),
     });
