@@ -164,6 +164,24 @@ describe("loginBlockIssues", () => {
     expect(paths({ outputs })).toEqual(["outputs.__proto__"]);
   });
 
+  it("evaluates a variable only in a login url that is a URL template (§7.12)", () => {
+    for (const url of [
+      "{$variable.base_url}/login",
+      "https://{$variable.tenant}.example.com/login",
+    ]) {
+      expect(paths({ request: { url } })).toEqual([]);
+    }
+    expect(
+      paths({
+        request: {
+          url: "https://example.com/{$variable.tenant}/login",
+          body: "base={$variable.base_url}",
+          headers: { Host: "{$variable.tenant}" },
+        },
+      }),
+    ).toEqual(["request.url", "request.body", "request.headers.Host"]);
+  });
+
   it("locates each expression the engine cannot evaluate", () => {
     expect(
       paths({

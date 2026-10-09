@@ -709,6 +709,7 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
       }
       undeclaredVariables(template, at);
     }
+    undeclaredVariables(login?.request?.url, ["connect", "login", "request", "url"]);
     for (const issue of login ? loginBlockIssues(login) : []) {
       push(issue.message, ["connect", "login", ...issue.path]);
     }

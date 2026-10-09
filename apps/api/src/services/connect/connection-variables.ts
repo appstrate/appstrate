@@ -33,11 +33,13 @@ const TITLE = "Invalid Connection Variable";
 /** The URL templates choosing the upstream of a connection made with `auth`. */
 function authUrlTemplates(
   manifest: IntegrationManifest,
-  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer" | "connect">,
 ): string[] {
-  return [getRemoteSource(manifest)?.url, auth.type === "oauth2" ? auth.issuer : undefined].filter(
-    isVariableTemplate,
-  );
+  return [
+    getRemoteSource(manifest)?.url,
+    auth.type === "oauth2" ? auth.issuer : undefined,
+    auth.connect?.login?.request.url,
+  ].filter(isVariableTemplate);
 }
 
 /** Egress decision for a user-chosen URL (§8.7: no author trust); DNS-resolving. */

@@ -478,8 +478,12 @@ Each `outputs` entry is one of:
 The login request's `url`, `body` and `headers` carry the user's login inputs as
 `{{name}}` (a field of `credentials.schema`); a `{$…}` expression there is refused at
 import, as is a runtime expression or selector `context` the login engine cannot
-evaluate. That includes `{$variable.<name>}`: a login request takes no connection
-variable, so a declarative login cannot target a per-connection upstream.
+evaluate. One exception: `url` may be a [URL template](#url-templates-url-form-vs-host-form)
+over a [connection variable](#connection-variables-variables) —
+`{$variable.base_url}/login` — so each connection logs in to the instance its user names.
+Such a `url` carries no `{{name}}`; its `authorized_uris` entries then carry the same
+variable (`{$variable.base_url}/**`), and its delivery templates may reference only that
+variable ([the origin rule](#authorized_uris-and-delivery-the-origin-rule)).
 
 Each `{{name}}` value is encoded for the place it takes, so a value never adds a
 parameter, a member, a part or a header line (the sidecar does the same for the
@@ -969,6 +973,7 @@ imported:
 | --------------------------------------------------------------------------------------- | ---------------------------------- |
 | `source.remote.url`                                                                     | URL template                       |
 | `auths.<key>.issuer` (`oauth2`)                                                         | URL template                       |
+| `auths.<key>.connect.login.request.url`                                                 | URL template                       |
 | `auths.<key>.authorized_uris[i]`                                                        | URL form or authority form (below) |
 | `auths.<key>.delivery.http.value`, `delivery.env.<n>.value`, `delivery.files.<p>.value` | value template, raw substitution   |
 

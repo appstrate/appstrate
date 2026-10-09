@@ -37,6 +37,7 @@ import {
   loginUrlRefused,
   requireNonEmptyCredentials,
 } from "./strategy.ts";
+import { renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { resolveConnectionVariables } from "./connection-variables.ts";
 import { maskCredentialLabel } from "./mask-label.ts";
 import {
@@ -53,17 +54,28 @@ export function persistsLoginSecret(auth: Pick<AfpsManifestAuth, "connect">): bo
   );
 }
 
-/** The auth's declarative login with typed `inputs`, bound to its rendered `authorized_uris`. */
-export function runAuthLogin(
+/** The auth's login with typed `inputs`, its URL and `authorized_uris` rendered for `variables`. */
+export async function runAuthLogin(
   auth: AfpsManifestAuth,
   inputs: Record<string, unknown>,
   variables: Readonly<Record<string, string>> | null,
 ): ReturnType<typeof runLogin> {
-  return runLogin(auth.connect as LoginConfig, {
-    inputs,
-    authorizedUris: renderAuthAuthorizedUris(auth, {}, variables ?? {}),
-    allowAllUris: auth.allow_all_uris === true,
-  });
+  const config = auth.connect as LoginConfig;
+  const url = renderUrlTemplate(config.login.request.url, variables ?? {});
+  if (url === null) {
+    throw new LoginError(
+      "connect.login.request.url renders no URL for this connection",
+      "invalid_config",
+    );
+  }
+  return runLogin(
+    { ...config, login: { ...config.login, request: { ...config.login.request, url } } },
+    {
+      inputs,
+      authorizedUris: renderAuthAuthorizedUris(auth, {}, variables ?? {}),
+      allowAllUris: auth.allow_all_uris === true,
+    },
+  );
 }
 
 /** A login failure the submitter can act on, as its 4xx/5xx; any other stays the caller's 500. */

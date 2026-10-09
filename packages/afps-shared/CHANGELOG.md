@@ -16,6 +16,9 @@ consumer's publish rather than the first user's `npm install`.
 
 ### Added
 
+- **`loginBlockIssues`** accepts a `{$variable.<name>}` in a login `url` that is a
+  URL template (AFPS §7.12); every other `{$…}` in the request is still reported. (#1818)
+
 - **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
   `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
   a counter fails `isTokenCount`; keys other than the four counters and `tiers`

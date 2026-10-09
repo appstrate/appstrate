@@ -277,6 +277,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A declarative login can target the host its connection names** (#1818,
+  AFPS §7.7/§7.12, `@afps-spec/schema` 0.10.0): a `connect.login` request `url`
+  may be a URL template over a connection variable
+  (`{$variable.base_url}/login`), rendered and egress-checked per connection,
+  with `authorized_uris` following that host.
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
   the agent needs at least one connection of that integration to run (#1830).
   The agent editor has a "required" toggle per integration, and the

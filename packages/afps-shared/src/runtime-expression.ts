@@ -8,6 +8,7 @@
 
 import { parseCredentialRef, templateExpressions } from "./credential-template.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "./jsonpath.ts";
+import { parseUrlTemplate } from "./connection-variables.ts";
 
 export type ResponseExpression =
   { kind: "status" } | { kind: "body"; pointer?: string } | { kind: "header"; name: string };
@@ -161,6 +162,8 @@ export function loginBlockIssues(login: LoginBlockView): LoginBlockIssue[] {
     ]),
   ];
   for (const [template, path] of requestTemplates) {
+    // A login URL may be a URL template (§7.12): its variable is rendered before the login.
+    if (template === request.url && template !== undefined && parseUrlTemplate(template)) continue;
     for (const expr of templateExpressions(template ?? "")) {
       report(`'${expr}' is not evaluated in a login request; login inputs are {{name}}`, path);
     }

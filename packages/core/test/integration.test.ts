@@ -2594,17 +2594,21 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
     ]);
   });
 
-  it("findUnevaluableExpressions refuses a variable in a login request url", () => {
-    const login = {
-      login: {
-        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
-        outputs: { token: "$response.body#/token" },
-      },
-    };
-    expect(
-      findUnevaluableExpressions({ ...customWithConnect(login), variables }).map((v) =>
-        v.path.join("."),
-      ),
-    ).toEqual(["auths.session.connect.login.request.url"]);
+  it("findUnevaluableExpressions takes a variable in a login url only as a URL template", () => {
+    const at = (url: string) =>
+      findUnevaluableExpressions({
+        ...customWithConnect({
+          login: {
+            request: { method: "POST", url, body: "p={{password}}" },
+            outputs: { token: "$response.body#/token" },
+          },
+        }),
+        variables,
+      }).map((v) => v.path.join("."));
+    expect(at("{$variable.base_url}/login")).toEqual([]);
+    expect(at("https://api.example.com/{$variable.base_url}")).toEqual([
+      "auths.session.connect.login.request.url",
+    ]);
+    expect(at("{$variable.nope}/login")).toEqual(["auths.session.connect.login.request.url"]);
   });
 });

@@ -22,12 +22,13 @@ export function fieldsConnect(
   integrationId: string,
   authKey: string,
   credentials: Record<string, unknown>,
+  variables?: Record<string, string>,
 ): Promise<Response> {
   return Promise.resolve(
     getTestApp().request(`/api/integrations/${integrationId}/auths/${authKey}/connect/fields`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ credentials }),
+      body: JSON.stringify({ credentials, ...(variables ? { variables } : {}) }),
     }),
   );
 }

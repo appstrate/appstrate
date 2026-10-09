@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`findUnevaluableExpressions`** (`@appstrate/core/integration`) accepts a
+  `connect.login` request `url` that is a URL template over a declared
+  variable (AFPS §7.7/§7.12) and reports an undeclared one there. (#1818)
+
 - **`required?: boolean`** on `ManifestIntegrationEntry` and
   `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
   afps-spec#28): the agent needs at least one connection of that integration
