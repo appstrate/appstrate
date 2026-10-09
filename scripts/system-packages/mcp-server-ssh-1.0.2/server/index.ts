@@ -123,6 +123,7 @@ const SUN_PATH_BYTES = 104;
 const CONTROL_PATH_MAX_BYTES = SUN_PATH_BYTES - ".0123456789abcdef".length - 1;
 
 const CONTROL_PERSIST_S = 300;
+const CONNECT_TIMEOUT_S = 15;
 
 /** ssh percent-expands paths and ProxyCommand; a literal `%` is `%%`. */
 const sshLiteral = (s: string) => s.replaceAll("%", "%%");
@@ -168,7 +169,7 @@ export function buildSshOptions(
       KbdInteractiveAuthentication: "no",
       ForwardAgent: "no",
       ForwardX11: "no",
-      ConnectTimeout: "15",
+      ConnectTimeout: String(CONNECT_TIMEOUT_S),
       // A peer that stops answering is dropped after ~45 s instead of hanging.
       ServerAliveInterval: "15",
       ServerAliveCountMax: "3",
@@ -821,11 +822,9 @@ export async function execTool(
   );
   const s = await session(deps);
   logLine({ op: "exec", timeout_s: timeoutS });
-  // sshd runs each command as the leader of a new session, so the login shell's
-  // `$$` is the command's process group — the handle a timeout kills it by.
   const marker = `appstrate-ssh-pid-${crypto.randomUUID().replaceAll("-", "")}=`;
   const res = await s.run(
-    ["ssh", ...buildSshArgs(s.cfg, s.paths, `echo ${marker}$$\n${command}`)],
+    ["ssh", ...buildSshArgs(s.cfg, s.paths, markedCommand(marker, command))],
     {
       ceilingMs: timeoutS * 1000,
     },
@@ -864,20 +863,29 @@ export function takePidMarker(
   return { stdout: stdout.slice(0, at) + (end === -1 ? "" : stdout.slice(end + 1)), pid };
 }
 
+/**
+ * sshd runs the command as the leader of a new session, so the login shell's
+ * pid is its process group: a child `sh` echoes it as `$PPID`, in single
+ * quotes that fish and csh leave alone as POSIX shells do.
+ */
+export function markedCommand(marker: string, command: string): string {
+  return `sh -c 'echo ${marker}$PPID'\n${command}`;
+}
+
 const TERM_GRACE_S = 5;
-// 22 s, quoted by the ssh_exec description.
-const STOP_CEILING_MS = (TERM_GRACE_S + 2) * 1000 + 15_000;
+const STOP_CEILING_MS = (TERM_GRACE_S + 2 + CONNECT_TIMEOUT_S) * 1000;
 
 /**
  * SIGTERM, then SIGKILL; exits 0 (gone), 3 (gone already), 4 (survived). The group `pid` leads,
  * else `pid` alone (a wrapper's child leads none). `kill -SIG -PGID`: dash refuses `--`.
  */
 export function stopScript(pid: number): string {
+  // `sh -c`, whatever the login shell; the script holds no single quote.
   return (
-    `if kill -TERM -${pid}; then t=-${pid}; elif kill -TERM ${pid}; then t=${pid}; else exit 3; fi; ` +
+    `sh -c 'if kill -TERM -${pid}; then t=-${pid}; elif kill -TERM ${pid}; then t=${pid}; else exit 3; fi; ` +
     `n=0; while kill -0 $t; do ` +
     `[ "$n" -lt ${TERM_GRACE_S} ] || { kill -KILL $t; sleep 1; kill -0 $t && exit 4; exit 0; }; ` +
-    `sleep 1; n=$((n + 1)); done`
+    `sleep 1; n=$((n + 1)); done'`
   );
 }
 
@@ -1218,8 +1226,7 @@ export const TOOLS = [
   },
   {
     name: "ssh_exec",
-    description:
-      "Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After `timeout_seconds` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most 22 s past `timeout_seconds` with `timed_out: true`, `exit_code: null`, and `remote_process` saying whether it ended (`terminated`, `already_exited`, `still_running` or `unknown`), next to its `remote_pid`. A process that leaves the group (`setsid`, a daemon) is not reached. Longer work can be started detached — `nohup cmd > log 2>&1 < /dev/null &`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.",
+    description: `Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After \`timeout_seconds\` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most ${STOP_CEILING_MS / 1000} s past \`timeout_seconds\` with \`timed_out: true\`, \`exit_code: null\`, \`remote_pid\`, and \`remote_process\` saying whether it ended. A process that leaves the group (\`setsid\`, a daemon) is not reached. Longer work can be started detached — \`nohup cmd > log 2>&1 < /dev/null &\`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.`,
     inputSchema: {
       type: "object",
       properties: {

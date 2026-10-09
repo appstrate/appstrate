@@ -48,6 +48,7 @@ const {
   buildControlArgs,
   sessionPaths,
   takePidMarker,
+  markedCommand,
   stopScript,
   quoteSftpPath,
   parseSftpLs,
@@ -120,7 +121,7 @@ const isMasterCheck = (argv: string[]) =>
 
 /** The pid marker `ssh_exec` prefixes its command with, read back off the argv. */
 const markerOf = (argv: string[]) =>
-  /^echo (appstrate-ssh-pid-[0-9a-f]{32}=)\$\$\n/.exec(argv.at(-1)!)?.[1];
+  /^sh -c 'echo (appstrate-ssh-pid-[0-9a-f]{32}=)\$PPID'\n/.exec(argv.at(-1)!)?.[1];
 
 /**
  * Runner stub: records every invocation, answers from a queue. Master checks
@@ -147,7 +148,7 @@ function stubRunner(answers: Array<Answer | ((argv: string[]) => Answer)>) {
 }
 
 type Deps = {
-  run: (argv: string[], opts: Omit<Call, "argv">) => Promise<Answer & { code: number | null }>;
+  run?: (argv: string[], opts: Omit<Call, "argv">) => Promise<Answer & { code: number | null }>;
   sessionDir: string;
 };
 
@@ -549,7 +550,9 @@ describe("ssh_exec via injected runner", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.argv[0]).toBe("ssh");
     // One `echo` of the shell's pid first, then the command verbatim.
-    expect(calls[0]!.argv.at(-1)).toMatch(/^echo appstrate-ssh-pid-[0-9a-f]{32}=\$\$\nhostname$/);
+    expect(calls[0]!.argv.at(-1)).toMatch(
+      /^sh -c 'echo appstrate-ssh-pid-[0-9a-f]{32}=\$PPID'\nhostname$/,
+    );
     expect(calls[0]!.argv.filter((a) => a.startsWith("LogLevel="))).toEqual(["LogLevel=ERROR"]);
     expect(res.isError).toBeUndefined();
     expect(res.payload).toMatchObject({
@@ -716,6 +719,13 @@ describe("ssh_exec via injected runner", () => {
       expect(controlPath(calls[1]!)).toBe(controlPath(calls[0]!));
     },
   );
+
+  // The pid is echoed by a child `sh`, single-quoted: `$$` in the login shell
+  // itself is a parse error in fish, which would fail every command.
+  it("reports the login shell's pid from a child sh, in quotes every shell keeps", () => {
+    expect(markedCommand("m=", "uptime")).toBe("sh -c 'echo m=$PPID'\nuptime");
+    expect(stopScript(42)).toMatch(/^sh -c '[^']*'$/);
+  });
 
   it("reads the pid off its own marker only, never a group-wide or bogus one", () => {
     const m = "appstrate-ssh-pid-ab=";
@@ -1850,13 +1860,18 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
       stdout: "ignore",
       stderr: Bun.file(join(dir, "sshd.log")),
     });
-    for (let i = 0; i < 50; i++) {
-      const up = await new Promise<boolean>((resolve) => {
+    let up = false;
+    for (let i = 0; i < 50 && !up; i++) {
+      up = await new Promise<boolean>((resolve) => {
         const sock = connect(port, "127.0.0.1", () => resolve(sock.end() !== null));
         sock.once("error", () => resolve(false));
       });
-      if (up) break;
-      await Bun.sleep(100);
+      if (!up) await Bun.sleep(100);
+    }
+    if (!up) {
+      throw new Error(
+        `sshd did not listen on ${port} within 5 s: ${readFileSync(join(dir, "sshd.log"), "utf8")}`,
+      );
     }
   });
 
@@ -1878,7 +1893,7 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
     });
     const session = join(dir, "s");
     await Bun.write(join(session, "known_hosts"), `[127.0.0.1]:${port} ${hostKey}\n`);
-    const deps = { sessionDir: session } as unknown as Deps;
+    const deps: Deps = { sessionDir: session };
     const file = join(dir, "notes.txt");
     try {
       // sftp first: it cannot become the master itself.
