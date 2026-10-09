@@ -118,6 +118,8 @@ export interface RuntimeImageTagMismatch {
 
 /**
  * The release version a value names, or `undefined` when it names none.
+ * Exported because every version-contract check uses the same predicate — the
+ * Firecracker runner handshake compares its guest-artifacts release with it.
  *
  * The platform and the image tags are drawn from two different namespaces:
  * `APP_VERSION` is the git ref name the release workflow was triggered on
@@ -149,7 +151,7 @@ export interface RuntimeImageTagMismatch {
  * is literal, so a value that had to be rewritten to parse cannot be compared
  * against a raw tag without inventing a mismatch.
  */
-function releaseVersion(value: string | undefined): string | undefined {
+export function releaseVersion(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   const normalized = normalizeVersion(trimmed);

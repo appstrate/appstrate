@@ -48,6 +48,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1846), read-only. It lists the runs whose stored `token_usage` the
   stricter `TokenUsage` component (below) refuses; expected 0.
 
+- **Upgrade the `appstrate-runner` daemon together with this release, and pin
+  its artifacts** (Firecracker only, #1852). The runner protocol goes from 2
+  to 3: a daemon left on protocol 2 is refused ("daemon speaks protocol 2,
+  platform expects 3"). An unpinned runner host never refreshes the kernel and
+  rootfs it already has, so set `FIRECRACKER_ARTIFACTS_VERSION` to the
+  platform version on the runner host before or with the upgrade.
+
 ### Changed
 
 - **BREAKING (API): a declared integration blocks a run only when the agent
@@ -211,6 +218,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   passed, launch included, before the 60 s timeout of MCP clients. The run
   keeps going: continue with `getRun` (`query: { wait: true }`), never with a
   second `run_and_wait`.
+
+- **Firecracker guest artifacts join the version contract** (#1852). The
+  runner daemon reports the release of its installed kernel and rootfs on
+  `/v1/health` (`artifactsVersion`). A released platform refuses at the
+  handshake a daemon whose artifacts come from another release, and names the
+  fix: `FIRECRACKER_ARTIFACTS_VERSION=<APP_VERSION>` on the runner host. Until
+  the handshake passes, the agent runtime stays not ready and the platform
+  keeps retrying. A `dev` platform or locally built artifacts
+  (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
 
 - **An internal error during an integration credential refresh is no longer
   reported as a transient upstream failure** (#1847). A database fault or an

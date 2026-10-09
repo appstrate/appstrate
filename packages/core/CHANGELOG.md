@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usage carried were dropped, for the seam to log. (#1552, #1846)
 - **`ALIAS_BACKING_API_SHAPES`** (`@appstrate/core/model-swap`): every
   `AliasBackingApiShape`, the vendor protocols a provider can declare. (#1846)
+- **`releaseVersion`** (`@appstrate/core/image-ref`) is exported: the
+  release-version predicate of the runtime-image trio rule (normalizes a
+  leading `v`; `undefined` for `dev`, build stamps and alias tag families). The
+  Firecracker runner handshake applies the same rule through it. (#1852)
 
 - **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
   per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model

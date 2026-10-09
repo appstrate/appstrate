@@ -97,6 +97,11 @@ interface RunnerAppDeps {
     platformReachable: boolean;
     guestPathVerified: boolean | null;
   };
+  /**
+   * Release of the installed guest artifacts, as `ensureGuestArtifacts`
+   * returned it. Absent = no release identity (locally built artifacts).
+   */
+  artifactsVersion?: string | null;
 }
 
 /**
@@ -192,6 +197,7 @@ export function createRunnerApp(deps: RunnerAppDeps): Hono {
       // probe so both fields are always present on the wire.
       platformReachable: deps.health?.platformReachable ?? false,
       guestPathVerified: deps.health?.guestPathVerified ?? null,
+      artifactsVersion: deps.artifactsVersion ?? null,
     }),
   );
 

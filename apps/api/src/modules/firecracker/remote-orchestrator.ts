@@ -29,7 +29,9 @@ import type {
   StopResult,
 } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { releaseVersion } from "@appstrate/core/image-ref";
 import { logger } from "../../lib/logger.ts";
+import { getVersionInfo } from "../../lib/version.ts";
 import type { BootHeartbeatOutcome } from "../../services/state/runs.ts";
 import { startBootHeartbeat as startBootHeartbeatPump } from "../../services/run-boot-heartbeat.ts";
 import { getRemoteEnv, type RemoteRunnerEnv } from "./remote-env.ts";
@@ -132,6 +134,8 @@ interface RemoteOrchestratorDeps {
    * it in index.ts.
    */
   recordConsoleExcerpt?: (runId: string, exitCode: number, excerpt: string) => Promise<void>;
+  /** The platform's build identity. Default: `getVersionInfo().app`. */
+  appVersion?: string;
 }
 
 export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
@@ -145,6 +149,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     ((runId: string) => Promise<BootHeartbeatOutcome>) | undefined;
   private readonly recordConsoleExcerpt:
     ((runId: string, exitCode: number, excerpt: string) => Promise<void>) | undefined;
+  private readonly appVersion: string | undefined;
   /** resolvePlatformApiUrl cache — the answer is static per daemon. */
   private platformUrlPromise: Promise<string> | undefined;
 
@@ -154,6 +159,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     this.heartbeatIntervalMs = deps.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.recordBootHeartbeat = deps.recordBootHeartbeat;
     this.recordConsoleExcerpt = deps.recordConsoleExcerpt;
+    this.appVersion = deps.appVersion;
   }
 
   /**
@@ -233,13 +239,23 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
    * GET /v1/health and validate the payload — the single health round-trip
    * that both initialize() (the handshake) and resolvePlatformApiUrl() (the
    * guest-visible platform URL) share. Throws an actionable error when the
-   * URL does not answer with a runner health payload.
+   * URL does not answer with a runner health payload. The protocol is read
+   * before the full payload: a daemon on another protocol answers another
+   * health shape, and the mismatch is the error to report.
    */
   private async fetchHealth() {
+    const env = this.requireEnv();
     const res = await this.call(RUNNER_ROUTES.health, { method: "GET" });
-    const parsed = healthResponseSchema.safeParse(await res.json().catch(() => undefined));
+    const body: unknown = await res.json().catch(() => undefined);
+    const protocol = healthResponseSchema.pick({ protocol: true }).safeParse(body);
+    if (protocol.success && protocol.data.protocol !== RUNNER_PROTOCOL_VERSION) {
+      throw new Error(
+        `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL}: daemon speaks protocol ` +
+          `${protocol.data.protocol}, platform expects ${RUNNER_PROTOCOL_VERSION} — upgrade the older side`,
+      );
+    }
+    const parsed = healthResponseSchema.safeParse(body);
     if (!parsed.success) {
-      const env = this.requireEnv();
       throw new Error(
         `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL} returned an unexpected health ` +
           `payload — is this URL really an appstrate-runner daemon?`,
@@ -250,22 +266,31 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
 
   /**
    * Handshake with the daemon. This is where a misconfigured deployment
-   * fails — missing env vars, unreachable daemon, protocol drift — all
-   * with actionable messages, BEFORE the first run is accepted.
+   * fails — missing env vars, unreachable daemon, protocol drift, guest
+   * artifacts from another release — all with actionable messages, BEFORE
+   * the first run is accepted.
    */
   async initialize(): Promise<void> {
     const env = this.requireEnv();
     const health = await this.fetchHealth();
-    if (health.protocol !== RUNNER_PROTOCOL_VERSION) {
-      throw new Error(
-        `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL}: daemon speaks protocol ` +
-          `${health.protocol}, platform expects ${RUNNER_PROTOCOL_VERSION} — upgrade the older side`,
-      );
-    }
     if (!health.initialized) {
       throw new Error(
         `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL} is up but its Firecracker ` +
           `orchestrator failed to initialize — check the daemon's logs (KVM, artifacts)`,
+      );
+    }
+    // The guest rootfs carries the agent runtime and sidecar, so it is part
+    // of the platform's version contract, under the image trio's rule: only
+    // two release versions are comparable (a `dev` platform or locally built
+    // artifacts take no part).
+    const appVersion = this.appVersion ?? getVersionInfo().app;
+    const platformRelease = releaseVersion(appVersion);
+    const artifactsRelease = releaseVersion(health.artifactsVersion ?? undefined);
+    if (platformRelease && artifactsRelease && platformRelease !== artifactsRelease) {
+      throw new Error(
+        `appstrate-runner at ${env.FIRECRACKER_RUNNER_URL}: guest artifacts are release ` +
+          `${health.artifactsVersion}, platform is ${appVersion} — set ` +
+          `FIRECRACKER_ARTIFACTS_VERSION=${appVersion} on the runner host and restart appstrate-runner`,
       );
     }
     // Cache the daemon's guest-visible platform URL from the same health
@@ -279,6 +304,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
     logger.info("firecracker orchestrator connected", {
       url: env.FIRECRACKER_RUNNER_URL,
       protocol: health.protocol,
+      artifactsVersion: health.artifactsVersion,
       platformReachable: health.platformReachable,
       guestPathVerified: health.guestPathVerified,
     });

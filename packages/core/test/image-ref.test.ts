@@ -29,7 +29,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { parseImageRef, findRuntimeImageTagMismatch } from "../src/image-ref.ts";
+import { parseImageRef, findRuntimeImageTagMismatch, releaseVersion } from "../src/image-ref.ts";
 
 const PI = "ghcr.io/appstrate/appstrate-pi";
 const SIDECAR = "ghcr.io/appstrate/appstrate-sidecar";
@@ -348,5 +348,27 @@ describe("findRuntimeImageTagMismatch — digest pins", () => {
         sidecarImage: `${SIDECAR}@${digest}`,
       }),
     ).toBeNull();
+  });
+});
+
+describe("releaseVersion", () => {
+  it("normalizes a git ref name and an image tag to the same release", () => {
+    expect(releaseVersion("v1.0.0-beta.51")).toBe("1.0.0-beta.51");
+    expect(releaseVersion("1.0.0-beta.51")).toBe("1.0.0-beta.51");
+  });
+
+  it("names no release for a build stamp or an alias tag family", () => {
+    for (const value of [
+      undefined,
+      "",
+      "  ",
+      "dev",
+      "health-container-e2e",
+      "latest",
+      "1.0",
+      "sha-abc1234",
+    ]) {
+      expect(releaseVersion(value)).toBeUndefined();
+    }
   });
 });
