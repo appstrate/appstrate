@@ -383,14 +383,32 @@ export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority"> & {
 
 export type RunnerEgressPolicy = EgressPolicy & AuthorityPolicy;
 
-/** The SSRF predicate a runner listener applies to `host:port`: none when its policy exempts it. */
+/**
+ * Whether `host` (a name or an IP in any form) is this machine: `localhost`, `*.localhost`,
+ * 0.0.0.0/8, 127.0.0.0/8, `::`, `::1`, or an IPv4-mapped one. Unparseable counts as loopback.
+ */
+export function isLoopback(host: string): boolean {
+  const bare = host.replace(/^\[|\]$/g, "");
+  const url = URL.parse(bare.includes(":") ? `http://[${bare}]/` : `http://${bare}/`);
+  if (!url) return true;
+  const h = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h === "::" || h === "::1") return true;
+  const mapped = /^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/.exec(h);
+  const octet = mapped ? parseInt(mapped[1]!, 16) >> 8 : Number(/^(\d+)(\.\d+){3}$/.exec(h)?.[1]);
+  return octet === 0 || octet === 127;
+}
+
+/**
+ * The SSRF predicate a runner listener applies to `host:port`, names and resolved addresses alike.
+ * An exempt target still never reaches this machine: its listeners include the agent's proxy.
+ */
 export function ssrfFloorFor(
   policy: AuthorityPolicy,
   host: string,
   port: number,
   isBlockedHostFn: (host: string) => boolean,
 ): (host: string) => boolean {
-  return policy.skipsSsrfFloor(host, port) ? () => false : isBlockedHostFn;
+  return policy.skipsSsrfFloor(host, port) ? isLoopback : isBlockedHostFn;
 }
 
 /** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */

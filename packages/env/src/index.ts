@@ -532,12 +532,8 @@ export const envSchema = z
     // error listing the registered backends.
     RUN_ADAPTER: z.string().default("process"),
 
-    // Integration runtime backend the Docker orchestrator pins onto its
-    // sidecar. Only that orchestrator forwards it: "process" there refuses
-    // `source.kind: "local"` runners (no setuid runner wrapper), so "docker"
-    // is the only value local integrations run under. The process
-    // orchestrator refuses "docker" at boot (reading the raw env, where
-    // unset is not this default); the firecracker orchestrator ignores it.
+    // Forwarded by the Docker orchestrator only. The process orchestrator
+    // refuses "docker" at boot from the raw env, where unset is not this default.
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
 
     // Docker images (override for GHCR / custom registries)

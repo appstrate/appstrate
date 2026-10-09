@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createServer as createHttpServer } from "node:http";
 import type { Socket } from "node:net";
 import type {
   IncomingMessage,
@@ -11,7 +11,6 @@ import type {
 import {
   isBlockedHost,
   resolveAndCheckHost,
-  API_CALL_TIMEOUT_MS,
   peerAddress,
   peerAdmitted,
   type HostResolver,
@@ -19,10 +18,11 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
-  hopByHopHeaders,
+  forwardHttpRequest,
   parseConnectTarget,
   netConnectWithTimeout,
   relaySockets,
+  withoutHopByHop,
   TUNNEL_IDLE_TIMEOUT_MS,
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
@@ -105,19 +105,6 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   // alias keeps the call sites below unchanged.
   const relay = (s1: Socket, s2: Socket) => relaySockets(s1, s2, TUNNEL_IDLE_TIMEOUT_MS);
 
-  /** Strip hop-by-hop headers + Connection-listed headers from incoming request. */
-  function forwardHeaders(
-    raw: IncomingMessage["headers"],
-  ): Record<string, string | string[] | undefined> {
-    const hopByHop = hopByHopHeaders(raw.connection);
-    const out: Record<string, string | string[] | undefined> = {};
-    for (const [key, value] of Object.entries(raw)) {
-      if (hopByHop.has(key.toLowerCase())) continue;
-      out[key] = value;
-    }
-    return out;
-  }
-
   // The platform API is a trusted destination: the agent can only send
   // HMAC-signed messages there (the run secret is scoped to a single run).
   // In local dev the platform URL resolves to `host.docker.internal`, which
@@ -190,37 +177,15 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // traffic bypasses the upstream proxy (see getUpstreamProxy docstring).
     const upstream = getUpstreamProxy(parsed.hostname, targetPort);
 
-    const cleaned = forwardHeaders(req.headers);
+    const cleaned = withoutHopByHop(req.headers);
 
-    const forward = (options: RequestOptions) => {
-      const proxyReq = httpRequest(options, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-        proxyRes.pipe(res);
-      });
-
-      // Timeout — abort if the target or upstream proxy hangs
-      proxyReq.setTimeout(API_CALL_TIMEOUT_MS, () => {
-        proxyReq.destroy(new Error(`Request timeout after ${API_CALL_TIMEOUT_MS}ms`));
-      });
-
-      // Clean up if either side breaks
-      req.on("error", () => {
-        proxyReq.destroy();
-      });
-      res.on("error", () => {
-        proxyReq.destroy();
-      });
-      proxyReq.on("error", (err) => {
+    const forward = (options: RequestOptions) =>
+      forwardHttpRequest(req, res, options, (err) =>
         logger.error("Forward proxy HTTP error", {
           target: redactUrlForLog(targetUrl),
           error: err.message,
-        });
-        if (!res.headersSent) res.writeHead(502);
-        res.end("Proxy error");
-      });
-
-      req.pipe(proxyReq);
-    };
+        }),
+      );
 
     if (upstream) {
       // Chained: the upstream proxy resolves the target remotely — no local

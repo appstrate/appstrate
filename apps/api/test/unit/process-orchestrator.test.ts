@@ -342,32 +342,22 @@ describe("ProcessOrchestrator", () => {
   });
 
   describe("INTEGRATION_RUNTIME_ADAPTER override (#1819)", () => {
-    function withAdapterEnv<T>(value: string | undefined, body: () => T): T {
-      const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
-      if (value === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
-      else process.env.INTEGRATION_RUNTIME_ADAPTER = value;
-      try {
-        return body();
-      } finally {
-        if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
-        else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
-      }
-    }
+    // Back to the file-level baseline (unset) the other tests construct under.
+    afterEach(() => {
+      delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+    });
 
     it("refuses docker: a host sidecar has no per-run network for docker runners", () => {
-      withAdapterEnv("docker", () => {
-        expect(() => new ProcessOrchestrator()).toThrow(
-          /INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process/,
-        );
-      });
+      process.env.INTEGRATION_RUNTIME_ADAPTER = "docker";
+      expect(() => new ProcessOrchestrator()).toThrow(
+        /INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process/,
+      );
     });
 
     it("accepts an unset or explicit process value", () => {
-      for (const value of [undefined, "process"]) {
-        withAdapterEnv(value, () => {
-          expect(() => new ProcessOrchestrator()).not.toThrow();
-        });
-      }
+      expect(() => new ProcessOrchestrator()).not.toThrow();
+      process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+      expect(() => new ProcessOrchestrator()).not.toThrow();
     });
   });
 
@@ -422,10 +412,8 @@ describe("ProcessOrchestrator", () => {
     }, 10_000);
 
     it("pins the sidecar's integration runtime adapter to 'process'", async () => {
-      // A non-containerized (process) run must not let the sidecar auto-select
-      // the Docker integration adapter (which needs the per-language runner
-      // images). The orchestrator pins INTEGRATION_RUNTIME_ADAPTER=process so
-      // integrations spawn as host subprocesses, matching the run itself.
+      // The sidecar picks its integration runtime only from this variable, so a
+      // process run pins it: integrations spawn as host subprocesses, like the run.
       const runId = "test-run-integ-adapter";
       const boundary = await orchestrator.createIsolationBoundary(runId);
       const fakeSidecar = join(boundary.id, "fake-sidecar.ts");

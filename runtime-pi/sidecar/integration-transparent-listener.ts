@@ -7,9 +7,8 @@
  * The plain CONNECT egress listener assumes a cooperative HTTP client
  * that honours `HTTPS_PROXY` and speaks CONNECT. Surveying popular
  * third-party MCP servers shows the opposite is the norm: undici/`fetch`
- * ignores proxy env vars entirely, axios sends non-CONNECT forward-proxy
- * requests for HTTPS (→ 405). Both die behind the CONNECT-only egress
- * with an opaque timeout.
+ * ignores proxy env vars entirely (an opaque timeout), axios sends HTTPS
+ * as an absolute-form `https://` request (→ 405, only `http://` is relayed).
  *
  * This listener removes the cooperation requirement. The per-run DNS
  * responder ({@link createIntegrationDnsResponder}) resolves every
@@ -58,7 +57,7 @@ import {
   type HostResolver,
   type Peer,
 } from "./helpers.ts";
-import { netConnectWithTimeout, relaySockets } from "./connect-tunnel.ts";
+import { destroyBothWhenIdle, netConnectWithTimeout, tieSockets } from "./connect-tunnel.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { extractSni, collectUntilSniParses } from "./integration-mitm-listener.ts";
 import type { EgressListenerEvent } from "./integration-egress-listener.ts";
@@ -164,21 +163,11 @@ export function createTransparentEgressListener(
     // Peer gate, started at accept.
     const peer = socketPeer(clientSocket);
     const peerPolicy = peer ? options.policyForPeer(peer).catch(() => null) : Promise.resolve(null);
-    // Upstream is dialed later, after the async SSRF/resolve phase. Track
-    // it in the connection scope so ANY client teardown — including the
-    // preamble idle-timeout firing mid-dial, before relaySockets wires its
-    // own close handlers — reaps a half-open upstream instead of leaking it
-    // until its own connect timeout. Idempotent: destroy() on a torn-down
-    // socket is a no-op.
-    let upstream: Socket | undefined;
     clientSocket.on("error", () => clientSocket.destroy());
-    clientSocket.once("close", () => {
-      if (upstream && !upstream.destroyed) upstream.destroy();
-    });
     // Preamble deadline: hard cap on the pre-splice phase (ClientHello
     // collection + SSRF resolve + upstream dial) so a client that stalls —
     // or a hung DNS resolve — can't pin the socket forever. Once the splice
-    // starts, relaySockets re-arms setTimeout on both sockets with its own
+    // starts, destroyBothWhenIdle re-arms setTimeout on both sockets with its own
     // idle window, superseding this.
     clientSocket.setTimeout(PREAMBLE_TIMEOUT_MS, () => clientSocket.destroy());
 
@@ -203,7 +192,7 @@ export function createTransparentEgressListener(
         // async window (SSRF resolve + upstream dial) with NO listener —
         // pause so post-preamble bytes (an HTTP POST body, TLS early
         // data) buffer in the kernel instead of being emitted into the
-        // void. relaySockets' pipe() resumes the stream.
+        // void. The splice's pipe() resumes the stream.
         clientSocket.pause();
 
         const policy = await peerPolicy;
@@ -260,17 +249,21 @@ export function createTransparentEgressListener(
         // If the client already gave up (preamble timeout / RST) during the
         // async resolve, don't open a doomed upstream.
         if (clientSocket.destroyed) return;
-        upstream = netConnectWithTimeout(upstreamPort, check.pinnedAddress, () => {
+        const upstream = netConnectWithTimeout(upstreamPort, check.pinnedAddress, () => {
           // Replay the sniffed preamble first — the upstream must see the
           // byte stream exactly as the client produced it.
-          upstream!.write(preamble);
+          upstream.write(preamble);
           emit({ kind: "tunnel-opened", target });
-          relaySockets(clientSocket, upstream!);
+          clientSocket.pipe(upstream);
+          upstream.pipe(clientSocket);
+          destroyBothWhenIdle(clientSocket, upstream);
         });
         upstream.on("error", (err: Error) => {
           emit({ kind: "tunnel-error", target, reason: err.message });
-          clientSocket.destroy();
         });
+        // From the dial on: a client teardown mid-dial reaps the upstream, a later one lets the
+        // upload's tail flush first.
+        tieSockets(clientSocket, upstream);
       })().catch(() => {
         clientSocket.destroy();
       });

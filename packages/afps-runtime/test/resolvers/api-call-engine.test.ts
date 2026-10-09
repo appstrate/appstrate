@@ -14,7 +14,6 @@ import {
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
   ApiCallRefusedError,
-  skipsSsrfFloor,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/api-call-failure-codes.ts";
@@ -783,27 +782,6 @@ describe("fetchApiCall — the target's host in a message", () => {
     });
     expect(err?.kind).toBe("unresolvable");
     expect(err?.message).toBe("Target host could not be resolved ({{sub}}.example.com)");
-  });
-});
-
-describe("skipsSsrfFloor (shared with the runner egress listeners, #1819)", () => {
-  const rule = {
-    declaredUris: ["https://intranet.corp/**", "https://10.0.0.5:8443", "https://*.corp/**"],
-    allowAllUris: false,
-    internalHost: (h: string) => ["intranet.corp", "10.0.0.5", "wild.corp"].includes(h),
-  };
-
-  it("exempts a host the declared list names literally and the operator accepts", () => {
-    expect(skipsSsrfFloor("intranet.corp", rule)).toBe(true);
-    expect(skipsSsrfFloor("10.0.0.5", rule)).toBe(true);
-  });
-
-  it("never exempts a glob-matched, unlisted or trailing-dot host, nor under allow_all_uris", () => {
-    expect(skipsSsrfFloor("wild.corp", rule)).toBe(false);
-    expect(skipsSsrfFloor("other.corp", { ...rule, internalHost: () => true })).toBe(false);
-    expect(skipsSsrfFloor("intranet.corp", { ...rule, internalHost: () => false })).toBe(false);
-    expect(skipsSsrfFloor("intranet.corp.", { ...rule, internalHost: () => true })).toBe(false);
-    expect(skipsSsrfFloor("intranet.corp", { ...rule, allowAllUris: true })).toBe(false);
   });
 });
 

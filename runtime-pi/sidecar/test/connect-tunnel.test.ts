@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `closeWith` (#1819): how one side of a relay tears down the other. A clean
- * end/close of `from` flushes what is still queued for `to`, then destroys it;
- * an error on `from`, or a `to` still connecting, destroys `to` at once.
+ * `closeWith` (#1819): how one side of a relay tears down the other. A
+ * half-close of `from` is passed on and `to` keeps carrying the reply; a close
+ * flushes what is still queued for `to`, then destroys it; an error on `from`,
+ * or a close while `to` is still connecting, destroys `to` at once.
  */
 
 import { describe, it, expect, afterEach } from "bun:test";
@@ -58,7 +59,26 @@ async function backedUpSocket(): Promise<{ to: Socket; peer: Socket }> {
 }
 
 describe("closeWith", () => {
-  it("flushes everything queued for `to` before destroying it when `from` ends cleanly", async () => {
+  it("passes a half-close of `from` on, and keeps `to` open for the reply", async () => {
+    let accept!: (socket: Socket) => void;
+    const accepted = new Promise<Socket>((res) => (accept = res));
+    const to = netConnect(await listen((s) => accept(s)), "127.0.0.1");
+    sockets.push(to);
+    to.on("error", () => {});
+    const peer = await accepted;
+    peer.on("end", () => peer.end("reply"));
+    const from = new Socket();
+    sockets.push(from);
+    closeWith(from, to);
+
+    let reply = "";
+    to.on("data", (chunk: Buffer) => (reply += chunk.toString()));
+    from.emit("end");
+    await new Promise<void>((res) => to.once("end", () => res()));
+    expect(reply).toBe("reply");
+  });
+
+  it("flushes everything queued for `to` before destroying it when `from` closes cleanly", async () => {
     const { to, peer } = await backedUpSocket();
     const { accepted: from, client: fromPeer } = await tcpPair();
     closeWith(from, to);
@@ -106,7 +126,7 @@ describe("closeWith", () => {
     closeWith(from, to);
 
     expect(to.connecting).toBe(true);
-    from.emit("end");
+    from.emit("close");
     expect(to.destroyed).toBe(true);
   });
 });

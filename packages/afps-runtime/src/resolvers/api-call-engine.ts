@@ -205,7 +205,10 @@ export interface FetchApiCallOptions {
   credentialHeaders: readonly string[];
   /**
    * Whether the operator of the network this call leaves from lets it reach an internal address
-   * behind `hostname`; {@link skipsSsrfFloor} decides with it, on every hop.
+   * behind `hostname`. A host skips the SSRF gate only when this accepts it AND `declaredUris`
+   * names it literally, never under `allowAllUris`: the operator vouches for the host, the
+   * manifest for the call. Same rule on a redirect hop. A host only a glob or a rendered entry
+   * matches is always gated.
    */
   internalHost: (hostname: string) => boolean;
   /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
@@ -222,19 +225,6 @@ export interface FetchApiCallOptions {
   /** Credential values scrubbed from the redirect hosts and transport errors a message names. */
   credentialFields: Readonly<Record<string, string>>;
   logger?: ApiCallLogger;
-}
-
-/** Whether `hostname` skips the SSRF floor: the operator vouches for the host (`internalHost`), the
- * manifest for the traffic (`declaredUris` names it literally, never under `allowAllUris`). */
-export function skipsSsrfFloor(
-  hostname: string,
-  opts: Pick<FetchApiCallOptions, "declaredUris" | "allowAllUris" | "internalHost">,
-): boolean {
-  return (
-    !opts.allowAllUris &&
-    hostLiterallyAllowlisted(`http://${hostname}/`, opts.declaredUris) &&
-    opts.internalHost(hostname)
-  );
 }
 
 /**
@@ -296,7 +286,10 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
               forwardCredentials,
             }
           : {}),
-        allowHost: (hostname: string) => skipsSsrfFloor(hostname, opts),
+        allowHost: (hostname: string) =>
+          !allowAllUris &&
+          hostLiterallyAllowlisted(`http://${hostname}/`, declaredUris) &&
+          opts.internalHost(hostname),
         sensitiveHeaders: opts.credentialHeaders,
         cookies:
           opts.cookies ?? cookieScope(new Map(), opts.integrationId, gated ? declaredUris : null),

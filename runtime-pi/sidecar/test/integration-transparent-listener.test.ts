@@ -21,6 +21,7 @@ import type { EgressListenerEvent } from "../integration-egress-listener.ts";
 import { isBlockedHost, type AuthorityPolicy, type Peer } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { buildClientHello } from "./helpers/tls-client-hello.ts";
+import { privateIpv4 } from "./helpers/private-ipv4.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
 const openServers: Server[] = [];
@@ -34,8 +35,8 @@ afterEach(async () => {
   }
 });
 
-/** Plain TCP echo upstream — records everything it receives. */
-async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
+/** Plain TCP echo upstream on `host` — records everything it receives. */
+async function startTcpEcho(host = "127.0.0.1"): Promise<{ port: number; received: Buffer[] }> {
   const received: Buffer[] = [];
   const server = createServer((socket) => {
     socket.on("data", (chunk: Buffer) => {
@@ -44,7 +45,7 @@ async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
     });
   });
   openServers.push(server);
-  await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+  await new Promise<void>((res) => server.listen(0, host, () => res()));
   const addr = server.address();
   const port = addr && typeof addr === "object" ? addr.port : 0;
   return { port, received };
@@ -418,13 +419,19 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
     declaredUris: uris,
     allowAllUris: false,
   });
-  /** The real SSRF floor, every name resolving to loopback, `internal.test` operator-listed. */
-  async function runnerListener(upstreamPort: number, egress: RunnerEgress, listed = true) {
+  /** The real SSRF floor, every name resolving to `address`, `internal.test` operator-listed. */
+  async function runnerListener(
+    upstreamPort: number,
+    egress: RunnerEgress,
+    listed = true,
+    address = privateIpv4(),
+  ) {
     const events: EgressListenerEvent[] = [];
     const internalHost = (h: string) => listed && h === "internal.test";
     const listener = await makeListener({
       upstreamPort,
       isBlockedHostFn: isBlockedHost,
+      resolveHostFn: async () => [address],
       policyForPeer: async () => compileRunnerEgressPolicy(egress, internalHost),
       onEvent: (e) => events.push(e),
     });
@@ -433,7 +440,7 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
   const httpTo = (host: string) => Buffer.from(`GET / HTTP/1.1\r\nHost: ${host}\r\n\r\n`, "latin1");
 
   it("splices to a private address behind a listed declared literal host (SNI and Host)", async () => {
-    const upstream = await startTcpEcho();
+    const upstream = await startTcpEcho(privateIpv4());
     const egress = literal([`https://internal.test:${upstream.port}`]);
     for (const preamble of [buildClientHello("internal.test"), httpTo("internal.test")]) {
       const { port, events } = await runnerListener(upstream.port, egress);
@@ -443,8 +450,18 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
     }
   });
 
-  it("keeps the floor for a declared literal host the operator does not list", async () => {
+  it("never splices to this machine, even for a listed declared literal host", async () => {
     const upstream = await startTcpEcho();
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    const { port, events } = await runnerListener(upstream.port, egress, true, "127.0.0.1");
+    const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("ssrf");
+    expect(upstream.received.length).toBe(0);
+  });
+
+  it("keeps the floor for a declared literal host the operator does not list", async () => {
+    const upstream = await startTcpEcho(privateIpv4());
     const egress = literal([`https://internal.test:${upstream.port}`]);
     const { port, events } = await runnerListener(upstream.port, egress, false);
     const { closed } = await driveClient(port, [buildClientHello("internal.test")], 1);
@@ -454,7 +471,7 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
   });
 
   it("keeps the floor for a listed host a connection chose", async () => {
-    const upstream = await startTcpEcho();
+    const upstream = await startTcpEcho(privateIpv4());
     const egress = {
       ...literal([`https://internal.test:${upstream.port}`]),
       declaredUris: [`https://{$credential.host}:${upstream.port}`],

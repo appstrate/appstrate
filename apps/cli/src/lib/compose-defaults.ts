@@ -102,8 +102,8 @@ export const CODE_DEFAULTS: Record<string, string> = {
   // `RUN_ADAPTER` code default is `process`; compose intentionally
   // overrides to `docker` (see ALLOWLIST).
   RUN_ADAPTER: "process",
-  // Sidecar integration runtime pinned by the Docker orchestrator
-  // (operator override; the process orchestrator reads the raw env).
+  // Sidecar integration runtime, forwarded by the Docker orchestrator only
+  // (the process orchestrator refuses `docker` at boot).
   INTEGRATION_RUNTIME_ADAPTER: "docker",
   // `TRUSTED_ORIGINS` code default is the dev localhost CSV; compose
   // intentionally overrides to empty (see ALLOWLIST).
