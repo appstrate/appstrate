@@ -302,6 +302,16 @@ describe("integration-egress-listener (#543)", () => {
     await upstream.closed;
   });
 
+  it("closes a tunnel whose client sends a FIN mid-ClientHello, well before the preamble deadline", async () => {
+    const echo = await startTcpEcho();
+    const { handle } = await makeListener({ preambleTimeoutMs: 10_000 });
+
+    const partial = buildClientHello("api.example.com").subarray(0, 20);
+    const res = await halfCloseClient(handle.address().port, partial, `127.0.0.1:${echo.port}`);
+    expect(res.closed).toBe(true);
+    expect(echo.received).toHaveLength(0);
+  });
+
   it("refuses an SSRF target at CONNECT (cloud metadata)", async () => {
     // Use the REAL SSRF predicate for this one.
     const { handle, events } = await makeListener({ isBlockedHostFn: undefined });
@@ -599,8 +609,9 @@ describe("integration-egress-listener (#543)", () => {
           skipsSsrfFloor: () => false,
           isSelf: () => false,
         },
-        // The allowed request is vetted last, so its answer is ready after the refusal's.
-        resolveHostFn: () => Bun.sleep(100).then(() => ["127.0.0.1"]),
+        // The 403 is ready while the allowed request is still upstream: Bun's response queue
+        // keeps the answers in request order.
+        resolveHostFn: async () => ["127.0.0.1"],
       });
       const allowed = `http://allowed.example.com:${upstream.port}/`;
       const denied = `denied.example.com:${upstream.port}`;
@@ -636,30 +647,40 @@ describe("integration-egress-listener (#543)", () => {
       expect(events.map((e) => e.reason)).toEqual(["dns-resolution-failed"]);
     });
 
-    it("cancels the upstream request when the client leaves mid-answer", async () => {
-      let markCancelled!: () => void;
-      const cancelled = new Promise<void>((res) => (markCancelled = res));
-      const server = createHttpServer((req, res) => {
-        req.socket.once("close", () => markCancelled());
-        res.writeHead(200);
-        res.write("first"); // and never more
-      });
-      httpServers.push(server);
-      await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
-      const { port } = server.address() as { port: number };
-      const { handle } = await makeListener({ upstreamTimeoutMs: 5_000 });
+    for (const leaves of ["before the answer", "mid-answer"]) {
+      it(`cancels the upstream request, silently, when the client leaves ${leaves}`, async () => {
+        let markArrived!: () => void;
+        const arrived = new Promise<void>((res) => (markArrived = res));
+        let markCancelled!: () => void;
+        const cancelled = new Promise<void>((res) => (markCancelled = res));
+        const server = createHttpServer((req, res) => {
+          req.socket.once("close", () => markCancelled());
+          if (leaves === "mid-answer") {
+            res.writeHead(200);
+            res.write("first"); // and never more
+          }
+          markArrived();
+        });
+        httpServers.push(server);
+        await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+        const { port } = server.address() as { port: number };
+        const { handle, events } = await makeListener({ upstreamTimeoutMs: 5_000 });
 
-      const client = netConnect(handle.address().port, "127.0.0.1", () =>
-        client.write(get(`http://127.0.0.1:${port}/`, ["Connection: keep-alive"])),
-      );
-      client.on("error", () => {});
-      client.once("data", () => client.destroy());
-      const outcome = await Promise.race([
-        cancelled.then(() => "cancelled"),
-        Bun.sleep(1_000).then(() => "still running"),
-      ]);
-      expect(outcome).toBe("cancelled");
-    });
+        const client = netConnect(handle.address().port, "127.0.0.1", () =>
+          client.write(get(`http://127.0.0.1:${port}/`, ["Connection: keep-alive"])),
+        );
+        client.on("error", () => {});
+        if (leaves === "mid-answer") client.once("data", () => client.destroy());
+        else void arrived.then(() => client.destroy());
+        const outcome = await Promise.race([
+          cancelled.then(() => "cancelled"),
+          Bun.sleep(1_000).then(() => "still running"),
+        ]);
+        expect(outcome).toBe("cancelled");
+        await Bun.sleep(50); // a failure, had the cancel been reported as one, lands by now
+        expect(events.filter((e) => e.kind === "tunnel-error")).toEqual([]);
+      });
+    }
 
     it("answers 502 when the vetted upstream cannot be reached, closing as HTTP/1.0 asks", async () => {
       const deadPort = await new Promise<number>((resolve) => {

@@ -480,6 +480,24 @@ describe("transparent egress listener — half-close", () => {
     await upstream.closed;
   });
 
+  // The preamble deadline is 10 s: a FIN ends the preamble at once, as no SNI or `Host` can follow.
+  it("closes on a FIN mid-HTTP-head, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const res = await halfCloseClient(listener.address().port, "GET / HTTP/1.1\r\nHo");
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("closes on a FIN mid-ClientHello, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const partial = buildClientHello("api.example.com").subarray(0, 20);
+    const res = await halfCloseClient(listener.address().port, partial);
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
   it("relays the upstream's FIN as a FIN: what the client sends afterwards still arrives", async () => {
     let markDone!: (received: string) => void;
     const done = new Promise<string>((res) => (markDone = res));

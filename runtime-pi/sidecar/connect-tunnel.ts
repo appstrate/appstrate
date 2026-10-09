@@ -126,10 +126,11 @@ export function forwardHttpRequest(
   onError: (err: Error) => void,
   timeoutMs = API_CALL_TIMEOUT_MS,
 ): void {
-  let failed = false;
+  // Failed or cancelled: either way, nothing more is reported or written.
+  let settled = false;
   const fail = (err: Error) => {
-    if (failed) return;
-    failed = true;
+    if (settled) return;
+    settled = true;
     onError(err);
     if (res.headersSent) return void res.destroy();
     res.writeHead(502);
@@ -155,9 +156,11 @@ export function forwardHttpRequest(
     fail(new Error("upstream switched protocols"));
   });
   req.on("error", () => proxyReq.destroy());
-  // The client left before the whole answer: cancel the upstream request.
+  // The client left before the whole answer: cancel the upstream request, silently.
   res.on("close", () => {
-    if (!res.writableFinished) proxyReq.destroy();
+    if (res.writableFinished) return;
+    settled = true;
+    proxyReq.destroy();
   });
   proxyReq.on("error", fail);
   req.pipe(proxyReq);

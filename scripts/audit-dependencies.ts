@@ -28,7 +28,7 @@
  * ─── What `bun audit --json` actually emits ──────────────────────────
  *
  * Measured 2026-10-09 against this lockfile with `bun audit` v1.4.2, the
- * version CI pins via `.github/actions/bun-setup` (v1.3.14 emitted the same
+ * version `package.json` pins in `packageManager` (v1.3.14 emitted the same
  * payload). Four properties this file depends on, none of them guessed:
  *
  *   1. stdout is a flat map, `{"<package>": [advisory, …], …}`, and an

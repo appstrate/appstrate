@@ -32,7 +32,8 @@ export function startLateReplyServer(
 
 /**
  * Write `preface` (a CONNECT head, whose answer is awaited, or nothing), then `payload` and a
- * FIN. Resolves with what came back after the head, and whether the connection then closed.
+ * FIN. Resolves with what came back after the head, and whether the connection then closed
+ * (within 3 s).
  */
 export function halfCloseClient(
   port: number,

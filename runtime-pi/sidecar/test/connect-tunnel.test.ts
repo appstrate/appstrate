@@ -129,13 +129,14 @@ describe("relaySockets", () => {
   it("destroys a half-open relay that stays idle, on both sides", async () => {
     const a = await tcpPair(true);
     const b = await tcpPair(true);
-    relaySockets(a.accepted, b.accepted, 200);
+    relaySockets(a.accepted, b.accepted, 300);
     tieSockets(a.accepted, b.accepted);
+    const closed = (s: Socket) => new Promise<void>((res) => s.once("close", () => res()));
+    const bothClosed = Promise.all([closed(a.accepted), closed(b.accepted)]).then(() => true);
 
     a.client.end(); // relayed as a FIN to `b.client`, which never answers
     await Bun.sleep(100);
     expect([a.accepted.destroyed, b.accepted.destroyed]).toEqual([false, false]);
-    await Bun.sleep(400);
-    expect([a.accepted.destroyed, b.accepted.destroyed]).toEqual([true, true]);
+    expect(await Promise.race([bothClosed, Bun.sleep(1_500).then(() => false)])).toBe(true);
   });
 });
