@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "Browserless",
   "icon": "mdi:application-outline",
-  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page into structured data, crawl or map a site, search the web, export a page as PDF or screenshot, run a Lighthouse audit, run Puppeteer code, or hand a multi-step task to Browserless's browser agent. Connect with an API token on any deployment, or with OAuth on Browserless Cloud only. Every call consumes Browserless units.",
+  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page into structured data, crawl or map a site, search the web, export a page as PDF or screenshot, run a Lighthouse audit, run Puppeteer code, or hand a multi-step task to Browserless's browser agent. Connect with an API token. On a self-hosted open-source Browserless, only Puppeteer code (browserless_function) works: the other tools need Browserless Cloud or Enterprise. On Browserless Cloud, every call consumes units.",
   "keywords": ["browser-automation", "web-scraping", "ai"],
   "license": "Apache-2.0",
   "source": {
@@ -24,7 +24,7 @@
           "format": "uri",
           "pattern": "^https?://",
           "title": "URL du serveur MCP Browserless",
-          "description": "Gardez https://mcp.browserless.io pour Browserless Cloud. Pour un Browserless auto-hébergé : adresse du serveur @browserless.io/mcp lancé en mode HTTP (TRANSPORT=httpStream) et relié à votre instance par BROWSERLESS_API_URL, sans /mcp (ex. https://browserless-mcp.example.com). OAuth n'existe que sur Browserless Cloud : sur votre instance, connectez-vous avec le jeton d'API.",
+          "description": "Gardez https://mcp.browserless.io pour Browserless Cloud. Pour un Browserless auto-hébergé : adresse du serveur @browserless.io/mcp lancé en mode HTTP (TRANSPORT=httpStream) et relié à votre instance par BROWSERLESS_API_URL, sans /mcp (ex. https://browserless-mcp.example.com). Avec l'image open source, seul l'outil browserless_function (code Puppeteer) fonctionne : les autres outils reposent sur les API de Browserless Cloud ou Enterprise.",
           "default": "https://mcp.browserless.io"
         }
       },
@@ -58,30 +58,6 @@
         }
       },
       "_meta": {
-        "dev.appstrate/auth": {
-          "required": true
-        }
-      }
-    },
-    "oauth": {
-      "type": "oauth2",
-      "token_endpoint_auth_method": "none",
-      "code_challenge_methods_supported": ["S256"],
-      "default_scopes": ["email"],
-      "authorized_uris": ["{$variable.base_url}/**"],
-      "delivery": {
-        "http": {
-          "in": "header",
-          "name": "Authorization",
-          "prefix": "Bearer ",
-          "value": "{$credential.access_token}"
-        }
-      },
-      "_meta": {
-        "dev.appstrate/oauth": {
-          "scope_separator": " ",
-          "refresh_token_issuance": "default"
-        },
         "dev.appstrate/auth": {
           "required": true
         }
