@@ -534,10 +534,10 @@ export const envSchema = z
 
     // Integration runtime backend the Docker orchestrator pins onto the
     // sidecar (operator override; same value set as core RUN_ADAPTER
-    // backends). The process orchestrator deliberately reads the raw
-    // environment instead — it must distinguish "unset" (pin to "process")
-    // from an explicit operator override, which a schema default would
-    // erase. The firecracker orchestrator always pins "process": the
+    // backends). The process orchestrator pins "process" and refuses an
+    // explicit "docker" (no per-run network for docker runners); it reads
+    // the raw environment, where unset is not this default. The
+    // firecracker orchestrator always pins "process": the
     // sidecar runs INSIDE the guest, so its integration runners are guest
     // subprocesses.
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),

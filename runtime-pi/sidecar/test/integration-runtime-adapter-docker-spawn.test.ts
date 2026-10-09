@@ -135,11 +135,33 @@ function dockerAdapter() {
   } as NodeJS.ProcessEnv);
 }
 
+/** Set `RUN_ID` (the sidecar's per-run network) for the duration of `body`. */
+async function withRunId<T>(runId: string | undefined, body: () => Promise<T>): Promise<T> {
+  const previous = process.env.RUN_ID;
+  if (runId === undefined) delete process.env.RUN_ID;
+  else process.env.RUN_ID = runId;
+  try {
+    return await body();
+  } finally {
+    if (previous === undefined) delete process.env.RUN_ID;
+    else process.env.RUN_ID = previous;
+  }
+}
+
+/** A docker adapter prepared on run `runId`'s network, as `bootIntegrations` leaves it. */
+async function preparedDockerAdapter(
+  runId = "run-123456789",
+): Promise<ReturnType<typeof dockerAdapter>> {
+  const adapter = dockerAdapter();
+  await withRunId(runId, () => adapter.prepare(runId));
+  return adapter;
+}
+
 async function spawnWith(
   calls: DockerCall[],
   s: IntegrationSpawnSpec,
 ): Promise<ReturnType<typeof dockerAdapter>> {
-  const adapter = dockerAdapter();
+  const adapter = await preparedDockerAdapter();
   await adapter.spawn({
     runId: "run-123456789",
     spec: s,
@@ -228,8 +250,9 @@ describe("writeSecretEnvFile — docker --env-file line containment", () => {
 describe("docker adapter spawn — credential env delivery", () => {
   it("rejects the spawn before creating a container when a value would break its line", async () => {
     await withFakeDocker(async (calls) => {
+      const adapter = await preparedDockerAdapter();
       await expect(
-        dockerAdapter().spawn({
+        adapter.spawn({
           runId: "run-123456789",
           spec: spec({ spawnEnv: { GCP_KEY: "line1\nPROXY_URL" } }),
           bundleRoot: "/tmp/bundle-does-not-need-to-exist",
@@ -238,7 +261,7 @@ describe("docker adapter spawn — credential env delivery", () => {
           onStderrLine: () => {},
         }),
       ).rejects.toThrow(/GCP_KEY/);
-      expect(calls).toEqual([]);
+      expect(calls.some((c) => c.args[0] === "create")).toBe(false);
     });
   });
 
@@ -469,18 +492,6 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
     listener: { address: "172.18.0.10", port: 8080 },
   });
 
-  async function withRunId<T>(runId: string | undefined, body: () => Promise<T>): Promise<T> {
-    const previous = process.env.RUN_ID;
-    if (runId === undefined) delete process.env.RUN_ID;
-    else process.env.RUN_ID = runId;
-    try {
-      return await body();
-    } finally {
-      if (previous === undefined) delete process.env.RUN_ID;
-      else process.env.RUN_ID = previous;
-    }
-  }
-
   it("attributes a spawned runner's address on the run network to its connection", async () => {
     let members: Record<string, { Name: string; IPv4Address: string }> = {};
     const respond = (args: string[]) =>
@@ -518,15 +529,53 @@ describe("docker adapter — runner peer attribution (#1458)", () => {
       }, respond),
     );
   });
+});
 
-  it("attributes no peer to a runner without a per-run network, and inspects nothing", async () => {
+describe("docker adapter — per-run network is mandatory (#1819)", () => {
+  it("refuses to prepare without RUN_ID, touching no docker state", async () => {
     await withRunId(undefined, () =>
       withFakeDocker(async (calls) => {
-        const adapter = dockerAdapter();
-        await adapter.prepare("run-peers-2");
-        expect(await adapter.peerAttribution()(at("127.0.0.1"))).toBeNull();
-        expect(calls.some((c) => c.args[0] === "network")).toBe(false);
+        await expect(dockerAdapter().prepare("run-no-network")).rejects.toThrow(
+          /RUN_ID is not set/,
+        );
+        expect(calls).toEqual([]);
       }),
     );
+  });
+
+  it("refuses to spawn a runner before prepare(), creating no container", async () => {
+    await withFakeDocker(async (calls) => {
+      await expect(
+        dockerAdapter().spawn({
+          runId: "run-123456789",
+          spec: spec(),
+          bundleRoot: "/tmp/bundle-does-not-need-to-exist",
+          egress: null,
+          workspaceHandle: null,
+          onStderrLine: () => {},
+        }),
+      ).rejects.toThrow(/before prepare/);
+      expect(calls).toEqual([]);
+    });
+  });
+
+  it("joins every runner to the run's network and routes it to the sidecar alias", async () => {
+    await withFakeDocker(async (calls) => {
+      const adapter = dockerAdapter();
+      const ctx = await withRunId("run-net-1", () => adapter.prepare("run-net-1"));
+      expect(ctx.listenerBindHost).toBe("0.0.0.0");
+      expect(ctx.proxyUrlFor(8443)).toBe("http://sidecar:8443");
+      await adapter.spawn({
+        runId: "run-net-1",
+        spec: spec(),
+        bundleRoot: "/tmp/bundle-does-not-need-to-exist",
+        egress: null,
+        workspaceHandle: null,
+        onStderrLine: () => {},
+      });
+      const create = calls.find((c) => c.args[0] === "create")!;
+      expect(create.args[create.args.indexOf("--network") + 1]).toBe("appstrate-exec-run-net-1");
+      await adapter.shutdown();
+    });
   });
 });

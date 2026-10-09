@@ -269,6 +269,20 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private sidecarPorts = new Map<string, SidecarPorts>();
   private pendingSpecs = new Map<string, PendingSpec>();
 
+  constructor() {
+    // A host-subprocess sidecar cannot attach Docker runners to a per-run network,
+    // so their egress would escape the allowlist and the SSRF floor. Raw env: an
+    // unset value means "process" here, not the schema's "docker" default.
+    if (process.env.INTEGRATION_RUNTIME_ADAPTER === "docker") {
+      throw new Error(
+        "INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process: " +
+          "Docker integration runners need the per-run network only a containerized sidecar provides. " +
+          "Set RUN_ADAPTER=docker or RUN_ADAPTER=firecracker to run local integrations, " +
+          "or unset INTEGRATION_RUNTIME_ADAPTER.",
+      );
+    }
+  }
+
   async initialize(): Promise<void> {
     await mkdir(dataDir, { recursive: true });
     logger.warn(
@@ -460,8 +474,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    // No `runId`: RUN_ID only serves container labeling and this
-    // topology spawns no containers.
+    // No `runId`: RUN_ID names the per-run Docker network and labels runner
+    // containers, and this topology spawns no containers.
     const env = buildBaseSidecarEnv({
       spec,
       baseEnv: cleanProcessEnv(),
@@ -470,14 +484,9 @@ export class ProcessOrchestrator implements RunOrchestrator {
       platformApiUrl,
       workspace: boundary.workspace,
     });
-    // This run is NOT containerized (process orchestrator), so its integrations
-    // must spawn as host subprocesses too. The sidecar selects its integration
-    // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
-    // pin it to mirror this orchestrator's RUN_ADAPTER. Respect an explicit
-    // operator override carried in from the environment.
-    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
-      env.INTEGRATION_RUNTIME_ADAPTER = "process";
-    }
+    // This run is NOT containerized, so its integrations spawn as host
+    // subprocesses too (the constructor refuses the docker override).
+    env.INTEGRATION_RUNTIME_ADAPTER = "process";
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
     env.LISTEN_HOST = LOOPBACK;

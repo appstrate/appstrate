@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,11 +26,20 @@ _setDataDirForTesting(DATA_DIR);
 
 let orchestrator: ProcessOrchestrator;
 
+// The constructor refuses INTEGRATION_RUNTIME_ADAPTER=docker, which a Tier-3 `.env`
+// (auto-loaded by Bun) sets. Only the #1819 describe below sets it, per test.
+const operatorIntegrationAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
+beforeAll(() => {
+  delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+});
+
 afterEach(async () => {
   await orchestrator?.shutdown();
 });
 
 afterAll(async () => {
+  if (operatorIntegrationAdapter === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+  else process.env.INTEGRATION_RUNTIME_ADAPTER = operatorIntegrationAdapter;
   _setDataDirForTesting();
   await rm(DATA_DIR, { recursive: true, force: true });
 });
@@ -332,6 +341,39 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
+  describe("INTEGRATION_RUNTIME_ADAPTER override (#1819)", () => {
+    function withAdapterEnv<T>(value: string | undefined, body: () => T): T {
+      const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
+      if (value === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+      else process.env.INTEGRATION_RUNTIME_ADAPTER = value;
+      try {
+        return body();
+      } finally {
+        if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+        else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
+      }
+    }
+
+    it("refuses docker: a host sidecar has no per-run network for docker runners", () => {
+      withAdapterEnv("docker", () => {
+        expect(() => new ProcessOrchestrator()).toThrow(
+          /INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process/,
+        );
+        expect(() => new ProcessOrchestrator()).toThrow(
+          /RUN_ADAPTER=docker or RUN_ADAPTER=firecracker/,
+        );
+      });
+    });
+
+    it("accepts an unset or explicit process value", () => {
+      for (const value of [undefined, "process"]) {
+        withAdapterEnv(value, () => {
+          expect(() => new ProcessOrchestrator()).not.toThrow();
+        });
+      }
+    });
+  });
+
   describe("createSidecar (no health gate)", () => {
     beforeEach(async () => {
       await resetDataDir();
@@ -382,7 +424,7 @@ describe("ProcessOrchestrator", () => {
       expect(await waitForExit(capturedPid!)).toBe(true);
     }, 10_000);
 
-    it("defaults the sidecar's integration runtime adapter to 'process'", async () => {
+    it("pins the sidecar's integration runtime adapter to 'process'", async () => {
       // A non-containerized (process) run must not let the sidecar auto-select
       // the Docker integration adapter (which needs the per-language runner
       // images). The orchestrator pins INTEGRATION_RUNTIME_ADAPTER=process so

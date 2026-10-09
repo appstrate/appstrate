@@ -169,11 +169,10 @@ async function requireRunnerIsolation(
         `APPSTRATE_RUNNER_UIDS pool (${why}). On the sidecar's uid the runner could read the ` +
         `sidecar's environment — platform API key, run token, proxy credentials, every ` +
         `connected integration's decrypted tokens — straight out of /proc; on a shared uid ` +
-        `the egress listeners could not tell it from another runner. Remedies, cheapest ` +
-        `first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep the run itself in process ` +
-        `mode while each integration runner gets its own container; or run under ` +
-        `RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, whose guest supervisor ` +
-        `provides both. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
+        `the egress listeners could not tell it from another runner. Remedies: run under ` +
+        `RUN_ADAPTER=docker, where each integration runner gets its own container; or under ` +
+        `RUN_ADAPTER=firecracker, whose guest supervisor provides both. Integrations whose ` +
+        `source.kind is "remote" or "none" spawn nothing ` +
         `and are unaffected.`,
     );
   };
