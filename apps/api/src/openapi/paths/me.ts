@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import {
+  USER_MEMORY_CONTENT_MAX_CHARS,
+  USER_MEMORY_SUBJECT_MAX_CHARS,
+  USER_MEMORY_TYPES,
+} from "@appstrate/core/user-memory";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
   agentPackageIdParam,
@@ -36,7 +41,266 @@ const namedSpaceSchema = {
  * The other routes in this namespace run inside org (or space) context.
  */
 
+const userMemorySchema = {
+  type: "object",
+  required: [
+    "id",
+    "type",
+    "subject",
+    "content",
+    "orgId",
+    "org_name",
+    "org_member",
+    "created_by",
+    "createdAt",
+    "updatedAt",
+  ],
+  properties: {
+    id: { type: "string", description: "`mem_` prefixed id." },
+    type: { type: "string", enum: [...USER_MEMORY_TYPES] },
+    subject: {
+      type: ["string", "null"],
+      description: 'Free label ("health", a client\'s name) grouping memories by topic.',
+    },
+    content: { type: "string" },
+    orgId: {
+      type: ["string", "null"],
+      format: "uuid",
+      description:
+        "Origin: the organization it was learned in, or null when it is about the person.",
+    },
+    org_name: { type: ["string", "null"] },
+    org_member: {
+      type: "boolean",
+      description:
+        "Whether the person still belongs to the origin (always true for a null origin). A memory from an organization they left is erased 30 days after they left.",
+    },
+    created_by: { type: "string", enum: ["user", "assistant"] },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+} as const;
+
+const memoryOwnerOnly =
+  "The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.";
+
+const memoryFull = { $ref: "#/components/responses/MemoryFull" } as const;
+
 export const mePaths = {
+  "/api/me/memories": {
+    get: {
+      operationId: "listMyMemories",
+      tags: ["Profile"],
+      summary: "List the assistant's memory of the caller",
+      description: `The memories the assistant keeps about the caller that this credential reaches: all of them, including those from organizations the person left, for an unbound credential; what is about the person and the bound organization's own for a bound one. ${memoryOwnerOnly}`,
+      responses: {
+        "200": {
+          description: "The caller's memories, in rendering order (by type, oldest first)",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: userMemorySchema },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+    post: {
+      operationId: "createMyMemory",
+      tags: ["Profile"],
+      summary: "Add a memory",
+      description: `Adds a memory written by the person. ${memoryOwnerOnly}`,
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["type", "content"],
+              properties: {
+                type: { type: "string", enum: [...USER_MEMORY_TYPES] },
+                content: { type: "string", minLength: 1, maxLength: USER_MEMORY_CONTENT_MAX_CHARS },
+                subject: {
+                  type: ["string", "null"],
+                  minLength: 1,
+                  maxLength: USER_MEMORY_SUBJECT_MAX_CHARS,
+                },
+                orgId: {
+                  type: ["string", "null"],
+                  format: "uuid",
+                  description:
+                    "Origin: an organization the caller belongs to. Omitted or null: about the person, loaded in every organization.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "Memory added",
+          content: { "application/json": { schema: userMemorySchema } },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Invalid body, an `orgId` the caller does not belong to, or content holding a password, key, token or card number.",
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "409": memoryFull,
+      },
+    },
+    delete: {
+      operationId: "forgetMyMemories",
+      tags: ["Profile"],
+      summary: "Forget memories in bulk",
+      description: `Deletes the memories of one origin, or all of them. ${memoryOwnerOnly}`,
+      parameters: [
+        {
+          name: "origin",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description:
+            "`all`, `me` (the memories about the person), or an organization id (what was learned there).",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Number of memories deleted",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["deleted"],
+                properties: { deleted: { type: "integer" } },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/me/memories/core": {
+    get: {
+      operationId: "getMyMemoryCore",
+      tags: ["Profile"],
+      summary: "The core of the assistant's memory of the caller",
+      description: `What the chat loads into its prompt: the memories about the caller, plus those learned in \`orgId\` (omitted: the first half only). \`enabled: false\` when the caller's switch or that organization's is off. ${memoryOwnerOnly}`,
+      parameters: [
+        {
+          name: "orgId",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uuid" },
+          description: "An organization the caller belongs to.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The core, in rendering order",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["enabled", "memories"],
+                properties: {
+                  enabled: { type: "boolean" },
+                  memories: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["id", "type", "subject", "content", "orgId"],
+                      properties: {
+                        id: { type: "string" },
+                        type: { type: "string", enum: [...USER_MEMORY_TYPES] },
+                        subject: { type: ["string", "null"] },
+                        content: { type: "string" },
+                        orgId: { type: ["string", "null"], format: "uuid" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/me/memories/{id}": {
+    patch: {
+      operationId: "updateMyMemory",
+      tags: ["Profile"],
+      summary: "Edit a memory",
+      description: `Merges the given fields into one memory; its origin does not change. ${memoryOwnerOnly}`,
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                type: { type: "string", enum: [...USER_MEMORY_TYPES] },
+                content: { type: "string", minLength: 1, maxLength: USER_MEMORY_CONTENT_MAX_CHARS },
+                subject: {
+                  type: ["string", "null"],
+                  minLength: 1,
+                  maxLength: USER_MEMORY_SUBJECT_MAX_CHARS,
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Memory updated",
+          content: { "application/json": { schema: userMemorySchema } },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": memoryFull,
+      },
+    },
+    delete: {
+      operationId: "deleteMyMemory",
+      tags: ["Profile"],
+      summary: "Forget a memory",
+      description: memoryOwnerOnly,
+      parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+      responses: {
+        "204": { description: "Memory deleted" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+
   "/api/me/orgs": {
     get: {
       operationId: "listMyOrgs",

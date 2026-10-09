@@ -2171,6 +2171,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the assistant's memory of the caller
+         * @description The memories the assistant keeps about the caller that this credential reaches: all of them, including those from organizations the person left, for an unbound credential; what is about the person and the bound organization's own for a bound one. The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        get: operations["listMyMemories"];
+        put?: never;
+        /**
+         * Add a memory
+         * @description Adds a memory written by the person. The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        post: operations["createMyMemory"];
+        /**
+         * Forget memories in bulk
+         * @description Deletes the memories of one origin, or all of them. The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        delete: operations["forgetMyMemories"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/memories/core": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The core of the assistant's memory of the caller
+         * @description What the chat loads into its prompt: the memories about the caller, plus those learned in `orgId` (omitted: the first half only). `enabled: false` when the caller's switch or that organization's is off. The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        get: operations["getMyMemoryCore"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/memories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Forget a memory
+         * @description The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        delete: operations["deleteMyMemory"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a memory
+         * @description Merges the given fields into one memory; its origin does not change. The person's own identity only: a delegated credential (an API key, a third-party OAuth client) is refused, as on `/api/profile`. What the caller reaches depends on its credential, by the same rule as the `memory` MCP tool: the person's session or CLI (bound to no organization) reaches every memory; a credential bound to one organization (the chat's token, an MCP client's token for that organization's endpoint) reaches what is about the person and that organization only, writes as `assistant`, and is refused with `memory_outside_organization` beyond it and `memory_off` while a switch is off. **Does NOT require `X-Org-Id`**.
+         */
+        patch: operations["updateMyMemory"];
+        trace?: never;
+    };
     "/api/me/orgs": {
         parameters: {
             query?: never;
@@ -3037,6 +3109,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Erase what members' assistants learned in this organization
+         * @description Deletes every member's assistant memories whose origin is this organization (`user_memories.org_id`). What members told the assistant about themselves, and what they taught it in other organizations, is theirs and untouched. Pair it with `assistant_memory: false` in the settings to stop new ones. Owner/admin (`org:settings`).
+         */
+        delete: operations["eraseOrgAssistantMemories"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/settings": {
         parameters: {
             query?: never;
@@ -3848,7 +3940,7 @@ export interface paths {
         head?: never;
         /**
          * Update user profile
-         * @description Update the current user's profile (displayName, language).
+         * @description Update the current user's profile (displayName, language, assistant_memory).
          */
         patch: operations["updateProfile"];
         trace?: never;
@@ -6248,6 +6340,8 @@ export interface components {
         };
         /** @description Organization settings (extensible) */
         OrgSettings: {
+            /** @description The assistant's memory of each member (`/api/me/memories`). `false`: in this organization the chat neither reads nor writes it; memories already learned here stay with their owners unless purged with `DELETE /api/orgs/{orgId}/memories`. Default true. */
+            assistant_memory?: boolean;
             /** @description When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `code sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about. */
             restrict_package_copy?: boolean;
             /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
@@ -7040,6 +7134,8 @@ export interface components {
             displayName?: string | null;
             /** @enum {string} */
             language: "fr" | "en";
+            /** @description The person's switch for the assistant's memory of them (`/api/me/memories`). Off: no chat reads or writes it, in any organization. Default true. */
+            assistant_memory: boolean;
             /** Format: email */
             email: string;
             name: string;
@@ -7267,6 +7363,16 @@ export interface components {
         /** @description `model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding. */
         ModelAlreadyAdded: {
             headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
+        /** @description `memory_full`: the write would overflow its half of the memory (about the person, or one organization). Condense first: merge memories or remove stale ones. The problem body carries `budget`, `used` (characters) and `scope` (`me` | `org`). */
+        MemoryFull: {
+            headers: {
+                "Request-Id": components["headers"]["RequestId"];
                 [name: string]: unknown;
             };
             content: {
@@ -15861,6 +15967,266 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listMyMemories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's memories, in rendering order (by type, oldest first) */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @description `mem_` prefixed id. */
+                            id: string;
+                            /** @enum {string} */
+                            type: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                            /** @description Free label ("health", a client's name) grouping memories by topic. */
+                            subject: string | null;
+                            content: string;
+                            /**
+                             * Format: uuid
+                             * @description Origin: the organization it was learned in, or null when it is about the person.
+                             */
+                            orgId: string | null;
+                            org_name: string | null;
+                            /** @description Whether the person still belongs to the origin (always true for a null origin). A memory from an organization they left is erased 30 days after they left. */
+                            org_member: boolean;
+                            /** @enum {string} */
+                            created_by: "user" | "assistant";
+                            /** Format: date-time */
+                            createdAt: string;
+                            /** Format: date-time */
+                            updatedAt: string;
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createMyMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    type: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                    content: string;
+                    subject?: string | null;
+                    /**
+                     * Format: uuid
+                     * @description Origin: an organization the caller belongs to. Omitted or null: about the person, loaded in every organization.
+                     */
+                    orgId?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Memory added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description `mem_` prefixed id. */
+                        id: string;
+                        /** @enum {string} */
+                        type: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                        /** @description Free label ("health", a client's name) grouping memories by topic. */
+                        subject: string | null;
+                        content: string;
+                        /**
+                         * Format: uuid
+                         * @description Origin: the organization it was learned in, or null when it is about the person.
+                         */
+                        orgId: string | null;
+                        org_name: string | null;
+                        /** @description Whether the person still belongs to the origin (always true for a null origin). A memory from an organization they left is erased 30 days after they left. */
+                        org_member: boolean;
+                        /** @enum {string} */
+                        created_by: "user" | "assistant";
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            /** @description Invalid body, an `orgId` the caller does not belong to, or content holding a password, key, token or card number. */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["MemoryFull"];
+        };
+    };
+    forgetMyMemories: {
+        parameters: {
+            query: {
+                /** @description `all`, `me` (the memories about the person), or an organization id (what was learned there). */
+                origin: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of memories deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        deleted: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMyMemoryCore: {
+        parameters: {
+            query?: {
+                /** @description An organization the caller belongs to. */
+                orgId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The core, in rendering order */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        memories: {
+                            id: string;
+                            /** @enum {string} */
+                            type: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                            subject: string | null;
+                            content: string;
+                            /** Format: uuid */
+                            orgId: string | null;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    deleteMyMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Memory deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateMyMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    type?: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                    content?: string;
+                    subject?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Memory updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description `mem_` prefixed id. */
+                        id: string;
+                        /** @enum {string} */
+                        type: "preference" | "person" | "project" | "goal" | "commitment" | "fact";
+                        /** @description Free label ("health", a client's name) grouping memories by topic. */
+                        subject: string | null;
+                        content: string;
+                        /**
+                         * Format: uuid
+                         * @description Origin: the organization it was learned in, or null when it is about the person.
+                         */
+                        orgId: string | null;
+                        org_name: string | null;
+                        /** @description Whether the person still belongs to the origin (always true for a null origin). A memory from an organization they left is erased 30 days after they left. */
+                        org_member: boolean;
+                        /** @enum {string} */
+                        created_by: "user" | "assistant";
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["MemoryFull"];
+        };
+    };
     listMyOrgs: {
         parameters: {
             query?: never;
@@ -18636,6 +19002,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    eraseOrgAssistantMemories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of memories erased */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        deleted: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
     getOrgSettings: {
         parameters: {
             query?: never;
@@ -18679,6 +19073,8 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    /** @description The assistant's memory of each member (`/api/me/memories`). `false`: in this organization the chat neither reads nor writes it; memories already learned here stay with their owners unless purged with `DELETE /api/orgs/{orgId}/memories`. Default true. */
+                    assistant_memory?: boolean;
                     /** @description When true, copying a package OUT of the space that owns it requires the source package type's `share` in its home space: `POST /api/packages/{scope}/{name}/fork`, `GET /api/packages/{scope}/{name}/{version}/download` and `GET /api/agents/{scope}/{name}/bundle` answer `403 package_copy_restricted` otherwise. Default false — reading implies copying, as in Notion, Drive and Figma. SKILLS are exempt on all three: the CLI's `code sync` downloads them into a local checkout by design. A SERVER-side agent run is unaffected — it assembles the same bundle and hands it to nobody — but `appstrate run --local`, which downloads one, is not: a copy of the agent leaves the platform to perform it, which is what this setting is about. */
                     restrict_package_copy?: boolean;
                     /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
@@ -21493,6 +21889,7 @@ export interface operations {
                      *       "id": "usr_abc123",
                      *       "displayName": "Alice Martin",
                      *       "language": "fr",
+                     *       "assistant_memory": true,
                      *       "email": "alice@example.com",
                      *       "name": "Alice Martin",
                      *       "can_create_org": true
@@ -21519,6 +21916,7 @@ export interface operations {
                     displayName?: string;
                     /** @enum {string} */
                     language?: "fr" | "en";
+                    assistant_memory?: boolean;
                 };
             };
         };
@@ -21536,6 +21934,7 @@ export interface operations {
                      *       "id": "usr_abc123",
                      *       "displayName": "Alice Martin",
                      *       "language": "en",
+                     *       "assistant_memory": true,
                      *       "email": "alice@example.com",
                      *       "name": "Alice Martin",
                      *       "can_create_org": true

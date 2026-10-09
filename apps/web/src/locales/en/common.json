@@ -417,5 +417,8 @@
   "viewAs.stopped.view_as_unsupported": "Preview unavailable: this session cannot preview a role.",
   "viewAs.stopped.view_as_forbidden": "Preview unavailable: you may not preview this role.",
   "viewAs.stopped.view_as_not_found": "Preview unavailable: the space or role to preview does not exist.",
-  "viewAs.stopped.generic": "Preview unavailable."
+  "viewAs.stopped.generic": "Preview unavailable.",
+  "apiError.memory_full": "The memory is full for this part ({{message}}): condense or delete memories before adding more.",
+  "apiError.memory_off": "The assistant's memory is turned off here.",
+  "apiError.memory_outside_organization": "This connection acts in one organization: it cannot touch what was learned in another."
 }

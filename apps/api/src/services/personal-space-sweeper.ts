@@ -23,7 +23,12 @@ import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue } from "../infra/queue/index.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { emptyAndDeletePersonalSpace, listSweepablePersonalSpaces } from "./spaces.ts";
+import {
+  emptyAndDeletePersonalSpace,
+  listSweepablePersonalSpaces,
+  PERSONAL_SPACE_GRACE_DAYS,
+} from "./spaces.ts";
+import { sweepDepartedMemberMemories } from "./user-memories.ts";
 
 interface SweepResult {
   sweptSpaces: number;
@@ -43,7 +48,10 @@ interface SweepResult {
  */
 export async function sweepOrphanedPersonalSpaces(now = new Date()): Promise<SweepResult> {
   const due = await listSweepablePersonalSpaces(now);
-  if (due.length === 0) return { sweptSpaces: 0, failedSpaces: 0 };
+  if (due.length === 0) {
+    await sweepMemories(now);
+    return { sweptSpaces: 0, failedSpaces: 0 };
+  }
 
   let sweptSpaces = 0;
   let failedSpaces = 0;
@@ -68,7 +76,25 @@ export async function sweepOrphanedPersonalSpaces(now = new Date()): Promise<Swe
   }
 
   logger.info("Personal-space sweep finished", { sweptSpaces, failedSpaces, due: due.length });
+  await sweepMemories(now);
   return { sweptSpaces, failedSpaces };
+}
+
+/**
+ * The assistant's memories a departed member learned in the organization go
+ * with their personal space: same window, same pass (`sweepDepartedMemberMemories`).
+ * After the spaces, so a space swept in this pass releases its owner's memories now.
+ */
+async function sweepMemories(now: Date): Promise<void> {
+  const cutoff = new Date(now.getTime() - PERSONAL_SPACE_GRACE_DAYS * 86_400_000);
+  try {
+    const erased = await sweepDepartedMemberMemories(cutoff);
+    if (erased > 0) logger.info("Erased departed members' assistant memories", { erased });
+  } catch (err) {
+    logger.error("Failed to erase departed members' assistant memories", {
+      error: getErrorMessage(err),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -301,6 +301,17 @@ export const responses = {
       },
     },
   },
+  /** The assistant's memory: a write that would overflow its half (`services/user-memories.ts`). */
+  MemoryFull: {
+    description:
+      "`memory_full`: the write would overflow its half of the memory (about the person, or one organization). Condense first: merge memories or remove stale ones. The problem body carries `budget`, `used` (characters) and `scope` (`me` | `org`).",
+    headers: REQUEST_ID_ONLY_HEADERS,
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+      },
+    },
+  },
   /** The last owner leaving — the one exit that can empty the owner set. */
   LastOwner: {
     description:

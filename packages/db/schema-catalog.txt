@@ -459,6 +459,7 @@ column packages.org_id uuid
 column packages.source package_source not null default 'local'::package_source
 column packages.type package_type not null
 column packages.updated_at timestamp with time zone not null default now()
+column profiles.assistant_memory boolean not null default true
 column profiles.created_at timestamp with time zone not null default now()
 column profiles.display_name text
 column profiles.id text not null
@@ -618,6 +619,16 @@ column user.image text
 column user.name text not null
 column user.realm text not null default 'platform'::text
 column user.updated_at timestamp with time zone not null default now()
+column user_memories.content text not null
+column user_memories.created_at timestamp with time zone not null default now()
+column user_memories.created_by text not null
+column user_memories.id text not null
+column user_memories.org_id uuid
+column user_memories.source_session_id text
+column user_memories.subject text
+column user_memories.type text not null
+column user_memories.updated_at timestamp with time zone not null default now()
+column user_memories.user_id text not null
 column verification.created_at timestamp with time zone not null default now()
 column verification.expires_at timestamp with time zone not null
 column verification.id text not null
@@ -900,6 +911,12 @@ constraint uploads uploads_pkey PRIMARY KEY (id)
 constraint uploads uploads_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint user user_email_unique UNIQUE (email)
 constraint user user_pkey PRIMARY KEY (id)
+constraint user_memories user_memories_created_by_valid CHECK ((created_by = ANY (ARRAY['user'::text, 'assistant'::text])))
+constraint user_memories user_memories_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint user_memories user_memories_pkey PRIMARY KEY (id)
+constraint user_memories user_memories_source_session_id_chat_sessions_id_fk FOREIGN KEY (source_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL
+constraint user_memories user_memories_type_valid CHECK ((type = ANY (ARRAY['preference'::text, 'person'::text, 'project'::text, 'goal'::text, 'commitment'::text, 'fact'::text])))
+constraint user_memories user_memories_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint verification verification_pkey PRIMARY KEY (id)
 constraint webhook_deliveries webhook_deliveries_pkey PRIMARY KEY (id)
 constraint webhook_deliveries webhook_deliveries_status_valid CHECK ((status = ANY (ARRAY['pending'::text, 'success'::text, 'failed'::text])))
@@ -1038,6 +1055,9 @@ index CREATE INDEX idx_uploads_end_user ON public.uploads USING btree (end_user_
 index CREATE INDEX idx_uploads_expires_unconsumed ON public.uploads USING btree (expires_at) WHERE (consumed_at IS NULL)
 index CREATE INDEX idx_uploads_org ON public.uploads USING btree (org_id)
 index CREATE INDEX idx_uploads_space ON public.uploads USING btree (space_id)
+index CREATE INDEX idx_user_memories_org ON public.user_memories USING btree (org_id) WHERE (org_id IS NOT NULL)
+index CREATE INDEX idx_user_memories_source_session ON public.user_memories USING btree (source_session_id) WHERE (source_session_id IS NOT NULL)
+index CREATE INDEX idx_user_memories_user_org ON public.user_memories USING btree (user_id, org_id)
 index CREATE INDEX idx_webhook_deliveries_webhook_created ON public.webhook_deliveries USING btree (webhook_id, created_at, id)
 index CREATE INDEX idx_webhooks_org_id ON public.webhooks USING btree (org_id)
 index CREATE INDEX idx_webhooks_space_enabled ON public.webhooks USING btree (space_id, enabled)
@@ -1139,6 +1159,7 @@ index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_
 index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)
 index CREATE UNIQUE INDEX user_email_unique ON public."user" USING btree (email)
+index CREATE UNIQUE INDEX user_memories_pkey ON public.user_memories USING btree (id)
 index CREATE UNIQUE INDEX user_pkey ON public."user" USING btree (id)
 index CREATE UNIQUE INDEX verification_pkey ON public.verification USING btree (id)
 index CREATE UNIQUE INDEX webhook_deliveries_pkey ON public.webhook_deliveries USING btree (id)

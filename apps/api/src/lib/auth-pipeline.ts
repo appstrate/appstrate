@@ -600,6 +600,9 @@ function skipOrgContext(path: string): boolean {
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
   // spaceId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
+  // `/api/me/memories`: the assistant's memory of the person spans every
+  // organization they belong to; no single org represents it.
+  if (/^\/api\/me\/memories(\/[^/]+)?\/?$/.test(path)) return true;
   // Instance-wide operator routes: an operator may belong to no organization.
   // Listed by exact family, so a new `/api/admin/*` route stays org-gated
   // until it is added here with a guard of its own.

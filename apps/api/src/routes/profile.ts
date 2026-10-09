@@ -23,6 +23,8 @@ export const profileUpdateSchema = z
   .object({
     language: z.enum(["fr", "en"]).optional(),
     displayName: z.string().min(1).max(100).optional(),
+    /** The person's switch for the assistant's memory of them. */
+    assistant_memory: z.boolean().optional(),
   })
   .strict();
 
@@ -59,6 +61,7 @@ async function getProfileResource(userId: string) {
       id: profiles.id,
       displayName: profiles.displayName,
       language: profiles.language,
+      assistant_memory: profiles.assistantMemory,
       email: userTable.email,
       name: userTable.name,
     })
@@ -96,14 +99,20 @@ profileRouter.patch("/profile", async (c) => {
 
   const data = await readJsonBody(c, profileUpdateSchema);
 
-  const { language, displayName } = data;
+  const { language, displayName, assistant_memory: assistantMemory } = data;
 
   try {
     // `language` lives only on `profiles`; update it inline. `displayName`
     // is mirrored across `profiles` + Better Auth `user.name`, so it goes
     // through the shared dual-write service (also stamps `updatedAt`).
-    if (language) {
-      await db.update(profiles).set({ language }).where(eq(profiles.id, user.id));
+    if (language || assistantMemory !== undefined) {
+      await db
+        .update(profiles)
+        .set({
+          ...(language ? { language } : {}),
+          ...(assistantMemory !== undefined ? { assistantMemory } : {}),
+        })
+        .where(eq(profiles.id, user.id));
     }
 
     if (displayName) {

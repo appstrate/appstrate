@@ -20,6 +20,7 @@ async function fetchProfile(): Promise<AuthProfile | null> {
       id: data.id,
       displayName: data.displayName ?? null,
       language: data.language,
+      assistantMemory: data.assistant_memory,
       canCreateOrg: data.can_create_org,
     };
     if (profile.language && profile.language !== i18n.language) {

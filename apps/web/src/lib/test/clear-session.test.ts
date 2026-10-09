@@ -33,7 +33,13 @@ describe("clearSession", () => {
   it("empties the query cache and the scope, and keeps the remembered spaces", () => {
     authStore.setState({
       user: { id: "usr_a", email: "a@test.com", emailVerified: true },
-      profile: { id: "usr_a", displayName: "A", language: "fr", canCreateOrg: true },
+      profile: {
+        id: "usr_a",
+        displayName: "A",
+        language: "fr",
+        assistantMemory: true,
+        canCreateOrg: true,
+      },
       loading: false,
     });
     orgStore.getState().setId("org_a");

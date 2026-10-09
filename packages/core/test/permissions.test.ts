@@ -215,6 +215,7 @@ describe("CoreResources ↔ runtime catalog drift", () => {
       files: true,
       schedules: true,
       persistence: true,
+      memory: true,
       models: true,
       "model-provider-credentials": true,
       proxies: true,
