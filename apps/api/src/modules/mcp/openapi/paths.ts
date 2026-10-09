@@ -170,6 +170,14 @@ const orgEndpoint = {
     security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
     parameters: [orgPathParameter],
     responses: {
+      "400": {
+        description:
+          "`invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; " +
+          "pin a space with `/api/mcp/o/{org}/s/{space}` instead.",
+        content: {
+          "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+        },
+      },
       "401": { $ref: "#/components/responses/Unauthorized" },
       "403": { $ref: "#/components/responses/Forbidden" },
       "405": {
@@ -221,40 +229,37 @@ const orgMetadata = {
   },
 } as const;
 
-/**
- * The same endpoint pinned to one space by its URL: every operation keeps its
- * shape, gains the `space` path parameter and its own operationId. Its PRM is
- * the org's document — same resource, same token audience.
- */
-function pinnedToSpace<
-  T extends Record<string, { operationId: string; parameters: readonly unknown[] }>,
->(endpoint: T, note: string): T {
-  return Object.fromEntries(
-    Object.entries(endpoint).map(([method, op]) => [
-      method,
-      {
-        ...op,
-        operationId: `${op.operationId}InSpace`,
-        description: `${note} ${(op as { description?: string }).description ?? ""}`.trim(),
-        parameters: [...op.parameters, spacePathParameter],
-      },
-    ]),
-  ) as unknown as T;
+/** An operation of the space-pinned URL: the org's, with `{space}` and its own id. */
+function pinnedToSpace(
+  op: { operationId: string; description: string; parameters: readonly unknown[] },
+  note: string,
+) {
+  return {
+    ...op,
+    operationId: `${op.operationId}InSpace`,
+    description: `${note} ${op.description}`,
+    parameters: [...op.parameters, spacePathParameter],
+  };
 }
+
+const SPACE_PINNED_NOTE =
+  "The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one " +
+  "client-side space pin, usable by any client. Every call acts in `{space}`, tools take no " +
+  "`space_id`, and a space-bound credential naming another space is a 403. Same token as " +
+  "the organization's endpoint.";
 
 export const mcpPaths = {
   "/api/mcp/o/{org}": orgEndpoint,
-  "/api/mcp/o/{org}/s/{space}": pinnedToSpace(
-    orgEndpoint,
-    "The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one " +
-      "client-side space pin, usable by any client. Every call acts in `{space}`, tools take no " +
-      "`space_id`, and a space-bound credential naming another space is a 403. Same token as " +
-      "the organization's endpoint.",
-  ),
+  "/api/mcp/o/{org}/s/{space}": {
+    post: pinnedToSpace(orgEndpoint.post, SPACE_PINNED_NOTE),
+    get: pinnedToSpace(orgEndpoint.get, SPACE_PINNED_NOTE),
+  },
   "/.well-known/oauth-protected-resource/api/mcp/o/{org}": orgMetadata,
-  "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": pinnedToSpace(
-    orgMetadata,
-    "The space-pinned endpoint's metadata: the organization's document, `resource` included " +
-      "(a path prefix of the endpoint URL, which MCP clients accept).",
-  ),
+  "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": {
+    get: pinnedToSpace(
+      orgMetadata.get,
+      "The space-pinned endpoint's metadata: the organization's document, `resource` included " +
+        "(a path prefix of the endpoint URL, which MCP clients accept).",
+    ),
+  },
 } as const;

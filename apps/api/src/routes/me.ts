@@ -511,8 +511,7 @@ router.get(
  * role (operations beyond it will 403 at invoke time).
  *
  * Space context resolves as `requireSpaceContext` does: the credential's
- * space, else `X-Space-Id`, else (in-process MCP sub-dispatch only) the org's
- * default space. The payload names that space: an empty list alone cannot
+ * space, else `X-Space-Id`; with neither, a 400. The payload names that space: an empty list alone cannot
  * tell an agent whether nothing is there for it or it is in the wrong space.
  */
 router.get("/context", requireSpaceContext(), async (c) => {

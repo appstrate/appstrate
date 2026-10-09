@@ -37,6 +37,7 @@ import {
 } from "../../../../../test/helpers/seed.ts";
 import {
   MCP_ACCEPT,
+  inSpace,
   mcpHeaders,
   mcpPath,
   mcpRpc,
@@ -189,12 +190,11 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("403s a guest with no space row and serves the same caller once a row exists", async () => {
-    // RBAC spec §7.3: the per-org endpoint pins an org, resolves the ORG'S
-    // DEFAULT SPACE, and reads the caller's role there. `mcp` is a space-level
-    // resource, so a `guest` — implicit in no space — cannot pass its guard.
-    // A session caller is used because it takes the same `enterMcpSpace` →
-    // `applySpacePermissions` path a per-org bearer does; only the credential
-    // that resolved the org role differs.
+    // RBAC spec §7.3: an unpinned connection reaches the spaces where the
+    // caller holds a role with `mcp:read`. A `guest` — implicit in no space —
+    // reaches none and is refused. A session caller is used because it takes
+    // the same path a per-org bearer does; only the credential that resolved
+    // the org role differs.
     const owner = await createTestContext();
     const guest = await createTestUser();
     await addOrgMember(owner.orgId, guest.id, "guest");
@@ -216,7 +216,7 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("enters a URL-pinned space with the middleware's refusals, byte for byte", async () => {
-    // `enterMcpSpace` → `enterSpaceById`, the door `requireSpaceContext` uses:
+    // The URL's space enters through `enterSpaceById`, the door `requireSpaceContext` uses:
     // a malformed id is a 400 before any lookup; a missing id, a space of
     // another org and a private one the caller is not in are the SAME 404; a
     // closed one is the 403; a row lets the same caller in.
@@ -227,7 +227,7 @@ describe("mcp discovery + auth gate", () => {
     const priv = await seedSpace({ orgId: owner.orgId, visibility: "private" });
     const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
     const initialize = (spaceId: string) =>
-      initializeAs({ Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": spaceId });
+      initializeAs(inSpace({ Cookie: member.cookie, "X-Org-Id": owner.orgId }, spaceId));
 
     const malformed = await initialize("spc_1");
     expect(malformed.status).toBe(400);
@@ -259,7 +259,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": owner.orgId };
 
     expect((await initializeAs(headers)).status).toBe(200);
-    const spoofed = await initializeAs({ ...headers, "X-Space-Id": sibling.id });
+    const spoofed = await initializeAs(inSpace(headers, sibling.id));
     expect(spoofed.status).toBe(403);
     expect(((await spoofed.json()) as { detail: string }).detail).toBe(
       "The space in the URL is not the credential's space",
@@ -421,8 +421,8 @@ describe("mcp tool round-trip", () => {
   });
 
   it("narrows the advertised surface to the caller's space role", async () => {
-    // The per-org endpoint resolves the org's default space and reads the
-    // caller's role there (RBAC spec §7.3), and the two presets differ exactly
+    // The endpoint reads the caller's role in the space the request enters
+    // (RBAC spec §7.3), and the two presets differ exactly
     // where this matters: `viewer` holds neither `agents:run` nor the mcp
     // module's `invoke` contribution, `builder` holds both. Same user shape,
     // same request — only the space row's preset differs.
@@ -653,11 +653,10 @@ describe("mcp tool round-trip", () => {
     await seedSpaceMember({ spaceId: runs.id, userId: caller.user.id, presetRole: "admin" });
     const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
     // Pinned on A: an unpinned connection would require `space_id` on each call.
-    const headers = {
-      Cookie: caller.cookie,
-      "X-Org-Id": owner.orgId,
-      "X-Space-Id": owner.defaultSpaceId,
-    };
+    const headers = inSpace(
+      { Cookie: caller.cookie, "X-Org-Id": owner.orgId },
+      owner.defaultSpaceId,
+    );
 
     const call = async (id: number, name: string, args: Record<string, unknown>) => {
       const { envelope } = await rpc(headers, {
@@ -998,11 +997,7 @@ async function endUserHeaders(scope: string): Promise<Record<string, string>> {
     .setIssuedAt()
     .setExpirationTime("2m")
     .sign(endUserSigningKey);
-  return {
-    Authorization: `Bearer ${token}`,
-    "X-Org-Id": ctx.orgId,
-    "X-Space-Id": ctx.defaultSpaceId,
-  };
+  return inSpace({ Authorization: `Bearer ${token}`, "X-Org-Id": ctx.orgId }, ctx.defaultSpaceId);
 }
 
 describe("mcp tools/list for an OIDC end-user", () => {

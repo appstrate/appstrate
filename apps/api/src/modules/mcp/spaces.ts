@@ -1,29 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Org-wide mode: one MCP connection reaches every space of the organization
- * where the caller holds a role (`docs/plans/mcp-org-wide-spaces.md`).
- *
- * A connection is PINNED when a strategy fixed its space (API key, end-user
- * token) or its URL names one (`/api/mcp/o/:org/s/:space` — the chat's does).
- * Otherwise it is ORG-WIDE: the router lists the caller's
- * spaces once per request, and each tool call names the space it acts in with
- * a `space_id` argument.
- *
- * One HTTP request still enters exactly ONE space. The transport is stateless
- * and a `tools/call` request carries one call, so the router reads that call's
- * `space_id` before building the tools and enters the space through the same
- * door as `requireSpaceContext` (`enterSpaceById`). Everything downstream — the route
- * guards of dispatched calls, and the tools that call a service directly with
- * the request context (`read_skill`, files, package import) — then reads the
- * caller's role in that space and nothing else.
+ * The spaces an MCP connection acts in: pinned (credential or URL) or org-wide,
+ * one space entered per HTTP request. Design: `docs/plans/mcp-org-wide-spaces.md`.
  */
 
 import type { Context } from "hono";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppEnv } from "../../types/index.ts";
 import { listSpacesForPrincipal } from "../../services/spaces.ts";
-import { fileSpaceId } from "../../services/files.ts";
+import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import {
   callerOrgRole,
@@ -52,32 +38,16 @@ export interface OrgWideSpaces {
   current: McpSpace;
 }
 
-/**
- * The spaces a request is pinned to: the credential's (API key, end-user
- * token) and the URL's (`/api/mcp/o/:org/s/:space`). Two that disagree are
- * refused by the caller.
- */
+/** The credential's space and the URL's (`/api/mcp/o/:org/s/:space`), when set. */
 export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
   return [c.get("spaceId"), c.req.param("space")].filter((id): id is string => Boolean(id));
 }
 
-/** Pinned: some source fixed the space. Every other connection is org-wide. */
-export function isPinnedConnection(c: Context<AppEnv>): boolean {
-  return pinnedSpaceIds(c).length > 0;
-}
-
-/**
- * The spaces where the caller holds a role AND may use MCP (`mcp:read` is a
- * space-level grant). The same listing `GET /api/spaces` serves, persona
- * overlay included; spaces visible without a role are left out — the MCP acts,
- * it does not browse.
- */
+/** The spaces of `GET /api/spaces` where the caller holds a role granting `mcp:read`. */
 export async function listReachableSpaces(
   c: Context<AppEnv>,
   orgId: string,
-  surfaceOf: (permissions: ReadonlySet<string>) => McpSurface,
-): Promise<McpSpace[]> {
-  // Fails closed: a principal without an org role reaches no space this way.
+): Promise<Omit<McpSpace, "surface">[]> {
   const orgRole = callerOrgRole(c, orgId);
   if (!orgRole) return [];
   const entries = await listSpacesForPrincipal(
@@ -87,7 +57,7 @@ export async function listReachableSpaces(
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
   );
-  const out: McpSpace[] = [];
+  const out: Omit<McpSpace, "surface">[] = [];
   for (const { space, role } of entries) {
     if (!role) continue;
     const permissions = effectiveInSpace(c, role);
@@ -97,20 +67,14 @@ export async function listReachableSpaces(
       name: space.name,
       role: toSpaceRoleWire(role)!.name,
       permissions,
-      surface: surfaceOf(permissions),
     });
   }
   return out;
 }
 
 /**
- * The space a JSON-RPC body names: a `tools/call`'s `space_id`, or, for a
- * `resources/read` of an `appfile://` URI, the space holding that file — a
- * file row belongs to one space, so the URI names it, and the `resource_link`
- * a run returns is read without any other argument. Only the first message of
- * a batch is read (MCP 2025-06-18 has no batches): a later `tools/call` naming
- * another space is refused by `assertSpaceArgument`, a later read of another
- * space's file answers "not found".
+ * The space the body's first message names: a `tools/call`'s `space_id`, or
+ * the space of the file a `resources/read` of an `appfile://` URI reads.
  */
 export async function requestedSpaceId(
   message: unknown,
@@ -126,17 +90,9 @@ export async function requestedSpaceId(
   }
   if (method === "resources/read" && typeof params.uri === "string") {
     const fileId = parseFileUri(params.uri);
-    return (fileId && (await fileSpaceId(orgId, fileId))) || undefined;
+    return (fileId && (await loadFileForPreview(orgId, fileId))?.spaceId) || undefined;
   }
   return undefined;
-}
-
-/** The space a request enters: the one named if reachable, else any reachable one (see the router). */
-export function pickSpace(
-  reachable: readonly McpSpace[],
-  requested: string | undefined,
-): McpSpace | undefined {
-  return reachable.find((s) => s.id === requested) ?? reachable[0];
 }
 
 /** One line per space, for refusals and instructions. */
@@ -144,11 +100,7 @@ export function describeSpace(space: McpSpace): string {
   return `${space.name} (\`${space.id}\`, role ${space.role})`;
 }
 
-/**
- * `granted_in`: the spaces where `granted` holds, set only when they are not
- * all of them — absent means "every space you reach", the same rule as the
- * bracketed operation index. Absent too on a pinned connection (no `spaces`).
- */
+/** `granted_in`: the spaces where `granted` holds, absent when it holds in all (or pinned). */
 export function grantedIn(
   spaces: OrgWideSpaces | undefined,
   granted: (space: McpSpace) => boolean,
@@ -168,11 +120,7 @@ export const NO_FALLBACK_HINT =
   "Do not retry this action in another space to get around the refusal; report it to the " +
   "user, who decides which space the action belongs in.";
 
-/**
- * Validate a call's `space_id` against the space the request entered. It is
- * always required, whether the caller reaches one space or several: one
- * schema, no default. Missing or unknown → -32602 listing the reachable spaces.
- */
+/** A call's `space_id` must name the space the request entered; else -32602 listing them. */
 export function assertSpaceArgument(spaces: OrgWideSpaces, spaceId: unknown): void {
   const list = spaces.reachable.map(describeSpace).join("; ");
   if (spaceId === undefined) {

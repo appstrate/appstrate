@@ -130,7 +130,7 @@
   "orgSettings.mcpTitle": "Connect an MCP client",
   "orgSettings.mcpScopeLabel": "Connection scope",
   "orgSettings.mcpScopeAll": "All my spaces",
-  "orgSettings.mcpScopeAllHint": "The client reaches every space where you hold a role, and each call names the space it acts in. An action refused in one space is never redone in another.",
+  "orgSettings.mcpScopeAllHint": "The client reaches every space where you hold a role, and each call names the space it acts in. A refusal in one space tells the assistant not to redo the action elsewhere.",
   "orgSettings.mcpScopeSpaceHint": "This connection acts in this space only: its tools see no other. For access truly restricted to one space, prefer an API key of that space.",
   "orgSettings.mcpDesc": "Connect any MCP client to this organization. Authentication (OAuth) is discovered automatically — paste the server URL into your client, or use a shortcut below.",
   "orgSettings.mcpEndpointLabel": "MCP server URL",

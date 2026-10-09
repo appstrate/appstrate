@@ -14921,6 +14921,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
@@ -15060,6 +15069,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */

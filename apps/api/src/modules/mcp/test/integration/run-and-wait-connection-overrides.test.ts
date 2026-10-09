@@ -32,11 +32,7 @@ import { eq } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../../../../test/helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest,
@@ -52,6 +48,7 @@ import {
   mcpHeaders,
   mcpPath,
   type JsonRpcEnvelope,
+  mcpAuthHeaders,
 } from "../../../../../test/helpers/mcp.ts";
 import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
@@ -129,7 +126,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
     ctx = await createTestContext({ orgSlug: "mcpconn" });
-    headers = authHeaders(ctx);
+    headers = mcpAuthHeaders(ctx);
   });
 
   // Drain in `afterEach`, never at the tail of a test body: the trigger is

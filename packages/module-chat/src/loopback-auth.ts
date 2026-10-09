@@ -159,7 +159,7 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own `/api/mcp/o/:org` connection.
+ * its own `/api/mcp/o/:org/s/:space` connection.
  *
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process

@@ -130,7 +130,7 @@
   "orgSettings.mcpTitle": "Connecter un client MCP",
   "orgSettings.mcpScopeLabel": "Portée de la connexion",
   "orgSettings.mcpScopeAll": "Tous mes espaces",
-  "orgSettings.mcpScopeAllHint": "Le client atteint chaque espace où vous avez un rôle, et chaque appel nomme l'espace où il agit. Une action refusée dans un espace n'est jamais refaite dans un autre.",
+  "orgSettings.mcpScopeAllHint": "Le client atteint chaque espace où vous avez un rôle, et chaque appel nomme l'espace où il agit. Un refus dans un espace est signalé à l'assistant, qui ne doit pas refaire l'action ailleurs.",
   "orgSettings.mcpScopeSpaceHint": "Cette connexion n'agit que dans cet espace : ses outils n'en voient aucun autre. Pour un accès réellement restreint à un espace, préférez une clé API de cet espace.",
   "orgSettings.mcpDesc": "Connectez n'importe quel client MCP à cette organisation. L'authentification (OAuth) est découverte automatiquement — collez l'URL du serveur dans votre client, ou utilisez un raccourci ci-dessous.",
   "orgSettings.mcpEndpointLabel": "URL du serveur MCP",

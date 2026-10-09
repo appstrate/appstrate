@@ -134,13 +134,6 @@ describe("mcp org-wide connection", () => {
     expect((inGestion.data.space as { id: string }).id).toBe(gestion.id);
   });
 
-  it("requires space_id on a write", async () => {
-    const res = await call("invoke_operation", { operation_id: "createAgent", body: {} });
-    expect(res.error?.code).toBe(-32602);
-    expect(res.error?.message).toContain("space_id is required");
-    expect(res.error?.message).toContain(gestion.id);
-  });
-
   it("refuses a space the caller does not reach, listing the ones it does", async () => {
     const res = await call("invoke_operation", {
       operation_id: "listAgents",

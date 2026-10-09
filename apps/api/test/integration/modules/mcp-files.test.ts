@@ -28,7 +28,6 @@ import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
-  authHeaders,
   createTestContext,
   createTestUser,
   addOrgMember,
@@ -40,7 +39,7 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -626,7 +625,7 @@ describe("mcp file-backed package workflow", () => {
       packageArchive(true),
     );
 
-    const sessionHeaders = authHeaders(ctx);
+    const sessionHeaders = mcpAuthHeaders(ctx);
     const { envelope } = await rpc(sessionHeaders, {
       jsonrpc: "2.0",
       id: 1,

@@ -176,11 +176,7 @@ export interface McpToolContext {
    * server instructions); external MCP clients leave it false and keep get_me.
    */
   contextInjected?: boolean;
-  /**
-   * Set on an org-wide connection (`./spaces.ts`): the caller's reachable
-   * spaces and the one this request entered. `permissions` and `scope` are
-   * that space's. Absent on a pinned connection.
-   */
+  /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
 }
 
@@ -229,8 +225,7 @@ export const FORWARDED_AUTH_HEADERS = [
 // a forgery cannot succeed; this is defence in depth.)
 const PROTECTED_HEADERS = new Set<string>([
   ...FORWARDED_AUTH_HEADERS,
-  // Set by the router to the space the request entered: the typed `space_id`
-  // argument is the only way a call changes space.
+  // The router sets it to the space entered; `space_id` is the only way to change it.
   "x-space-id",
   "host",
   "content-length",
@@ -331,7 +326,6 @@ function describePayload(
   ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
 ): Record<string, unknown> {
   return {
-    // Org-wide: `granted` answers for this space; `granted_in` for the others.
     ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
     ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
     operation_id: op.operationId,
@@ -1600,7 +1594,6 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    // Org-wide: every space this connection can act in, with the caller's role.
     const spaces = ctx.orgSpaces?.reachable.map((s) => ({
       id: s.id,
       name: s.name,
@@ -1616,10 +1609,8 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * What one request's caller is offered: the tools `buildMcpTools` declares AND
  * the acts `buildServerInstructions` teaches, each read off the guards of the
  * route it dispatches to (or, for `import_package_file`, stands in for). A
- * withheld act is ABSENT from both — never declared then refused. An org-wide
- * connection is offered the UNION of its spaces' surfaces: an act some space
- * withholds is declared with the spaces that grant it, and refused in the
- * others (`withSpaceArgument`).
+ * withheld act is ABSENT from both — never declared then refused. Org-wide, the
+ * surface is the union of the spaces', refused per space by `withSpaceArgument`.
  */
 export interface McpSurface {
   /** `invoke_operation`; the transport already required `mcp:read`. */
@@ -1716,12 +1707,9 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
 }
 
 /**
- * What each tool needs in the space an org-wide call names. `false`: it acts
- * in no space and takes no `space_id`. `null`: it acts in one, the route guard
- * alone deciding. A surface key: the act its own surface flag stands for,
- * re-checked in that space since the declared surface is the union of them
- * all. Exhaustive, so a new tool cannot silently act in whichever space the
- * request happened to enter.
+ * What each tool needs in the space an org-wide call names: `false` no space
+ * (no `space_id`), `null` the route guard alone, else the surface act
+ * re-checked there. Exhaustive, so a new tool must decide.
  */
 const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   search_operations: null,
@@ -1737,11 +1725,7 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   get_runtime_capabilities: false,
 };
 
-/**
- * The `space_id` argument, carrying the caller's spaces itself: clients truncate
- * server instructions (Claude Code keeps ~2 KB), so the schema is the one place
- * a model is sure to find which ids exist and what they are called.
- */
+/** `space_id`, listing the spaces itself: clients truncate server instructions. */
 function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
   return {
     type: "string",
@@ -1762,8 +1746,6 @@ function withSpaceArgument(
   if (act === false) return tool;
   const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
     need === null || space.surface[need];
-  // Declared because SOME space grants it: name those spaces when not all do,
-  // the rule of the index brackets and of `granted_in`.
   const { granted_in } = grantedIn(spaces, holds(act));
   const schema = tool.descriptor.inputSchema;
   const descriptor: Tool = {
@@ -1796,8 +1778,7 @@ function withSpaceArgument(
           true,
         );
       }
-      // Consumed here: the request already entered that space. A handler that
-      // validates its own arguments (`run_and_wait`) must not see it.
+      // Consumed: `run_and_wait` validates its own arguments.
       const { space_id: _entered, ...rest } = args;
       return tool.handler(rest, extra);
     },

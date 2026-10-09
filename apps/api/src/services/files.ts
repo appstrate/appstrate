@@ -1300,21 +1300,6 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
 }
 
 /**
- * The space a file of `orgId` lives in, or null for a malformed id or a miss.
- * Answers WHERE, never whether the caller may read it: the read that follows
- * runs in that space, under its own ACL.
- */
-export async function fileSpaceId(orgId: string, fileId: string): Promise<string | null> {
-  if (!FILE_ID_RE.test(fileId)) return null;
-  const [row] = await db
-    .select({ spaceId: files.spaceId })
-    .from(files)
-    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
-    .limit(1);
-  return row?.spaceId ?? null;
-}
-
-/**
  * Resolve a chat composer file attachment to a durable `appfile://` URI + its
  * metadata (the seam behind `PlatformServices.resolveChatAttachment`, wired for
  * the chat module which has no DB access):

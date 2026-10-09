@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/componen
 import { CopyBlock } from "../copy-block";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
 import { spaceLabel } from "../../lib/space-label";
+import { toSlug } from "../../lib/strings";
 import { useSpaces } from "../../hooks/use-spaces";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
 
@@ -25,16 +26,6 @@ interface McpClientConnectProps {
 
 /** The value of the "every space" scope; any other value is a space id. */
 const ALL_SPACES = "all";
-
-/** A space label as a server-name suffix: lowercase ASCII words joined by `-`. */
-function slugify(label: string): string {
-  return label
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
 
 /** A row pairing a one-click deeplink button with its JSON fallback. */
 function DeeplinkTab({ label, href, fallback }: { label: string; href: string; fallback: string }) {
@@ -70,7 +61,7 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
   const base = `${window.location.origin}/api/mcp/o/${orgId}`;
   const cfg = space
     ? buildMcpClientConfig(
-        `appstrate-${orgSlug}-${slugify(spaceLabel(space, t)) || "space"}`,
+        `appstrate-${orgSlug}-${toSlug(spaceLabel(space, t)) || "space"}`,
         `${base}/s/${space.id}`,
       )
     : buildMcpClientConfig(`appstrate-${orgSlug}`, base);
