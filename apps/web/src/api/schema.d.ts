@@ -14751,7 +14751,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Unparseable JSON (`-32700`) or an invalid JSON-RPC message or batch (`-32700`/`-32600`). */
+            /** @description Unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). */
             400: {
                 headers: {
                     [name: string]: unknown;
