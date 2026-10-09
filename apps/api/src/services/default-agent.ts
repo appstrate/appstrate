@@ -36,9 +36,8 @@ Be concise, enthusiastic, and professional.
 `;
 
 /**
- * Provision a default "Hello World" agent for a newly created organization,
- * with its manifest version published, so every surface that runs the latest
- * published version (CLI, chat, Claude Code plugin) can run it right away.
+ * Provision a default "Hello World" agent for a newly created organization.
+ * Its 1.0.0 is published, so surfaces running the latest version can run it.
  * Non-fatal: logs a warning on failure (e.g. if the agent already exists).
  */
 export async function provisionDefaultAgentForOrg(
@@ -46,7 +45,6 @@ export async function provisionDefaultAgentForOrg(
   orgSlug: string,
   createdBy: string,
   defaultSpaceId: string,
-  deps: { publish: typeof createVersionFromDraft } = { publish: createVersionFromDraft },
 ): Promise<void> {
   try {
     const packageId = `@${orgSlug}/hello-world`;
@@ -84,7 +82,7 @@ export async function provisionDefaultAgentForOrg(
       }),
     );
 
-    const published = await deps.publish({ packageId, orgId, userId: createdBy });
+    const published = await createVersionFromDraft({ packageId, orgId, userId: createdBy });
     if ("error" in published) {
       logger.warn("Failed to publish the default hello-world agent", {
         orgId,
@@ -96,7 +94,7 @@ export async function provisionDefaultAgentForOrg(
 
     logger.info("Provisioned default hello-world agent", { orgId, packageId });
   } catch (err) {
-    logger.warn("Failed to provision default hello-world agent (may already exist)", {
+    logger.warn("Failed to provision default hello-world agent", {
       orgId,
       err,
     });

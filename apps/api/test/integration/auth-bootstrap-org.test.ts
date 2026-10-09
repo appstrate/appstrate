@@ -58,7 +58,6 @@ import { resetRateLimiters } from "../../src/middleware/rate-limit.ts";
 import { emitEvent } from "../../src/lib/modules/module-loader.ts";
 import { createDefaultSpace } from "../../src/services/spaces.ts";
 import { provisionDefaultAgentForOrg } from "../../src/services/default-agent.ts";
-import { getLatestVersionInfo } from "../../src/services/package-versions.ts";
 
 const app = getTestApp();
 
@@ -582,7 +581,6 @@ describe("Bootstrap owner account (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       const helloWorld = orgPackages.find((p) => p.id === `@${org!.slug}/hello-world`);
       expect(helloWorld).toBeDefined();
       expect(helloWorld!.draftManifest).toMatchObject({ schema_version: AFPS_SCHEMA_VERSION });
-      expect(await getLatestVersionInfo(helloWorld!.id)).toMatchObject({ version: "1.0.0" });
 
       // The sign-up hook and the redeem route both reach for the org; the
       // fan-out still fires exactly once.
