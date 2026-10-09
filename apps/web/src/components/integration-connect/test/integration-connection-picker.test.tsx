@@ -29,7 +29,6 @@ import { IntegrationConnectionPicker } from "../integration-connection-picker.ts
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
 import { ScopeSummaryText } from "../scope-summary-text.tsx";
-import type { ScopeSummary } from "../connection-scope-fit.ts";
 import {
   useConnectionPicker,
   type ConnectionPicker,
@@ -927,8 +926,7 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
       scoped(LABELS, ["read", "labels"]),
       scoped(DB, ["read"]),
     ]);
-    expect(picker.sortedCandidates.map((c) => c.id)).toEqual([DB, LABELS, WEB]);
-    expect(picker.candidates.map((c) => c.id)).toEqual([WEB, LABELS, DB]);
+    expect(picker.candidates.map((c) => c.id)).toEqual([DB, LABELS, WEB]);
   });
 
   it("offers a new connection with the agent's scopes first, the in-place upgrade second", () => {
@@ -943,6 +941,21 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     expect(html).toContain(
       i18n.t("agents:detail.integrationMemberPicker.missingScopes", { scopes: "Send" }),
     );
+  });
+
+  it("a new connection from the warning takes the under-scoped one's place", () => {
+    const conn = scoped(WEB, ["read"], ["send"]);
+    const connected: unknown[][] = [];
+    const picker: ConnectionPicker = {
+      ...pickerOver([conn]),
+      triggerConnect: async (...args) => {
+        connected.push(args);
+      },
+    };
+    (
+      propsOf(warningTree(conn, picker), `member-pick-new-for-agent-${WEB}`)?.onClick as () => void
+    )();
+    expect(connected).toEqual([["primary", { replacing: WEB }]]);
   });
 
   it("names creating a connection as a way out only when the actor may create one", () => {
@@ -967,7 +980,7 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
 
   it("'Mettre à niveau' asks for a confirmation, and only a confirmed upgrade writes", () => {
     const conn = scoped(WEB, ["read"], ["send"]);
-    const asked: Array<string | null> = [];
+    const asked: unknown[] = [];
     const upgraded: Candidate[] = [];
     const picker: ConnectionPicker = {
       ...withConnect(pickerOver([conn])),
@@ -1032,9 +1045,9 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     const t = (key: string, opts?: Record<string, unknown>) =>
       i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
 
-    expect(summaryOf(row(DB))?.text).toBe("Send");
+    expect(summaryOf(row(DB))).toContain(">Send · Read</span>");
     expect(textsOf(row(DB))).not.toContain(t("broaderThanAgent"));
-    expect(summaryOf(row(LABELS))?.text).toBe("Send · Labels");
+    expect(summaryOf(row(LABELS))).toContain(">Send · Labels +1</span>");
     expect(textsOf(row(LABELS))).toContain(t("broaderThanAgent"));
     expect(textsOf(row(WEB))).toContain(t("missingScopes", { scopes: "Send" }));
     expect(summaryOf(row(WEB))).toBeUndefined();
@@ -1050,8 +1063,8 @@ function textsOf(node: unknown): string[] {
   return textsOf(node.props.children);
 }
 
-/** The `summary` a row hands to `ScopeSummaryText`, if it shows one. */
-function summaryOf(node: unknown): ScopeSummary | undefined {
+/** The row's `ScopeSummaryText`, rendered, if it shows one. */
+function summaryOf(node: unknown): string | undefined {
   if (Array.isArray(node)) {
     for (const child of node) {
       const found = summaryOf(child);
@@ -1059,7 +1072,7 @@ function summaryOf(node: unknown): ScopeSummary | undefined {
     }
     return undefined;
   }
-  if (!isValidElement<{ children?: unknown; summary?: ScopeSummary }>(node)) return undefined;
-  if (node.type === ScopeSummaryText) return node.props.summary;
+  if (!isValidElement<{ children?: unknown }>(node)) return undefined;
+  if (node.type === ScopeSummaryText) return render(node);
   return summaryOf(node.props.children);
 }

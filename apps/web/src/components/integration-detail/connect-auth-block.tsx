@@ -4,12 +4,11 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { IntegrationAuthStatus, IntegrationManifestView } from "../../hooks/use-integrations";
-import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { AuthHeader } from "./auth-header";
 import { ConnectionsTable } from "./connections-table";
-import { ConnectWithScopesButton } from "./connect-scopes-dialog";
+import { AddAccountButton } from "./connect-scopes-dialog";
 import { scopeChoiceFor } from "./connect-scope-choice";
 
 // ─────────────────────────────────────────────
@@ -24,7 +23,7 @@ import { scopeChoiceFor } from "./connect-scope-choice";
  *
  * On an oauth2 auth with a `scope_catalog`, "+ Ajouter" first asks which scopes
  * to request on top of the `default_scopes` baseline, optionally ticked from an
- * agent of the space ({@link ConnectWithScopesButton}). Otherwise it connects
+ * agent of the space ({@link AddAccountButton}). Otherwise it connects
  * with the baseline alone.
  */
 export function ConnectAuthBlock({
@@ -44,7 +43,6 @@ export function ConnectAuthBlock({
   const { can } = usePermissions();
   const canConfigure = can("integrations:configure");
   const isOAuth = status.type === "oauth2";
-  const scopeChoice = scopeChoiceFor(manifest.auths?.[status.auth_key]);
   // Connectable when a client is usable: org-registered, shared system client,
   // or auto-provisioned at connect time (remote MCP CIMD/DCR). Shared gate.
   const clientMissing = isOAuth && !isOauthAuthConnectable(status);
@@ -80,20 +78,12 @@ export function ConnectAuthBlock({
           >
             {t("integration.auth.blockedByAdminHint")}
           </p>
-        ) : scopeChoice ? (
-          <ConnectWithScopesButton
+        ) : (
+          <AddAccountButton
             packageId={packageId}
             authKey={status.auth_key}
             manifest={manifest}
-            choice={scopeChoice}
-            label={t("integration.auth.addAccount")}
-            forceAccountSelect={ownConnectionCount > 0}
-          />
-        ) : (
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={status.auth_key}
-            intent="connect"
+            choice={scopeChoiceFor(manifest.auths?.[status.auth_key])}
             label={t("integration.auth.addAccount")}
             forceAccountSelect={ownConnectionCount > 0}
           />

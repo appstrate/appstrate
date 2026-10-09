@@ -8,7 +8,14 @@ import type {
 } from "../../hooks/use-integrations";
 
 type ScopeCatalogEntry = NonNullable<IntegrationManifestAuth["scope_catalog"]>[number];
-type AgentDeclaration = Pick<AgentIntegrationEntry, "id" | "tools" | "scopes">;
+
+/** One auth's "+ Ajouter" with a choice of scopes. */
+export interface ScopeTarget {
+  packageId: string;
+  authKey: string;
+  manifest: IntegrationManifestView;
+  choice: ScopeChoice;
+}
 
 /**
  * What "+ Ajouter" offers for one auth. Every connect requests
@@ -35,49 +42,41 @@ export function scopeChoiceFor(auth: IntegrationManifestAuth | undefined): Scope
   return { baseline: defaults.filter((scope) => !implied.has(scope)), selectable };
 }
 
-/** The selectable scopes an agent needs on `authKey`: what the agent quick-fill ticks. */
-export function scopesForAgent(
+/**
+ * The selectable scopes an agent's declaration needs on `authKey`: what the quick-fill ticks.
+ * A declaration pinned to another auth (`auth_key`) needs nothing here.
+ */
+export function agentScopes(
   choice: ScopeChoice,
-  input: {
-    manifest: IntegrationManifestView;
-    authKey: string;
-    agent: Pick<AgentIntegrationEntry, "tools" | "scopes">;
-  },
+  manifest: IntegrationManifestView,
+  authKey: string,
+  entry: Pick<AgentIntegrationEntry, "tools" | "scopes" | "auth_key">,
 ): string[] {
+  if (entry.auth_key !== undefined && entry.auth_key !== authKey) return [];
   const required = new Set(
     requiredScopesForAgent({
-      manifest: input.manifest,
-      authKey: input.authKey,
-      agentTools: input.agent.tools,
-      agentScopes: input.agent.scopes,
+      manifest,
+      authKey,
+      agentTools: entry.tools,
+      agentScopes: entry.scopes,
     }),
   );
-  return choice.selectable.filter((entry) => required.has(entry.value)).map((e) => e.value);
+  return choice.selectable.filter((e) => required.has(e.value)).map((e) => e.value);
 }
 
-/**
- * A pick in the agent quick-fill: the agent's selectable scopes for this integration added to
- * `ticked`. `added` is false when nothing new is ticked: the baseline covers the agent, it
- * uses another auth, or the definition read does not declare the integration.
- */
-export async function tickAgentScopes(input: {
-  loadAgent: () => Promise<{ dependencies: { integrations: readonly AgentDeclaration[] } }>;
-  integrationId: string;
-  manifest: IntegrationManifestView;
-  authKey: string;
-  choice: ScopeChoice;
-  ticked: readonly string[];
-}): Promise<{ ticked: string[]; added: boolean }> {
-  const { choice, manifest, authKey, ticked } = input;
-  const agent = await input.loadAgent();
-  const entry = agent.dependencies.integrations.find((i) => i.id === input.integrationId);
-  const scopes = entry ? scopesForAgent(choice, { manifest, authKey, agent: entry }) : [];
-  const fresh = scopes.filter((scope) => !ticked.includes(scope));
-  return { ticked: [...ticked, ...fresh], added: fresh.length > 0 };
-}
-
-/** The ticked scopes to request, in catalog order; `[]` connects with the baseline alone. */
-export function requestedScopes(choice: ScopeChoice, ticked: readonly string[]): string[] {
-  const picked = new Set(ticked);
-  return choice.selectable.filter((entry) => picked.has(entry.value)).map((e) => e.value);
+/** The hosted connect input: ticked scopes in catalog order, none at all for the baseline alone. */
+export function connectPopupInput(
+  target: { packageId: string; authKey: string; choice: ScopeChoice | null },
+  ticked: readonly string[],
+  forceAccountSelect: boolean,
+): { packageId: string; authKey: string; scopes?: string[]; forceAccountSelect?: true } {
+  const scopes = (target.choice?.selectable ?? [])
+    .filter((e) => ticked.includes(e.value))
+    .map((e) => e.value);
+  return {
+    packageId: target.packageId,
+    authKey: target.authKey,
+    ...(scopes.length > 0 ? { scopes } : {}),
+    ...(forceAccountSelect ? { forceAccountSelect: true as const } : {}),
+  };
 }

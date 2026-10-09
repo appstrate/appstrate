@@ -15,6 +15,7 @@ import {
 } from "../../hooks/use-integrations";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { ApiError } from "../../api/errors";
+import { errorMessage } from "../../lib/mutation-error";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
@@ -112,7 +113,15 @@ function IntegrationConnectionCard({
         />
       );
     }
-    return <CardShell title={displayName} subtitle={packageId} />;
+    // Any other failure is named; a disabled read has none to name.
+    return (
+      <CardShell
+        title={displayName}
+        subtitle={packageId}
+        extraSubtitle={error ? errorMessage(error) : null}
+        extraSubtitleTone="warning"
+      />
+    );
   }
 
   // Not active in this space (the integration's own detail says so) → no

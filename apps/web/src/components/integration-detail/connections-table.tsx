@@ -26,7 +26,6 @@ import {
   isConnectionOwnedBy,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
-import { summarizeScopes } from "../integration-connect/connection-scope-fit";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -130,7 +129,6 @@ function ConnectionTableRow({
   const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
-  const scopes = summarizeScopes(manifest, authKey, connection.scopes_granted);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
@@ -280,13 +278,11 @@ function ConnectionTableRow({
                     <InlineConnectButton
                       packageId={packageId}
                       authKey={authKey}
-                      intent="reconnect"
                       // Threading the existing row id is what makes the OAuth
                       // callback UPDATE-in-place rather than INSERT a duplicate
                       // (integration-connections.ts:721 "explicit connectionId
                       // = update; no id = insert").
                       connectionId={connection.id}
-                      size="sm"
                     />
                   )}
                 </>
@@ -308,11 +304,11 @@ function ConnectionTableRow({
 
         {/* Granted scopes */}
         <TableCell className="max-w-[16rem]">
-          {scopes ? (
-            // The labels name the grant; the raw values stay one hover away.
+          {connection.scopes_granted.length > 0 ? (
             <ScopeSummaryText
-              summary={scopes}
-              title={connection.scopes_granted.join(" ")}
+              manifest={manifest}
+              authKey={authKey}
+              scopes={connection.scopes_granted}
               className="text-muted-foreground block truncate text-[0.65rem]"
             />
           ) : (

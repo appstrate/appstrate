@@ -22,6 +22,7 @@ const { AMBER_TEXT } = await import("../integration-connect/connection-picker-st
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const { ApiError } = await import("../../api/errors.ts");
+const { errorMessage } = await import("../../lib/mutation-error.ts");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
@@ -297,9 +298,12 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     expect(html).toContain(`integration-activate-${GMAIL}`);
   });
 
-  it("claims no inactivity on any other failure", () => {
-    const html = renderWith({ error: new ApiError("internal_error", "boom", 500) });
+  it("names any other failure, in the warning tone, and claims no inactivity", () => {
+    const failure = new ApiError("internal_error", "boom", 500);
+    const html = renderWith({ error: failure });
     expect(html).not.toContain("animate-spin");
     expect(html).not.toContain(`integration-activate-${GMAIL}`);
+    expect(html).toContain(errorMessage(failure));
+    expect(html).toContain(`${AMBER_TEXT} mt-0.5`);
   });
 });

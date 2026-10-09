@@ -64,7 +64,7 @@ export function PickerMenu({
   const navigate = useNavigate();
   const {
     runBlocking,
-    sortedCandidates,
+    candidates,
     resolvedConnectionIds,
     canAddConnection,
     byDefault,
@@ -92,7 +92,7 @@ export function PickerMenu({
     ownerLabel,
     setLabel,
     scopeFitOf,
-    grantedSummary,
+    manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
     open,
@@ -166,11 +166,9 @@ export function PickerMenu({
         <DropdownMenuLabel className="text-[0.7rem]">
           {t("detail.integrationMemberPicker.title")}
         </DropdownMenuLabel>
-        {/* Compatible first, the ones granting no more than the agent asks for leading. */}
-        {sortedCandidates.map((c) => {
+        {candidates.map((c) => {
           const tl = typeLabel(c.auth_key);
           const fit = scopeFitOf(c);
-          const summary = grantedSummary(c);
           const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
@@ -243,13 +241,14 @@ export function PickerMenu({
                   >
                     {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
                   </span>
-                ) : summary ? (
+                ) : (
                   <ScopeSummaryText
-                    summary={summary}
-                    title={summary.title}
+                    manifest={manifest}
+                    authKey={c.auth_key}
+                    scopes={c.scopes_granted}
                     className="text-muted-foreground truncate text-[0.65rem]"
                   />
-                ) : null}
+                )}
                 {fit === "broader" && (
                   <span className="text-muted-foreground truncate text-[0.65rem] italic">
                     {t("detail.integrationMemberPicker.broaderThanAgent")}

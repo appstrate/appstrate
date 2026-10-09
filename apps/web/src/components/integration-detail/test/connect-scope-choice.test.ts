@@ -5,12 +5,7 @@ import type {
   IntegrationManifestAuth,
   IntegrationManifestView,
 } from "../../../hooks/use-integrations";
-import {
-  requestedScopes,
-  scopeChoiceFor,
-  scopesForAgent,
-  tickAgentScopes,
-} from "../connect-scope-choice";
+import { agentScopes, connectPopupInput, scopeChoiceFor } from "../connect-scope-choice";
 
 const GOOGLE = {
   type: "oauth2",
@@ -77,102 +72,65 @@ describe("scopeChoiceFor", () => {
   });
 });
 
-describe("scopesForAgent", () => {
+describe("agentScopes", () => {
+  const scopesOf = (entry: Parameters<typeof agentScopes>[3]) =>
+    agentScopes(choice(), MANIFEST, "google", entry);
+
   it("ticks the selectable scopes the agent's tools need, never the baseline", () => {
-    expect(
-      scopesForAgent(choice(), {
-        manifest: MANIFEST,
-        authKey: "google",
-        agent: { tools: ["read_email", "send_email"] },
-      }),
-    ).toEqual(["gmail.send"]);
+    expect(scopesOf({ tools: ["read_email", "send_email"] })).toEqual(["gmail.send"]);
   });
 
   it("adds the agent's explicit scopes", () => {
-    expect(
-      scopesForAgent(choice(), {
-        manifest: MANIFEST,
-        authKey: "google",
-        agent: { tools: ["read_email"], scopes: ["gmail.compose"] },
-      }),
-    ).toEqual(["gmail.compose"]);
+    const explicit = { tools: ["read_email"], scopes: ["gmail.compose"] };
+    expect(scopesOf(explicit)).toEqual(["gmail.compose"]);
   });
 
   it("ticks nothing for an agent the baseline already covers", () => {
-    expect(
-      scopesForAgent(choice(), {
-        manifest: MANIFEST,
-        authKey: "google",
-        agent: { tools: ["read_email"] },
-      }),
-    ).toEqual([]);
+    expect(scopesOf({ tools: ["read_email"] })).toEqual([]);
+  });
+
+  it("ticks nothing for an agent pinned to another auth", () => {
+    const pinned = { auth_key: "pat", tools: ["send_email"], scopes: ["gmail.compose"] };
+    expect(scopesOf(pinned)).toEqual([]);
+  });
+
+  it("ticks for an agent pinned to this auth", () => {
+    expect(scopesOf({ auth_key: "google", tools: ["send_email"] })).toEqual(["gmail.send"]);
   });
 });
 
-describe("tickAgentScopes", () => {
-  const INTEGRATION = "@acme/gmail";
+describe("connectPopupInput", () => {
+  const target = { packageId: "@acme/gmail", authKey: "google", choice: choice() };
 
-  function pick(
-    integrations: { id: string; tools?: string[]; scopes?: string[] }[],
-    ticked: string[] = [],
-  ) {
-    const loaded: string[] = [];
-    return tickAgentScopes({
-      loadAgent: async () => {
-        loaded.push("agent");
-        return { dependencies: { integrations } };
-      },
-      integrationId: INTEGRATION,
-      manifest: MANIFEST,
+  it("sends no scopes when nothing is ticked: the baseline alone", () => {
+    expect(connectPopupInput(target, [], false)).toEqual({
+      packageId: "@acme/gmail",
       authKey: "google",
-      choice: choice(),
-      ticked,
-    }).then((result) => ({ ...result, loaded }));
-  }
-
-  it("reads the agent and ticks the scopes its entry for this integration needs", async () => {
-    const result = await pick([
-      { id: "@acme/other", tools: ["send_email"], scopes: ["gmail.compose"] },
-      { id: INTEGRATION, tools: ["send_email"] },
-    ]);
-    expect(result).toEqual({ ticked: ["gmail.send"], added: true, loaded: ["agent"] });
+    });
   });
 
-  it("adds to what is already ticked", async () => {
-    const result = await pick([{ id: INTEGRATION, tools: ["send_email"] }], ["gmail.compose"]);
-    expect(result.ticked).toEqual(["gmail.compose", "gmail.send"]);
-    expect(result.added).toBe(true);
-  });
-
-  it("adds nothing for an agent the baseline covers", async () => {
-    const result = await pick([{ id: INTEGRATION, tools: ["read_email"] }]);
-    expect(result).toMatchObject({ ticked: [], added: false });
-  });
-
-  it("adds nothing when the definition read does not declare the integration", async () => {
-    const result = await pick([{ id: "@acme/other", tools: ["send_email"] }], ["gmail.compose"]);
-    expect(result).toMatchObject({ ticked: ["gmail.compose"], added: false });
-  });
-
-  it("adds nothing when everything the agent needs is already ticked", async () => {
-    const result = await pick([{ id: INTEGRATION, tools: ["send_email"] }], ["gmail.send"]);
-    expect(result).toMatchObject({ ticked: ["gmail.send"], added: false });
-  });
-});
-
-describe("requestedScopes", () => {
   it("sends the ticked scopes in catalog order", () => {
-    expect(requestedScopes(choice(), ["gmail.send", "gmail.compose"])).toEqual([
-      "gmail.compose",
-      "gmail.send",
-    ]);
+    expect(connectPopupInput(target, ["gmail.send", "gmail.compose"], false)).toEqual({
+      packageId: "@acme/gmail",
+      authKey: "google",
+      scopes: ["gmail.compose", "gmail.send"],
+    });
   });
 
-  it("sends nothing when nothing is ticked: the baseline alone", () => {
-    expect(requestedScopes(choice(), [])).toEqual([]);
+  it("passes forceAccountSelect through", () => {
+    expect(connectPopupInput(target, ["gmail.send"], true)).toEqual({
+      packageId: "@acme/gmail",
+      authKey: "google",
+      scopes: ["gmail.send"],
+      forceAccountSelect: true,
+    });
   });
 
-  it("drops a value outside the selectable set", () => {
-    expect(requestedScopes(choice(), ["openid", "gmail.send", "unknown"])).toEqual(["gmail.send"]);
+  it("sends no scopes for an auth without a choice", () => {
+    expect(connectPopupInput({ ...target, choice: null }, [], true)).toEqual({
+      packageId: "@acme/gmail",
+      authKey: "google",
+      forceAccountSelect: true,
+    });
   });
 });

@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import type { ScopeSummary } from "./connection-scope-fit";
+import type { IntegrationManifestView } from "../../hooks/use-integrations";
+import { summarizeScopes } from "./connection-scope-fit";
 
-/** A connection's granted permissions in one line; "default permissions" only when it holds them all. */
+/** A grant in one line, its raw scopes on hover; nothing for an empty grant. */
 export function ScopeSummaryText({
-  summary,
-  title,
+  manifest,
+  authKey,
+  scopes,
   className,
 }: {
-  summary: ScopeSummary;
-  title: string;
+  manifest: IntegrationManifestView;
+  authKey: string;
+  scopes: string[];
   className: string;
 }) {
   const { t } = useTranslation("settings");
-  const parts = [
-    summary.text,
-    summary.lacking && t("integration.connection.lackingDefaults", { scopes: summary.lacking }),
-  ].filter(Boolean);
+  if (scopes.length === 0) return null;
   return (
-    <span className={className} title={title}>
-      {parts.length > 0 ? parts.join(" · ") : t("integration.connection.defaultPermissions")}
+    <span className={className} title={scopes.join(" ")}>
+      {summarizeScopes(manifest, authKey, scopes) ?? t("integration.connection.defaultPermissions")}
     </span>
   );
 }

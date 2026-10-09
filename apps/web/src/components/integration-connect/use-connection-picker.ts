@@ -18,7 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution } from "./integration-run-readiness";
-import { scopeFit, scopeLabels, sortByScopeFit, summarizeScopes } from "./connection-scope-fit";
+import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -120,8 +120,7 @@ export function useConnectionPicker(
   // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
   const [open, setOpen] = useState(false);
-  // The connection whose in-place upgrade awaits confirmation.
-  const [upgradeTargetId, setUpgradeTarget] = useState<string | null>(null);
+  const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setDraft(null);
@@ -156,7 +155,7 @@ export function useConnectionPicker(
 
   const { resolution, run_blocking: runBlocking, required } = entry;
   const {
-    candidates,
+    candidates: unranked,
     resolved_connection_ids: resolvedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
@@ -164,18 +163,23 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
+  const fits = new Map(
+    unranked.map((c) => [
+      c.id,
+      scopeFit({
+        manifest,
+        authKey: c.auth_key,
+        granted: c.scopes_granted,
+        missing: c.missing_scopes,
+        required: requiredScopesFor(c.auth_key),
+      }),
+    ]),
+  );
+  const scopeFitOf = (c: IntegrationCandidate) => fits.get(c.id) ?? "unjudged";
+  // Compatible first, least privilege leading.
+  const candidates = sortByScopeFit(unranked, scopeFitOf);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
-  const scopeFitOf = (c: IntegrationCandidate) =>
-    scopeFit({
-      manifest,
-      authKey: c.auth_key,
-      granted: c.scopes_granted,
-      missing: c.missing_scopes,
-      required: requiredScopesFor(c.auth_key),
-    });
-  const grantedSummary = (c: IntegrationCandidate) =>
-    summarizeScopes(manifest, c.auth_key, c.scopes_granted);
   const missingScopeLabels = (c: IntegrationCandidate) =>
     scopeLabels(manifest, c.auth_key, c.missing_scopes);
   // A fresh connect requests the agent's scopes; only an oauth2 auth makes that worth saying.
@@ -259,12 +263,7 @@ export function useConnectionPicker(
    */
   const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
     if (!auths[authKey]) return;
-    // Every auth type goes through the hosted connect portal (issue #769) — the
-    // popup opens the connect_url, which dispatches to the OAuth screen or the
-    // hosted credential form server-side. We snapshot the accessible set first
-    // so we can identify the just-created connection afterwards (the popup
-    // can't return its id, and a cancelled popup adds nothing, leaving the
-    // prior resolution intact).
+    // The popup cannot return the new id: it is the candidate this snapshot lacks.
     const before = new Set(candidates.map((c) => c.id));
     // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
     // server always requests. Non-OAuth auths connect at their fixed credentials.
@@ -319,7 +318,6 @@ export function useConnectionPicker(
     runBlocking,
     required,
     candidates,
-    sortedCandidates: sortByScopeFit(candidates, scopeFitOf),
     candidateIds,
     resolvedConnectionIds,
     canAddConnection,
@@ -353,9 +351,8 @@ export function useConnectionPicker(
     // Labels shared by several components
     ownerLabel,
     setLabel,
-    // Scopes
     scopeFitOf,
-    grantedSummary,
+    manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
     // Menu + actions
@@ -369,6 +366,6 @@ export function useConnectionPicker(
     renewConnection,
     upgradeScopes,
     upgradeTargetId,
-    setUpgradeTargetId: (id: string | null) => setUpgradeTarget(id),
+    setUpgradeTargetId,
   };
 }

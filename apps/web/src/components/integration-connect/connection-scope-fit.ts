@@ -9,14 +9,6 @@ const FIT_RANK: Record<ScopeFit, number> = { exact: 0, unjudged: 1, broader: 2, 
 
 const SUMMARY_MAX = 2;
 
-export interface ScopeSummary {
-  /** What the grant adds to `default_scopes`, `+N`-folded; `null` when nothing. */
-  text: string | null;
-  /** The `default_scopes` the grant lacks; `null` when it holds them all. */
-  lacking: string | null;
-  title: string;
-}
-
 /** The manifest's `scope_catalog` label of each scope, the raw scope when it declares none. */
 export function scopeLabels(
   manifest: IntegrationManifest | undefined,
@@ -28,29 +20,29 @@ export function scopeLabels(
   return scopes.map((s) => labelOf.get(s) ?? s);
 }
 
-/** A grant told by what sets it apart; an IdP's echo the catalog does not declare is left out. */
+/**
+ * A non-empty grant in one line, non-default scopes first, `+N`-folded; `null` when it is the
+ * defaults exactly. An IdP echo the catalog does not declare is left out, and a default the IdP
+ * did not echo is never reported missing.
+ */
 export function summarizeScopes(
   manifest: IntegrationManifest | undefined,
   authKey: string,
   scopes: readonly string[],
-): ScopeSummary | null {
-  if (scopes.length === 0) return null;
+): string | null {
   const auth = manifest?.auths?.[authKey];
   const defaults = auth?.default_scopes ?? [];
-  const declared = auth?.scope_catalog?.length
-    ? new Set(auth.scope_catalog.map((entry) => entry.value))
-    : null;
-  const telling = scopes.filter((s) => !defaults.includes(s) && (declared?.has(s) ?? true));
+  const catalog = auth?.scope_catalog ?? [];
+  const declared = catalog.length
+    ? scopes.filter((s) => catalog.some((entry) => entry.value === s))
+    : scopes;
+  const extra = declared.filter((s) => !defaults.includes(s));
   const held = new Set(manifest ? expandScopesGranted(scopes, manifest, authKey) : scopes);
-  const lacking = defaults.filter((s) => !held.has(s));
-  const labels = scopeLabels(manifest, authKey, telling);
-  const more = labels.length - SUMMARY_MAX;
+  if (extra.length === 0 && defaults.every((s) => held.has(s))) return null;
+  const ordered = [...extra, ...declared.filter((s) => defaults.includes(s))];
+  const labels = scopeLabels(manifest, authKey, ordered.length > 0 ? ordered : scopes);
   const shown = labels.slice(0, SUMMARY_MAX).join(" · ");
-  return {
-    text: labels.length === 0 ? null : more > 0 ? `${shown} +${more}` : shown,
-    lacking: lacking.length === 0 ? null : scopeLabels(manifest, authKey, lacking).join(", "),
-    title: scopeLabels(manifest, authKey, scopes).join(", "),
-  };
+  return labels.length > SUMMARY_MAX ? `${shown} +${labels.length - SUMMARY_MAX}` : shown;
 }
 
 /**
