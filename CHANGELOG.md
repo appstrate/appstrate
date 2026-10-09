@@ -92,6 +92,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the runner's allowlist still bounds host and port. Never list a loopback
   name (`localhost`, `127.0.0.1`) outside tests: it opens the sidecar's own
   ports to the integrations that name it.
+- **BREAKING (operators): `RUN_ADAPTER=process` with
+  `INTEGRATION_RUNTIME_ADAPTER=docker` is now refused at boot** (#1819). The
+  docker runners had no per-run network there: no egress for proxy-aware
+  clients, unfiltered egress for the others. Run local integrations under
+  `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the
@@ -359,6 +364,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A proxy-aware local runner reaches `http://` targets through its egress
+  listener** (#1819). Every such client sends a plain `http://` request to
+  `HTTP_PROXY` in absolute-form, and the listener of a runner with nothing to
+  inject answered 405 to anything but `CONNECT`, so an internal web app on
+  `http://10.0.0.5:8080` stayed out of reach even once allowed. The listener
+  now relays one such request per connection, origin-form with
+  `Connection: close`, under the same allowlist and SSRF checks as a
+  `CONNECT`. The listener that injects credentials still answers 405, since
+  they would travel in cleartext.
+- **A download through a sidecar tunnel no longer loses its end when the
+  server closes first** (#1819). The runner egress listeners and the agent's
+  forward proxy destroyed the client side as soon as the upstream closed,
+  dropping the bytes a slower client had not read yet; they now end it, so
+  those bytes are delivered before the connection closes.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each

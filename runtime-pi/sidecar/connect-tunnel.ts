@@ -70,20 +70,37 @@ export function netConnectWithTimeout(
 }
 
 /**
- * Blind bidirectional relay between two sockets, with an idle timeout and
- * mutual teardown on error/close. Used after a CONNECT tunnel is established.
+ * Tie `to` to `from`: an error on `from` destroys `to` at once; when `from`
+ * ends or closes cleanly, `to` is ended and destroyed once its queued bytes are
+ * flushed (`finish`) — destroying at once would drop the tail of a response
+ * its peer has not read yet, and waiting for that peer's FIN would leave the
+ * socket half-open for as long as the peer keeps it. A `to` still connecting
+ * is destroyed; one whose peer never drains dies at its idle timeout.
+ */
+export function closeWith(from: Socket, to: Socket): void {
+  const release = () => {
+    if (to.connecting) to.destroy();
+    else if (!to.destroyed) to.end(() => to.destroy());
+  };
+  from.on("error", () => to.destroy());
+  from.once("end", release);
+  from.once("close", release);
+}
+
+/**
+ * Blind bidirectional relay between two sockets: an idle timeout destroys
+ * both, otherwise each side's teardown follows {@link closeWith}. Used after a
+ * CONNECT tunnel is established.
  */
 export function relaySockets(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
   s1.pipe(s2);
   s2.pipe(s1);
-  s1.setTimeout(idleMs, () => s1.destroy());
-  s2.setTimeout(idleMs, () => s2.destroy());
-  s1.on("error", () => s2.destroy());
-  s2.on("error", () => s1.destroy());
-  s1.on("close", () => {
-    if (!s2.destroyed) s2.destroy();
-  });
-  s2.on("close", () => {
-    if (!s1.destroyed) s1.destroy();
-  });
+  const destroyBoth = () => {
+    s1.destroy();
+    s2.destroy();
+  };
+  s1.setTimeout(idleMs, destroyBoth);
+  s2.setTimeout(idleMs, destroyBoth);
+  closeWith(s1, s2);
+  closeWith(s2, s1);
 }
