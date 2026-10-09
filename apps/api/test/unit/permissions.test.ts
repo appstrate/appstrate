@@ -18,6 +18,7 @@ import {
   API_KEY_ALLOWED_SCOPES,
   type Permission,
 } from "../../src/lib/permissions.ts";
+import { OIDC_ALLOWED_SCOPES } from "../../src/modules/oidc/auth/scopes.ts";
 import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
 
 /**
@@ -153,6 +154,21 @@ describe("orgPermissions", () => {
     // empty (or any) set — silently under- or over-granting is the one thing
     // this table may never do.
     expect(() => orgPermissions("nope" as OrgRole)).toThrow();
+  });
+
+  it("lets every member and guest attach their own model credential, never write org ones", () => {
+    for (const role of ["member", "guest"] as const) {
+      const perms = orgPermissions(role);
+      expect(perms.has("model-provider-credentials:connect")).toBe(true);
+      expect(perms.has("model-provider-credentials:write")).toBe(false);
+      expect(perms.has("model-provider-credentials:delete")).toBe(false);
+    }
+    expect(orgPermissions("admin").has("model-provider-credentials:connect")).toBe(true);
+    expect(orgPermissions("owner").has("model-provider-credentials:connect")).toBe(true);
+  });
+
+  it("keeps connect out of the end-user OIDC vocabulary", () => {
+    expect(OIDC_ALLOWED_SCOPES.has("model-provider-credentials:connect" as never)).toBe(false);
   });
 });
 
@@ -467,6 +483,7 @@ describe("API_KEY_ALLOWED_SCOPES", () => {
       "model-provider-credentials:read",
       "model-provider-credentials:write",
       "model-provider-credentials:delete",
+      "model-provider-credentials:connect",
       // Decides which OAuth app every space mints with — session-only like `integrations:configure`.
       "integrations:configure",
       "org-integrations:configure",

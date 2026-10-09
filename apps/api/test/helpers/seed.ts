@@ -500,6 +500,8 @@ interface ModelProviderCredentialSeed {
   /** Override for self-hosted endpoints; honored only by providers with `baseUrlOverridable: true`. */
   baseUrlOverride?: string | null;
   createdBy?: string | null;
+  /** Personal credential owner; omitted = organization credential. */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -563,6 +565,7 @@ export async function seedOrgModelProviderKey(
       credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
       baseUrlOverride,
       createdBy: overrides.createdBy ?? null,
+      ownerUserId: overrides.ownerUserId ?? null,
     })
     .returning();
   return row!;
@@ -579,6 +582,8 @@ interface OAuthCredentialSeed {
   needsReconnection?: boolean;
   accountId?: string;
   createdBy?: string | null;
+  /** Personal credential owner; omitted = organization credential. */
+  ownerUserId?: string | null;
 }
 
 /**
@@ -607,6 +612,7 @@ export async function seedOrgModelProviderOAuth(
         ...(overrides.accountId !== undefined ? { accountId: overrides.accountId } : {}),
       }),
       createdBy: overrides.createdBy ?? null,
+      ownerUserId: overrides.ownerUserId ?? null,
     })
     .returning();
   return row!;
@@ -639,8 +645,21 @@ export async function corruptCredentialBlob(credentialId: string): Promise<void>
 
 type OrgModelInsert = Partial<InferInsertModel<typeof orgModels>> & {
   orgId: string;
-  credentialId: string;
-};
+} & ({ credentialId: string; providerId?: string } | { credentialId: null; providerId: string });
+
+/** `providerId` of a bound credential: an unbound model must name its provider explicitly. */
+async function boundCredentialProviderId(credentialId: string | null): Promise<string> {
+  if (credentialId === null) {
+    throw new Error("seedOrgModel: an unbound model (credentialId null) needs providerId");
+  }
+  const [row] = await db
+    .select({ providerId: modelProviderCredentials.providerId })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId))
+    .limit(1);
+  if (!row) throw new Error(`seedOrgModel: credential ${credentialId} not found`);
+  return row.providerId;
+}
 
 export async function seedOrgModel(
   overrides: OrgModelInsert,
@@ -651,6 +670,7 @@ export async function seedOrgModel(
       label: "Test Model",
       modelId: "claude-sonnet-4-20250514",
       ...overrides,
+      providerId: overrides.providerId ?? (await boundCredentialProviderId(overrides.credentialId)),
     })
     .returning();
   return model!;

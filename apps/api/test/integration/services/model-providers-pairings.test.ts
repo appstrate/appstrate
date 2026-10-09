@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
 import {
+  cancelPairing,
   cleanupExpiredPairings,
   consumePairing,
   createPairing,
@@ -154,7 +155,7 @@ describe("getPairing", () => {
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
-    const row = await getPairing(id, fix.org.id);
+    const row = await getPairing(id, fix.org.id, fix.userId);
     expect(row).not.toBeNull();
     expect(row!.id).toBe(id);
   });
@@ -169,8 +170,22 @@ describe("getPairing", () => {
     });
     const otherUser = await createTestUser();
     const { org: otherOrg } = await createTestOrg(otherUser.id);
-    const row = await getPairing(id, otherOrg.id);
+    const row = await getPairing(id, otherOrg.id, fix.userId);
     expect(row).toBeNull();
+  });
+
+  it("returns null and cancels nothing for another member of the same org", async () => {
+    const { id } = await createPairing({
+      userId: fix.userId,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+    const otherMember = await createTestUser();
+    expect(await getPairing(id, fix.org.id, otherMember.id)).toBeNull();
+    await cancelPairing(id, fix.org.id, otherMember.id);
+    expect(await getPairing(id, fix.org.id, fix.userId)).not.toBeNull();
   });
 });
 
@@ -213,8 +228,8 @@ describe("cleanupExpiredPairings", () => {
     const deleted = await cleanupExpiredPairings();
     expect(deleted).toBe(1);
 
-    expect(await getPairing(fresh.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(recent.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(old.id, fix.org.id)).toBeNull();
+    expect(await getPairing(fresh.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(recent.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(old.id, fix.org.id, fix.userId)).toBeNull();
   });
 });

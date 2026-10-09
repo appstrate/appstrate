@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =
+  allowed) and the **`model-provider-credentials:connect`** permission action
+  (`@appstrate/core/permissions`): a member brings their own model credential.
+  `false` refuses new personal credentials, and the resolution chain ignores
+  existing ones. (#1875)
 - **`required?: boolean`** on `ManifestIntegrationEntry` and
   `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
   afps-spec#28): the agent needs at least one connection of that integration
@@ -74,6 +79,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: the chat platform services take the session user.**
+  `PlatformServices.resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ …, userId })` (`@appstrate/core/module`): a subscription
+  turn spends the user's own personal credential, and a turn on a model the user
+  holds no credential for is refused with `model_credential_required`.
+  `SubscriptionChatModel` (`@appstrate/core/chat-contract`) gains
+  `credentialId: string`, and `ChatUsageRecord` gains
+  `credentialId: string | null`, written to `llm_usage.credential_id`. Out-of-tree
+  modules that call either seam must pass the session user, and forward the
+  credential id when they record usage.
 - **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
   (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
   manifest declares them, which the sidecar's runner egress listeners read to

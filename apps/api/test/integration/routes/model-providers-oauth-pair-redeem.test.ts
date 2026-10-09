@@ -13,6 +13,9 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -21,9 +24,9 @@ import {
   createOAuthCredential,
   markCredentialNeedsReconnection,
 } from "../../../src/services/model-providers/credentials.ts";
-import { createOrgModel } from "../../../src/services/org-models.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
 import { listCatalogModels } from "../../../src/services/model-catalog.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
 
@@ -84,6 +87,12 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     for (const other of ["provider_id", "credential_id", "availableModelIds"]) {
       expect(body).not.toHaveProperty(other);
     }
+    // The redeemed subscription belongs to the account that paired it, not to the org.
+    const [row] = await db
+      .select({ ownerUserId: modelProviderCredentials.ownerUserId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, body.credentialId as string));
+    expect(row!.ownerUserId).toBe(ctx.user.id);
   });
 
   it("reconnects the targeted credential in place", async () => {
@@ -97,13 +106,6 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       expiresAt: Date.now() - 60_000,
       email: "same-account@example.test",
     });
-    const modelId = await createOrgModel(
-      ctx.orgId,
-      "Target model",
-      "test-model",
-      ctx.user.id,
-      originalCredentialId,
-    );
     await markCredentialNeedsReconnection(ctx.orgId, originalCredentialId);
 
     const pairing = await mintPairing(ctx, "test-oauth", originalCredentialId);
@@ -143,18 +145,26 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
         }),
       ],
     );
+  });
 
-    const modelsResponse = await app.request("/api/models", { headers: authHeaders(ctx) });
-    expect(modelsResponse.status).toBe(200);
-    const models = (await modelsResponse.json()) as {
-      data: Array<{ id: string; credentialId: string | null; needs_reconnection: boolean }>;
-    };
-    expect(models.data.find((model) => model.id === modelId)).toEqual(
-      expect.objectContaining({
-        credentialId: originalCredentialId,
-        needs_reconnection: false,
-      }),
+  it("refuses the redeem with 403 when the org turned personal credentials off after the mint", async () => {
+    const pairing = await mintPairing(ctx, "test-oauth");
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "personal_model_credentials_disabled",
     );
+    const rows = await db
+      .select({ id: modelProviderCredentials.id })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.orgId, ctx.orgId));
+    expect(rows).toHaveLength(0);
   });
 
   it("does NOT emit Deprecation / Link successor-version response headers", async () => {

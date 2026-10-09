@@ -20,7 +20,12 @@ import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { connectHelperCommand } from "../lib/connect-helper.ts";
-import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
+import {
+  assertCredentialEditable,
+  assertPersonalModelCredentialsAllowed,
+  getOrgModelProviderCredential,
+  modelCredentialCaller,
+} from "../services/model-providers/credentials.ts";
 
 /**
  * Body shape posted by `npx @appstrate/connect-helper <token>` after it
@@ -211,15 +216,21 @@ export function createModelProvidersOAuthRouter() {
   // GETs only ever return status, never the token itself.
   router.post(
     "/pairing",
-    requirePermission("model-provider-credentials", "write"),
+    requirePermission("model-provider-credentials", "connect"),
     rateLimit(10),
     async (c) => {
       const orgId = c.get("orgId");
       const user = c.get("user");
+      const caller = modelCredentialCaller(orgId, user.id, c.get("permissions") ?? new Set());
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
+      // A subscription is always personal: minting a pairing creates one, so the org policy applies.
+      await assertPersonalModelCredentialsAllowed(orgId);
+
       if (input.credentialId) {
-        const credential = await getOrgModelProviderCredential(orgId, input.credentialId);
+        // Reconnect targets the caller's own subscription only; anything else reads as absent.
+        await assertCredentialEditable(caller, input.credentialId, "edit");
+        const credential = await getOrgModelProviderCredential(caller, input.credentialId);
         if (
           !credential ||
           credential.source !== "custom" ||
@@ -273,27 +284,32 @@ export function createModelProvidersOAuthRouter() {
   //
   // Wrong-org reads return 404 (not 403) — we never confirm or deny
   // existence of a pairing belonging to a different tenant.
-  router.get("/pairing/:id", requirePermission("model-provider-credentials", "read"), async (c) => {
-    const orgId = c.get("orgId");
-    const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
+  router.get(
+    "/pairing/:id",
+    requirePermission("model-provider-credentials", "connect"),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-    const row = await getPairing(id, orgId);
-    if (!row) throw notFound("Pairing not found");
+      // Another member's pairing reads as absent: it carries that member's reconnect target.
+      const row = await getPairing(id, orgId, c.get("user").id);
+      if (!row) throw notFound("Pairing not found");
 
-    const now = Date.now();
-    let status: "pending" | "consumed" | "expired";
-    if (row.consumedAt) status = "consumed";
-    else if (row.expiresAt.getTime() <= now) status = "expired";
-    else status = "pending";
+      const now = Date.now();
+      let status: "pending" | "consumed" | "expired";
+      if (row.consumedAt) status = "consumed";
+      else if (row.expiresAt.getTime() <= now) status = "expired";
+      else status = "pending";
 
-    return c.json({
-      id: row.id,
-      status,
-      consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
-      expiresAt: row.expiresAt.toISOString(),
-      credentialId: row.credentialId,
-    });
-  });
+      return c.json({
+        id: row.id,
+        status,
+        consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
+        expiresAt: row.expiresAt.toISOString(),
+        credentialId: row.credentialId,
+      });
+    },
+  );
 
   // DELETE /api/model-providers-oauth/pairing/:id
   // Cancel a pending pairing. Idempotent — returns 204 even when the row
@@ -301,12 +317,12 @@ export function createModelProvidersOAuthRouter() {
   // wrong-org case is silent for the same reason GET returns 404.
   router.delete(
     "/pairing/:id",
-    requirePermission("model-provider-credentials", "write"),
+    requirePermission("model-provider-credentials", "connect"),
     async (c) => {
       const orgId = c.get("orgId");
       const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-      await cancelPairing(id, orgId);
+      await cancelPairing(id, orgId, c.get("user").id);
 
       await recordAuditFromContext(c, {
         action: "oauth_model_provider.pairing_cancelled",

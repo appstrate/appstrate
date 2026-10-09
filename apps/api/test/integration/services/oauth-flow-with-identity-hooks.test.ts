@@ -129,7 +129,12 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
       email: "user@example.com",
     });
 
-    const list = await listOrgModelProviderCredentials(orgId);
+    const list = await listOrgModelProviderCredentials({
+      orgId,
+      userId,
+      readsOrg: true,
+      writesOrg: true,
+    });
     const oauth = list.find((k) => k.id === imported.credentialId);
     expect(oauth).toBeDefined();
     expect(oauth!.source).toBe("custom");
@@ -137,6 +142,9 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     expect(oauth!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
     expect(oauth!.oauth_email).toBe("user@example.com");
     expect(oauth!.needs_reconnection).toBe(false);
+    // A subscription is owned by the account that imported it, never by the org.
+    expect(oauth!.owner_type).toBe("user");
+    expect(oauth!.owner_id).toBe(userId);
   });
 
   it("loadInferenceCredentials returns access token + providerId + accountId + apiShape", async () => {

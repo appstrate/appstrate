@@ -56,10 +56,15 @@ export type NewCredentialBody = Omit<
   "label"
 >;
 
-/** The credential the model(s) run on: an existing one, or one to create first. */
+/**
+ * The credential the model(s) run on: an existing one, one to create first, or
+ * none (`null`) when each member serves the model with their own credential.
+ */
 interface ModelFormCredentialBinding {
-  credentialId: string;
+  credentialId: string | null;
   newCredential?: NewCredentialBody;
+  /** Sent with `credentialId: null`: the registry provider the members' credentials match. */
+  providerId?: string;
 }
 
 /**
@@ -75,15 +80,24 @@ export type ModelFormData = ModelFormCredentialBinding &
     reasoning?: boolean | null;
   };
 
-/** The `POST /api/models` body, bound to the credential an inline key just created. */
+/** The `POST /api/models` body, bound to the credential an inline key just created, or to none. */
 export function toCreateModelBody(
   data: ModelFormData,
-  credentialId: string,
-): ModelFormModelEntry & { credentialId: string } {
-  const { newCredential: _, input, contextWindow, maxTokens, reasoning, ...rest } = data;
+  credentialId: string | null,
+): ModelFormModelEntry & { credentialId: string | null; providerId?: string } {
+  const {
+    newCredential: _,
+    providerId,
+    input,
+    contextWindow,
+    maxTokens,
+    reasoning,
+    ...rest
+  } = data;
   return {
     ...rest,
     credentialId,
+    ...(providerId !== undefined ? { providerId } : {}),
     ...(input ? { input } : {}),
     ...(contextWindow != null ? { contextWindow } : {}),
     ...(maxTokens != null ? { maxTokens } : {}),
@@ -140,18 +154,30 @@ export interface ModelFormPayloadInput {
    * `null`. `fields.credentialId` alone survives a provider switch.
    */
   selectedCredentialId: string | null;
+  /** Each member serves the model with their own credential: `credentialId` goes `null`. */
+  unbound: boolean;
 }
 
 type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string };
 
-/** The credential half of any create: an existing selection, or the inline key to create first. */
+/**
+ * The credential half of any create: an existing selection, the inline key to
+ * create first, or none when each member brings their own (`unbound`).
+ */
 function resolveCredentialBinding(input: {
   provider: ModelFormProvider | undefined;
   selectedCredentialId: string | null;
   inlineApiKey: string;
   baseUrl: string;
+  unbound: boolean;
 }): { ok: true; binding: ModelFormCredentialBinding } | CredentialFailure {
   const { provider, baseUrl } = input;
+  if (input.unbound) {
+    if (!provider) {
+      return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };
+    }
+    return { ok: true, binding: { credentialId: null, providerId: provider.providerId } };
+  }
   const isOauthProvider = provider?.authMode === "oauth2";
   const inlineApiKey = input.inlineApiKey.trim();
   const credentialId = input.selectedCredentialId ?? "";
@@ -194,6 +220,7 @@ export function modelFormRefusals(input: {
   inlineApiKey: string;
   /** The ids a catalog provider binds (the server refuses any other); `null` = free-form. */
   offeredIds: readonly string[] | null;
+  unbound: boolean;
 }): { credentialId: string | null; modelId: string | null } {
   const credential = input.provider
     ? resolveCredentialBinding({ ...input, baseUrl: "" })
@@ -252,6 +279,7 @@ export function buildModelFormPayload(input: ModelFormPayloadInput): ModelFormDa
     selectedCredentialId: input.selectedCredentialId,
     inlineApiKey: fields.inlineApiKey,
     baseUrl: fields.baseUrl,
+    unbound: input.unbound,
   });
   if (!credential.ok) return null;
 
@@ -300,6 +328,7 @@ export function buildModelsBatchPayload(input: {
   selectedCredentialId: string | null;
   inlineApiKey: string;
   baseUrl: string;
+  unbound: boolean;
 }):
   | { ok: true; data: ModelFormMultiData }
   | { ok: false; field: "credentialId" | "modelId"; messageKey: string } {

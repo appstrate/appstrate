@@ -28,11 +28,20 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
+  createTestContext,
+  createTestUser,
+  createTestOrg,
+  memberContext,
+} from "../../helpers/auth.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import {
+  canSeeCredential,
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
+  type ModelCredentialCaller,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
@@ -51,6 +60,14 @@ import { corruptCredentialBlob } from "../../helpers/seed.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
+
+/** An org manager's view: every row of the org, and the right to change any of them. */
+const adminCaller = (orgId: string): ModelCredentialCaller => ({
+  orgId,
+  userId: "org-admin",
+  readsOrg: true,
+  writesOrg: true,
+});
 
 describe("model-provider-credentials service — api_key path", () => {
   beforeEach(async () => {
@@ -198,7 +215,7 @@ describe("model-provider-credentials service — api_key path", () => {
       apiKey: PLAINTEXT,
     });
 
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
       (k) => k.source === "custom",
     );
     expect(list).toHaveLength(1);
@@ -365,7 +382,7 @@ describe("model-provider-credentials service — oauth path", () => {
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
     // email preserved (only surface in list, not in load).
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
       (k) => k.source === "custom",
     );
     expect(list[0]!.oauth_email).toBe("x@example.test");
@@ -387,7 +404,7 @@ describe("model-provider-credentials service — oauth path", () => {
     // loadInferenceCredentials gates dead OAuth rows — null is the signal.
     expect(await loadInferenceCredentials(ctx.orgId, id)).toBeNull();
     // The list view surfaces the raw flag for UI affordances.
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
       (k) => k.source === "custom",
     );
     expect(list[0]!.needs_reconnection).toBe(true);
@@ -412,7 +429,8 @@ describe("model-provider-credentials service — upstream rejections of an api k
   }
 
   const flagged = async (orgId: string, id: string) =>
-    (await listOrgModelProviderCredentials(orgId)).find((k) => k.id === id)!.needs_reconnection;
+    (await listOrgModelProviderCredentials(adminCaller(orgId))).find((k) => k.id === id)!
+      .needs_reconnection;
 
   it("flags the key at INTEGRATION_REFRESH_MAX_FAILURES rejections, and a rotation clears it", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-flag");
@@ -533,7 +551,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         apiKey: PLAINTEXT,
       });
 
-      const list = await listOrgModelProviderCredentials(ctx.orgId);
+      const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
       const custom = list.filter((k) => k.source === "custom");
       expect(custom).toHaveLength(1);
       // The aggregated UI shape never carries plaintext or the encrypted blob.
@@ -559,7 +577,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         email: "user@example.com",
       });
 
-      const list = await listOrgModelProviderCredentials(org.id);
+      const list = await listOrgModelProviderCredentials(adminCaller(org.id));
       const oauth = list.find((k) => k.id === imported.credentialId);
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
@@ -596,7 +614,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       await corruptCredentialBlob(apiKeyId);
       await corruptCredentialBlob(oauthId);
 
-      const list = await listOrgModelProviderCredentials(ctx.orgId);
+      const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
       expect(list.find((k) => k.id === apiKeyId)!.needs_reconnection).toBe(true);
       const oauth = list.find((k) => k.id === oauthId)!;
       expect(oauth.needs_reconnection).toBe(true);
@@ -623,7 +641,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
         .where(eq(modelProviderCredentials.id, apiKeyId));
 
-      const listed = (await listOrgModelProviderCredentials(ctx.orgId)).find(
+      const listed = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).find(
         (k) => k.id === apiKeyId,
       );
       expect(listed!.needs_reconnection).toBe(false);
@@ -752,7 +770,7 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
       },
     ]);
 
-    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
     const entry = list.find((c) => c.id === "sys-alias-only");
     expect(entry).toBeDefined();
     expect(entry!.source).toBe("built-in");
@@ -787,10 +805,77 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
       },
     ]);
 
-    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
     const entry = list.find((c) => c.id === "sys-mixed");
     expect(entry).toBeDefined();
     expect(entry!.apiShape).toBe("anthropic-messages");
     expect(entry!.base_url).toBe("https://api.anthropic.com");
+  });
+});
+
+describe("model-provider-credentials service — visibility and the personal-credential policy", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("canSeeCredential: an org credential needs readsOrg, a personal one its owner alone", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-visible" });
+    const member = await memberContext(ctx, "member");
+    const reader = await memberContext(ctx, "member");
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      label: "Member subscription",
+      providerId: "test-oauth",
+      accessToken: "at-member",
+      refreshToken: "rt-member",
+    });
+    const memberCaller: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      readsOrg: false,
+      writesOrg: false,
+    };
+    const readerCaller: ModelCredentialCaller = {
+      ...memberCaller,
+      userId: reader.user.id,
+      readsOrg: true,
+    };
+
+    expect(await canSeeCredential(memberCaller, orgCredentialId)).toBe(false);
+    expect(await canSeeCredential(readerCaller, orgCredentialId)).toBe(true);
+    expect(await canSeeCredential(memberCaller, personalId)).toBe(true);
+    expect(await canSeeCredential(readerCaller, personalId)).toBe(false);
+    expect(await canSeeCredential(memberCaller, crypto.randomUUID())).toBe(false);
+
+    const otherOrg = await createTestContext({ orgSlug: "mpc-svc-visible-b" });
+    expect(await canSeeCredential({ ...readerCaller, orgId: otherOrg.orgId }, personalId)).toBe(
+      false,
+    );
+  });
+
+  it("createOAuthCredential refuses a subscription while the org policy is off", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-policy" });
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const error = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Refused",
+      providerId: "test-oauth",
+      accessToken: "at",
+      refreshToken: "rt",
+    }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    expect((error as ApiError).status).toBe(403);
+    expect(await db.select().from(modelProviderCredentials)).toHaveLength(0);
   });
 });
