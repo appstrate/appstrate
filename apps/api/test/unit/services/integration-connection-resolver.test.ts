@@ -959,16 +959,70 @@ describe("resolveConnections — fallback among own connections of one account",
     });
   });
 
-  it("binds the narrow one for an agent declaring no scope (the auth's default_scopes)", () => {
-    const [n, b] = [narrow(), broad()];
-    const result = fallback([b, n], []);
+  /** `oauth2Manifest()` whose oauth auth carries `defaults` and, optionally, a catalog. */
+  function withDefaults(defaults: string[], catalog?: object[]): IntegrationManifest {
+    const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
+    m.auths.oauth.default_scopes = defaults;
+    if (catalog) m.auths.oauth.scope_catalog = catalog;
+    return m as unknown as IntegrationManifest;
+  }
+  const bind = (manifest: IntegrationManifest, rows: ConnectionRow[], agentScopes: string[]) =>
+    resolveConnections({
+      requirements: [req(manifest, [], agentScopes)],
+      accessibleConnections: rows,
+      pins: [],
+    });
+
+  it("judges an agent declaring no scope on the auth's default_scopes", () => {
+    // Without the defaults the narrower `lacking` row would win on breadth.
+    const lacking = conn({ scopesGranted: ["read"] });
+    const baseline = conn({ scopesGranted: ["base", "read"] });
+    const result = bind(withDefaults(["base"]), [lacking, baseline], []);
     expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: n.id }]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: baseline.id }]);
   });
 
-  it("still asks on an out-of-run proxy call, which names no scope", () => {
+  it("prefers covering the agent over covering the defaults", () => {
+    const missesAgent = conn({ scopesGranted: ["base", "read"] });
+    const missesDefault = conn({ scopesGranted: ["write"] });
+    const result = bind(withDefaults(["base"]), [missesAgent, missesDefault], ["write"]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: missesDefault.id }]);
+  });
+
+  // #1871: an expiry must not elevate a read-only agent onto the write-capable row.
+  it("binds a dead narrow row over a live broad one, which answers needs_reconnection", () => {
+    const deadNarrow = conn({ scopesGranted: ["read"], needsReconnection: true });
+    const liveBroad = conn({ scopesGranted: ["read", "write"] });
+    for (const rows of [
+      [deadNarrow, liveBroad],
+      [liveBroad, deadNarrow],
+    ]) {
+      const result = fallback(rows, ["read"]);
+      expect(result.errors[0]).toMatchObject({
+        code: "needs_reconnection",
+        connectionId: deadNarrow.id,
+      });
+    }
+  });
+
+  it("expands `implies` when judging breadth: an umbrella is never narrower", () => {
+    const manifest = withDefaults(
+      [],
+      [
+        { value: "public_repo", label: "Public repos" },
+        { value: "repo", label: "Repos", implies: ["public_repo"] },
+      ],
+    );
+    // Older, so it would win a raw-count tie.
+    const umbrella = conn({ scopesGranted: ["repo"], createdAt: new Date(1) });
+    const exact = conn({ scopesGranted: ["public_repo"], createdAt: new Date(2) });
+    const result = bind(manifest, [umbrella, exact], ["public_repo"]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: exact.id }]);
+  });
+
+  it("still asks without an agent selection (a credential-proxy call)", () => {
     const result = resolveConnections({
-      requirements: [{ ...req(oauth2Manifest()), outOfRun: true }],
+      requirements: [{ ...req(oauth2Manifest()), noAgentSelection: true }],
       accessibleConnections: [narrow(), broad()],
       pins: [],
     });

@@ -129,6 +129,12 @@ import {
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
+  PLACEHOLDER_ACCOUNT_ID,
+  connectionVariablesOf,
+  displayAccountId,
+  sameConnectionVariables,
+} from "../lib/connection-identity.ts";
+import {
   getLocalServerRef,
   getRemoteSource,
   hasPerConnectionAuthServer,
@@ -244,21 +250,6 @@ interface ActorConnectionRow {
   oauthResource: string | null;
 }
 
-/** Whether two connections name the same upstream: the same variables, the same values. */
-export function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
-  const entries = Object.entries(a);
-  return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
-}
-
-/** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-export function connectionVariablesOf(value: unknown): ConnectionVariables {
-  const out: Record<string, string> = {};
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
-  }
-  return Object.freeze(out);
-}
-
 /**
  * Spawn-side connection row — carries the `authKey` so the spawn
  * resolver can pick the right `manifest.auths[authKey].delivery`
@@ -268,13 +259,6 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
   /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
   credentialRevision: string;
-}
-
-/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
-const PLACEHOLDER_ACCOUNT_ID = "default";
-
-export function displayAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
 
 /**
@@ -442,7 +426,7 @@ export async function selectAccessibleConnection(
         agentTools: [],
         agentScopes: [],
         required: true,
-        outOfRun: true,
+        noAgentSelection: true,
       },
     ],
     accessibleConnections: rows,

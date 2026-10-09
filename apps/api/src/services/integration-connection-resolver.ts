@@ -10,8 +10,9 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      several oauth2 rows of one known account, auth and instance → the least-privileged covering
- *      the agent (never out of run); otherwise several → `must_choose_connection`; none → below
+ *      several oauth2 rows of one known account, auth and instance → the least-privileged
+ *      covering the agent (never without an agent selection); otherwise several →
+ *      `must_choose_connection`; none → as below
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -42,8 +43,10 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   resolveEffectiveToolSelection,
+  expandScopesGranted,
   missingScopesForConnection,
   partitionScopesByAuthCatalog,
+  scopesNotCovered,
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
@@ -74,12 +77,12 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
+import { listActiveIntegrationIds } from "./integration-connections.ts";
 import {
   connectionVariablesOf,
   displayAccountId,
-  listActiveIntegrationIds,
   sameConnectionVariables,
-} from "./integration-connections.ts";
+} from "../lib/connection-identity.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -113,8 +116,8 @@ export interface IntegrationRequirement {
   requiredAuthKey?: string;
   /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
   effectiveTools?: readonly string[] | "*";
-  /** An out-of-run credential-proxy call: no selection, so no scope tells own rows apart. */
-  outOfRun?: boolean;
+  /** A credential-proxy call: no agent selection, so no scope tells own rows apart. */
+  noAgentSelection?: boolean;
 }
 
 interface ResolveConnectionsInput {
@@ -236,7 +239,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       actorEndUserId: input.actorEndUserId ?? null,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
-      ...(req.outOfRun ? { outOfRun: true } : {}),
+      ...(req.noAgentSelection ? { noAgentSelection: true } : {}),
     });
 
     record(req.integrationId, result);
@@ -276,7 +279,7 @@ interface ResolveOneArgs {
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
   availableAuthKeys?: string[];
-  outOfRun?: boolean;
+  noAgentSelection?: boolean;
 }
 
 type ResolveOneResult =
@@ -449,7 +452,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
   // 6. Fallback.
   const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
-  // Health plays no part: a dead own row is still the pick, so an expiry never switches accounts.
+  // Health never switches the pick: a dead own row is still bound and answers needs_reconnection.
   const own = serving.filter((c) => isOwnedByActor(args, c));
   if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
   const sameAccount = own.length > 1 ? leastPrivilegedOfOneAccount(args, own) : null;
@@ -466,15 +469,15 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
 /**
  * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
- * scopes, so no account is chosen: the narrowest covering the agent's scopes plus the auth's
- * `default_scopes`, else the one missing the fewest (its `insufficient_scopes` carries the
- * remedy). `null` otherwise, and for an out-of-run proxy call, whose requirement names no scope.
+ * scopes, so no account is chosen. Ranked by what the agent misses, then what the auth's
+ * `default_scopes` miss, then breadth, then health: a dead narrow row is never traded for a live
+ * broader one, it answers `needs_reconnection`. `null` otherwise, and with no agent selection.
  */
 function leastPrivilegedOfOneAccount(
   args: ResolveOneArgs,
   own: ConnectionRow[],
 ): ConnectionRow | null {
-  if (args.outOfRun) return null;
+  if (args.noAgentSelection) return null;
   const [first] = own;
   const auth = args.manifest.auths?.[first!.authKey];
   const account = displayAccountId(first!.accountId);
@@ -485,25 +488,31 @@ function leastPrivilegedOfOneAccount(
     c.accountId === account &&
     sameConnectionVariables(connectionVariablesOf(c.variables), variables);
   if (!own.every(sameUpstream)) return null;
-  const agentScopes = [...args.agentScopes, ...(auth.default_scopes ?? [])];
+  const { manifest } = args;
+  const authKey = first!.authKey;
   const ranked = own.map((c) => ({
     c,
-    missing: missingScopesForConnection({
-      manifest: args.manifest,
-      authKey: c.authKey,
+    agentMissing: missingScopesForConnection({
+      manifest,
+      authKey,
       granted: c.scopesGranted,
       agentTools: args.agentTools,
-      agentScopes,
+      agentScopes: args.agentScopes,
     }).length,
-    // Breadth on catalog scopes only (IdP echoes aside), as the picker judges it.
-    breadth: partitionScopesByAuthCatalog(auth, c.scopesGranted).declared.length,
+    defaultMissing: scopesNotCovered(auth.default_scopes ?? [], c.scopesGranted, manifest, authKey)
+      .length,
+    // Catalog scopes only (IdP echoes aside), `implies` expanded: an umbrella is never narrower.
+    breadth: partitionScopesByAuthCatalog(
+      auth,
+      expandScopesGranted(c.scopesGranted, manifest, authKey),
+    ).declared.length,
   }));
-  // Ties: live first, fewer grants, then the older row — never the load order.
   ranked.sort(
     (a, b) =>
-      a.missing - b.missing ||
-      Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||
+      a.agentMissing - b.agentMissing ||
+      a.defaultMissing - b.defaultMissing ||
       a.breadth - b.breadth ||
+      Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||
       a.c.createdAt.getTime() - b.c.createdAt.getTime() ||
       a.c.id.localeCompare(b.c.id),
   );
@@ -722,8 +731,8 @@ function checkHealth(
       code: "needs_reconnection",
       // The reconnect UPDATEs this row in place; without the id it would INSERT a duplicate.
       connectionId: conn.id,
-      // No `requiredScopes`: the reconnect re-consents what the row holds and widens no agent
-      // bound to it; a row still short afterwards answers `insufficient_scopes`.
+      // No `requiredScopes`: the reconnect re-consents what the row holds plus `default_scopes`,
+      // adding no agent's scopes; a row still short afterwards answers `insufficient_scopes`.
       ...(authKey !== null ? { authKey } : {}),
       ownedByActor,
       source,

@@ -42,7 +42,7 @@ import { logger } from "../../lib/logger.ts";
 export interface ConnectOfferTarget {
   integrationId: string;
   authKey: string;
-  /** Exactly what the item asked for — no union computed at mint time. */
+  /** The item's `required_scopes` on a fresh connect, `[]` on a reconnect; never unioned here. */
   scopes: string[];
   /** Present = re-consent the actor's existing connection in place. */
   connectionId?: string;
@@ -56,10 +56,10 @@ const FIELD_PREFIX = "integrations.";
  * opening a link, and with which claims. Pure.
  *
  * `not_connected`, or `auth_key_mismatch` on the dep's own auth, qualifies as a fresh
- * connect (no `connection_id`). `needs_reconnection`
- * qualifies only on a connection the actor OWNS and only with an id to re-consent
- * in place: a foreign-owned row is somebody else's account, and minting against
- * it would let the caller re-consent a colleague's credential.
+ * connect (no `connection_id`). `needs_reconnection` qualifies only on a connection the actor
+ * OWNS and only with an id to re-consent in place, with no scopes of this agent: a
+ * foreign-owned row is somebody else's account, and minting against it would let the caller
+ * re-consent a colleague's credential.
  *
  * Everything else is refused: `insufficient_scopes` and `must_choose_connection`
  * need a choice, and `auth_key_serves_no_selected_tool` needs the user to change
@@ -74,11 +74,9 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
     case "auth_key_mismatch":
       return { integrationId, authKey: e.auth_key, scopes: e.required_scopes ?? [] };
     case "needs_reconnection":
-      // Re-consents what the row holds: no scope of this agent reaches the others bound to it.
       return e.owned_by_actor === true && e.connection_id
         ? { integrationId, authKey: e.auth_key, scopes: [], connectionId: e.connection_id }
         : null;
-    // insufficient_scopes: upgrading in place widens every bound agent, a new one stays unbound.
     default:
       return null;
   }

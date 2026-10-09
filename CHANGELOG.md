@@ -100,9 +100,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the least-privileged one covering the agent's scopes plus the auth's
   `default_scopes` (else the closest, which answers `insufficient_scopes`)
   instead of answering `must_choose_connection`, whether or not the agent
-  declares scopes. A new connection made for one agent no longer breaks the
-  others. Several accounts, auths or instances, an unknown identity, and an
-  out-of-run credential-proxy call still ask.
+  declares scopes. Health comes after breadth: a dead narrow connection is
+  reported `needs_reconnection`, never swapped for a live broader one. A new
+  connection made for one agent no longer breaks the others. Several
+  accounts, auths or instances, an unknown identity, and a credential-proxy
+  call without an agent selection still ask.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -504,10 +506,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   defaults state the same rule, and an `integration.connection.reconnected`
   audit event that changed a connection's granted scopes carries them before
   and after (`scopesGranted`).
-- **A reconnect no longer adds scopes** (#1871): a `needs_reconnection` item
-  carries no `required_scopes`, and its link re-consents what the connection
-  holds. It used to request the current agent's scopes, which then reached
-  every agent bound to the connection.
+- **A reconnect no longer adds the current agent's scopes** (#1871): a
+  `needs_reconnection` item carries no `required_scopes`, and its link
+  re-consents what the connection holds plus the auth's `default_scopes`. It
+  used to request the current agent's scopes, which then reached every agent
+  bound to the connection. A refresh that shrinks a grant now flags the
+  connection only for a scope it held and an agent requires, not for scopes
+  other agents' connections hold.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

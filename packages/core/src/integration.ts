@@ -1573,7 +1573,7 @@ export interface ConnectionResolutionError {
    * {@link missingScopes} (required minus granted); `not_connected` ends at a
    * consent that has to stand on its own, so the full set is the only thing it
    * can be built from. Never on `needs_reconnection`: a reconnect re-consents
-   * what the row holds, so it widens no other agent bound to it. The caller forwards
+   * what the row holds plus `default_scopes`, adding no agent's scopes. The caller forwards
    * it as the connect kickoff's `scopes` body field, which unions it with the
    * auth's `default_scopes` and anything already granted. Omitted when the
    * auth is not `oauth2`, when the agent's selection requires no scopes, or
