@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { collectMetaWarnings } from "../../../src/services/integration-import-warnings.ts";
+import {
+  collectLoginCriteriaWarnings,
+  collectMetaWarnings,
+} from "../../../src/services/integration-import-warnings.ts";
 
 describe("collectMetaWarnings", () => {
   it("returns [] when manifest has no _meta", () => {
@@ -68,5 +71,51 @@ describe("collectMetaWarnings", () => {
     expect(collectMetaWarnings({ _meta: "string" })).toEqual([]);
     expect(collectMetaWarnings({ _meta: null })).toEqual([]);
     expect(collectMetaWarnings({ _meta: 42 })).toEqual([]);
+  });
+});
+
+describe("collectLoginCriteriaWarnings", () => {
+  const manifest = (login: Record<string, unknown>) => ({
+    type: "integration",
+    auths: { session: { type: "custom", connect: { login } } },
+  });
+  const formRequest = {
+    method: "POST",
+    url: "https://app.example.com/login",
+    content_type: "application/x-www-form-urlencoded",
+    body: "u={{u}}",
+  };
+
+  it("warns on a form login with no success_criteria, naming the auth", () => {
+    const warnings = collectLoginCriteriaWarnings(manifest({ request: formRequest }));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toStartWith("auths.session.connect.login:");
+    expect(
+      collectLoginCriteriaWarnings(manifest({ request: formRequest, success_criteria: [] })),
+    ).toHaveLength(1);
+  });
+
+  it("reads the media type from a Content-Type header, any case, parameters ignored", () => {
+    const request = {
+      method: "POST",
+      url: "https://app.example.com/login",
+      headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+    };
+    expect(collectLoginCriteriaWarnings(manifest({ request }))).toHaveLength(1);
+  });
+
+  it("stays silent when success_criteria are declared, or the login posts no form", () => {
+    expect(
+      collectLoginCriteriaWarnings(
+        manifest({ request: formRequest, success_criteria: [{ condition: "$statusCode == 302" }] }),
+      ),
+    ).toEqual([]);
+    expect(
+      collectLoginCriteriaWarnings(
+        manifest({ request: { ...formRequest, content_type: "application/json" } }),
+      ),
+    ).toEqual([]);
+    expect(collectLoginCriteriaWarnings({ type: "agent" })).toEqual([]);
+    expect(collectLoginCriteriaWarnings(null)).toEqual([]);
   });
 });

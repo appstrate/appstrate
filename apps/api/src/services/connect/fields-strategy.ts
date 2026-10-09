@@ -9,7 +9,6 @@
  * unchanged.
  */
 
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
 
 import {
@@ -18,15 +17,18 @@ import {
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
-import { validateConnectionCredentials } from "../schema.ts";
 import { maskCredentialLabel } from "./mask-label.ts";
-import { invalidRequest, validationFailed } from "../../lib/errors.ts";
+import { validationFailed } from "../../lib/errors.ts";
 import type {
   ConnectContext,
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
-import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import {
+  assertCredentialsMatchSchema,
+  assertFieldsInput,
+  requireNonEmptyCredentials,
+} from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
@@ -39,23 +41,11 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     requireNonEmptyCredentials(credentials);
 
-    // Validate the pasted bag against the auth's declared credentials.schema.
     // Rejects missing required fields AND wrong-cased keys (e.g. `apiKey` for a
     // manifest declaring `api_key`), which would otherwise persist a connection
     // that looks healthy but whose `delivery.http` injection silently no-ops at
     // runtime (the field lookup misses → empty value → header never injected).
-    const credsResult = validateConnectionCredentials(
-      auth.credentials?.schema as JSONSchemaObject | undefined,
-      credentials,
-    );
-    if (!credsResult.valid) {
-      throw invalidRequest(
-        `Credentials do not match the integration's declared schema: ${credsResult.errors
-          .map((e) => `${e.field} ${e.message}`)
-          .join("; ")}`,
-        "credentials",
-      );
-    }
+    assertCredentialsMatchSchema(auth.credentials?.schema, credentials);
     const variables = await resolveConnectionVariables(
       manifest,
       auth as unknown as AfpsManifestAuth,

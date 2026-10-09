@@ -30,6 +30,7 @@ import {
   type UIMessageChunk,
 } from "ai";
 import {
+  createIsolatedResourceLoader,
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   prepareRequestedThinkingLevel,
@@ -53,7 +54,7 @@ import {
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
-import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
+import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -483,9 +484,12 @@ export function runPiChat(input: PiChatInput): Response {
           modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
         const resourceLoader = await untilAborted(
           timed(
-            createPiChatResourceLoader({
+            createIsolatedResourceLoader({
               DefaultResourceLoader,
               SettingsManager,
+              cwd: PI_CHAT_CWD,
+              agentDir: PI_CHAT_AGENT_DIR,
+              skillPaths: [],
               extensionFactories: [
                 ...tools.extensionFactories,
                 ...authExtensions,

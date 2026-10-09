@@ -5,8 +5,9 @@
  *
  * Executes a manifest-declared single login request: substitute `{{...}}`
  * placeholders (from the transient bootstrap `inputs`) into one HTTP request,
- * fire it, and extract the injectable token/cookie values declared in
- * `connect.login.outputs` into `outputs` (the final injectable bundle).
+ * each value encoded for its place ({@link renderRequest}), fire it, and extract
+ * the injectable token/cookie values declared in `connect.login.outputs` into
+ * `outputs` (the final injectable bundle).
  * Intentionally stateless: no request chaining, no cookie jar, no redirect
  * following. Stateful flows (multi-cookie sessions, TLS impersonation, refresh,
  * redirect chains) belong on the Orchestrated `connect.tool` path, not here.
@@ -35,8 +36,13 @@
  */
 
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
-import { substituteVars } from "../proxy-primitives.ts";
-import { unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
+import {
+  headerNamed,
+  substituteRequest,
+  UnencodableInputError,
+  unresolvedPlaceholders,
+} from "@appstrate/afps-runtime/resolvers";
+import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { evaluateJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
@@ -130,8 +136,8 @@ export interface LoginConfig {
 }
 
 interface LoginContext {
-  /** Transient bootstrap secrets (e.g. password) for `{{...}}`. Never persisted by the engine. */
-  inputs: Record<string, string>;
+  /** Transient bootstrap secrets (e.g. password) for `{{...}}`, typed. Never persisted. */
+  inputs: Record<string, unknown>;
   /** Integration URL allowlist (global). The request URL must match unless allowAllUris. */
   authorizedUris: string[] | null;
   allowAllUris: boolean;
@@ -147,14 +153,26 @@ interface LoginResult {
   expiresAt: string | null;
 }
 
-/** Structured failure — carries the reason; never the response body. */
+/**
+ * Structured failure — never the response body nor an input value. `rejected`, `upstream_failed`
+ * (see {@link failedStatusReason}), `timeout`, `invalid_input` (`field`) and `url_not_allowed` with
+ * `fields` are the submitter's or the target's; every other reason is a defect of the integration.
+ */
 export class LoginError extends Error {
+  readonly upstreamStatus?: number;
+  readonly timeoutMs?: number;
+  readonly field?: string;
+  readonly fields?: readonly string[];
+
   constructor(
     message: string,
     readonly reason:
       | "unresolved_placeholder"
       | "url_not_allowed"
-      | "bad_status"
+      | "rejected"
+      | "unexpected_status"
+      | "upstream_failed"
+      | "invalid_input"
       | "response_too_large"
       | "timeout"
       | "extract_failed"
@@ -164,10 +182,19 @@ export class LoginError extends Error {
      * `catch` so the underlying parse/URL error is not discarded.
      * `preserve-caught-error` cannot see custom classes, so this is on us.
      */
-    options?: ErrorOptions,
+    options?: ErrorOptions & {
+      upstreamStatus?: number;
+      timeoutMs?: number;
+      field?: string;
+      fields?: readonly string[];
+    },
   ) {
     super(message, options);
     this.name = "LoginError";
+    this.upstreamStatus = options?.upstreamStatus;
+    this.timeoutMs = options?.timeoutMs;
+    this.field = options?.field;
+    this.fields = options?.fields;
   }
 }
 
@@ -449,6 +476,49 @@ function applyOutput(
   }
 }
 
+/** {@link substituteRequest}, plus `content_type` as a `Content-Type` header unless one is written. */
+function renderRequest(
+  request: LoginRequest,
+  inputs: Record<string, unknown>,
+): { url: string; headers: Record<string, string>; body: string | undefined } {
+  let rendered: { url: string; headers: Record<string, string>; body: string | undefined };
+  try {
+    rendered = substituteRequest(
+      {
+        url: request.url,
+        headers: request.headers ?? {},
+        body: request.body,
+        contentType: request.content_type,
+      },
+      inputs,
+    );
+  } catch (err) {
+    if (!(err instanceof UnencodableInputError)) throw err;
+    throw new LoginError(err.message, "invalid_input", { field: err.field, cause: err });
+  }
+  if (request.content_type && headerNamed(rendered.headers, "content-type") === undefined) {
+    rendered.headers["Content-Type"] = request.content_type;
+  }
+  return rendered;
+}
+
+const REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 422]);
+const NOT_A_LOGIN_STATUSES: ReadonlySet<number> = new Set([404, 405, 410]);
+
+/** Who a status failing the success test blames: a 404/405/410 is never a login endpoint. */
+function failedStatusReason(status: number, login: LoginRequestSpec): LoginError["reason"] {
+  if (isRetryableHttpStatus(status)) return "upstream_failed";
+  if (NOT_A_LOGIN_STATUSES.has(status)) return "unexpected_status";
+  const judged = (login.success_criteria?.length ?? 0) > 0;
+  return judged || REFUSAL_STATUSES.has(status) ? "rejected" : "unexpected_status";
+}
+
+/** The inputs that fill the authority of URL template `url`. */
+function authorityInputs(url: string): string[] {
+  const authority = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0]!;
+  return unresolvedPlaceholders(authority, {});
+}
+
 /**
  * Execute the declarative login request. Throws {@link LoginError} on the
  * first failure (no partial persistence — the caller persists nothing on throw).
@@ -478,15 +548,6 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   }
 
   const vars = { ...ctx.inputs };
-  const url = substituteVars(login.request.url, vars);
-  const body =
-    login.request.body !== undefined ? substituteVars(login.request.body, vars) : undefined;
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(login.request.headers ?? {}))
-    headers[k] = substituteVars(v, vars);
-  if (login.request.content_type && headers["Content-Type"] === undefined) {
-    headers["Content-Type"] = login.request.content_type;
-  }
 
   // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never
   // be sent literally upstream).
@@ -501,6 +562,13 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
       "unresolved_placeholder",
     );
   }
+  const { url, headers, body } = renderRequest(login.request, vars);
+  const urlFields = authorityInputs(login.request.url);
+  const urlRefused = (message: string, options?: ErrorOptions) =>
+    new LoginError(message, "url_not_allowed", {
+      ...options,
+      ...(urlFields.length > 0 ? { fields: urlFields } : {}),
+    });
 
   // URL gate. This engine runs in the platform process (not the
   // credential-isolating sidecar), so the request URL is a manifest-authored
@@ -522,16 +590,14 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     // here — the URL did not parse. The TypeError is the only thing in the
     // thrown error that says so. (Message and reason left as-is: both are
     // matched by callers; the cause is the additive half.)
-    throw new LoginError("url targets a blocked/internal address", "url_not_allowed", {
-      cause: err,
-    });
+    throw urlRefused("url targets a blocked/internal address", { cause: err });
   }
   // Scheme floor: only http(s) may leave the engine. The literal `isBlockedUrl`
   // gate this check replaced also rejected non-http(s) schemes; the DNS-aware
   // host check below is host-only, so keep the floor explicit — an `ftp:` /
   // `file:` / `gopher:` URL must fail here, not later as a generic fetch error.
   if (loginUrl.protocol !== "https:" && loginUrl.protocol !== "http:") {
-    throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+    throw urlRefused("url targets a blocked/internal address");
   }
   const loginHost = loginUrl.hostname;
   // DNS-aware check (resolves the host, blocks if ANY resolved address is
@@ -542,7 +608,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   if (!isAllowedInternalIdpHost(loginHost)) {
     const hostCheck = await resolveAndCheckHost(loginHost, { resolve: ctx.resolveHost });
     if (hostCheck.blocked) {
-      throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+      throw urlRefused("url targets a blocked/internal address");
     }
   }
   // When an allowlist is present (`!allowAllUris`), the URL must additionally
@@ -550,7 +616,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   if (!ctx.allowAllUris) {
     const allowed = (ctx.authorizedUris ?? []).some((spec) => matchesAuthorizedUriSpec(spec, url));
     if (!allowed) {
-      throw new LoginError("url not in authorizedUris allowlist", "url_not_allowed");
+      throw urlRefused("url not in authorizedUris allowlist");
     }
   }
 
@@ -567,9 +633,14 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     });
   } catch (err) {
     if (ac.signal.aborted) {
-      throw new LoginError(`timed out after ${limits.stepTimeoutMs}ms`, "timeout");
+      throw new LoginError(`timed out after ${limits.stepTimeoutMs}ms`, "timeout", {
+        timeoutMs: limits.stepTimeoutMs,
+      });
     }
-    throw new LoginError(`request failed: ${String(err)}`, "extract_failed");
+    // Class and code only: a transport message may quote the URL, and the URL an input.
+    const code = (err as { code?: unknown } | null)?.code;
+    const kind = `${err instanceof Error ? err.name : typeof err}${typeof code === "string" ? ` (${code})` : ""}`;
+    throw new LoginError(`request failed: ${kind}`, "upstream_failed", { cause: err });
   } finally {
     clearTimeout(timer);
   }
@@ -584,7 +655,9 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
 
   if (!passesSuccessCriteria(response, login.success_criteria)) {
     // Never log/echo the body — only the status.
-    throw new LoginError(`unexpected status ${res.status}`, "bad_status");
+    throw new LoginError(`unexpected status ${res.status}`, failedStatusReason(res.status, login), {
+      upstreamStatus: res.status,
+    });
   }
 
   // Extract in two passes so a `jwt` extractor can reference any other

@@ -14,8 +14,9 @@
  * `{{placeholder}}`s; the trusted engine substitutes the transient inputs.
  */
 
-import { runLogin, type LoginConfig } from "@appstrate/connect/connect";
-import { invalidRequest } from "../../lib/errors.ts";
+import { LoginError, runLogin, type LoginConfig } from "@appstrate/connect/connect";
+import { badGateway, invalidRequest } from "../../lib/errors.ts";
+import { logger } from "../../lib/logger.ts";
 import {
   assertRequiredIdentityClaims,
   extractIdentity,
@@ -28,9 +29,47 @@ import type {
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
-import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import {
+  assertCredentialsMatchSchema,
+  assertFieldsInput,
+  loginInputRefused,
+  loginRejected,
+  loginTimedOut,
+  loginUrlRefused,
+  requireNonEmptyCredentials,
+} from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
+
+/** A login failure the submitter can act on, as its 4xx/5xx; any other stays the caller's 500. */
+function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
+  if (!(err instanceof LoginError)) return err;
+  if (err.reason === "upstream_failed" || err.reason === "timeout") {
+    // The cause the 502/504 body leaves out: a status, a delay or an error class, never an input.
+    logger.warn("connect.login did not complete", {
+      integrationId: ctx.integrationId,
+      authKey: ctx.authKey,
+      reason: err.reason,
+      error: err.message,
+    });
+  }
+  switch (err.reason) {
+    case "rejected":
+      return loginRejected(
+        `the service refused the submitted credentials (HTTP ${err.upstreamStatus}).`,
+      );
+    case "invalid_input":
+      return loginInputRefused(err.field!);
+    case "url_not_allowed":
+      return err.fields?.length ? loginUrlRefused(err.fields) : err;
+    case "upstream_failed":
+      return badGateway("The service could not complete the login. Try again later.");
+    case "timeout":
+      return loginTimedOut(err.timeoutMs!);
+    default:
+      return err;
+  }
+}
 
 export class LoginStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -43,16 +82,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.login declaration`);
     }
     requireNonEmptyCredentials(credentials);
-
-    // LoginStrategy substitutes `{{name}}` placeholders into HTTP request URLs,
-    // headers, and bodies — only string-valued bootstrap inputs are meaningful.
-    // Non-string values from the widened `ConnectCompleteInput.credentials`
-    // shape get stringified so they still flow through (JSON-encoded objects
-    // round-trip cleanly), but the canonical contract here is strings.
-    const stringInputs: Record<string, string> = {};
-    for (const [k, v] of Object.entries(credentials)) {
-      stringInputs[k] = typeof v === "string" ? v : JSON.stringify(v);
-    }
+    const inputs = assertCredentialsMatchSchema(auth.credentials?.schema, credentials);
 
     const variables = await resolveConnectionVariables(
       manifest,
@@ -60,9 +90,11 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       ctx.variables,
     );
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
-      inputs: stringInputs,
+      inputs,
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
       allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
+    }).catch((err: unknown) => {
+      throw loginRefusal(err, ctx);
     });
 
     // Identity source = injectable outputs + engine-promoted identity claims,
