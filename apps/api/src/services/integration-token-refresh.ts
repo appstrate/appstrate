@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth2 token refresh for `integration_connections` rows ({@link refreshConnectionCredential}).
+ * Credential refresh for `integration_connections` rows ({@link refreshConnectionCredential}): an
+ * OAuth2 refresh-token exchange, or a declarative login run again with its kept inputs.
  * Lives in apps/api: connect stays free of `@appstrate/db` so the sidecar can consume it.
  */
 
@@ -13,6 +14,7 @@ import {
   ClientAuthInvariantError,
   performRefreshTokenExchange,
   decryptCredentialsToStringMap,
+  decryptCredentialInputsToStringMap,
   resolveOAuthEndpoints,
   UnknownKeyIdError,
 } from "@appstrate/connect";
@@ -37,6 +39,10 @@ import {
   resolveIntegrationClientById,
 } from "./integration-connections.ts";
 import { computeRequiredScopes } from "./integration-scope-resolver.ts";
+import { persistsLoginSecret, runAuthLogin } from "./connect/login-strategy.ts";
+import { validateConnectionCredentials } from "./schema.ts";
+import { LoginError } from "@appstrate/connect/connect";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -78,13 +84,14 @@ export interface RefreshTarget {
   oauthResource: string | null;
 }
 
-/** `forced` (an upstream 401) skips the freshness short-circuit after the lock. */
+/**
+ * `perform` with the row's freshest ciphertext, once per connection at a time. `forced` (an
+ * upstream 401) skips the freshness short-circuit after the lock.
+ */
 async function refreshUnderLock(
   connection: RefreshTarget,
-  packageIdForLog: string,
-  authKeyForLog: string,
-  refreshContext: IntegrationRefreshContext,
   forced: boolean,
+  perform: (credentialsEncrypted: string) => Promise<IntegrationRefreshResult>,
 ): Promise<IntegrationRefreshResult> {
   const { id: connectionId, credentialsEncrypted } = connection;
 
@@ -131,14 +138,7 @@ async function refreshUnderLock(
       }
       return null;
     },
-    doRefresh: () =>
-      doRefresh(
-        { connectionId, clientRef: connection.clientRef },
-        packageIdForLog,
-        authKeyForLog,
-        freshCiphertext,
-        refreshContext,
-      ),
+    doRefresh: () => perform(freshCiphertext),
   });
 }
 
@@ -229,16 +229,7 @@ async function doRefresh(
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     },
   );
-  if (!written) {
-    const [row] = await db
-      .select({ needsReconnection: integrationConnections.needsReconnection })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connectionId))
-      .limit(1);
-    throw row?.needsReconnection
-      ? new RefreshVerdictError("dead", "connection_flagged")
-      : new RefreshVerdictError("retry", "connection_changed");
-  }
+  if (!written) throw await rowChangedVerdict(connectionId);
 
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
@@ -257,18 +248,78 @@ async function exchangeFailureVerdict(
         error: err.message,
       });
       return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
-    case "transient": {
-      const env = getEnv();
-      const counted = await recordIntegrationRefreshFailure(
-        log.connectionId,
-        env.INTEGRATION_REFRESH_MAX_FAILURES,
-        { graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS },
-      );
-      return counted?.needsReconnection
-        ? new RefreshVerdictError("dead", "refresh_failures_exhausted", { cause: err })
-        : new RefreshVerdictError("retry", "upstream_transient", { cause: err });
-    }
+    case "transient":
+      return countedFailureVerdict(log.connectionId, err);
   }
+}
+
+/** A failure that may pass: `retry` until the refresh-failure threshold, then `dead`. */
+async function countedFailureVerdict(
+  connectionId: string,
+  cause: unknown,
+): Promise<RefreshVerdictError> {
+  const env = getEnv();
+  const counted = await recordIntegrationRefreshFailure(
+    connectionId,
+    env.INTEGRATION_REFRESH_MAX_FAILURES,
+    { graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS },
+  );
+  return counted?.needsReconnection
+    ? new RefreshVerdictError("dead", "refresh_failures_exhausted", { cause })
+    : new RefreshVerdictError("retry", "upstream_transient", { cause });
+}
+
+/**
+ * The connection's login run again with the inputs it kept: the new outputs replace the session,
+ * the inputs stay. Credentials the service now refuses flag the connection; any other failure
+ * counts toward the refresh-failure threshold.
+ */
+async function doRelogin(
+  { connectionId, clientRef }: { connectionId: string; clientRef: string | null },
+  log: { packageId: string; authKey: string },
+  authDef: AfpsManifestAuth,
+  variables: Readonly<Record<string, string>> | null,
+  credentialsEncrypted: string,
+): Promise<IntegrationRefreshResult> {
+  const kept = decryptCredentialInputsToStringMap(credentialsEncrypted);
+  const typed = validateConnectionCredentials(
+    authDef.credentials?.schema as JSONSchemaObject | undefined,
+    kept,
+  );
+  if (Object.keys(kept).length === 0 || !typed.valid) {
+    // Inputs the current manifest no longer accepts: only the user can supply new ones.
+    await markIntegrationConnectionNeedsReconnection(connectionId);
+    throw new RefreshVerdictError("dead", "connection_flagged");
+  }
+  let login: Awaited<ReturnType<typeof runAuthLogin>>;
+  try {
+    login = await runAuthLogin(authDef, typed.data ?? kept, variables);
+  } catch (err) {
+    if (!(err instanceof LoginError)) throw err;
+    logger.warn("Integration re-login failed", { ...log, connectionId, reason: err.reason });
+    if (err.reason !== "rejected") throw await countedFailureVerdict(connectionId, err);
+    await markIntegrationConnectionNeedsReconnection(connectionId);
+    throw new RefreshVerdictError("dead", "connection_flagged", { cause: err });
+  }
+  const expiresAt = login.expiresAt ? new Date(login.expiresAt) : null;
+  const written = await persistCredentialBundle(
+    { kind: "update-by-id", connectionId, expect: { clientRef, credentialsEncrypted } },
+    { credentials: login.outputs, inputs: kept, expiresAt, needsReconnection: false },
+  );
+  if (!written) throw await rowChangedVerdict(connectionId);
+  return { fields: login.outputs, expiresAt, scopesGranted: null, shrinkDetected: false };
+}
+
+/** A compare-and-set write that did not land: the row was flagged, or reconnected meanwhile. */
+async function rowChangedVerdict(connectionId: string): Promise<RefreshVerdictError> {
+  const [row] = await db
+    .select({ needsReconnection: integrationConnections.needsReconnection })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.needsReconnection
+    ? new RefreshVerdictError("dead", "connection_flagged")
+    : new RefreshVerdictError("retry", "connection_changed");
 }
 
 /**
@@ -305,6 +356,7 @@ export async function refreshConnectionCredential(input: {
     authKey: string;
     expiresAt: Date | null;
     credentialRevision: string;
+    variables: Record<string, string> | null;
   };
   integrationId: string;
   /** The manifest the caller reads the connection's auth from, and `authDef` its declaration. */
@@ -339,7 +391,23 @@ export async function refreshConnectionCredential(input: {
   };
 
   if (authDef.type !== "oauth2") {
-    return unrefreshable(`auth type '${authDef.type}' is not refreshable`);
+    if (!persistsLoginSecret(authDef)) {
+      return unrefreshable(`auth type '${authDef.type}' is not refreshable`);
+    }
+    if (
+      Object.keys(decryptCredentialInputsToStringMap(connection.credentialsEncrypted)).length === 0
+    ) {
+      return unrefreshable("the connection kept no login inputs; reconnect it once");
+    }
+    return settle(input, forced, (ciphertext) =>
+      doRelogin(
+        { connectionId: connection.id, clientRef: connection.clientRef },
+        { packageId: integrationId, authKey },
+        authDef,
+        connection.variables,
+        ciphertext,
+      ),
+    );
   }
 
   let refreshContext: IntegrationRefreshContext | null;
@@ -358,9 +426,28 @@ export async function refreshConnectionCredential(input: {
   }
   if (!refreshContext) return unrefreshable("no OAuth client or token endpoint");
 
+  return settle(input, forced, (ciphertext) =>
+    doRefresh(
+      { connectionId: connection.id, clientRef: connection.clientRef },
+      integrationId,
+      authKey,
+      ciphertext,
+      refreshContext,
+    ),
+  );
+}
+
+/** One refresh under the connection's lock, its verdict translated to an outcome. */
+async function settle(
+  input: Parameters<typeof refreshConnectionCredential>[0],
+  forced: boolean,
+  perform: (credentialsEncrypted: string) => Promise<IntegrationRefreshResult>,
+): Promise<ConnectionRefreshOutcome> {
+  const { connection, integrationId } = input;
+  const { authKey } = connection;
   let refreshed: IntegrationRefreshResult;
   try {
-    refreshed = await refreshUnderLock(connection, integrationId, authKey, refreshContext, forced);
+    refreshed = await refreshUnderLock(connection, forced, perform);
   } catch (err) {
     if (err instanceof RefreshVerdictError) {
       // A proactive refresh has no evidence against the token a flag set elsewhere left in place.

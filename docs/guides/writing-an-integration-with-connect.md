@@ -31,16 +31,16 @@ variables also references them as `{$variable.<name>}` ([Connection variables](#
 
 ## Strategy selection at a glance
 
-| `auth.type` | `connect` | `connect.tool` `run_at` | Strategy     | Flow                                                |
-| ----------- | --------- | ----------------------- | ------------ | --------------------------------------------------- |
-| `oauth2`    | —         | —                       | OAuth2       | OAuth 2.0 + PKCE, discovery + auto-refresh          |
-| `api_key`   | —         | —                       | Fields       | paste-the-bag (user submits the credential)         |
-| `basic`     | —         | —                       | Fields       | paste-the-bag (username + password)                 |
-| `mtls`      | —         | —                       | Fields       | paste-the-bag (client cert + key, mounted as files) |
-| `custom`    | _absent_  | —                       | Fields       | paste-the-bag, free-form `credentials.schema`       |
-| `custom`    | `login`   | —                       | Login        | one declarative HTTP login request                  |
-| `custom`    | `tool`    | `run-start`             | LoginSecret  | store the secret, mint the session at each run      |
-| `custom`    | `tool`    | `link`                  | Orchestrated | run the login tool once in an ephemeral connect-run |
+| `auth.type` | `connect` | `connect.tool` `run_at` | Strategy     | Flow                                                  |
+| ----------- | --------- | ----------------------- | ------------ | ----------------------------------------------------- |
+| `oauth2`    | —         | —                       | OAuth2       | OAuth 2.0 + PKCE, discovery + auto-refresh            |
+| `api_key`   | —         | —                       | Fields       | paste-the-bag (user submits the credential)           |
+| `basic`     | —         | —                       | Fields       | paste-the-bag (username + password)                   |
+| `mtls`      | —         | —                       | Fields       | paste-the-bag (client cert + key, mounted as files)   |
+| `custom`    | _absent_  | —                       | Fields       | paste-the-bag, free-form `credentials.schema`         |
+| `custom`    | `login`   | —                       | Login        | one declarative HTTP login request, renewed on opt-in |
+| `custom`    | `tool`    | `run-start`             | LoginSecret  | store the secret, mint the session at each run        |
+| `custom`    | `tool`    | `link`                  | Orchestrated | run the login tool once in an ephemeral connect-run   |
 
 AFPS auth `type` is one of `oauth2 | api_key | basic | mtls | custom`. The 1.x
 `oauth1` type is **removed** — no working connect path, no signing layer was ever
@@ -580,6 +580,36 @@ allows — none when the auth's upstream is fixed.
 Referencing a bootstrap login secret like `{$credential.password}` directly in
 `delivery.http.value` is a manifest error — the platform decouples acquisition from
 delivery.
+
+### Keeping the session alive (`persist_login_secret`)
+
+A login runs once, at connect time, and by default the inputs are not kept: when the
+session expires, the user reconnects. Set `persist_login_secret: true` under
+`connect._meta["dev.appstrate/connect"]` to keep the submitted inputs, encrypted, in the
+connection's non-injectable plane (never delivered, never readable by a run):
+
+```jsonc
+"connect": {
+  "login": { "...": "..." },
+  "_meta": { "dev.appstrate/connect": { "persist_login_secret": true } }
+}
+```
+
+The platform then logs in again with them, and replaces the session, when:
+
+- the upstream answers `401` to a request carrying the session (the request is replayed
+  once with the new one);
+- the session reaches the expiry the login declared through `expires_in_output`.
+
+Credentials the service now refuses (a password changed upstream) flag the connection for
+reconnection; a service that cannot be reached counts toward the refresh-failure
+threshold. An app that answers an expired session with a redirect to its login page and a
+`200` is not detected: declare `expires_in_output`, or use an orchestrated `tool`. A
+connection made before the opt-in kept no inputs: reconnect it once.
+
+The connection is named by its identity (`identity_outputs`, `identity_claims`), else by
+the one required string field of `credentials.schema` that is not a secret (`format:
+"password"` or `writeOnly`), masked (`al****.com`), else `Connexion N`.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).

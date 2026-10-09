@@ -2523,6 +2523,8 @@ interface StoreConnectionInput {
    * was extracted (e.g. a masked API-key fingerprint from FieldsStrategy).
    * Identity still wins; ignored on reconnect (label is never re-derived).
    */
+  /** The login inputs an auth keeps to log in again (`persist_login_secret`); never injected. */
+  inputs?: Record<string, unknown>;
   labelHint?: string;
   /**
    * Which registered client minted this connection — a flat client id (system
@@ -3049,6 +3051,7 @@ export async function saveIntegrationConnection(
     needsReconnection: false,
     expiresAt: input.expiresAt ?? null,
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
+    ...(input.inputs ? { inputs: input.inputs } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
     variables: input.variables ?? null,
     ...(input.oauthResource !== undefined ? { oauthResource: input.oauthResource } : {}),

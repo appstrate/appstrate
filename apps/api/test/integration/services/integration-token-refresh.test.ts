@@ -164,7 +164,11 @@ async function seedPinnedClient(ctx: TestContext, token: TokenServer): Promise<s
   return client!.id;
 }
 
-type Target = RefreshTarget & { expiresAt: Date | null; credentialRevision: string };
+type Target = RefreshTarget & {
+  expiresAt: Date | null;
+  credentialRevision: string;
+  variables: Record<string, string> | null;
+};
 
 /** The connection as a resolver reads it: what a refresh is pinned to. */
 async function readTarget(connId: string): Promise<Target> {
@@ -175,6 +179,7 @@ async function readTarget(connId: string): Promise<Target> {
       clientRef: integrationConnections.clientRef,
       oauthResource: integrationConnections.oauthResource,
       expiresAt: integrationConnections.expiresAt,
+      variables: integrationConnections.variables,
     })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connId));

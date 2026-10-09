@@ -349,6 +349,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A declarative login can renew its session** (#1818): with
+  `persist_login_secret` under `connect._meta["dev.appstrate/connect"]`, a
+  `connect.login` connection keeps its inputs (non-injectable) and logs in
+  again when the upstream answers `401` or the declared expiry nears, through
+  the same refresh as an OAuth token. A refused re-login flags the connection.
+  A login or `connect.tool` connection is now named after its one non-secret
+  required field, masked, when it reports no identity.
 - **A new organization's starter agent runs from the CLI, the chat and the
   Claude Code plugin on its first try** (#1789). It was created as a draft
   only, so `appstrate run @<scope>/hello-world`, which runs the latest
