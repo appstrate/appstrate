@@ -256,8 +256,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   SpaceMemberRemoval:
     "single-field acknowledgement of DELETE /spaces/{id}/members/{userId}; the page re-reads SpaceMemberObject, which IS registered",
   ResolutionFieldError: "ProblemDetail.errors[] item; never read through a shared-type",
+  ConnectionResolutionItem:
+    "ResolutionFieldError narrowed to the 409 resolution codes; canonical type in @appstrate/core/api-errors, no shared-type",
+  ConnectionResolutionWarning:
+    "ResolutionFieldError narrowed to the warning codes; canonical type in @appstrate/core/api-errors, no shared-type",
+  MissingIntegrationConnectionProblem:
+    "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   LaunchWarnings:
-    "`warnings` envelope merged by allOf into the launch/schedule success bodies; its items are ResolutionFieldError, no shared-type",
+    "`warnings` envelope merged by allOf into the launch/schedule success bodies; its items are ConnectionResolutionWarning, no shared-type",
   // Canonical TS shape: `HandoffStep` in services/connect/provisioning.ts.
   HandoffCommandStep: "handoff command step; derived from a credential bundle, no shared-type",
   HandoffValueStep: "handoff value step; derived from a credential bundle, no shared-type",

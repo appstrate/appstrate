@@ -259,6 +259,7 @@ describe("launch override — the bound set names the launch it came from", () =
       expect(warning).toMatchObject({
         field: `integrations.${INTEGRATION}`,
         code: "integration_unbound",
+        source: "run_override",
         message: expect.stringContaining("this run's connection_overrides"),
       });
       // The absence was chosen: nothing to connect.
@@ -307,10 +308,17 @@ describe("launch override — the bound set names the launch it came from", () =
         body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [] } }),
       });
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; param?: string; detail: string };
-      expect(body.code).toBe("invalid_request");
-      expect(body.param).toBe("connection_overrides");
-      expect(body.detail).toContain(INTEGRATION);
+      const body = (await res.json()) as {
+        code: string;
+        param?: string;
+        errors: { field: string; code: string }[];
+      };
+      // The code a `[]` pin raises, on the override's own key.
+      expect(body.code).toBe("validation_failed");
+      expect(body.param).toBeUndefined();
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
       expect(await db.select().from(runs)).toHaveLength(0);
     });
   });
@@ -340,14 +348,14 @@ describe("launch override — the bound set names the launch it came from", () =
       });
     }
 
-    it("starts the run without it, warning integration_unbound and snapshotting an empty set", async () => {
+    it("starts the run without it, warning not_connected and snapshotting an empty set", async () => {
       await seedOptionalAgent(false);
 
       const res = await launchOptional();
       expect(res.status).toBe(201);
       const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
       expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-        [`integrations.${UNCONNECTED}`, "integration_unbound"],
+        [`integrations.${UNCONNECTED}`, "not_connected"],
       ]);
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });

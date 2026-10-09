@@ -25,10 +25,10 @@
  *                                     (`parseRequestInput` cannot own this here:
  *                                     it runs after the preflight on the launch
  *                                     route and not at all on validate)
- *   - non-required, not connected   → launch 201 / validate 200 with an
- *                                     `integration_unbound` warning
- *   - `[]` override                 → binds none on a non-required integration,
- *                                     400 on a `required` one
+ *   - non-required, not connected   → launch 201 / validate 200 with a
+ *                                     `not_connected` warning
+ *   - `[]` override                 → binds none on a non-required integration
+ *                                     (`integration_unbound`), 400 on a `required` one
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -244,7 +244,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
   // ─── A non-required integration nobody connected ───────────
   describe("non-required integration with no connection", () => {
-    it("launches with an integration_unbound warning, binding none", async () => {
+    it("launches with a not_connected warning, binding none", async () => {
       await seedIntegration(INTEGRATION);
       await seedDefaultModel();
 
@@ -261,10 +261,10 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(res.status).toBe(201);
       const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
       expect(created.warnings).toHaveLength(1);
-      // The lone api_key auth is the connect target, as on `not_connected`…
+      // The lone api_key auth is the connect target, as on the required twin…
       expect(created.warnings[0]).toMatchObject({
         field: `integrations.${INTEGRATION}`,
-        code: "integration_unbound",
+        code: "not_connected",
         auth_key: "primary",
       });
       expect(created.warnings[0]!.required_scopes).toBeUndefined();
@@ -286,7 +286,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as { valid: true; warnings: ValidationFieldError[] };
       expect(body.valid).toBe(true);
       expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-        [`integrations.${INTEGRATION}`, "integration_unbound"],
+        [`integrations.${INTEGRATION}`, "not_connected"],
       ]);
     });
 
@@ -325,6 +325,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(created.warnings[0]).toMatchObject({
         field: `integrations.${INTEGRATION}`,
         code: "integration_unbound",
+        source: "run_override",
       });
       expect(created.warnings[0]!.auth_key).toBeUndefined();
       expect(created.warnings[0]!.required_scopes).toBeUndefined();
@@ -347,15 +348,11 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
         expect(res.status).toBe(400);
         const body = (await res.json()) as ProblemDetails;
-        if (path === "/api/runs/inline") {
-          expect(body.code).toBe("invalid_request");
-          expect(body.param).toBe("connection_overrides");
-        } else {
-          const item = body.errors!.find((e) => e.field === "connection_overrides");
-          expect(item?.message).toContain(INTEGRATION);
-          // Reported once: readiness judges the launch without the refused key.
-          expect(body.errors!.map((e) => e.field)).toEqual(["connection_overrides"]);
-        }
+        // One item, fail-fast or accumulated: readiness judges the launch without the refused key.
+        expect(body.code).toBe("validation_failed");
+        expect(body.errors!.map((e) => [e.field, e.code])).toEqual([
+          [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+        ]);
         expect(await db.select().from(runs)).toHaveLength(0);
       },
     );
@@ -519,7 +516,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(err.connect_url).toBeUndefined();
     });
 
-    it("carries connect_url on the integration_unbound warning of a non-required integration", async () => {
+    it("carries connect_url on the not_connected warning of a non-required integration", async () => {
       await seedOauthIntegration();
       await seedDefaultModel();
 
@@ -532,7 +529,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as { warnings: ValidationFieldError[] };
       const warning = body.warnings.find((w) => w.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(warning).toMatchObject({
-        code: "integration_unbound",
+        code: "not_connected",
         auth_key: "primary",
         required_scopes: ["search.read"],
       });
@@ -586,7 +583,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         expect(replay.status).toBe(201);
         expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
         const warning = await warningOf(replay);
-        expect(warning).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+        expect(warning).toMatchObject({ code: "not_connected", auth_key: "primary" });
         expect(warning).not.toHaveProperty("connect_url");
         expect(warning).not.toHaveProperty("expiresAt");
         expect(warning).not.toHaveProperty("packageId");

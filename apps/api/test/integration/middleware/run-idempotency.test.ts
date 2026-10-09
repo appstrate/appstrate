@@ -21,9 +21,10 @@ beforeEach(truncateAll);
 
 const WARNING = {
   field: "integrations.@idem-review/svc",
-  code: "integration_unbound",
-  title: "Integration Not Bound — Run Proceeds Without It",
-  message: "Integration '@idem-review/svc' has no connection accessible to this actor.",
+  code: "not_connected",
+  title: "Integration Not Connected",
+  message:
+    "Integration '@idem-review/svc' has no connection accessible to this actor; the run proceeds without it.",
 };
 
 function cacheLaunch(ctx: TestContext, key: string, path: string, body: unknown) {

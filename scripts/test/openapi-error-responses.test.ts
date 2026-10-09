@@ -46,6 +46,40 @@ describe("checkErrorResponseBodies", () => {
     expect(report).toEqual({ checked: 3, gaps: [], stale: [] });
   });
 
+  it("accepts an anyOf only when every branch resolves to a ProblemDetail", () => {
+    const spec = specWith({
+      "409": {
+        description: "either",
+        content: {
+          "application/problem+json": {
+            schema: {
+              anyOf: [
+                { $ref: "#/components/schemas/ProblemDetail" },
+                { $ref: "#/components/schemas/TypedProblem" },
+              ],
+            },
+          },
+        },
+      },
+      "422": {
+        description: "one branch is not a problem",
+        content: {
+          "application/problem+json": {
+            schema: {
+              anyOf: [{ $ref: "#/components/schemas/ProblemDetail" }, { type: "object" }],
+            },
+          },
+        },
+      },
+    }) as { components: { schemas: Record<string, unknown> } };
+    spec.components.schemas.TypedProblem = {
+      allOf: [{ $ref: "#/components/schemas/ProblemDetail" }, { required: ["errors"] }],
+    };
+    expect(checkErrorResponseBodies(spec, {}).gaps).toEqual([
+      "GET /x 422 — application/problem+json schema is not ProblemDetail",
+    ]);
+  });
+
   it("flags a 4xx, a 5xx and a default response that declare no ProblemDetail body", () => {
     const report = checkErrorResponseBodies(
       specWith({

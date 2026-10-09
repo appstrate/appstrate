@@ -163,7 +163,7 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as WriteBody;
     expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-      [`integrations.${INTEGRATION}`, "integration_unbound"],
+      [`integrations.${INTEGRATION}`, "not_connected"],
     ]);
   });
 
@@ -174,7 +174,7 @@ describe("schedule writes — the connection choice is made up front", () => {
     const armed = await patch(schedule.id, { name: "Renamed" });
     expect(armed.status).toBe(200);
     expect(((await armed.json()) as WriteBody).warnings.map((w) => w.code)).toEqual([
-      "integration_unbound",
+      "not_connected",
     ]);
 
     const disabled = await patch(schedule.id, { enabled: false });
@@ -740,7 +740,7 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
     expect(own.status).toBe(201);
     expect(((await own.json()) as WriteBody).warnings).toEqual([
       expect.objectContaining({
-        code: "integration_unbound",
+        code: "auth_key_mismatch",
         required_auth_key: "primary",
         available_auth_keys: ["backup"],
       }),

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { problemContent } from "../responses.ts";
+import { connectionConflictContent, problemContent } from "../responses.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
@@ -11,7 +11,7 @@ const inlineDependencyAuthorization =
 
 const runConnectionOverrides = {
   type: "object",
-  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey; \`[]\` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (\`[]\` included), and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`), and so are a key that names no integration the agent declares and \`[]\` on an integration it marks \`required\` (400 \`invalid_request\`, \`param: connection_overrides\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
+  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey; \`[]\` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's single OWN connection — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (\`[]\` included), and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`), and so is a key that names no integration the agent declares (400 \`invalid_request\`, \`param: connection_overrides\`) and \`[]\` on an integration it marks \`required\` (400 \`validation_failed\`, an \`errors[]\` item \`required_integration_unbound\` on \`connection_overrides.<id>\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
   additionalProperties: connectionIdSetJsonSchema,
 } as const;
 
@@ -267,11 +267,7 @@ const canonicalRunsPaths = {
           description:
             "Concurrent request with the same Idempotency-Key still in flight, the organization's deletion is reserved so no new work is admitted (`org_deleting`), the `rerun_from` run belongs to a different agent (`rerun_agent_mismatch`), the `rerun_from` run's input carried an inline `data:` file whose bytes were materialized and are not replayable (`rerun_inline_input_unavailable` — re-send the file in `input`, preferably as an `upload://` reference), or a declared integration blocks the launch (`missing_integration_connection` — one `errors[]` item per integration, `must_choose_connection` items carrying `candidate_connections`; what does not block is a 201 `warnings[]` item, see LaunchWarnings)",
           headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
+          content: connectionConflictContent,
         },
         "410": {
           description:
@@ -1344,11 +1340,7 @@ const canonicalRunsPaths = {
           description:
             "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared with a member pin, since this body takes no `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
           headers: REQUEST_ID_ONLY_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
+          content: connectionConflictContent,
         },
         "422": {
           description:

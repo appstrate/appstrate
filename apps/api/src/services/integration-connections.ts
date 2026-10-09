@@ -432,8 +432,9 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required. `required`: no usable
-    // connection is an error (→ null below), not an empty binding.
+    // No agent selection: every declared auth serves, no scope is required. `required`: a proxy
+    // call cannot proceed without a connection, so nothing usable is an error (→ null below),
+    // never the empty binding a run starts with.
     requirements: [
       {
         integrationId: packageId,

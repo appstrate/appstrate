@@ -183,12 +183,12 @@ describe("/api/integrations/:packageId admin surface", () => {
   interface AgentResolutionDTO {
     source: string | null;
     error_code: string | null;
-    warning_code: string | null;
+    warning: { field: string; code: string; source?: string } | null;
     resolved_connection_ids: string[];
     resolved_missing_scopes: string[];
     admin_pinned_connection_ids: string[] | null;
     member_pinned_connection_ids: string[] | null;
-    org_default_connection_ids: string[];
+    org_default_connection_ids: string[] | null;
     org_default_enforced: boolean;
     can_add_connection: boolean;
     candidates: Array<{ id: string; is_own: boolean; missing_scopes: string[] }>;
@@ -235,7 +235,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       // Wire-shape contract — all fields present, snake_case.
       expect(body).toHaveProperty("source");
       expect(body).toHaveProperty("error_code");
-      expect(body).toHaveProperty("warning_code");
+      expect(body).toHaveProperty("warning");
       expect(body).toHaveProperty("resolved_connection_ids");
       expect(body).toHaveProperty("resolved_missing_scopes");
       expect(body).toHaveProperty("admin_pinned_connection_ids");
@@ -249,8 +249,10 @@ describe("/api/integrations/:packageId admin surface", () => {
       // the fallback binds it, and no error stands in the way.
       expect(body.source).toBe("fallback_auto");
       expect(body.error_code).toBeNull();
-      expect(body.warning_code).toBeNull();
+      expect(body.warning).toBeNull();
       expect(body.resolved_connection_ids).toEqual([connId]);
+      // No org default: `null`, never an empty set.
+      expect(body.org_default_connection_ids).toBeNull();
     });
 
     it("returns not_connected, no layer, when a required integration has no accessible connection", async () => {
@@ -269,7 +271,10 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution.source).toBeNull();
       expect(entry.resolution.error_code).toBeNull();
-      expect(entry.resolution.warning_code).toBe("integration_unbound");
+      expect(entry.resolution.warning).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "not_connected",
+      });
       expect(entry.resolution.resolved_connection_ids).toEqual([]);
     });
 
@@ -280,12 +285,12 @@ describe("/api/integrations/:packageId admin surface", () => {
       const optional = await getEntry(AGENT, INTEGRATION);
       expect(optional.run_blocking).toBe(false);
       expect(optional.resolution.error_code).toBeNull();
-      expect(optional.resolution.warning_code).toBe("integration_not_active");
+      expect(optional.resolution.warning?.code).toBe("integration_not_active");
 
       const required = await getEntry(REQUIRED_AGENT, INTEGRATION);
       expect(required.run_blocking).toBe(true);
       expect(required.resolution.error_code).toBe("integration_not_active");
-      expect(required.resolution.warning_code).toBeNull();
+      expect(required.resolution.warning).toBeNull();
     });
 
     it("tells no pin (null) from a pin to none ([])", async () => {
@@ -311,7 +316,10 @@ describe("/api/integrations/:packageId admin surface", () => {
       // The admin pin wins and binds nothing, though a shared connection would serve.
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution.error_code).toBeNull();
-      expect(entry.resolution.warning_code).toBe("integration_unbound");
+      expect(entry.resolution.warning).toMatchObject({
+        code: "integration_unbound",
+        source: "admin_pin",
+      });
       expect(entry.resolution.resolved_connection_ids).toEqual([]);
       expect(entry.resolution.candidates.map((c) => c.id)).toEqual([shared]);
     });

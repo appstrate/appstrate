@@ -345,7 +345,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       expect(result.data.done).toBe(true);
       const warnings = result.data.warnings as Array<Record<string, unknown>>;
       const warning = warnings.find((w) => w.field === `integrations.${OAUTH}`)!;
-      expect(warning).toMatchObject({ code: "integration_unbound", auth_key: "primary" });
+      expect(warning).toMatchObject({ code: "not_connected", auth_key: "primary" });
       expect(warning).not.toHaveProperty("connect_url");
       expect(warning).not.toHaveProperty("expiresAt");
     }

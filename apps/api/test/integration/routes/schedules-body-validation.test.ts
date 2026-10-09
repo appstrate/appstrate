@@ -162,6 +162,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       expect.objectContaining({
         field: `integrations.${INTEGRATION}`,
         code: "integration_unbound",
+        source: "schedule_override",
         message: expect.stringContaining("the schedule's connection_overrides"),
       }),
     ]);
@@ -198,10 +199,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       }),
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.param).toBe("connection_overrides");
-    expect(problem.detail).toContain(INTEGRATION);
+    const problem = (await res.json()) as {
+      code?: string;
+      errors?: { field: string; code: string }[];
+    };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors?.map((e) => [e.field, e.code])).toEqual([
+      [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+    ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 

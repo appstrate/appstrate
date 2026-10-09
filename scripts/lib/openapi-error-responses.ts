@@ -3,8 +3,8 @@
 /**
  * The error-body rule of `scripts/verify-openapi.ts` §6b (here so a test reaches it):
  * every 4xx/5xx/`default` response declares `application/problem+json` → `ProblemDetail`
- * (directly or as an `allOf` member, `$ref`s resolved), further media types allowed; an
- * exempted response declares its exemption's media type instead.
+ * (directly, as an `allOf` member, or as every branch of an `anyOf`/`oneOf`, `$ref`s resolved),
+ * further media types allowed; an exempted response declares its exemption's media type instead.
  */
 
 import { OPERATION_VERBS, resolveRef } from "./openapi-pointer.ts";
@@ -31,11 +31,24 @@ export interface ErrorBodyReport {
   stale: string[];
 }
 
-function isProblemDetail(schema: unknown): boolean {
+function isProblemDetail(
+  root: Node,
+  schema: unknown,
+  seen: ReadonlySet<string> = new Set(),
+): boolean {
   if (schema === null || typeof schema !== "object") return false;
   const node = schema as Node;
   if (node.$ref === PROBLEM_DETAIL_REF) return true;
-  return Array.isArray(node.allOf) && node.allOf.some((member) => isProblemDetail(member));
+  if (typeof node.$ref === "string") {
+    return (
+      !seen.has(node.$ref) &&
+      isProblemDetail(root, resolveRef(root, node.$ref), new Set([...seen, node.$ref]))
+    );
+  }
+  const is = (member: unknown) => isProblemDetail(root, member, seen);
+  if (Array.isArray(node.allOf)) return node.allOf.some(is);
+  const branches = node.anyOf ?? node.oneOf;
+  return Array.isArray(branches) && branches.length > 0 && branches.every(is);
 }
 
 export function checkErrorResponseBodies(
@@ -63,7 +76,7 @@ export function checkErrorResponseBodies(
         }
         const content = (response.content ?? {}) as Record<string, Node | undefined>;
         const problem = content[PROBLEM_MEDIA_TYPE];
-        if (problem && isProblemDetail(problem.schema)) continue;
+        if (problem && isProblemDetail(root, problem.schema)) continue;
 
         const exemptKey =
           key in exemptions ? key : operationKey in exemptions ? operationKey : null;

@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor } from "./helpers.ts";
 
@@ -103,10 +104,12 @@ describe("MCP server instructions — connect bullet", () => {
     const external = connectBullet(false);
     for (const bullet of [chat, external]) {
       expect(bullet).toMatch(/marks it `required`/);
-      expect(bullet).toContain("`integration_unbound`");
+      // Generated from the tuple, so a new warning code reaches the model.
+      for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+        expect(bullet).toContain(`\`${code}\``);
+      }
       // An explicit `[]` and an inactive integration warn too, without a connect target.
       expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
-      expect(bullet).toContain("`integration_not_active`");
       expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
       // Another member's schedule: the caller must not learn what their connections lack.
       expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);

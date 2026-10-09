@@ -808,7 +808,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         warnings: { field: string; code: string }[];
       };
       expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-        [`integrations.${INTEG}`, "integration_unbound"],
+        [`integrations.${INTEG}`, "not_connected"],
       ]);
       const [run] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(run!.resolvedConnections).toEqual({ [INTEG]: [] });

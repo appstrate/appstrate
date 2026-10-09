@@ -10,10 +10,10 @@
 import type {
   ConnectionResolutionErrorCode,
   ConnectionResolutionSource,
-  ConnectionResolutionWarningCode,
   IntegrationManifest,
   IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
+import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
@@ -256,19 +256,15 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   there is no verdict.
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).
- *  - `warning_code` — why the run would start without this integration
- *                   (`integration_unbound`, `integration_not_active`), else `null`.
+ *  - `warning`    — why the run would start without this integration: the
+ *                   launch's `warnings[]` item itself, else `null`.
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
   error_code: ConnectionResolutionErrorCode | null;
-  warning_code: ConnectionResolutionWarningCode | null;
-  /** The warning's `required_auth_key`: the auth the agent requires, when the actor's connections use others. */
-  required_auth_key: string | null;
-  /** The warning's `available_auth_keys`: the auths those connections use; else empty. */
-  available_auth_keys: string[];
+  warning: ResolutionFieldError | null;
   /** The set the next run binds (the whole failing set when a member fails its health check). */
   resolved_connection_ids: string[];
   /** Missing scopes on the one connection an under-scoped verdict names; else empty. */
@@ -279,11 +275,11 @@ export interface IntegrationAgentResolution {
   member_pinned_connection_ids: string[] | null;
   /**
    * Org-wide default connection set for this integration (all agents),
-   * empty when unset. `org_default_enforced` distinguishes a hard lock
+   * `null` when unset (never empty). `org_default_enforced` distinguishes a hard lock
    * (members can't override — surfaced like an admin pin) from a soft
    * default the member can still override with their own pick.
    */
-  org_default_connection_ids: string[];
+  org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;

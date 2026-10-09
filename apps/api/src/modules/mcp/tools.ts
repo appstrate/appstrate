@@ -46,7 +46,10 @@ import {
 } from "@appstrate/core/run-and-wait-client";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import {
@@ -1007,8 +1010,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       ", exposes the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error?, warnings? }` when the run reaches a " +
       "terminal status; `warnings`, present only when the launch reported some, lists the " +
-      "integrations the run started without (`integration_unbound`: nothing bound; " +
-      "`integration_not_active`: switched off in the space). If its wait ends first, it " +
+      "integrations the run started without, each with the code that state raises as an error " +
+      `on a required integration (${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")}; ` +
+      "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
       "returns `done:false` with the run `id` and an `error` saying so: the run is still " +
       "going — never call `run_and_wait` again for it; read its outcome with `getRun` on " +
       "that `id`. After `done:true`, do NOT call `getRun` to wait; the run is over. " +

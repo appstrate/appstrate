@@ -11,7 +11,10 @@ import {
   type McpToolContext,
 } from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
@@ -155,7 +158,9 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.description).toContain(
       "`{ id, packageId, status, done:true, result?, error?, warnings? }`",
     );
-    expect(tool.descriptor.description).toContain("`integration_unbound`");
+    for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+      expect(tool.descriptor.description).toContain(`\`${code}\``);
+    }
   });
 
   it("describes inline defaults and exact manifest overrides", () => {
