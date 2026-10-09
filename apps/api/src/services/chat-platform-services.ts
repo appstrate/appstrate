@@ -27,8 +27,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import { loadModel, modelNeedsReconnection } from "./org-models.ts";
-import { isSystemModel } from "./model-registry.ts";
+import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
@@ -39,15 +38,17 @@ import { db } from "@appstrate/db/client";
 
 /**
  * Resolve the chosen chat model preset to its real upstream binding for one
- * chat turn. Only oauth-subscription (authMode `oauth2`) models take the Pi
+ * chat turn, for the session user `userId` (their personal subscription serves
+ * it first). Only oauth-subscription (authMode `oauth2`) models take the Pi
  * chat-engine path; everything else returns `{ subscription: false }` so the
  * chat module binds the same engine to the llm-proxy instead.
  */
 export async function resolveChatModel(
   orgId: string,
   presetId: string,
+  userId: string,
 ): Promise<ChatModelResolution> {
-  const resolved = await loadModel(orgId, presetId);
+  const resolved = await loadModel(orgId, presetId, userId);
   if (!resolved) {
     // A model that resolves to nothing because its stored credential is dead —
     // oauth flagged needs-reconnection, or (either auth mode) a secret that no
@@ -84,16 +85,16 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // An oauth2 model with no credential can never be spent — a reconnect (which
-  // creates the credential) is the fix, so surface the reconnect prompt rather
-  // than a raw error.
-  if (!resolved.credentialId) {
+  // An unbound subscription model names no credential the user holds: nothing
+  // can be spent, and the error says which credential to add.
+  const { credentialId } = requireBoundModel(resolved);
+  if (!credentialId) {
     return { subscription: true, needsReconnection: true };
   }
 
   let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
   try {
-    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
+    token = await resolveOAuthTokenForSidecar(credentialId, orgId);
   } catch (err) {
     // `gone()` (HTTP 410) is a refresh-time revocation — surface as reconnect.
     if (err instanceof ApiError && err.status === 410) {
@@ -114,6 +115,7 @@ export async function resolveChatModel(
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
+      credentialId,
     },
   };
 }
@@ -126,8 +128,9 @@ export async function resolveChatModel(
  *
  * The subscription chat path spends the user's OWN provider subscription
  * (oauth2 claude-code/codex), so the row is always stamped
- * `credentialSource="org"`. Cost is derived here from the token counts + the
- * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
+ * `credentialSource="org"` and attributed to that credential (`credentialId`).
+ * Cost is derived here from the token counts + the model's catalog rates with
+ * Pi's `calculateCost`, like the proxy/runner rows.
  * Its tier bands (`record.tiers`) price each model call at its tier.
  *
  * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
@@ -200,6 +203,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
+        credentialId: record.credentialId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -226,8 +230,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
  * The chat module calls this before starting ANY turn — built-in, API-key, or
- * oauth-subscription. The gate resolves system-provided vs. org-owned
- * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
+ * oauth-subscription. The gate resolves the credential the turn spends
+ * SERVER-SIDE (the session user's payer, via `loadModel`) so the chat module stays
  * dumb — it has no model-registry access — but that resolution is REPORTED as
  * the `credentialSource` fact, not used to pre-filter:
  *
@@ -250,6 +254,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     inline in the platform's process, so the platform funds its compute and a
  *     module gating on subscription status must be able to refuse it.
  *
+ * A turn on an unbound model (no credential the session user can spend) is
+ * refused with `model_credential_required` before dispatch.
+ *
  * Returns null when no module provides the hook (OSS mode allows everything),
  * except for a reserved deletion, which refuses whatever the deployment loads.
  */
@@ -258,6 +265,7 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
   subscription: boolean;
+  userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
@@ -281,14 +289,26 @@ export async function checkUsageAllowed(args: {
       "checkUsageAllowed: `subscription` is required (boolean) — caller built against @appstrate/core < 6.0.0",
     );
   }
+  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
+  // A preset that resolves but serves no credential the session user can spend is
+  // refused before dispatch. A preset that does not resolve at all (unknown,
+  // disabled, dead credential) is NOT skipped: the hook still decides on the turn,
+  // reported as "org" below. The turn fails at model resolution before any upstream call.
+  if (resolved && resolved.credentialSource === null) {
+    try {
+      requireBoundModel(resolved);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        return { code: err.code, message: err.message, status: err.status };
+      }
+      throw err;
+    }
+  }
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,
     context: "chat",
     sessionId: args.sessionId,
-    // A chat turn resolves its model on the platform before admission, so the
-    // credential source is always determinable here (never `null`, unlike a
-    // remote-origin run).
-    credentialSource: args.subscription || !isSystemModel(args.presetId) ? "org" : "system",
+    credentialSource: args.subscription ? "org" : (resolved?.credentialSource ?? "org"),
     // A turn executes in the platform's own process — never on a
     // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",

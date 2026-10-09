@@ -66,7 +66,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
       aliased ? "Appstrate Medium" : "Plain GPT",
       "gpt-5.5",
       ctx.user.id,
-      credentialId,
+      { credentialId },
       { aliased },
     );
     await setDefaultModel(ctx.orgId, modelDbId);

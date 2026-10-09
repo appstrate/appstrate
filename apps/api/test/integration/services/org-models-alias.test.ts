@@ -44,16 +44,17 @@ describe("org-models — aliased flag (DB path)", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "Plain GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(false);
 
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(false);
     // Non-aliased: alias id and real model id describe the same model.
@@ -66,17 +67,18 @@ describe("org-models — aliased flag (DB path)", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "Appstrate Medium",
       modelId: "gpt-4o", // the hidden backing
       enabled: true,
       aliased: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(true);
 
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(true);
     // The user-selected alias is the row id; the real backing is hidden behind it.
@@ -95,6 +97,7 @@ describe("org-models — aliased flag (DB path)", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       modelId: "deepseek-flash", // takes off/low/high/max
       aliased: true,
     });
@@ -105,8 +108,10 @@ describe("org-models — aliased flag (DB path)", () => {
       medium: "supported",
       high: "supported",
     } as const;
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed!.generation?.reasoning.levels).toEqual(levels);
-    expect((await loadModel(ctx.orgId, model.id))!.generation?.reasoning.levels).toEqual(levels);
+    expect((await loadModel(ctx.orgId, model.id, null))!.generation?.reasoning.levels).toEqual(
+      levels,
+    );
   });
 });

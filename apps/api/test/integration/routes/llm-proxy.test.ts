@@ -31,7 +31,8 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage, modelProviderCredentials } from "@appstrate/db/schema";
+import { llmUsage, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
+import { encryptCredentials } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -47,6 +48,9 @@ import {
 } from "../../helpers/seed.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { listOrgModelProviderCredentials } from "../../../src/services/model-providers/credentials.ts";
+import { proxyLlmCall } from "../../../src/services/llm-proxy/core.ts";
+import { openaiResponsesAdapter } from "../../../src/services/llm-proxy/openai-responses.ts";
+import type { LlmProxyPrincipal } from "../../../src/services/llm-proxy/types.ts";
 import {
   CACHE_STATUS_HIT as HIT,
   CACHE_STATUS_MISS as MISS,
@@ -324,10 +328,11 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
 
   it("surfaces 409 model_provider_unregistered for a preset whose provider is not registered", async () => {
     const h = await buildHarness();
+    // The preset's provider is its own `org_models.provider_id`, not its credential's.
     await db
-      .update(modelProviderCredentials)
+      .update(orgModels)
       .set({ providerId: "@gone/provider" })
-      .where(eq(modelProviderCredentials.id, h.credentialId));
+      .where(eq(orgModels.id, h.presetId));
     let upstreamCalled = false;
     mockUpstream(async () => {
       upstreamCalled = true;
@@ -469,7 +474,12 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, h.credentialId));
     expect(row!.failures).toBe(5);
-    const listed = await listOrgModelProviderCredentials(h.ctx.orgId);
+    const listed = await listOrgModelProviderCredentials({
+      orgId: h.ctx.orgId,
+      userId: h.ctx.user.id,
+      readsOrg: true,
+      writesOrg: true,
+    });
     expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
     expect((await call()).status).not.toBe(401);
     expect(upstreamCalls).toBe(5);
@@ -1408,5 +1418,173 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
     expect(text).toContain("Upstream model error");
     expect(text).not.toContain("deepseek-chat-SECRET");
     expect(text).not.toContain("overloaded");
+  });
+});
+
+// Personal model credentials (#1875): a user's own key serves the models it
+// applies to, the organization's binding serves everyone else, and a model with
+// neither is refused before any upstream call. `proxyLlmCall` takes the principal
+// directly, so each credential path is driven without minting a JWT per user.
+describe("POST /api/llm-proxy/* — personal model credentials", () => {
+  const UPSTREAM_BASE = "https://api.openai.test/v1";
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+  });
+  afterEach(() => restoreFetch());
+
+  async function buildPersonalHarness(): Promise<{
+    ctx: TestContext;
+    presetId: string;
+    orgCredentialId: string;
+    personalCredentialId: string;
+  }> {
+    const ctx = await createTestContext({ orgSlug: "personalkeys" });
+    const orgKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "Org key",
+      providerId: "openai",
+      apiShape: "openai-responses",
+      baseUrl: UPSTREAM_BASE,
+      apiKey: "sk-org",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      credentialId: orgKey.id,
+      label: "Preset",
+      modelId: "gpt-4o-2024-08-06",
+      enabled: true,
+    });
+    const [personal] = await db
+      .insert(modelProviderCredentials)
+      .values({
+        orgId: ctx.orgId,
+        ownerUserId: ctx.user.id,
+        label: "My key",
+        providerId: "openai",
+        credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey: "sk-personal" }),
+        baseUrlOverride: UPSTREAM_BASE,
+        createdBy: ctx.user.id,
+      })
+      .returning();
+    return {
+      ctx,
+      presetId: model.id,
+      orgCredentialId: orgKey.id,
+      personalCredentialId: personal!.id,
+    };
+  }
+
+  /** An org model bound to no credential: each member must bring their own. */
+  async function seedUnboundModel(orgId: string): Promise<string> {
+    const [model] = await db
+      .insert(orgModels)
+      .values({
+        orgId,
+        providerId: "openai",
+        credentialId: null,
+        label: "Unbound",
+        modelId: "gpt-4o-2024-08-06",
+        enabled: true,
+      })
+      .returning();
+    return model!.id;
+  }
+
+  /** Proxy one non-streaming call as `principal`; returns the key the upstream saw. */
+  async function proxyAs(
+    principal: LlmProxyPrincipal,
+    presetId: string,
+  ): Promise<{ status: number; authorization: string | null }> {
+    let authorization: string | null = null;
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      authorization = new Headers(init?.headers as Record<string, string>).get("authorization");
+      return new Response(
+        JSON.stringify({ id: "resp_personal", usage: { input_tokens: 11, output_tokens: 3 } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const response = await proxyLlmCall({
+      adapter: openaiResponsesAdapter,
+      principal,
+      runId: null,
+      chatSessionId: null,
+      presetId,
+      requestId: `req_personal_${crypto.randomUUID()}`,
+      upstreamPath: "/v1/responses",
+      incomingHeaders: new Headers(),
+      rawBody: new TextEncoder().encode(JSON.stringify({ model: presetId, input: "hi" })),
+      fetchImpl,
+    });
+    await response.text();
+    return { status: response.status, authorization };
+  }
+
+  it("a jwt_user with a personal key is served by it, and the ledger names that key", async () => {
+    const h = await buildPersonalHarness();
+
+    const result = await proxyAs(
+      { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId },
+      h.presetId,
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.authorization).toBe("Bearer sk-personal");
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row!.credentialId).toBe(h.personalCredentialId);
+    // A personal key is customer-supplied, so the row reads as the org's own spend.
+    expect(row!.credentialSource).toBe("org");
+  });
+
+  it("an api_key principal spends the org credential even when its user holds a personal key", async () => {
+    const h = await buildPersonalHarness();
+    const key = await seedApiKey({
+      orgId: h.ctx.orgId,
+      spaceId: h.ctx.defaultSpaceId,
+      createdBy: h.ctx.user.id,
+      scopes: ["llm-proxy:call"],
+    });
+
+    const result = await proxyAs(
+      {
+        kind: "api_key",
+        apiKeyId: key.id,
+        orgId: h.ctx.orgId,
+        userId: h.ctx.user.id,
+      },
+      h.presetId,
+    );
+
+    expect(result.authorization).toBe("Bearer sk-org");
+    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
+    expect(row!.credentialId).toBe(h.orgCredentialId);
+  });
+
+  it("a run pays through its payer: the payer's personal key, or the org credential without one", async () => {
+    const h = await buildPersonalHarness();
+
+    const paid = await proxyAs(
+      { kind: "run", orgId: h.ctx.orgId, payerUserId: h.ctx.user.id },
+      h.presetId,
+    );
+    expect(paid.authorization).toBe("Bearer sk-personal");
+
+    const unpaid = await proxyAs(
+      { kind: "run", orgId: h.ctx.orgId, payerUserId: null },
+      h.presetId,
+    );
+    expect(unpaid.authorization).toBe("Bearer sk-org");
+  });
+
+  it("refuses an unbound model with 409 model_credential_required before any upstream call", async () => {
+    const ctx = await createTestContext({ orgSlug: "unboundmodel" });
+    const presetId = await seedUnboundModel(ctx.orgId);
+
+    await expect(
+      proxyAs({ kind: "jwt_user", userId: ctx.user.id, orgId: ctx.orgId }, presetId),
+    ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
   });
 });

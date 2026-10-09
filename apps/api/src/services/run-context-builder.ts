@@ -16,10 +16,10 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { clampToBackingLevel, resolveModelCascade } from "./org-models.ts";
+import { clampToBackingLevel, requireBoundModel, resolveModelCascade } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
-import { appendRunLog, modelSourceOf } from "./state/runs.ts";
+import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -89,6 +89,8 @@ export async function buildRunContext(params: {
   orgId: string;
   spaceId: string;
   actor: Actor | null;
+  /** Whose personal model credentials may serve the run — see `runPayerUserId`. */
+  payerUserId: string | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
   modelId?: string | null;
@@ -147,7 +149,7 @@ export async function buildRunContext(params: {
   /** The model pin this run fell back from — see {@link recordModelFallback}. */
   unavailablePinnedModelId: string | null;
 }> {
-  const { runId, agent, orgId, spaceId, actor, input, files } = params;
+  const { runId, agent, orgId, spaceId, actor, input, files, payerUserId } = params;
 
   // Skip getSpacePackageSettings when all values are already provided by the caller (from preflight)
   const skipSettingsFetch =
@@ -211,13 +213,15 @@ export async function buildRunContext(params: {
 
   const [proxyResult, modelCascade] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
-    resolveModelCascade(orgId, agent.id, effectiveModelId),
+    resolveModelCascade(orgId, agent.id, effectiveModelId, payerUserId),
   ]);
 
   if (!modelCascade) {
     throw new ModelNotConfiguredError();
   }
-  const modelResult = modelCascade.model;
+  // An unbound model (no usable credential for this payer) is refused here,
+  // before the keyless check below would read its empty key.
+  const modelResult = requireBoundModel(modelCascade.model);
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
@@ -235,7 +239,7 @@ export async function buildRunContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
-  const modelSource = modelSourceOf(modelResult);
+  const modelSource = modelResult.credentialSource;
   // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
   // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
   // ledger row can be classified server-side: the container reports the cost, so

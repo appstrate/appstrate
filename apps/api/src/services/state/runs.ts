@@ -55,6 +55,7 @@ import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
+import type { BoundModel } from "../org-models.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
@@ -952,9 +953,9 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
-/** `runs.model_source` of a resolved model: whose credential its inference spends. */
-export function modelSourceOf(model: { isSystemModel: boolean }): CredentialSource {
-  return model.isSystemModel ? "system" : "org";
+/** `runs.model_source` of a bound model: whose credential its inference spends. */
+export function modelSourceOf(model: BoundModel): CredentialSource {
+  return model.credentialSource;
 }
 
 /**

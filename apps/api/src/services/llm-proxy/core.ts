@@ -18,7 +18,7 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
-import { loadModel, type ResolvedModel } from "../org-models.ts";
+import { loadModel, requireBoundModel, type BoundModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
@@ -36,7 +36,7 @@ import {
   parseProxyRequest,
 } from "./helpers.ts";
 import { DEFAULT_MAX_REQUEST_BYTES, forwardMeteredResponse, usageFrameBound } from "./metering.ts";
-import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
+import { payerOf, type LlmProxyAdapter, type LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
@@ -92,7 +92,7 @@ interface ProxyCallInputs {
    * metering module. Do not re-introduce an `isSystemModel` guard around this
    * call — that guard was the admission bypass this seam exists to close.
    */
-  beforeUpstream?: (resolved: ResolvedModel, presetId: string) => Promise<void>;
+  beforeUpstream?: (resolved: BoundModel, presetId: string) => Promise<void>;
 }
 
 export class LlmProxyUnsupportedModelError extends Error {
@@ -159,11 +159,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const request = parseProxyRequest(inputs.rawBody);
   const presetId = inputs.presetId ?? request.presetId;
-  const resolved = await resolvePresetForOrg(
-    presetId,
-    inputs.principal.orgId,
-    inputs.adapter.apiShape,
-  );
+  const resolved = await resolvePresetForOrg(presetId, inputs.principal, inputs.adapter.apiShape);
 
   // No fingerprint forging: an OAuth-subscription provider has no path through
   // this generic gateway (a bare bearer won't satisfy a subscription upstream).
@@ -403,12 +399,12 @@ function unreachableUpstream(presetId: string, code: UpstreamFailureCode): ApiEr
 
 async function resolvePresetForOrg(
   presetId: string,
-  orgId: string,
+  principal: LlmProxyPrincipal,
   expectedApi: string,
-): Promise<ResolvedModel> {
+): Promise<BoundModel> {
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
-    loaded = await loadModel(orgId, presetId);
+    loaded = await loadModel(principal.orgId, presetId, payerOf(principal));
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
     // and keeps its status; anything else reads as "not enabled", cause kept.
@@ -424,7 +420,9 @@ async function resolvePresetForOrg(
   if (loaded.apiShape !== expectedApi) {
     throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape, loaded.aliased);
   }
-  return loaded;
+  // An unbound model names no credential to spend: a 409 `model_credential_required`
+  // for the caller, not a fallback to some other credential.
+  return requireBoundModel(loaded);
 }
 
 function joinUpstreamUrl(base: string, path: string): string {

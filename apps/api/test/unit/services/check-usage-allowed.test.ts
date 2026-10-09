@@ -30,13 +30,13 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations } from "@appstrate/db/schema";
+import { organizations, orgModels } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
-import {
-  initSystemModelProviderKeys,
-  getSystemModels,
-} from "../../../src/services/model-registry.ts";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { createTestContext } from "../../helpers/auth.ts";
+import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import type {
@@ -48,8 +48,11 @@ import type {
 
 const SYSTEM_PRESET = "sys-chat-model";
 
-/** A real uuid for an organization that does not exist, so it carries no reservation. */
-const ORG_ID = "00000000-0000-4000-a000-0000000000c1";
+/** The test organization and its session user, created fresh for each test. */
+let ORG_ID = "";
+let USER_ID = "";
+/** An org-owned model bound to the org's own API key (not a system preset). */
+let orgPresetId = "";
 
 function fakeInitCtx(): ModuleInitContext {
   return {
@@ -78,10 +81,14 @@ function gateModule(result: UsageRejection | null, calls: BeforeUsageParams[]): 
 }
 
 describe("checkUsageAllowed", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     resetModules();
-    // Register a real system-provided model so `isSystemModel` distinguishes it
-    // from an org's own preset (the whole gating decision hinges on this).
+    await truncateAll();
+    const ctx = await createTestContext();
+    ORG_ID = ctx.orgId;
+    USER_ID = ctx.user.id;
+    // Register a real system-provided model so the gate can tell it apart from
+    // an org's own preset (the whole credential decision hinges on this).
     seedTestModelProviders();
     initSystemModelProviderKeys([
       {
@@ -91,12 +98,85 @@ describe("checkUsageAllowed", () => {
         models: [{ id: SYSTEM_PRESET, modelId: "gpt-4o-2024-08-06" }],
       },
     ]);
+    // An org-owned preset: a real org credential, bound through `org_models`.
+    const orgKey = await seedOrgModelProviderKey({
+      orgId: ORG_ID,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiShape: "openai-completions",
+      apiKey: "sk-org",
+    });
+    const model = await seedOrgModel({
+      orgId: ORG_ID,
+      providerId: "test-apikey",
+      credentialId: orgKey.id,
+      label: "Org preset",
+      modelId: "gpt-4o-2024-08-06",
+      enabled: true,
+    });
+    orgPresetId = model.id;
   });
 
   afterAll(async () => {
     await restoreDiscoveredModules();
     initSystemModelProviderKeys([]);
     seedTestModelProviders();
+  });
+
+  it("refuses a turn on a model no credential serves, before the hook is dispatched", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+    const [unbound] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ORG_ID,
+        providerId: "test-apikey",
+        credentialId: null,
+        label: "Unbound",
+        modelId: "gpt-4o-2024-08-06",
+        enabled: true,
+      })
+      .returning();
+
+    const result = await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: unbound!.id,
+      sessionId: "chs_unbound",
+      subscription: false,
+      userId: USER_ID,
+    });
+
+    expect(result).toMatchObject({ code: "model_credential_required", status: 409 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("dispatches the hook for a preset that does not resolve, reporting credentialSource 'org'", async () => {
+    // An unknown preset fails at model resolution, but the admission hook is not
+    // skipped: the module decides on every turn, and the turn reports "org".
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [gateModule({ code: "over_cap", message: "blocked", status: 402 }, calls)],
+      fakeInitCtx(),
+    );
+
+    const result = await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: "00000000-0000-4000-a000-0000000000d9",
+      sessionId: "chs_missing",
+      subscription: false,
+      userId: USER_ID,
+    });
+
+    expect(result).toEqual({ code: "over_cap", message: "blocked", status: 402 });
+    expect(calls).toEqual([
+      {
+        orgId: ORG_ID,
+        context: "chat",
+        sessionId: "chs_missing",
+        credentialSource: "org",
+        executionPlane: "platform",
+      },
+    ]);
   });
 
   it("refuses a turn in an organization whose deletion is reserved", async () => {
@@ -118,6 +198,7 @@ describe("checkUsageAllowed", () => {
         presetId: SYSTEM_PRESET,
         sessionId: "chs_reserved",
         subscription: false,
+        userId: USER_ID,
       });
 
       expect(result).toEqual({
@@ -138,6 +219,7 @@ describe("checkUsageAllowed", () => {
           presetId: SYSTEM_PRESET,
           sessionId: "chs_reserved",
           subscription: false,
+          userId: USER_ID,
         }),
       ).toBeNull();
       expect(calls).toHaveLength(1);
@@ -147,17 +229,15 @@ describe("checkUsageAllowed", () => {
   });
 
   it("dispatches the hook for an org-owned model with credentialSource 'org'", async () => {
-    // Sanity: the org preset is genuinely not a system model.
-    expect(getSystemModels().has("org-preset-123")).toBe(false);
-
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
-      presetId: "org-preset-123",
+      presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
+      userId: USER_ID,
     });
 
     // The platform no longer short-circuits an org-credential turn: it reports
@@ -187,9 +267,10 @@ describe("checkUsageAllowed", () => {
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
-      presetId: "org-preset-123",
+      presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
+      userId: USER_ID,
     });
 
     expect(result).toEqual({ code: "over_cap", message: "blocked", status: 402 });
@@ -203,6 +284,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
       subscription: false,
+      userId: USER_ID,
     });
     expect(result).toBeNull();
   });
@@ -219,6 +301,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
       subscription: false,
+      userId: USER_ID,
     });
 
     expect(result).toEqual({ code: "over_cap", message: "Soft cap reached", status: 402 });
@@ -243,6 +326,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: null,
       subscription: false,
+      userId: USER_ID,
     });
 
     expect(result).toBeNull();
@@ -265,6 +349,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_sub",
       subscription: true,
+      userId: USER_ID,
     });
 
     expect(result).toBeNull();
@@ -292,9 +377,10 @@ describe("checkUsageAllowed", () => {
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
-      presetId: "org-preset-123",
+      presetId: orgPresetId,
       sessionId: "chs_sub",
       subscription: true,
+      userId: USER_ID,
     });
 
     expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });

@@ -50,7 +50,7 @@ interface PreflightGatesInput {
   /**
    * Whose credential pays for the inference this run performs, decided
    * SERVER-SIDE by the caller (platform pipeline: `resolveModel(...)
-   * .isSystemModel`; remote: never resolves a platform model → `null`).
+   * .credentialSource`; remote: never resolves a platform model → `null`).
    *
    * This is a FACT reported to `beforeUsage`, NOT a decision about whether the
    * hook fires — the hook fires on every run. A module reads it to quote the

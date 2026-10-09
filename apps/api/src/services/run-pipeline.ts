@@ -21,6 +21,7 @@ import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { resolveModel } from "./org-models.ts";
+import { runPayerUserId } from "./model-providers/credential-chain.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -392,13 +393,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
   // with no resolvable model reports `null` and then fails downstream with
   // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
-  // model component costs nothing.
-  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
-  const credentialSourceForGate: "system" | "org" | null = gateModel
-    ? gateModel.isSystemModel
-      ? "system"
-      : "org"
-    : null;
+  // model component costs nothing. An unbound model (`credentialSource` null)
+  // is refused downstream by `requireBoundModel`.
+  const payerUserId = runPayerUserId({ actor, apiKeyId });
+  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null, payerUserId);
+  const credentialSourceForGate = gateModel?.credentialSource ?? null;
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
@@ -530,6 +529,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         orgId,
         spaceId,
         actor,
+        payerUserId,
         input: input ?? undefined,
         files,
         modelId,

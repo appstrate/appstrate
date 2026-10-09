@@ -134,6 +134,7 @@ describe("publish_file across every launch path", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      payerUserId: null,
       input: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });

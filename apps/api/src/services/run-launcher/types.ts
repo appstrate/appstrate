@@ -60,7 +60,7 @@ export interface AppstrateRunPlan {
 
   // --- LLM ---
   /**
-   * Resolved model + credential. `label`/`isSystemModel` are consumed by
+   * Resolved model + credential. `label`/`credentialSource` are consumed by
    * the caller for the run record; the sidecar re-pulls fresh OAuth tokens
    * from the credential row (`credentialId`) at request time. Passed
    * through here verbatim — the executor only reads the inference fields.

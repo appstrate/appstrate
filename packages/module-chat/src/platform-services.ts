@@ -52,12 +52,13 @@ export interface ChatPlatformDeps {
   /** Public origin (`APP_URL`) that pagination `Link` headers are rooted on. */
   publicOrigin: string;
   /**
-   * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
-   * unknown provider yields `{ subscription: false }` (llm-proxy-bound); an oauth2
-   * provider yields the real upstream binding + a fresh access token, or a
-   * `needsReconnection` signal when its credential is dead.
+   * Resolve the chosen model row (`presetId`) for a chat turn, for the session
+   * user `userId`: an API-key / unknown provider yields `{ subscription: false }`
+   * (llm-proxy-bound); an oauth2 provider yields the real upstream binding + a
+   * fresh access token from the user's own subscription, or a `needsReconnection`
+   * signal when its credential is dead.
    */
-  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
+  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
@@ -101,6 +102,8 @@ export interface ChatPlatformDeps {
     presetId: string;
     sessionId: string | null;
     subscription: boolean;
+    /** The session user, whose payer credentials the turn resolves against. */
+    userId: string;
   }): Promise<UsageRejection | null>;
   /**
    * The space's enforced skills, read with the platform's authority: a member
@@ -149,7 +152,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
     publicOrigin: ctx.appUrl,
-    resolveChatModel: (orgId, presetId) => ctx.services.resolveChatModel(orgId, presetId),
+    resolveChatModel: (orgId, presetId, userId) =>
+      ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),

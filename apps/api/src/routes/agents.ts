@@ -444,7 +444,7 @@ export function createAgentsRouter() {
       const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
-        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
         generation = validateGenerationOverride(generation, selectedModel, "generation");

@@ -252,13 +252,9 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "",
       });
-      const modelDbId = await createOrgModel(
-        ctx.orgId,
-        "Blank GPT",
-        "gpt-5.5",
-        ctx.user.id,
+      const modelDbId = await createOrgModel(ctx.orgId, "Blank GPT", "gpt-5.5", ctx.user.id, {
         credentialId,
-      );
+      });
       // First org model auto-defaults, but pin it explicitly so the test is
       // robust to that behavior changing.
       await setDefaultModel(ctx.orgId, modelDbId);
@@ -329,7 +325,7 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "sk-test-not-a-real-key",
       });
-      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, credentialId);
+      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, { credentialId });
     }
 
     it("echoes the org default's model_label and model_source 'org'", async () => {
@@ -427,7 +423,7 @@ describe("Runs API", () => {
         "Echo Subscription",
         "gpt-5.5",
         ctx.user.id,
-        credential.id,
+        { credentialId: credential.id },
       );
       await setDefaultModel(ctx.orgId, modelDbId);
 

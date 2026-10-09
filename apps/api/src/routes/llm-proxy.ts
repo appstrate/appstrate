@@ -67,6 +67,7 @@ import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { proxyStatusMarker } from "../lib/proxy-status.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
+import { runPayerOf } from "../services/model-providers/credential-chain.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
@@ -138,8 +139,9 @@ export function createRunLlmProxyRouter() {
         throw forbidden("This run's inference is not served by the platform LLM proxy");
       }
       const orgId = run.orgId;
+      const payerUserId = runPayerOf(run);
       return proxyAndLog(c, apiShape, limits, {
-        principal: { kind: "run", orgId },
+        principal: { kind: "run", orgId, payerUserId },
         runId,
         chatSessionId: null,
         presetId: run.modelId,

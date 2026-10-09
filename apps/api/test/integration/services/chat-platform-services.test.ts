@@ -15,12 +15,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
-import { chatSessions, llmUsage } from "@appstrate/db/schema";
+import { chatSessions, llmUsage, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import { encryptCredentials } from "@appstrate/connect";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
-import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
@@ -34,6 +36,9 @@ describe("resolveChatModel", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Restores the registry baseline, which registers `test-oauth`: this file
+    // does not import the app helper that seeds it at boot.
+    seedTestModelProviders();
     ctx = await createTestContext();
   });
 
@@ -61,31 +66,27 @@ describe("resolveChatModel", () => {
       "Masked Subscription",
       "test-model",
       ctx.user.id,
-      credentialId,
+      { credentialId },
       { aliased: true },
     );
 
-    const resolution = await resolveChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 
   it("resolves a non-aliased oauth-subscription row to the Pi chat engine binding", async () => {
     const credentialId = await seedOauthCredential();
-    const presetId = await createOrgModel(
-      ctx.orgId,
-      "Subscribed",
-      "test-model",
-      ctx.user.id,
+    const presetId = await createOrgModel(ctx.orgId, "Subscribed", "test-model", ctx.user.id, {
       credentialId,
-    );
+    });
 
-    const resolution = await resolveChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id);
     expect(resolution.subscription).toBe(true);
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.modelId).toBe("test-model");
       expect(resolution.model.accessToken).toBe("test-access");
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
-      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
+      const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
       expect(row?.pi_provider).toBe("openai");
     } else {
       throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
@@ -109,7 +110,9 @@ describe("resolveChatModel", () => {
         createdBy: ctx.user.id,
       });
       globalThis.fetch = (async () => tokenEndpoint()) as unknown as typeof fetch;
-      return createOrgModel(ctx.orgId, "Subscribed", "test-model", ctx.user.id, row.id);
+      return createOrgModel(ctx.orgId, "Subscribed", "test-model", ctx.user.id, {
+        credentialId: row.id,
+      });
     }
 
     it("resolves to a reconnect when the provider refuses the refresh token", async () => {
@@ -117,7 +120,7 @@ describe("resolveChatModel", () => {
         Response.json({ error: "invalid_grant" }, { status: 400 }),
       );
 
-      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
@@ -125,7 +128,7 @@ describe("resolveChatModel", () => {
       globalThis.fetch = (async () => {
         throw new Error("the token endpoint must not be called again");
       }) as unknown as typeof fetch;
-      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
@@ -134,14 +137,58 @@ describe("resolveChatModel", () => {
     it("throws, and asks for no reconnect, when the token endpoint is down", async () => {
       const presetId = await expiredSubscription(() => new Response("down", { status: 503 }));
 
-      await expect(resolveChatModel(ctx.orgId, presetId)).rejects.toThrow();
-      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
+      await expect(resolveChatModel(ctx.orgId, presetId, ctx.user.id)).rejects.toThrow();
+      const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
       expect(row?.needs_reconnection ?? false).toBe(false);
     });
   });
 
+  it("serves a member-held model from that member's own subscription, never another's", async () => {
+    const other = await createTestUser({ email: `member-${crypto.randomUUID()}@example.test` });
+    const [row] = await db
+      .insert(modelProviderCredentials)
+      .values({
+        orgId: ctx.orgId,
+        ownerUserId: other.id,
+        label: "Other's subscription",
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        credentialsEncrypted: encryptCredentials({
+          kind: "oauth",
+          accessToken: "other-token",
+          refreshToken: "other-refresh",
+          expiresAt: Date.now() + 3_600_000,
+          needsReconnection: false,
+        }),
+        createdBy: other.id,
+      })
+      .returning();
+    // Unbound: no org credential, each member brings their own subscription.
+    const [model] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        credentialId: null,
+        label: "Member subscription",
+        // A model the subscription's catalog serves: a personal credential only
+        // serves a model of its own provider family.
+        modelId: TEST_OAUTH_MODEL_ID,
+        enabled: true,
+      })
+      .returning();
+
+    await expect(resolveChatModel(ctx.orgId, model!.id, ctx.user.id)).rejects.toMatchObject({
+      status: 409,
+      code: "model_credential_required",
+    });
+    expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
+      subscription: true,
+      model: { accessToken: "other-token", credentialId: row!.id },
+    });
+  });
+
   it("returns { subscription: false } for an unknown preset", async () => {
-    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset");
+    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset", ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 });
@@ -179,6 +226,7 @@ describe("recordChatUsage — pricing provenance", () => {
       inputTokens: 1_000,
       outputTokens: 500,
       cost: { input: 3, output: 15, cacheRead: 0.3 },
+      credentialId: null,
       durationMs: 42,
       ...overrides,
     };

@@ -1460,8 +1460,10 @@ export interface PlatformServices {
    * access — this is the seam that resolves the credential + token server-side,
    * so the real subscription token never enters the module's own resolution
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
+   * `userId` is the session user: their own personal subscription serves the
+   * turn, and an org-wide model they hold no credential for is unbound.
    */
-  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
+  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
@@ -1549,6 +1551,8 @@ export interface PlatformServices {
     presetId: string;
     sessionId: string | null;
     subscription: boolean;
+    /** The session user: the payer whose personal credentials the turn may spend. */
+    userId: string;
   }): Promise<UsageRejection | null>;
   /**
    * Set (or clear) an organization's per-org file storage limit — the

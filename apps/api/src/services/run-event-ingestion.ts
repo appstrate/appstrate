@@ -158,6 +158,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       startedAt: runs.startedAt,
       versionRef: runs.versionRef,
       modelSource: runs.modelSource,
+      modelCredentialId: runs.modelCredentialId,
       inferenceRoute: runs.inferenceRoute,
       modelCost: runs.modelCost,
       integrationsUnbound: runs.integrationsUnbound,
@@ -538,6 +539,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         cost: terminalCost,
         usage: validatedUsage,
         modelSource: run.modelSource,
+        modelCredentialId: run.modelCredentialId,
         inferenceRoute: run.inferenceRoute,
         // Same kickoff snapshot the metric path uses, so the terminal write
         // classifies identically to every snapshot before it.
@@ -1097,6 +1099,7 @@ async function persistEventAndAdvance(
       persistRunEvent(tx, scope, run.id, event, {
         writeLedger: true,
         modelSource: run.modelSource,
+        modelCredentialId: run.modelCredentialId,
         inferenceRoute: run.inferenceRoute,
         modelCost: run.modelCost,
       }),

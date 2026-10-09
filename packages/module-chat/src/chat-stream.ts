@@ -474,8 +474,10 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveChatModel(orgId, chosen.id);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id);
   const isSubscription = subscription.subscription;
+  // The personal credential the turn spends, attributed on the usage ledger.
+  const credentialId = "model" in subscription ? subscription.model.credentialId : null;
 
   // Admission gate — EVERY turn. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
@@ -499,6 +501,7 @@ export async function handleChatStream(
     presetId: chosen.id,
     sessionId: meteringSessionId,
     subscription: isSubscription,
+    userId: user.id,
   });
   if (rejection) {
     const refused = usageRejectionResponse(rejection);
@@ -704,7 +707,7 @@ export async function handleChatStream(
         onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
-          void deps.recordChatUsage(record).catch((err) => {
+          void deps.recordChatUsage({ ...record, credentialId }).catch((err) => {
             logger.warn("chat usage metering failed", { err: String(err) });
           });
         },

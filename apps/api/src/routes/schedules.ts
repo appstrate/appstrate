@@ -497,6 +497,7 @@ export function createSchedulesRouter() {
             scope.orgId,
             agent.id,
             data.model_id_override ?? packageSettings.modelId,
+            null,
           ));
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
@@ -713,6 +714,7 @@ export function createSchedulesRouter() {
           scope.orgId,
           existing.packageId,
           effectiveModelOverride ?? packageSettings.modelId,
+          null,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {

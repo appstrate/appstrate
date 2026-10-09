@@ -52,6 +52,7 @@ import {
   internalError,
 } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { runPayerOf } from "../services/model-providers/credential-chain.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
@@ -348,7 +349,7 @@ export function createInternalRouter() {
     const { run } = await verifyRunToken(c);
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
-    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    await assertOAuthModelCredential(credentialId, run);
     return c.json(
       serializeOAuthTokenResponse(await resolveOAuthTokenForSidecar(credentialId, run.orgId)),
     );
@@ -358,7 +359,7 @@ export function createInternalRouter() {
     const { run } = await verifyRunToken(c);
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
-    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    await assertOAuthModelCredential(credentialId, run);
     return c.json(
       serializeOAuthTokenResponse(
         await forceRefreshOAuthModelProviderToken(credentialId, run.orgId),
@@ -854,33 +855,37 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *      ANY OAuth credential, so it is rejected outright — a leaked run
  *      token from such a run must not be able to enumerate the org's OAuth
  *      credentials.
- *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
- *   3. UUID well-formedness: malformed path params surface as 404 not 500.
+ *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
+ *   3. Holder: a personal credential (`owner_user_id` set) serves only its
+ *      owner's runs — the run's payer. Subscriptions are personal by rule.
+ *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
  * rejected upstream by `assertPlatformOriginOAuthAccess`; the null-pin
  * rejection here makes the surface fail-closed even without that guard.
  */
-async function assertOAuthModelCredential(
-  credentialId: string,
-  runOrgId: string,
-  pinnedCredentialId: string | null,
-): Promise<void> {
+type VerifiedRun = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+
+async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun): Promise<void> {
   // Fail closed: no pin ⇒ no OAuth credential access, ever. Narrowing the
   // pin to a non-null string HERE (instead of an `!== null &&` short-circuit
   // that silently skips the equality gate) means the lookup below can only
   // ever be keyed by the run's own pinned credential.
-  if (pinnedCredentialId === null) {
+  if (run.modelCredentialId === null) {
     throw forbidden("Run has no OAuth model provider credential pinned");
   }
-  const pinned: string = pinnedCredentialId;
+  const pinned: string = run.modelCredentialId;
   if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
-  let row: { orgId: string } | undefined;
+  const payerUserId = runPayerOf(run);
+  let row: { orgId: string; ownerUserId: string | null } | undefined;
   try {
     [row] = await db
-      .select({ orgId: modelProviderCredentials.orgId })
+      .select({
+        orgId: modelProviderCredentials.orgId,
+        ownerUserId: modelProviderCredentials.ownerUserId,
+      })
       .from(modelProviderCredentials)
       // Keyed by the (non-null) pin — equal to the requested credentialId by
       // the gate above, so the run can only ever read its own credential.
@@ -899,7 +904,10 @@ async function assertOAuthModelCredential(
   if (!row) {
     throw notFound(`OAuth model provider credential ${credentialId} not found`);
   }
-  if (row.orgId !== runOrgId) {
+  if (row.orgId !== run.orgId) {
     throw forbidden(`Credential ${credentialId} not in run org`);
+  }
+  if (row.ownerUserId !== null && row.ownerUserId !== payerUserId) {
+    throw forbidden(`Credential ${credentialId} is another member's`);
   }
 }

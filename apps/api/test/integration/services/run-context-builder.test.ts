@@ -231,6 +231,7 @@ describe("buildRunContext generation settings", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      payerUserId: null,
       input: {},
       modelId,
       generationConfig: stored,
