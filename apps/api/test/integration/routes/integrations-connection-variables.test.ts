@@ -14,7 +14,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedPlacedPackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
@@ -413,6 +413,8 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
   afterAll(() => forge.stop());
   beforeEach(async () => {
     await truncateAll();
+    // The connect rate limits are keyed per IP, shared with every file of the process.
+    await flushRedis();
     forge.registrations.length = 0;
     forge.tokenRequests.length = 0;
     forge.advertise.clear();
@@ -445,6 +447,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     const [client] = await db.select().from(integrationOauthClients);
     expect(client!.issuer).toBe(base);
     expect(client!.autoProvisioned).toBe(true);
+    expect(client!.spaceId).toBeNull();
 
     const callback = await authorize(redirect_url);
     expect(callback.pathname).toBe(`/api/integrations/callback/${tag}`);
@@ -454,6 +457,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     const [conn] = await db.select().from(integrationConnections);
     expect(conn!.variables).toEqual({ base_url: base });
     expect(conn!.clientRef).toBe(client!.id);
+    expect(conn).toMatchObject({ spaceId: null, originSpaceId: ctx.defaultSpaceId });
     expect(forge.tokenRequests[0]!.resource).toBe(`${base}/api/v4/mcp`);
     // AFPS §8.6: the refresh is a token request too, bound to the same resource.
     expect(conn!.oauthResource).toBe(`${base}/api/v4/mcp`);
@@ -477,6 +481,26 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(clients.map((c) => c.issuer).sort()).toEqual([base, otherBase].sort());
     expect(new Set(clients.map((c) => c.redirectUri)).size).toBe(2);
     expect(forge.registrations).toHaveLength(2);
+  });
+
+  it("registers a server's client once for the org: another space reuses it", async () => {
+    const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+    await seedPlacedPackage(spaceB.id, "@myorg/forge");
+    const connect = (spaceId: string) =>
+      app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+        method: "POST",
+        headers: {
+          ...authHeaders({ ...ctx, defaultSpaceId: spaceId }),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ variables: { base_url: base } }),
+      });
+    expect((await connect(ctx.defaultSpaceId)).status).toBe(200);
+    expect((await connect(spaceB.id)).status).toBe(200);
+    expect(forge.registrations).toHaveLength(1);
+    const clients = await db.select().from(integrationOauthClients);
+    expect(clients).toHaveLength(1);
+    expect(clients[0]).toMatchObject({ spaceId: null, issuer: base });
   });
 
   it("refuses a response arriving at the shared callback, or carrying another iss", async () => {
@@ -610,6 +634,18 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(forge.registrations).toHaveLength(1);
   });
 
+  /** Registered and last used past every OAuth state's lifetime. */
+  const age = () =>
+    db
+      .update(integrationOauthClients)
+      .set({
+        createdAt: new Date(Date.now() - 11 * 60_000),
+        updatedAt: new Date(Date.now() - 11 * 60_000),
+      })
+      .where(eq(integrationOauthClients.integrationId, "@myorg/forge"));
+  const issuers = async () =>
+    (await db.select().from(integrationOauthClients)).map((c) => c.issuer).sort();
+
   it("drops the clients of servers no connection uses once no flow can still need them", async () => {
     const complete = async (baseUrl: string) => {
       const { res } = await beginHosted(baseUrl);
@@ -617,13 +653,6 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       const callback = await authorize(redirect_url);
       expect((await app.request(callback.pathname + callback.search)).status).toBe(200);
     };
-    const age = () =>
-      db
-        .update(integrationOauthClients)
-        .set({ createdAt: new Date(Date.now() - 11 * 60_000) })
-        .where(eq(integrationOauthClients.integrationId, "@myorg/forge"));
-    const issuers = async () =>
-      (await db.select().from(integrationOauthClients)).map((c) => c.issuer).sort();
 
     expect((await beginHosted(base)).res.status).toBe(200);
     await age();
@@ -633,6 +662,14 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     await complete(otherBase);
     await age();
     expect((await beginHosted(base)).res.status).toBe(200);
+    expect(await issuers()).toEqual([base, otherBase].sort());
+  });
+
+  it("keeps a server's client a flow just reused, however old", async () => {
+    expect((await beginHosted(base)).res.status).toBe(200);
+    await age();
+    expect((await beginHosted(base)).res.status).toBe(200);
+    expect((await beginHosted(otherBase)).res.status).toBe(200);
     expect(await issuers()).toEqual([base, otherBase].sort());
   });
 

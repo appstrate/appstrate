@@ -122,7 +122,9 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-readiness",
-      spaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
@@ -150,6 +152,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       actor: { type: "user", id: ctx.user.id },
       canConnect: true,
       canConfigureIntegrations: true,
+      wholeReach: true,
       // The selector is the ROUTER's decision now, and the service takes it as
       // given. `draft` is what the route hands over for a caller who may write
       // the agent — which is this fixture's author.
@@ -200,6 +203,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       actor: { type: "user", id: ctx.user.id } as const,
       canConnect: true,
       canConfigureIntegrations: true,
+      wholeReach: true,
     };
 
     // `draft` still reads the working copy — one declared integration, and the
@@ -234,7 +238,9 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
         integrationId: INTEG,
         authKey: "primary",
         accountId: "acct-readiness-full",
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
         scopesGranted: ["read", "write"],
@@ -255,6 +261,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       actor: { type: "user", id: ctx.user.id },
       canConnect: true,
       canConfigureIntegrations: true,
+      wholeReach: true,
       version: "draft",
     });
 

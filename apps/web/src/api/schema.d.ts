@@ -1686,7 +1686,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
+         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and org-scoped ones unless the space's default OAuth client for their auth is a manual one of its own, except in the space they were connected from), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -1711,8 +1711,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Unsharing a shared connection disables, in the same transaction, every enabled schedule of another actor than its owner whose `connection_overrides` name it (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`. Scopes are not edited here: for an agent that needs more scopes, create a new connection with them rather than reconnecting a shared one, which widens every agent that uses it.
+         * Rename an integration connection and/or set the spaces it is shared into
+         * @description The owner may rename the connection and set the WHOLE set of spaces it is shared into (`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` in the space the request is made from) may rename a space-scoped connection of that space, and withdraw any connection from that space by sending the projection it reads without it (`[]`); nothing else. A connection may be shared into a space of its org it serves: an org-scoped one into any space but one whose default OAuth client for the integration is its own (unless connected from there), a space-scoped one only into its own space. Every target space must still be reached by the owning member, an added one takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay untouched, and it renames only a connection scoped to it. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 `connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Removing a space disables, in the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per owner among the connections of the integration sharing its scope, compared verbatim: renaming to one another holds is refused with 409 `connection_label_taken`. Each space added or removed is audited on its own (`integration.connection.share_added` / `share_removed`). Scopes are not edited here: for an agent that needs more scopes, create a new connection with them rather than reconnecting a shared one, which widens every agent that uses it.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -1745,17 +1745,17 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get the space default connection for this integration
+         * Get the space-wide default connection for this integration
          * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Either way the set binds whole: a member that is no longer reachable fails the run with `pinned_connection_unavailable` rather than falling through. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
-         * Set the space default connection for this integration (admin)
+         * Set the space-wide default connection for this integration (admin)
          * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one. Every consuming agent gets the default's scopes: bind an agent that needs more to its own connection rather than upgrading a default one — a member pin overrides a soft default, and only an admin pin overrides an enforced one.
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
-        /** Remove the space default connection (admin) */
+        /** Remove the space-wide default connection (admin) */
         delete: operations["deleteIntegrationOrgDefault"];
         options?: never;
         head?: never;
@@ -1797,7 +1797,7 @@ export interface paths {
         put?: never;
         /**
          * Promote a space OAuth client to the org level
-         * @description Moves one of this space's custom clients to the org level (`spaceId: null`), inherited by every space of the org. It keeps its id and secret, so the connections it minted keep working; it becomes the org default when the org has none. Auto-provisioned (DCR/CIMD) clients stay per space (400). Requires both `integrations:configure` and `org-integrations:configure`, which are never granted to an API key.
+         * @description Moves one of this space's custom clients to the org level (`spaceId: null`), inherited by every space of the org. It keeps its id and secret, so the connections it minted keep working; it becomes the org default when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, unless the org already holds the auto-provisioned client of the same authorization server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and `org-integrations:configure`, which are never granted to an API key.
          */
         post: operations["promoteIntegrationOAuthClient"];
         delete?: never;
@@ -1832,7 +1832,7 @@ export interface paths {
         };
         get?: never;
         /**
-         * Pin a set of admin-shared connections to an agent for all members (admin)
+         * Pin a set of shared connections to an agent for all members of the space (admin)
          * @description Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.
          */
         put: operations["upsertIntegrationPin"];
@@ -2032,7 +2032,7 @@ export interface paths {
         };
         /**
          * List the caller's connections across every org/space
-         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For the user's own credential (cookie session, CLI or instance token) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For a delegated or end-user credential the list is scoped to its bound organization, and to its space when it pins one.
+         * @description Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For the user's own credential (cookie session, CLI or instance token) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For a delegated or end-user credential the list is scoped to its bound organization, and to its space when it pins one — where a connection's shares, origin space and reuse count show that space only.
          */
         get: operations["listMyConnections"];
         put?: never;
@@ -2055,12 +2055,16 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins keep the id, and their next run fails (`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Another actor's enabled schedules naming the connection are disabled in the same transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: while the connection stays unreachable, re-enabling one requires a new choice. Delete-impact counts them (`other_schedules_disabled_count`). Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins keep the id, and their next run fails (`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Another actor's enabled schedules naming the connection are disabled in the same transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: while the connection stays unreachable, re-enabling one requires a new choice. Delete-impact counts them (`other_schedules_disabled_count`). Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise); a credential bound to a space deletes only a connection scoped to it (403 for one serving the whole organization).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Rename one of the caller's own connections and/or set the spaces it is shared into
+         * @description The owner's door to the edit `PATCH /api/integrations/{packageId}/connections/{connectionId}` makes, wherever the connection lives: an org-scoped connection belongs to no space, so no `X-Space-Id` addresses it. Owner only — a governor withdraws a connection from a space through the space door. With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) are reachable. The owner may rename the connection and set the WHOLE set of spaces it is shared into (`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` in the space the request is made from) may rename a space-scoped connection of that space, and withdraw any connection from that space by sending the projection it reads without it (`[]`); nothing else. A connection may be shared into a space of its org it serves: an org-scoped one into any space but one whose default OAuth client for the integration is its own (unless connected from there), a space-scoped one only into its own space. Every target space must still be reached by the owning member, an added one takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay untouched, and it renames only a connection scoped to it. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 `connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Removing a space disables, in the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per owner among the connections of the integration sharing its scope, compared verbatim: renaming to one another holds is refused with 409 `connection_label_taken`. Each space added or removed is audited on its own (`integration.connection.share_added` / `share_removed`). Scopes are not edited here: for an agent that needs more scopes, create a new connection with them rather than reconnecting a shared one, which widens every agent that uses it.
+         */
+        patch: operations["updateMyConnection"];
         trace?: never;
     };
     "/api/me/connections/{connectionId}/delete-impact": {
@@ -2072,7 +2076,7 @@ export interface paths {
         };
         /**
          * The caller's pins and schedules a connection delete would rewrite
-         * @description Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's schedules inside it are listed, though the delete also rewrites the owner's schedules outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.
+         * @description Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's pins and schedules inside it are listed, though the delete also rewrites those outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.
          */
         get: operations["getMyConnectionDeleteImpact"];
         put?: never;
@@ -2112,7 +2116,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -2776,7 +2780,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) have an org tier; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -2818,7 +2822,7 @@ export interface paths {
         put?: never;
         /**
          * Register an org-level OAuth client for an integration auth
-         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose clients are per space. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose org-level client the platform registers itself at the first connect from any space. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         post: operations["createOrgIntegrationOAuthClient"];
         delete?: never;
@@ -4024,7 +4028,7 @@ export interface paths {
          *
          *     Channel selection: pass `channels=` with a comma-separated subset (e.g. `channels=run_update,connection_update`) to receive only those frames. The filter is applied server-side before serialization. Omit it to receive every channel the caller may receive. Note that dropping `run_log` is what keeps a dashboard-wide stream off the per-log firehose.
          *
-         *     Channel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the caller's own rows: a session always receives it, an API key needs `integrations:read`. A channel the caller may not receive is dropped from the subscription; the stream is refused with 403 only when none of the requested channels (every channel, when `channels` is omitted) remains.
+         *     Channel access: `run_update`, `run_log` and `run_metric` need `runs:read` or `runs:read-all` in the space (for an API key, among its scopes). `chat_session_update` needs `chat:read` in the space, as every `/api/chat` route does; an API key never holds it. `connection_update` carries only the caller's own rows — those of the stream's space, and the org-scoped ones of its org (`spaceId: null`) — a session always receives it, an API key needs `integrations:read`. A channel the caller may not receive is dropped from the subscription; the stream is refused with 403 only when none of the requested channels (every channel, when `channels` is omitted) remains.
          *
          *     Run visibility: `run_update`, `run_log` and `run_metric` carry only the runs the caller may read — every run in the space with `runs:read-all`, otherwise the runs the caller launched. The single-run stream refuses a run the caller may not read with 404, the same answer as `GET /api/runs/{id}`.
          */
@@ -5847,7 +5851,15 @@ export interface components {
                 owner_end_user_id: string | null;
                 owner_name: string | null;
                 scopes_granted: string[];
-                shared_with_org: boolean;
+                /**
+                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                 * @enum {string}
+                 */
+                scope: "org" | "space";
+                /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                shared_space_ids: string[];
+                /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                origin_space_id: string | null;
                 needs_reconnection: boolean;
                 missing_scopes: string[];
                 is_own: boolean;
@@ -12762,16 +12774,24 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
-                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
                             /**
-                             * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                             * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                              * @enum {string|null}
                              */
                             locked_by?: "admin_pin" | "org_default" | null;
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                             label: string;
-                            shared_with_org?: boolean;
+                            /**
+                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                             * @enum {string}
+                             */
+                            scope: "org" | "space";
+                            /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                            shared_space_ids: string[];
+                            /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                            origin_space_id: string | null;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -12913,16 +12933,24 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
-                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
                                 /**
-                                 * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                                 * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                                  * @enum {string|null}
                                  */
                                 locked_by?: "admin_pin" | "org_default" | null;
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                                 label: string;
-                                shared_with_org?: boolean;
+                                /**
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                                 * @enum {string}
+                                 */
+                                scope: "org" | "space";
+                                /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                                shared_space_ids: string[];
+                                /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                                origin_space_id: string | null;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13092,16 +13120,24 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
-                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
                         /**
-                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                          * @enum {string|null}
                          */
                         locked_by?: "admin_pin" | "org_default" | null;
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                         label: string;
-                        shared_with_org?: boolean;
+                        /**
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                         * @enum {string}
+                         */
+                        scope: "org" | "space";
+                        /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                        shared_space_ids: string[];
+                        /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                        origin_space_id: string | null;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13464,16 +13500,24 @@ export interface operations {
                             /** @enum {string} */
                             owner_type: "user" | "end_user";
                             owner_id: string;
-                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                            /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                             owner_name?: string | null;
                             /**
-                             * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                             * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                              * @enum {string|null}
                              */
                             locked_by?: "admin_pin" | "org_default" | null;
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                             label: string;
-                            shared_with_org?: boolean;
+                            /**
+                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                             * @enum {string}
+                             */
+                            scope: "org" | "space";
+                            /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                            shared_space_ids: string[];
+                            /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                            origin_space_id: string | null;
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13512,10 +13556,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`. */
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of the same owner holds with 409 `connection_label_taken`. */
                     label?: string;
-                    /** @description `true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`. */
-                    shared_with_org?: boolean;
+                    /** @description The WHOLE set of spaces whose members may bind this connection by an explicit pick; this write replaces it. `[]` shares it nowhere. */
+                    shared_space_ids?: string[];
                 };
             };
         };
@@ -13544,16 +13588,24 @@ export interface operations {
                         /** @enum {string} */
                         owner_type: "user" | "end_user";
                         owner_id: string;
-                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                         owner_name?: string | null;
                         /**
-                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                          * @enum {string|null}
                          */
                         locked_by?: "admin_pin" | "org_default" | null;
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                         label: string;
-                        shared_with_org?: boolean;
+                        /**
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                         * @enum {string}
+                         */
+                        scope: "org" | "space";
+                        /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                        shared_space_ids: string[];
+                        /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                        origin_space_id: string | null;
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13567,10 +13619,13 @@ export interface operations {
                     };
                 };
             };
+            /** @description Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`). */
             400: components["responses"]["ValidationError"];
+            /** @description The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`). */
             403: components["responses"]["Forbidden"];
+            /** @description No connection with this id: of the caller and reaching this space, or scoped to or shared into it. */
             404: components["responses"]["NotFound"];
-            /** @description Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it once its owning member no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`) */
+            /** @description Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13720,7 +13775,7 @@ export interface operations {
             /** @description Refused: an empty set, more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed. */
+            /** @description A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed. */
             404: components["responses"]["NotFound"];
         };
     };
@@ -13925,6 +13980,17 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `auto_client_exists_at_org`: the client is auto-provisioned and the org already holds the auto-provisioned client of its authorization server */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listIntegrationPins: {
@@ -13983,7 +14049,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it. */
+                    /** @description The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration, reach this space and be shared into it by the member who owns it. */
                     connection_ids: string[];
                 };
             };
@@ -14003,7 +14069,7 @@ export interface operations {
             /** @description Refused: more than 20 ids, or a repeated id (compared case-insensitively). */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
+            /** @description A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed — or the agent is not active in this space. */
             404: components["responses"]["NotFound"];
         };
     };
@@ -14101,16 +14167,24 @@ export interface operations {
                                 /** @enum {string} */
                                 owner_type: "user" | "end_user";
                                 owner_id: string;
-                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own. */
+                                /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
                                 owner_name?: string | null;
                                 /**
-                                 * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`.
+                                 * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
                                  * @enum {string|null}
                                  */
                                 locked_by?: "admin_pin" | "org_default" | null;
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                                 label: string;
-                                shared_with_org?: boolean;
+                                /**
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                                 * @enum {string}
+                                 */
+                                scope: "org" | "space";
+                                /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                                shared_space_ids: string[];
+                                /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                                origin_space_id: string | null;
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -15246,9 +15320,19 @@ export interface operations {
                                 needs_reconnection: boolean;
                                 expiresAt: string | null;
                                 identity: string;
+                                /** @description Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one. */
                                 reused_by_agents: number;
                                 auth_key: string;
-                                shared_with_org: boolean;
+                                /**
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                                 * @enum {string}
+                                 */
+                                scope: "org" | "space";
+                                /** @description The spaces whose members may use it. */
+                                shared_spaces: {
+                                    id: string;
+                                    name: string;
+                                }[];
                                 /**
                                  * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.
                                  * @enum {string|null}
@@ -15258,10 +15342,16 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 };
+                                /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
                                 space: {
                                     id: string;
                                     name: string;
-                                };
+                                } | null;
+                                /** @description The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted. */
+                                origin_space: {
+                                    id: string;
+                                    name: string;
+                                } | null;
                             }[];
                         }[];
                         hasMore: boolean;
@@ -15290,7 +15380,104 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:disconnect`, or the credential is bound to a space and the connection serves the whole organization. */
+            403: components["responses"]["Forbidden"];
             /** @description Connection is named by an admin pin or an org default (`connection_pinned`) */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    updateMyConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of the same owner holds with 409 `connection_label_taken`. */
+                    label?: string;
+                    /** @description The WHOLE set of spaces whose members may bind this connection by an explicit pick; this write replaces it. `[]` shares it nowhere. */
+                    shared_space_ids?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Updated — returns the bare connection resource */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        integration_package_id: string;
+                        auth_key: string;
+                        account_id: string;
+                        identity_claims: {
+                            [key: string]: unknown;
+                        } | null;
+                        scopes_granted: string[];
+                        needs_reconnection: boolean;
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                        /** @enum {string} */
+                        owner_type: "user" | "end_user";
+                        owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
+                        /**
+                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
+                         * @enum {string|null}
+                         */
+                        locked_by?: "admin_pin" | "org_default" | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label: string;
+                        /**
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
+                         * @enum {string}
+                         */
+                        scope: "org" | "space";
+                        /** @description Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`. */
+                        shared_space_ids: string[];
+                        /** @description The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted. */
+                        origin_space_id: string | null;
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
+                        /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                        variables: {
+                            [key: string]: string;
+                        } | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
+                    };
+                };
+            };
+            /** @description Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`). */
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or a requested target — added or kept — blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`). */
+            403: components["responses"]["Forbidden"];
+            /** @description No connection with this id that the caller owns inside its credential's binding. */
+            404: components["responses"]["NotFound"];
+            /** @description Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`) */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

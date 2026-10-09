@@ -24,8 +24,11 @@ import {
   connectionLockHintKey,
   connectionRowGrants,
   isConnectionOwnedBy,
+  isSharedInSpace,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
+import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
+import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -46,8 +49,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 /**
  * Connected accounts for one auth, as a table. Empty → a muted line. Columns:
  * account (with inline rename), status (+ reconnect when stale), granted scopes,
- * org-share toggle, and a disconnect action. All mutations are unchanged from
- * the previous card layout — only the presentation moved to a table.
+ * scope and the spaces it is shared into, and a disconnect action.
  */
 export function ConnectionsTable({
   packageId,
@@ -132,29 +134,22 @@ function ConnectionTableRow({
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
-  const isShared = connection.shared_with_org === true;
-  // The list now returns org-shared connections owned by OTHER members, so
-  // every per-row control has to be gated on the same rule the API enforces —
-  // otherwise the button renders and the request comes back 403:
-  //   - delete  → `DELETE /api/me/connections/:id`, strictly owner-scoped
-  //               (`routes/me.ts`), no admin escape hatch by design;
-  //   - share   → owner-only, because sharing is the owner's consent
-  //               (`routes/integrations.ts`, `shared_with_org` branch);
-  //               UNsharing is also open to `integrations:configure`;
-  //   - rename  → owner OR org admin (same route, label branch).
+  const isShared = isSharedInSpace(connection, spaceId);
+  // The list holds connections other members share into the space: every control is gated on
+  // the rule the API enforces (`connectionRowGrants`), and delete on ownership alone
+  // (`DELETE /api/me/connections/:id` has no admin escape hatch by design).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
   // Rename, share and reconnect all write the connection, which guards on
   // `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  const { canRename, canToggleShare, shareLocked } = connectionRowGrants({
+  const { canRename, canEditShares, canUnshareHere } = connectionRowGrants({
     isOwn,
     isShared,
+    scope: connection.scope,
     canConnect,
     canConfigure: can("integrations:configure"),
-    locked: !!connection.locked_by,
   });
-  // An admin pin or the space default names the row: unsharing and deleting it
-  // are refused (409 `connection_pinned`) until it is removed from there.
+  // A pin or default names the row (in any space, for its owner): delete answers 409.
   const lockKey = connectionLockHintKey(connection.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
   const startEdit = () => {
@@ -316,43 +311,33 @@ function ConnectionTableRow({
           )}
         </TableCell>
 
-        {/* Org-share toggle — sharing is the owner's consent, a governor can only withdraw it */}
+        {/* Scope + share targets — sharing is the owner's consent, a governor can only withdraw it */}
         <TableCell>
-          {canToggleShare ? (
-            <DisabledReasonTooltip reason={shareLocked ? lockHint : null}>
-              <label
-                className="flex items-center gap-1.5 text-xs"
-                title={
-                  shareLocked
-                    ? undefined
-                    : t(
-                        isOwn
-                          ? "integration.connection.shareWithOrg.help"
-                          : "integration.connection.shareWithOrg.unshareHelp",
-                      )
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={isShared}
-                  disabled={updateConnection.isPending || shareLocked}
-                  onChange={(e) =>
-                    updateConnection.mutate({
-                      params: { path: { packageId, connectionId: connection.id } },
-                      body: { shared_with_org: e.target.checked },
-                    })
-                  }
-                  data-testid={`share-toggle-${connection.id}`}
-                />
-                {t("integration.connection.shareWithOrg.label")}
-              </label>
-            </DisabledReasonTooltip>
-          ) : (
-            <span className="text-muted-foreground text-xs">
-              {isShared ? t("connections.sharedBadge") : "—"}
-            </span>
-          )}
-          {lockHint && (isOwn || canToggleShare) && (
+          <div className="flex flex-col items-start gap-1.5">
+            <ConnectionScopeBadge
+              scope={connection.scope}
+              testId={`connection-scope-${connection.id}`}
+            />
+            <ConnectionShareEditor
+              connectionId={connection.id}
+              orgId={orgId}
+              scope={connection.scope}
+              sharedSpaceIds={connection.shared_space_ids}
+              ownSpaceId={connection.scope === "space" ? spaceId : null}
+              hereSpaceId={spaceId}
+              canEditShares={canEditShares}
+              canUnshareHere={canUnshareHere}
+              lockHint={lockHint}
+              pending={updateConnection.isPending}
+              onChange={(sharedSpaceIds) =>
+                updateConnection.mutate({
+                  params: { path: { packageId, connectionId: connection.id } },
+                  body: { shared_space_ids: sharedSpaceIds },
+                })
+              }
+            />
+          </div>
+          {lockHint && (isOwn || canUnshareHere) && (
             <p
               className="text-muted-foreground mt-1 max-w-[16rem] text-[0.65rem] whitespace-normal"
               data-testid={`connection-lock-reason-${connection.id}`}

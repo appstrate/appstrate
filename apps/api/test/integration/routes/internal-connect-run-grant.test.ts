@@ -168,6 +168,7 @@ describe("/internal/* — connect-run grant authorization", () => {
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

@@ -88,13 +88,15 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         integrationId: INTEG,
         authKey: over.authKey ?? "primary",
         accountId: `acct-${seq}`,
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         needsReconnection: over.dead ?? false,
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `conn-${seq}`,
       })
       .returning({ id: integrationConnections.id });
@@ -127,6 +129,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       actor: { type: "user", id: ctx.user.id },
       canConnect: true,
       canConfigureIntegrations: true,
+      wholeReach: true,
       version: "draft",
     });
     return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;

@@ -2,10 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import type { ConnectionChoice } from "../lib/connection-choice";
 import type { ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
+import { isSharedInSpace } from "./integration-connect/connection-ownership";
 import { ConnectionSetChecklist } from "./integration-detail/connection-set-checklist";
 
 /**
@@ -130,8 +132,9 @@ function StoredChoice({
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: visible } = useIntegrationConnections(integrationId);
+  const spaceId = useCurrentSpaceId();
   const labelOf = (id: string) =>
-    visible?.find((c) => c.id === id && c.shared_with_org)?.label ??
+    visible?.find((c) => c.id === id && isSharedInSpace(c, spaceId))?.label ??
     t("schedule.connectionOverrides.privateConnection");
   return (
     <div

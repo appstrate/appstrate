@@ -32,7 +32,12 @@ import {
   MAX_CONNECTIONS_PER_INTEGRATION,
   MISSING_INTEGRATION_CONNECTION_CODES,
 } from "@appstrate/core/integration";
-import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
+import {
+  connectionIdSetJsonSchema,
+  connectionScopeSchema,
+  originSpaceIdSchema,
+  sharedSpaceIdsSchema,
+} from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -2177,7 +2182,9 @@ export const schemas = {
             "owner_end_user_id",
             "owner_name",
             "scopes_granted",
-            "shared_with_org",
+            "scope",
+            "shared_space_ids",
+            "origin_space_id",
             "needs_reconnection",
             "missing_scopes",
             "is_own",
@@ -2195,7 +2202,9 @@ export const schemas = {
             owner_end_user_id: { type: ["string", "null"] },
             owner_name: { type: ["string", "null"] },
             scopes_granted: { type: "array", items: { type: "string" } },
-            shared_with_org: { type: "boolean" },
+            scope: connectionScopeSchema,
+            shared_space_ids: sharedSpaceIdsSchema,
+            origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },
             missing_scopes: { type: "array", items: { type: "string" } },
             is_own: { type: "boolean" },

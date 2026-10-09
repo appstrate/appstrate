@@ -16,7 +16,7 @@
  *   4. A delegated credential is capped by its scope ceiling: the read needs
  *      `integrations:read`, the writes `integrations:connect`.
  *
- * Service-layer behaviour (own vs other member's connection, sharedWithOrg
+ * Service-layer behaviour (own vs other member's connection, shared
  * fallback, the 6-layer cascade resolution) lives in
  * `services/integration-pins-service.test.ts` + `services/integration-
  * connection-resolver.test.ts`. This file pins the HTTP boundary only.
@@ -102,16 +102,18 @@ describe("/api/me/integration-pins", () => {
     userId: string | null,
     opts: { endUserId?: string; spaceId?: string; shared?: boolean } = {},
   ): Promise<string> {
+    const spaceId = opts.spaceId ?? ctx.defaultSpaceId;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${(userId ?? opts.endUserId)!.slice(0, 6)}`,
-        spaceId: opts.spaceId ?? ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId,
         userId,
         endUserId: opts.endUserId ?? null,
-        sharedWithOrg: opts.shared ?? false,
+        sharedSpaceIds: opts.shared ? [spaceId] : [],
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -855,7 +857,8 @@ describe("/api/me/integration-pins", () => {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(404);
+      // Same 204 as an unknown id: a probe learns nothing, and the row is untouched.
+      expect(del.status).toBe(204);
       expect(await readPins()).toEqual(pinsBefore);
       expect(await readSchedules()).toEqual(schedulesBefore);
     });
@@ -987,6 +990,44 @@ describe("/api/me/integration-pins", () => {
       });
       expect(del.status).toBe(409);
       expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
+    });
+
+    it("lists a key bound to a space only the pins of that space", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          accountId: "acct-org",
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: spaceB.id,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
+          scopesGranted: [],
+          label: "Org row",
+        })
+        .returning({ id: integrationConnections.id });
+      await db.insert(integrationPins).values(
+        [ctx.defaultSpaceId, spaceB.id].map((spaceId) => ({
+          spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: ctx.user.id,
+          connectionIds: [row!.id],
+        })),
+      );
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+
+      expect((await impactOf(row!.id)).pins).toHaveLength(2);
+      const bound = await impactOf(row!.id, { Authorization: `Bearer ${apiKey.rawKey}` });
+      expect(bound.pins).toHaveLength(1);
     });
 
     it("is empty for an id that is not a UUID", async () => {

@@ -63,7 +63,9 @@ function candidate(id: string, label: string): Candidate {
     owner_end_user_id: null,
     owner_name: "Moi",
     scopes_granted: [],
-    shared_with_org: false,
+    scope: "org",
+    shared_space_ids: [],
+    origin_space_id: null,
     needs_reconnection: false,
     missing_scopes: [],
     is_own: true,
@@ -687,6 +689,62 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     );
     expect(loading).toContain(`member-picker-${INTEGRATION}`);
     expect(loading).not.toContain(`member-pick-none-${INTEGRATION}`);
+  });
+});
+
+describe("PickerMenu — where a candidate comes from", () => {
+  const ORIGIN = "spc_origin";
+
+  /** The text of an element tree, without rendering it (its items need the menu's context). */
+  function textOf(node: ReactNode): string {
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (!isValidElement<{ children?: ReactNode }>(node)) return "";
+    return textOf(node.props.children);
+  }
+
+  function rowText(c: Candidate): string {
+    const qc = new QueryClient();
+    qc.setQueryData(READINESS_KEY, readiness(resolution({ candidates: [c] })));
+    // The current org's space listing, under the key `useSpaces` reads.
+    const spacesKey = $api.queryOptions("get", "/api/spaces", {
+      params: { header: { "X-Org-Id": undefined } },
+    }).queryKey;
+    qc.setQueryData(spacesKey, {
+      object: "list",
+      data: [{ id: ORIGIN, name: "Marketing", access: "member", personal: false }],
+      hasMore: false,
+    });
+    const pickers: Array<ConnectionPicker | null> = [];
+    render(<PickerProbe persistence={{ mode: "pin" }} onPicker={(p) => pickers.push(p)} />, {
+      queryClient: qc,
+    });
+    const trees: ReactNode[] = [];
+    render(<MenuProbe picker={pickers[0]!} onTree={(tree) => trees.push(tree)} />, {
+      queryClient: qc,
+    });
+    const row = propsOf(trees[0], `member-pick-option-${c.id}`);
+    if (!row) throw new Error("the candidate should be listed");
+    return textOf(row.children as ReactNode);
+  }
+
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+
+  it("tells the owner of an org-scoped row the space it was connected from", () => {
+    const own = { ...candidate(WEB, "web"), origin_space_id: ORIGIN };
+    expect(rowText(own)).toContain(t("connectedFrom", { space: "Marketing" }));
+  });
+
+  it("names the owner to anyone else, and on a space-scoped row", () => {
+    const foreign = { ...candidate(WEB, "web"), is_own: false, owner_name: "Alice" };
+    expect(rowText(foreign)).toContain(t("connectedBy", { owner: "Alice" }));
+    const spaceScoped = { ...candidate(WEB, "web"), scope: "space" as const };
+    expect(rowText(spaceScoped)).toContain(t("connectedBy", { owner: t("byYou") }));
+  });
+
+  it("falls back to the owner when the origin space is gone", () => {
+    expect(rowText(candidate(WEB, "web"))).toContain(t("connectedBy", { owner: t("byYou") }));
   });
 });
 

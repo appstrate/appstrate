@@ -55,7 +55,6 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
 import {
   seedProxyIntegration,
   seedProxyConnection,
@@ -127,11 +126,11 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     authKey: "api",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
-    sharedWithOrg: false,
   });
 }
 
@@ -525,6 +524,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       authKey: "api",
       accountId: "acct-2",
       label: "acct-2",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "second-token" } }),
@@ -810,7 +810,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
   let shared: string;
   let upstreamAuth: string[];
 
-  async function insertConnection(accountId: string, userId: string, sharedWithOrg = false) {
+  async function insertConnection(accountId: string, userId: string, shared = false) {
     const [row] = await db
       .insert(integrationConnections)
       .values({
@@ -818,13 +818,14 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         authKey: "api",
         accountId,
         label: accountId,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         credentialsEncrypted: encryptCredentialEnvelope({
           outputs: { api_key: `tok-${accountId}` },
         }),
         scopesGranted: [],
-        sharedWithOrg,
+        sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -1071,7 +1072,10 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     const runId = await runBinding([shared]);
     expect((await call({ "X-Run-Id": runId })).status).toBe(200);
 
-    await updateConnectionMetadata(shared, { sharedWithOrg: false });
+    await db
+      .update(integrationConnections)
+      .set({ sharedSpaceIds: [] })
+      .where(eq(integrationConnections.id, shared));
 
     expect((await call({ "X-Run-Id": runId })).status).toBe(404);
     expect(upstreamAuth).toEqual(["Bearer tok-shared"]);

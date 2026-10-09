@@ -53,7 +53,7 @@ import {
   type OAuthClientResolver,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
-import type { IntegrationOAuthClient } from "@appstrate/shared-types";
+import type { IntegrationConnection, IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -76,11 +76,14 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
+import { callerPermissionsInSpace } from "../lib/view-as.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
+  assertConnectionBelongsToActor,
   assertIsIntegration,
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
@@ -127,12 +130,12 @@ import {
   deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
-  loadConnectionOwnership,
   pinAudit,
   pinAuditResourceId,
   setBlockUserConnections,
-  updateConnectionMetadata,
+  updateConnection,
   upsertIntegrationPin,
+  type ConnectionViewer,
 } from "../services/integration-pins-service.ts";
 import {
   getOrgDefault,
@@ -259,11 +262,17 @@ export const updateConnectionSchema = z
         if (problem) ctx.addIssue({ code: "custom", message: `label ${problem}` });
       })
       .optional(),
-    shared_with_org: z.boolean().optional(),
+    shared_space_ids: z
+      .array(z.string().min(1).max(100))
+      .max(100)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: "must not repeat a space id",
+      })
+      .optional(),
   })
   .strict()
-  .refine((b) => b.label !== undefined || b.shared_with_org !== undefined, {
-    message: "at least one of label, shared_with_org must be provided",
+  .refine((b) => b.label !== undefined || b.shared_space_ids !== undefined, {
+    message: "at least one of label, shared_space_ids must be provided",
   });
 
 const oauthClientSchema = z
@@ -493,8 +502,8 @@ export function oauthClientHandlers(
  * has `block_user_connections=true` and the caller is not allowed to
  * govern this integration.
  *
- * Workflow this enables: an admin toggles the gate → connects → marks the
- * connection sharedWithOrg → members are funnelled onto the shared
+ * Workflow this enables: an admin toggles the gate → connects → shares the
+ * connection into the space → members are funnelled onto the shared
  * connection via the resolver's fallback path. Members trying to bypass
  * with their own connection get a clean 403 instead of a silent override.
  *
@@ -519,30 +528,6 @@ async function assertConnectionCreationAllowed(
       title: "Connection Blocked by Admin",
       detail: `Creation of personal connections to '${integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
     });
-  }
-}
-
-/**
- * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
- * connect flows honor an arbitrary connection id to renew a credential in
- * place, so before that id is trusted we must confirm it is a connection the
- * caller actually owns in THIS space. Without this a caller could pass
- * another actor's (or another space's) connection id and overwrite its
- * credentials through the single-writer persist path. A miss surfaces as a
- * plain 404 so cross-scope existence is never disclosed.
- */
-async function assertConnectionBelongsToActor(
-  connectionId: string,
-  spaceId: string,
-  actor: Actor,
-): Promise<void> {
-  const owner = await loadConnectionOwnership(connectionId);
-  const ownedByActor =
-    owner !== null &&
-    owner.spaceId === spaceId &&
-    (actor.type === "user" ? owner.userId === actor.id : owner.endUserId === actor.id);
-  if (!ownedByActor) {
-    throw notFound("Connection not found");
   }
 }
 
@@ -682,6 +667,7 @@ async function beginHostedOAuth(
       {
         ...ctx,
         ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
         ...(variables ? { variables } : {}),
       },
       { scopes, forceAccountSelect: claims.force_account_select ?? false },
@@ -842,6 +828,7 @@ export function createIntegrationsRouter() {
         integrationId: result.packageId,
         authKey: result.authKey,
         ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        ...(result.delegated ? { delegated: true } : {}),
         ...(result.variables ? { variables: result.variables } : {}),
       };
       const { audit } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
@@ -883,7 +870,7 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, actor);
+    const status = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
     return c.json(status);
   });
 
@@ -947,13 +934,14 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, importConnectionSchema);
       // A reconnect target must be the caller's own connection in this space —
       // otherwise the credential write below would overwrite an arbitrary
       // (possibly another actor's) connection (IDOR).
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -981,6 +969,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1008,12 +997,13 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // carried into the OAuth state and honored at callback-time write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -1042,6 +1032,7 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1068,12 +1059,13 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // minted into the hosted-connect capability token and honored at write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -1087,6 +1079,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
@@ -1297,6 +1290,7 @@ export function createIntegrationsRouter() {
         integrationId: claims.package_id,
         authKey: claims.auth_key,
         ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
       };
       const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1326,7 +1320,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
-      const items = await listIntegrationConnections(scope, packageId, actor);
+      const items = await listIntegrationConnections(scope, packageId, actor, isUserPrincipal(c));
       return c.json(listResponse(items));
     },
   );
@@ -1355,7 +1349,7 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap (#657).
-      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
       return c.json(detail);
     },
   );
@@ -1433,10 +1427,10 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Org default connection (cross-agent governance) ─────────────────────
+  // ─── Space default connection (cross-agent governance; `org_default` on the wire) ───
   // One default connection set per (space, integration) — the resolver
-  // baseline for every consuming agent (enforce → org-wide lock; soft →
-  // overridable by member pins). Admin-only.
+  // baseline for every consuming agent of the space (enforce → space-wide lock;
+  // soft → overridable by member pins). Admin-only.
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/default",
@@ -1501,70 +1495,22 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "connect"),
     async (c) => {
       const connectionId = c.req.param("connectionId")!;
-      const scope = getSpaceScope(c);
-      const actor = getActor(c);
       // `connectionId` hits a `uuid` column — a non-UUID raises PG `22P02` and
       // surfaces as a 500. Validate first and collapse to the same `notFound`
       // the missing-row branch returns (no information leak / no 500).
       if (!z.uuid().safeParse(connectionId).success) {
         throw notFound(`Connection '${connectionId}' not found`);
       }
-      const ownership = await loadConnectionOwnership(connectionId);
-      if (!ownership || ownership.spaceId !== scope.spaceId) {
-        throw notFound(`Connection '${connectionId}' not found`);
-      }
-      // The connection owner, or whoever governs this space's integrations,
-      // can edit metadata. Sharing is the owner's consent, so only they may
-      // set `shared_with_org: true`; a governor may withdraw it.
-      const isOwner =
-        (actor.type === "user" && ownership.userId === actor.id) ||
-        (actor.type === "end_user" && ownership.endUserId === actor.id);
-      if (!isOwner && !canConfigureIntegrations(c)) {
-        throw new ApiError({
-          status: 403,
-          code: "forbidden",
-          title: "Forbidden",
-          detail:
-            "Only the connection owner or a principal with integrations:configure can update this connection",
-        });
-      }
       const body = await readJsonBody(c, updateConnectionSchema);
-      if (body.shared_with_org === true && !isOwner) {
-        throw new ApiError({
-          status: 403,
-          code: "forbidden",
-          title: "Forbidden",
-          detail: "Only the connection owner can share it (shared_with_org: true)",
-        });
-      }
-      const { connection: updated, disabledScheduleIds } = await updateConnectionMetadata(
-        connectionId,
-        {
-          ...(body.label !== undefined ? { label: body.label } : {}),
-          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-        },
-      );
-      await removeScheduleJobs(disabledScheduleIds);
-      await recordAuditFromContext(c, {
-        action: "integration.connection.metadata.updated",
-        resourceType: "integration_connection",
-        resourceId: connectionId,
-        after: {
-          ...(body.label !== undefined ? { label: body.label } : {}),
-          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
-        },
-      });
-      // 200 + the bare connection resource — same serializer as the
-      // connections list / connect flows (#657), not a hand-built stub.
-      //
-      // An org admin may rename a connection they do not own, so this echo
-      // must honour the same rule the list does: sharing a connection consents
-      // to using it, not to publishing the owner's OIDC claim bag. Without the
-      // redaction a `PATCH {label}` reads back what
-      // `GET .../connections` deliberately withheld.
-      const serialized = serializeIntegrationConnection(updated);
-      return c.json(isOwner ? serialized : { ...serialized, identity_claims: null });
+      const { orgId, spaceId } = getSpaceScope(c);
+      const viewer = {
+        actor: getActor(c),
+        spaceId,
+        governs: canConfigureIntegrations(c),
+        // A delegated credential acts from this space only.
+        boundSpaceId: isUserPrincipal(c) ? null : spaceId,
+      };
+      return c.json(await applyConnectionUpdate(c, orgId, viewer, connectionId, body));
     },
   );
 
@@ -1583,4 +1529,51 @@ export function createIntegrationsRouter() {
  */
 function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
   return c.get("permissions")?.has("integrations:configure") ?? false;
+}
+
+/** Both connection-edit doors: apply, drop disabled schedules' jobs, audit, echo the row. */
+export async function applyConnectionUpdate(
+  c: Context<AppEnv>,
+  orgId: string,
+  viewer: Omit<ConnectionViewer, "permissionsIn">,
+  connectionId: string,
+  body: z.infer<typeof updateConnectionSchema>,
+): Promise<IntegrationConnection> {
+  const { connection, isOwner, added, removed, disabledScheduleIds } = await updateConnection({
+    connectionId,
+    viewer: {
+      ...viewer,
+      permissionsIn: (spaceId) => callerPermissionsInSpace(c, spaceId, orgId),
+    },
+    ...(body.label !== undefined ? { label: body.label } : {}),
+    ...(body.shared_space_ids !== undefined ? { sharedSpaceIds: body.shared_space_ids } : {}),
+  });
+  await removeScheduleJobs(disabledScheduleIds);
+  const audit = (action: string, after: AuditPayload, spaceIdOverride?: string) =>
+    recordAuditFromContext(c, {
+      action,
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      after,
+      // `/me/*` carries no org context: the audit names the connection's org.
+      orgIdOverride: connection.orgId,
+      ...(spaceIdOverride ? { spaceIdOverride } : {}),
+    });
+  // A share is recorded in the space it opens or closes.
+  for (const spaceId of added) {
+    await audit("integration.connection.share_added", { spaceId }, spaceId);
+  }
+  for (const spaceId of removed) {
+    await audit("integration.connection.share_removed", { spaceId }, spaceId);
+  }
+  if (body.label !== undefined || disabledScheduleIds.length > 0) {
+    await audit("integration.connection.metadata.updated", {
+      ...(body.label !== undefined ? { label: body.label } : {}),
+      ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+    });
+  }
+  return serializeIntegrationConnection(connection, {
+    owner: isOwner,
+    within: isOwner ? viewer.boundSpaceId : viewer.spaceId,
+  });
 }

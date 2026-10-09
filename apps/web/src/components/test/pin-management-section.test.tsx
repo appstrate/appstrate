@@ -6,18 +6,20 @@
  * none reads as such.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api } from "../../api/client.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
+import { spaceStore } from "../../stores/space-store.ts";
 import { PinManagementSection } from "../integration-detail/pin-management-section.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
 const GMAIL = "@acme/gmail";
-const header = { "X-Org-Id": undefined, "X-Space-Id": undefined };
+const SPACE = "spc_here";
+const header = { "X-Org-Id": undefined, "X-Space-Id": SPACE };
 const path = { packageId: GMAIL };
 
 const SHARED = {
@@ -25,7 +27,7 @@ const SHARED = {
   label: "Équipe",
   account_id: "team@acme.test",
   auth_key: "oauth",
-  shared_with_org: true,
+  shared_space_ids: [SPACE],
 };
 
 function renderSection(opts: {
@@ -61,7 +63,16 @@ function renderSection(opts: {
     { agent_package_id: "@acme/mailer", display_name: "Mailer" },
     { agent_package_id: "@acme/triage", display_name: "Triage" },
   ]);
-  return render(<PinManagementSection packageId={GMAIL} />, { queryClient: qc });
+  // SSR reads Zustand's hydration snapshot: only shared-into-this-space rows are pinnable.
+  const space = spyOn(spaceStore, "getInitialState").mockReturnValue({
+    ...spaceStore.getInitialState(),
+    id: SPACE,
+  });
+  try {
+    return render(<PinManagementSection packageId={GMAIL} />, { queryClient: qc });
+  } finally {
+    space.mockRestore();
+  }
 }
 
 const t = (key: string) => i18n.t(`settings:integration.admin.pinManagement.${key}`);

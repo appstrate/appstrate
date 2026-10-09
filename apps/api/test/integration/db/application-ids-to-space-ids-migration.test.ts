@@ -326,8 +326,8 @@ const SEED = `
   VALUES ('run_m0003_a', '${ORG}', '${APP_A}', '@m0003/agent', 'u_m0003_platform', 'success');
 
   INSERT INTO integration_connections
-    (integration_package_id, auth_key, account_id, label, space_id, user_id, credentials_encrypted)
-  VALUES ('@m0003/agent', 'primary', 'acct_m0003', 'acct_m0003', '${APP_A}',
+    (integration_package_id, auth_key, account_id, label, org_id, space_id, user_id, credentials_encrypted)
+  VALUES ('@m0003/agent', 'primary', 'acct_m0003', 'acct_m0003', '${ORG}', '${APP_A}',
           'u_m0003_platform', 'enc_m0003');
 
   INSERT INTO audit_events (org_id, space_id, actor_type, actor_id, action, resource_type, resource_id)
@@ -465,14 +465,16 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    // 21 FK columns + the constraint-less `audit_events.space_id`. Two of the
-    // 21 arrived with `0056_space_roles` (`space_members.space_id`,
+    // 22 FK columns + the constraint-less `audit_events.space_id`. Two of the
+    // 22 arrived with `0056_space_roles` (`space_members.space_id`,
     // `chat_sessions.space_id`), and two more with the personal-spaces work:
     // `packages.home_space_id` (`0063_packages_home_space`) and
-    // `package_shares.space_id` (`0065_package_shares`). 0003 derives the
-    // columns it rewrites FROM the FK set, so it covers them without an edit —
+    // `package_shares.space_id` (`0065_package_shares`); one more with
+    // `0086_connection_org_scope` (`integration_connections.origin_space_id`).
+    // 0003 derives the columns it rewrites FROM the FK set, so it covers them
+    // without an edit —
     // which is exactly the property this count guards.
-    expect(survivors.length).toBe(22);
+    expect(survivors.length).toBe(23);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
@@ -483,7 +485,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(21);
+    expect(before.length).toBe(22);
 
     await replayScript();
 
@@ -494,7 +496,9 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        ORDER BY 1, 2
     `);
     // Byte-for-byte the same set, same names, same delete actions — twenty of
-    // the twenty-one `c` (cascade), and exactly one `r` (restrict):
+    // the twenty-two `c` (cascade), exactly one `n` (set null):
+    // `integration_connections.origin_space_id`, a provenance pointer on an
+    // org-scoped row that outlives its origin space, and exactly one `r` (restrict):
     // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
     // would silently promote a package to the org catalogue on a space delete
     // and WIDEN who may write it. `audit_events` carries no such FK —
@@ -502,11 +506,16 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     // the space attribution of every historical audit row on each space
     // delete.
     //
-    // So the assertion names its one exception instead of allowing any
-    // non-cascade action: a resurrected `n`, or a second `r`, means either 0055
+    // So the assertion names its two exceptions instead of allowing any
+    // non-cascade action: a second `n`, or a second `r`, means either 0055
     // was reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
     expect(after.filter((r) => r.d !== "c")).toEqual([
+      {
+        child: "integration_connections",
+        conname: "integration_connections_origin_space_id_spaces_id_fk",
+        d: "n",
+      },
       { child: "packages", conname: "packages_home_space_id_spaces_id_fk", d: "r" },
     ]);
   });

@@ -103,8 +103,14 @@ import {
   JsonPathSyntaxError,
   parseJsonPath,
 } from "@appstrate/afps-shared/jsonpath";
-import type { ActorScope, OrgScope, SpaceScope } from "../lib/scope.ts";
-import { actorFromIds, actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
+import type { OrgScope, SpaceScope } from "../lib/scope.ts";
+import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.ts";
+import {
+  meConnectionAuthorityFilter,
+  ownRowInSpace,
+  usableInSpace,
+  type MeConnectionAuthority,
+} from "./connection-reach.ts";
 import {
   getPackageDisplayName,
   notEphemeralFilter,
@@ -261,6 +267,47 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
   credentialRevision: string;
 }
 
+// IDOR guard on a client-supplied reconnect target. Ownership, not usability:
+// `block_user_connections` never stops a renewal.
+export async function assertConnectionBelongsToActor(
+  connectionId: string,
+  spaceId: string,
+  actor: Actor,
+  delegated: boolean,
+): Promise<void> {
+  const [owned] = await db
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(and(eq(integrationConnections.id, connectionId), ownRowInSpace(spaceId, actor)))
+    .limit(1);
+  if (!owned) throw notFound("Connection not found");
+  if (delegated && owned.spaceId !== spaceId) throw delegatedReconnectRefused();
+}
+
+/** A delegated credential (API key, third-party token) acts from its space only. */
+function delegatedReconnectRefused(): ApiError {
+  return forbidden(
+    "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+  );
+}
+
+function scopeNarrowingRefused(remedy: string): ApiError {
+  return conflict(
+    "connection_scope_narrowing",
+    `This connection serves the whole organization, and the OAuth client that would reconnect it belongs to one space only. ${remedy}`,
+  );
+}
+
+/** Whether `connectionId` serves its whole org: its reconnect resolves no space client. */
+export async function isOrgScopedConnection(connectionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row !== undefined && row.spaceId === null;
+}
+
 /**
  * {@link loadAccessibleConnectionById}'s reach: the connection, of `integrationId`, in the
  * space, the actor's own or shared.
@@ -273,8 +320,7 @@ function reachableConnection(
   return and(
     eq(integrationConnections.id, connectionId),
     eq(integrationConnections.integrationId, integrationId),
-    eq(integrationConnections.spaceId, context.spaceId),
-    actorOrSharedFilter(context.actor, integrationConnections),
+    usableInSpace(context.spaceId, context.actor),
   )!;
 }
 
@@ -433,6 +479,7 @@ export async function selectAccessibleConnection(
     pins: [],
     orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
+    spaceId: context.spaceId,
     ...identity,
   });
   const error = errors[0];
@@ -471,8 +518,7 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
     .where(
       and(
         eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.spaceId, context.spaceId),
-        actorOrSharedFilter(context.actor, integrationConnections),
+        usableInSpace(context.spaceId, context.actor),
       ),
     )
     .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
@@ -869,17 +915,18 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
  * the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
   issuer: string | null,
+  executor: DbOrTx = db,
 ): Promise<IntegrationOAuthClientWithSecret | null> {
-  const [row] = await db
+  const [row] = await executor
     .select()
     .from(integrationOauthClients)
     .where(
       and(
-        tierAuthFilter(scope, packageId, authKey),
+        tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
         eq(integrationOauthClients.autoProvisioned, true),
         issuer === null
           ? isNull(integrationOauthClients.issuer)
@@ -1102,7 +1149,7 @@ export async function updateIntegrationOAuthClient(
   // (it would point the DCR find-or-create at hand-entered credentials).
   if (existing.autoProvisioned) {
     throw invalidRequest(
-      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
+      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1200,19 +1247,27 @@ function moveClientToOrg(
     if (!existing) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
-    if (existing.autoProvisioned) {
-      throw invalidRequest(
-        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot leave its space.`,
+    if (existing.spaceId) await lockSpacesForKeyShare(tx, [existing.spaceId]);
+    if (
+      existing.autoProvisioned &&
+      (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
+    ) {
+      throw conflict(
+        "auto_client_exists_at_org",
+        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
+    // An auto client of a server chosen per connection is picked by its issuer, never the default.
     const isDefault =
       mayDefault &&
+      !(existing.autoProvisioned && existing.issuer !== null) &&
       !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
     const [row] = await tx
       .update(integrationOauthClients)
       .set({ spaceId: null, isDefault, updatedAt: new Date() })
       .where(eq(integrationOauthClients.id, existing.id))
       .returning();
+    await widenConnectionsToOrgScope(tx, eq(integrationConnections.clientRef, existing.id));
     return projectClientWithSecret(row!);
   });
 }
@@ -1299,8 +1354,8 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
- * and are never served by a system or org entry. Throws the operator-facing error when
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) use the org's machine client
+ * and are never served by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
  * which client is the default is an admin action (`setDefaultIntegrationClient`,
@@ -1312,12 +1367,23 @@ export function resolveConnectClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   resolved: ResolvedOAuthConnect,
+  reconnectsOrgRow = false,
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
   const system = autoProvisioned ? null : getDefaultSystemIntegrationClient(integrationId, authKey);
-  const picked = pickDefault(resolved.spaceClients, resolved.orgClients, system);
+  // An org-scoped row is never narrowed onto a space client.
+  const picked = pickDefault(
+    reconnectsOrgRow ? [] : resolved.spaceClients,
+    resolved.orgClients,
+    system,
+  );
   if (picked) {
     return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
+  }
+  if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
+    throw scopeNarrowingRefused(
+      "Ask an administrator to register an organization OAuth client for it, or create a new connection here.",
+    );
   }
 
   if (autoProvisioned) {
@@ -1622,14 +1688,9 @@ export async function setDefaultIntegrationClient(
  * the caller falls back to the manifest's declared values.
  */
 export interface ResolvedOAuthConnect {
-  /**
-   * The space's custom (BYO-app) clients for this auth — N for an oauth2-classic
-   * auth, 0..1 for an auto-provisioned (DCR/CIMD) auth. Empty when none is
-   * registered and dynamic registration is either not opted-in or unavailable —
-   * the caller then falls back to the org and system clients.
-   */
+  /** The space's custom (BYO-app) clients — none for an auto-provisioned auth. */
   spaceClients: IntegrationOAuthClientWithSecret[];
-  /** The org's clients the space inherits — empty for an auto-provisioned auth. */
+  /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
   orgClients: IntegrationOAuthClientWithSecret[];
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
@@ -1820,8 +1881,8 @@ export async function ensureIntegrationOAuthClient(
   // on internal hosts. The token endpoint is fetched server-side at exchange,
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
-    spaceClients: existing ? [existing] : [],
-    orgClients: [],
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
       ? { authorizationEndpoint: endpoints.authorizationEndpoint }
@@ -1833,7 +1894,7 @@ export async function ensureIntegrationOAuthClient(
   // Client already registered — nothing to mint; just return discovered config.
   if (existing) return resolved;
 
-  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     redirectUri,
@@ -1946,16 +2007,23 @@ async function ensurePerConnectionOAuthClient(
   const issuer = endpoints.issuer;
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   const resolved: ResolvedOAuthConnect = {
-    spaceClients: existing ? [existing] : [],
-    orgClients: [],
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
     issuer,
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
   };
-  if (existing) return resolved;
+  if (existing) {
+    // A reuse renews the client's lease against {@link pruneUnusedPerConnectionClients}.
+    await db
+      .update(integrationOauthClients)
+      .set({ updatedAt: new Date() })
+      .where(eq(integrationOauthClients.id, existing.id));
+    return resolved;
+  }
   await pruneUnusedPerConnectionClients(scope, packageId, authKey);
-  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     redirectUri: integrationCallbackUrlFor(issuer),
@@ -1965,20 +2033,20 @@ async function ensurePerConnectionOAuthClient(
 }
 
 /**
- * Delete the per-connection-server clients of this auth that minted no connection: whoever opens a
- * connect flow chooses the server. One younger than an OAuth state may still await its callback.
+ * Delete the org's per-connection-server clients of this auth that minted no connection: whoever
+ * opens a connect flow chooses the server. One used within an OAuth state's lifetime may await it.
  */
 async function pruneUnusedPerConnectionClients(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
 ): Promise<void> {
   await db.delete(integrationOauthClients).where(
     and(
-      tierAuthFilter(scope, packageId, authKey),
+      tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
       eq(integrationOauthClients.autoProvisioned, true),
       isNotNull(integrationOauthClients.issuer),
-      lt(integrationOauthClients.createdAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
+      lt(integrationOauthClients.updatedAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
       notExists(
         db
           .select({ id: integrationConnections.id })
@@ -1994,7 +2062,7 @@ async function pruneUnusedPerConnectionClients(
  * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
  */
 async function registerAutoProvisionedClient(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
   auth: AfpsManifestAuth,
@@ -2051,9 +2119,9 @@ async function registerAutoProvisionedClient(
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (space, package, authKey, issuer).
-  const racedClient = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
-  if (racedClient) return { ...resolved, spaceClients: [racedClient] };
+  // registered a client for the same (org, package, authKey, issuer).
+  const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
+  if (racedClient) return { ...resolved, orgClients: [racedClient] };
 
   const host = (() => {
     try {
@@ -2143,7 +2211,7 @@ async function registerAutoProvisionedClient(
     let client: IntegrationOAuthClientWithSecret;
     try {
       client = await createIntegrationOAuthClient(
-        scope,
+        org,
         packageId,
         authKey,
         {
@@ -2160,26 +2228,22 @@ async function registerAutoProvisionedClient(
         { autoProvisioned: true, issuer },
       );
     } catch (insertErr) {
-      // Concurrent auto-DCR: a parallel Connect for the same (space, package,
+      // Concurrent auto-DCR: a parallel Connect for the same (org, package,
       // authKey, issuer) registered its client between our `racedClient` re-check above
       // and this insert. The partial unique `idx_ioc_one_auto` rejects the
       // second auto-provisioned row (Postgres 23505) — catch it and re-select
       // the winner instead of surfacing a 500. Our own upstream registration is
       // abandoned (harmless: an unused DCR client), the connection proceeds on
       // the winning client.
-      if (
-        insertErr instanceof Error &&
-        "code" in insertErr &&
-        (insertErr as { code: string }).code === "23505"
-      ) {
-        const winner = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
+      if (isUniqueViolation(insertErr)) {
+        const winner = await getAutoProvisionedClient(org, packageId, authKey, issuer);
         if (winner) {
           logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
             packageId,
             authKey,
             clientId: winner.client_id,
           });
-          return { ...resolved, spaceClients: [winner] };
+          return { ...resolved, orgClients: [winner] };
         }
       }
       throw insertErr;
@@ -2190,7 +2254,7 @@ async function registerAutoProvisionedClient(
       clientId: registration.clientId,
       ...(issuer ? { issuer } : {}),
     });
-    return { ...resolved, spaceClients: [client] };
+    return { ...resolved, orgClients: [client] };
   } catch (err) {
     if (err instanceof DynamicClientRegistrationError) {
       logger.warn("auto-DCR: dynamic client registration failed", {
@@ -2261,11 +2325,15 @@ export async function deleteIntegrationOAuthClient(
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
-    : inArray(
-        integrationConnections.spaceId,
-        db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, owner.orgId)),
-      );
+    : eq(integrationConnections.orgId, owner.orgId);
   return db.transaction(async (tx) => {
+    // The client, then its rows — the order a connect and a promote take.
+    const [client] = await tx
+      .select({ id: integrationOauthClients.id })
+      .from(integrationOauthClients)
+      .where(clientByIdFilter(owner, packageId, clientId))
+      .for("update");
+    if (!client) throw notFound(`OAuth client '${clientId}' not found`);
     // Locked as read, in id order: the rows checked below are exactly the rows deleted.
     const minted = await tx
       .select({ id: integrationConnections.id })
@@ -2280,11 +2348,8 @@ export async function deleteIntegrationOAuthClient(
     );
     const [deleted] = await tx
       .delete(integrationOauthClients)
-      .where(clientByIdFilter(owner, packageId, clientId))
+      .where(eq(integrationOauthClients.id, client.id))
       .returning();
-    if (!deleted) {
-      throw notFound(`OAuth client '${clientId}' not found`);
-    }
     // Cascade: every connection pinned to this client is now dead — the
     // client_id/secret that minted its tokens is gone, so it can never refresh
     // again (resolveIntegrationClientById → null → needs_reconnection forever).
@@ -2342,7 +2407,7 @@ export async function deleteIntegrationOAuthClient(
       disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
     }
     return {
-      client: toPublicClient(projectClientWithSecret(deleted)),
+      client: toPublicClient(projectClientWithSecret(deleted!)),
       deletedConnections: deletedConns.length,
       disabledScheduleIds,
     };
@@ -2519,6 +2584,8 @@ interface StoreConnectionInput {
   /** See {@link PersistCredentialInput}. */
   variables?: Record<string, string> | null;
   oauthResource?: string;
+  /** See {@link PersistTarget}. */
+  delegated?: boolean;
 }
 
 /**
@@ -2527,7 +2594,7 @@ interface StoreConnectionInput {
  *
  *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
  *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
- *                      WHERE (id + spaceId + actor identity + the
+ *                      WHERE (id + the actor's own row reaching the space + the
  *                      (packageId, authKey) the credentials belong to); throws
  *                      `notFound` when the row isn't the caller's OR belongs to
  *                      a different integration/auth (a caller-supplied id can
@@ -2539,7 +2606,13 @@ interface StoreConnectionInput {
  *                      gone or was reconnected meanwhile.
  */
 export type PersistTarget =
-  | { kind: "insert"; scope: SpaceScope; actor: Actor }
+  | {
+      kind: "insert";
+      scope: SpaceScope;
+      actor: Actor;
+      /** Written by a delegated credential (API key, third-party token): scoped to the space. */
+      delegated?: boolean;
+    }
   | {
       kind: "update-owned";
       scope: SpaceScope;
@@ -2549,6 +2622,8 @@ export type PersistTarget =
        * the WHERE so a mismatched `connectionId` matches zero rows. */
       packageId: string;
       authKey: string;
+      /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
+      delegated?: boolean;
     }
   | {
       kind: "update-by-id";
@@ -2570,7 +2645,7 @@ export type PersistTarget =
  *   - `accountId`, `identityClaims`, `scopesGranted` are written ONLY when
  *     provided (`undefined` = leave untouched). The refresh write-back relies
  *     on this: it must not clobber the identity, nor — when the IdP omits
- *     `scope` — the scope high-water-mark.
+ *     `scope` — the stored grant.
  */
 interface PersistCredentialInput {
   credentials: Record<string, unknown>;
@@ -2606,37 +2681,149 @@ interface PersistCredentialInput {
   oauthResource?: string;
 }
 
-/**
- * Serialise the label writes of one (space, integration) — an insert picking a free label and a
- * rename — so a pick cannot be taken between its read and its write.
- */
-export async function lockConnectionLabels(
-  tx: Tx,
-  spaceId: string,
-  integrationId: string,
-): Promise<void> {
-  const key = `ic_label:${spaceId}:${integrationId}`;
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
+/** `idx_integration_conn_owner_label`'s key; `spaceId` `null` is org scope. */
+export interface ConnectionLabelKey {
+  orgId: string;
+  spaceId: string | null;
+  integrationId: string;
+  ownerId: string;
 }
 
-/** Call under {@link lockConnectionLabels}. */
-async function firstFreeLabel(
-  tx: Tx,
-  spaceId: string,
-  integrationId: string,
-  label: string,
-): Promise<string> {
+function labelLockKey(key: ConnectionLabelKey): string {
+  return `ic_label:${key.orgId}:${key.spaceId ?? ""}:${key.integrationId}:${key.ownerId}`;
+}
+
+function labelKeyFilter(key: ConnectionLabelKey): SQL {
+  const c = integrationConnections;
+  return and(
+    eq(c.orgId, key.orgId),
+    key.spaceId === null ? isNull(c.spaceId) : eq(c.spaceId, key.spaceId),
+    eq(c.integrationId, key.integrationId),
+    sql`coalesce(${c.userId}, ${c.endUserId}) = ${key.ownerId}`,
+  )!;
+}
+
+/**
+ * Serialise the label writes (insert, rename, widening) of each key, in {@link labelLockKey} order,
+ * so a pick cannot be taken between its read and its write.
+ */
+export async function lockLabelKeys(tx: Tx, keys: ConnectionLabelKey[]): Promise<void> {
+  for (const lockKey of [...new Set(keys.map(labelLockKey))].sort()) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+  }
+}
+
+async function takenLabels(tx: Tx, key: ConnectionLabelKey): Promise<string[]> {
   const rows = await tx
     .select({ label: integrationConnections.label })
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.spaceId, spaceId),
-        eq(integrationConnections.integrationId, integrationId),
-      ),
-    );
-  const taken = rows.map((row) => row.label);
-  return dedupeLabel(label, taken, { maxLength: CONNECTION_LABEL_MAX });
+    .where(labelKeyFilter(key));
+  return rows.map((row) => row.label);
+}
+
+/** Call under {@link lockLabelKeys}. */
+async function firstFreeLabel(tx: Tx, key: ConnectionLabelKey, label: string): Promise<string> {
+  return dedupeLabel(label, await takenLabels(tx, key), { maxLength: CONNECTION_LABEL_MAX });
+}
+
+/** Org scope: a member, not through a delegated credential, minting with no space client. */
+function writesOrgScope(
+  target: { actor: Actor; delegated?: boolean },
+  clientSpace: string | null,
+): boolean {
+  return target.actor.type === "user" && !target.delegated && clientSpace === null;
+}
+
+/** A write naming a space locks it before its client, label keys and rows: a space deletion's order. */
+async function lockSpacesForKeyShare(tx: Tx, spaceIds: string[]): Promise<void> {
+  if (spaceIds.length === 0) return;
+  await tx
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(inArray(spaces.id, spaceIds))
+    .orderBy(asc(spaces.id))
+    .for("key share");
+}
+
+// The space of `clientRef`'s custom client (`null`: org, system or none), read FOR SHARE: its tier
+// cannot change before the connection it mints commits.
+async function mintingClientSpace(
+  tx: Tx,
+  clientRef: string | null | undefined,
+): Promise<string | null> {
+  // System ids are never UUID-shaped (the registry refuses them): a non-UUID names the system tier.
+  if (!clientRef || !isUuid(clientRef)) return null;
+  const [client] = await tx
+    .select({ spaceId: integrationOauthClients.spaceId })
+    .from(integrationOauthClients)
+    .where(eq(integrationOauthClients.id, clientRef))
+    .for("share");
+  if (!client) throw notFound(`OAuth client '${clientRef}' not found`);
+  return client.spaceId;
+}
+
+/** `where` over the unaliased table; shares kept, `origin_space_id` the space left, a taken label ` (n)`. */
+export async function widenConnectionsToOrgScope(
+  tx: Tx,
+  where: SQL,
+): Promise<{ id: string; label: string; previousLabel: string }[]> {
+  const c = integrationConnections;
+  const widenable = and(where, isNotNull(c.spaceId), isNotNull(c.userId));
+  const keyOf = (
+    row: { orgId: string; integrationId: string; userId: string | null },
+    spaceId: string | null,
+  ): ConnectionLabelKey => ({
+    orgId: row.orgId,
+    spaceId,
+    integrationId: row.integrationId,
+    ownerId: row.userId!,
+  });
+  const sources = await tx
+    .selectDistinct({
+      orgId: c.orgId,
+      spaceId: c.spaceId,
+      integrationId: c.integrationId,
+      userId: c.userId,
+    })
+    .from(c)
+    .where(widenable);
+  await lockSpacesForKeyShare(tx, [...new Set(sources.map((source) => source.spaceId!))]);
+  await lockLabelKeys(
+    tx,
+    sources.flatMap((source) => [keyOf(source, source.spaceId), keyOf(source, null)]),
+  );
+  const rows = await tx
+    .select({
+      id: c.id,
+      orgId: c.orgId,
+      spaceId: c.spaceId,
+      integrationId: c.integrationId,
+      userId: c.userId,
+      label: c.label,
+    })
+    .from(c)
+    .where(widenable)
+    .orderBy(asc(c.id))
+    .for("update");
+
+  const taken = new Map<string, string[]>();
+  const widened: { id: string; label: string; previousLabel: string }[] = [];
+  for (const row of rows) {
+    const key = keyOf(row, null);
+    let labels = taken.get(labelLockKey(key));
+    if (!labels) {
+      labels = await takenLabels(tx, key);
+      taken.set(labelLockKey(key), labels);
+    }
+    const label = dedupeLabel(row.label, labels, { maxLength: CONNECTION_LABEL_MAX });
+    labels.push(label);
+    await tx
+      .update(c)
+      .set({ spaceId: null, originSpaceId: row.spaceId, label, updatedAt: new Date() })
+      .where(eq(c.id, row.id));
+    widened.push({ id: row.id, label, previousLabel: row.label });
+  }
+  return widened;
 }
 
 /**
@@ -2688,22 +2875,33 @@ export async function persistCredentialBundle(
     // mix of declared auths (OAuth + PAT + custom).
     //
     // Label: identity or `labelHint` (" (n)"-suffixed when taken), else "Connexion N" past the
-    // highest N across EVERY owner — unique per (space, integration) under the advisory lock.
+    // owner's highest N — unique per owner in the scope under the advisory lock.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
     const row = await db.transaction(async (tx) => {
-      await lockConnectionLabels(tx, target.scope.spaceId, insertPackageId);
+      await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
+      const clientSpace = await mintingClientSpace(tx, input.clientRef);
+      const spaceId = writesOrgScope(target, clientSpace) ? null : target.scope.spaceId;
+      const key: ConnectionLabelKey = {
+        orgId: target.scope.orgId,
+        spaceId,
+        integrationId: insertPackageId,
+        ownerId: target.actor.id,
+      };
+      await lockLabelKeys(tx, [key]);
       const labelValue: string | SQL = namedLabel
-        ? await firstFreeLabel(tx, target.scope.spaceId, insertPackageId, namedLabel)
-        : sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
+        ? await firstFreeLabel(tx, key, namedLabel)
+        : sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(${integrationConnections.label} from '^Connexion ([0-9]+)$')::numeric) FROM ${integrationConnections} WHERE ${labelKeyFilter(key)} AND ${integrationConnections.label} ~ '^Connexion [0-9]+$'), 0) + 1)`;
       const inserted = await tx
         .insert(integrationConnections)
         .values({
           integrationId: insertPackageId,
           authKey: insertAuthKey,
           accountId: insertAccountId,
-          spaceId: target.scope.spaceId,
+          orgId: target.scope.orgId,
+          spaceId,
+          originSpaceId: spaceId === null ? target.scope.spaceId : null,
           userId,
           endUserId,
           credentialsEncrypted: ciphertext,
@@ -2724,7 +2922,7 @@ export async function persistCredentialBundle(
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
-    return serializeIntegrationConnection(row);
+    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
   }
 
   // UPDATE — shared column set; WHERE differs by target.
@@ -2751,8 +2949,7 @@ export async function persistCredentialBundle(
   if (target.kind === "update-owned") {
     set.oauthResource = input.oauthResource ?? null;
     await assertSpaceInScope(target.scope);
-    const ownerPredicate = actorFilter(target.actor, integrationConnections);
-    // Owner-scoped reconnect: id + space + actor identity, PLUS the
+    // Owner-scoped reconnect: id + the actor's own row reaching the space, PLUS the
     // (packageId, authKey) the new credentials belong to. Without the latter
     // two, a caller-supplied `connectionId` could overwrite ANY connection they
     // own — including one for a different integration — with this integration's
@@ -2760,10 +2957,9 @@ export async function persistCredentialBundle(
     // zero rows → the caller gets `notFound`, never a cross-integration clobber.
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
-      eq(integrationConnections.spaceId, target.scope.spaceId),
       eq(integrationConnections.integrationId, target.packageId),
       eq(integrationConnections.authKey, target.authKey),
-      ownerPredicate,
+      ownRowInSpace(target.scope.spaceId, target.actor),
     );
     // Identity guard: a reconnect / scope-upgrade must stay on the SAME
     // upstream account. If the re-consent authenticated a different identity
@@ -2784,59 +2980,84 @@ export async function persistCredentialBundle(
       input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
     const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
-      if (checksAccount || checksVariables) {
-        const [existing] = await tx
-          .select({
-            accountId: integrationConnections.accountId,
-            variables: integrationConnections.variables,
-          })
-          .from(integrationConnections)
-          .where(ownerScope)
-          .limit(1)
-          .for("update");
-        if (
-          existing &&
-          checksAccount &&
-          existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
-          existing.accountId !== input.accountId
-        ) {
-          throw conflict(
-            "identity_mismatch",
-            `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
-          );
-        }
-        if (
-          existing?.variables &&
-          checksVariables &&
-          !sameConnectionVariables(connectionVariablesOf(existing.variables), input.variables!)
-        ) {
-          const instance = Object.entries(existing.variables)
-            .map(([name, value]) => `${name}=${value}`)
-            .join(", ");
-          throw conflict(
-            "identity_mismatch",
-            `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
-          );
-        }
+      // A re-stamped client re-decides the scope: see {@link writesOrgScope}.
+      const restamped = input.clientRef !== undefined;
+      if (restamped) await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
+      const clientSpace = restamped ? await mintingClientSpace(tx, input.clientRef) : null;
+      const widens = restamped && writesOrgScope(target, clientSpace);
+      if (widens) {
+        // The keys a widening leaves and joins, before the row lock.
+        const key = {
+          orgId: target.scope.orgId,
+          integrationId: target.packageId,
+          ownerId: target.actor.id,
+        };
+        await lockLabelKeys(tx, [
+          { ...key, spaceId: target.scope.spaceId },
+          { ...key, spaceId: null },
+        ]);
+      }
+      const [existing] = await tx
+        .select({
+          accountId: integrationConnections.accountId,
+          variables: integrationConnections.variables,
+          spaceId: integrationConnections.spaceId,
+        })
+        .from(integrationConnections)
+        .where(ownerScope)
+        .limit(1)
+        .for("update");
+      if (!existing) return undefined;
+      if (target.delegated && existing.spaceId !== target.scope.spaceId) {
+        throw delegatedReconnectRefused();
+      }
+      if (clientSpace !== null && existing.spaceId !== clientSpace) {
+        throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
+      }
+      if (
+        checksAccount &&
+        existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
+        existing.accountId !== input.accountId
+      ) {
+        throw conflict(
+          "identity_mismatch",
+          `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+        );
+      }
+      if (
+        existing.variables &&
+        checksVariables &&
+        !sameConnectionVariables(connectionVariablesOf(existing.variables), input.variables!)
+      ) {
+        const instance = Object.entries(existing.variables)
+          .map(([name, value]) => `${name}=${value}`)
+          .join(", ");
+        throw conflict(
+          "identity_mismatch",
+          `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
+        );
+      }
+      if (widens && existing.spaceId !== null) {
+        await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId));
       }
       const updated = await tx
         .update(integrationConnections)
         .set(set)
-        .where(ownerScope)
+        .where(eq(integrationConnections.id, target.connectionId))
         .returning();
       return updated[0];
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
-    return serializeIntegrationConnection(row);
+    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
   }
 
   // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
   // Monotonic clear: the proactive refresh write-back always passes
   // `needsReconnection: false`, which would race-clobber a `true` set
-  // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
-  // revoke). When this write CLEARS the flag, gate the row on
+  // concurrently by `markIntegrationConnectionNeedsReconnection` (revoked grant,
+  // missing refresh token, unreadable credential). When this write CLEARS the flag, gate the row on
   // `needs_reconnection = false` so a concurrently-set `true` is preserved — the
   // refresh simply no-ops on that row (a flagged connection's cached credentials
   // are stale anyway, so skipping the write-back is harmless). An explicit
@@ -2851,15 +3072,9 @@ export async function persistCredentialBundle(
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
   const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
-  return row ? serializeIntegrationConnection(row) : null;
+  return row ? serializeIntegrationConnection(row, { owner: true, within: null }) : null;
 }
 
-/**
- * The single writer of `needs_reconnection = true` that does NOT touch the
- * stored credentials. Flips a row to "re-connect required" — used by the
- * refresh paths (no refresh_token / revoked grant) and the scope-shrink-
- * below-floor guard. Keyed by id (system write); no-ops when the row is gone.
- */
 /**
  * Read and decrypt the stored credential fields for one connection by id.
  * Returns `null` when the row is gone or its blob cannot be read (logged): every
@@ -2885,6 +3100,7 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
+/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {
@@ -3048,11 +3264,17 @@ export async function saveIntegrationConnection(
           connectionId: input.connectionId,
           packageId: input.packageId,
           authKey: input.authKey,
+          ...(input.delegated ? { delegated: true } : {}),
         },
         persistInput,
       )
     : await persistCredentialBundle(
-        { kind: "insert", scope, actor: input.actor },
+        {
+          kind: "insert",
+          scope,
+          actor: input.actor,
+          ...(input.delegated ? { delegated: true } : {}),
+        },
         { ...persistInput, packageId: input.packageId, authKey: input.authKey },
       );
   // INSERT and update-owned always return a summary (or throw).
@@ -3060,64 +3282,44 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * List the connections the actor can *use* for an integration in this
- * space: their own rows, plus every row shared in its space
- * (`sharedWithOrg`) whoever owns it.
- *
- * The union — not the actor's own rows — is the correct set here because
- * it is what the runtime resolver will actually pick from
- * (`selectAccessibleConnection`, `loadAccessibleConnections`,
- * `listAccessibleConnections`). An own-only list made three surfaces built
- * on top of it silently wrong: the admin org-default and pin pickers
- * (which filter this list for `shared_with_org` and could therefore only
- * ever offer the admin's *own* shared rows, while the backend happily
- * accepts anyone's — `integration-pins-service.ts` `upsertIntegrationPin`),
- * and `auths[].ready`, which claimed "not connected" for an actor whose
- * run would in fact resolve a shared connection.
- *
- * Rows the actor does not own come back with `identity_claims: null`:
- * sharing a connection consents to *using* it, not to publishing the
- * owner's OIDC claim bag (email, sub, …) to every member. `account_id`
- * and `owner_name` stay — the picker DTO already exposes both, and a
- * connection you can pick has to be identifiable.
- *
- * `locked_by` says up front which rows an unshare or delete would refuse
- * (`assertConnectionsUnpinned`), so the UI need not learn it from a 409.
+ * The resolver's set ({@link usableInSpace}), projected for this space unless an owner reads with
+ * `wholeReach`. `locked_by`: what a 409 would refuse — an own row's delete (a lock anywhere),
+ * another's withdrawal from this space.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
   packageId: string,
   actor: Actor,
+  wholeReach = false,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const rows = await db
     .select()
     .from(integrationConnections)
     .where(
-      and(
-        eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.spaceId, scope.spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
-      ),
+      and(eq(integrationConnections.integrationId, packageId), usableInSpace(scope.spaceId, actor)),
     );
   const ownerName = await resolveConnectionOwnerNames(rows);
-  const locks = await connectionLocks(
-    db,
-    rows.map((row) => row.id),
-  );
+  const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
+  const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
+  const locks = new Map([
+    ...(await connectionLocks(db, own)),
+    ...(await connectionLocks(db, others, scope.spaceId)),
+  ]);
   return rows.map((row) => {
-    const isOwn = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
-    const summary = serializeIntegrationConnection(row);
+    const owner = actorOwns(actor, row);
     return {
-      ...summary,
-      ...(isOwn ? {} : { identity_claims: null }),
+      ...serializeIntegrationConnection(row, {
+        owner,
+        within: owner && wholeReach ? null : scope.spaceId,
+      }),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
     };
   });
 }
 
-/** One integration the actor could attach to an agent (own and/or org-shared). */
+/** One integration the actor could attach to an agent (own and/or shared into the space). */
 interface UsableIntegration {
   integration_package_id: string;
   name: string;
@@ -3141,9 +3343,8 @@ interface UsableIntegration {
 
 /**
  * Integrations the actor could use when building an agent manually in the
- * current space: any integration for which a connection exists that is
- * either the actor's own (`actorFilter`) OR shared in its space
- * (`sharedWithOrg`) — `actorOrSharedFilter`, the resolver's access predicate.
+ * current space: any integration with a connection the actor may bind there —
+ * {@link usableInSpace}, the resolver's access predicate.
  *
  * Deduped to the integration level (the agent picks an integration; the
  * connection itself is resolved at run time by `resolveAgentIntegrationPick`).
@@ -3160,25 +3361,19 @@ export async function listUsableIntegrationsForActor(
       integrationId: integrationConnections.integrationId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
-      sharedWithOrg: integrationConnections.sharedWithOrg,
+      sharedSpaceIds: integrationConnections.sharedSpaceIds,
     })
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.spaceId, scope.spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
-      ),
-    );
+    .where(usableInSpace(scope.spaceId, actor));
   if (rows.length === 0) return [];
 
-  // own = row owned by this actor; shared = row shared in its space.
+  // own = row owned by this actor; shared = row shared into this space.
   // A single integration can have both kinds across multiple connection rows.
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {
-    const own = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
     const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
-    entry.own ||= own;
-    entry.shared ||= row.sharedWithOrg;
+    entry.own ||= actorOwns(actor, row);
+    entry.shared ||= row.sharedSpaceIds.includes(scope.spaceId);
     acc.set(row.integrationId, entry);
   }
 
@@ -3234,6 +3429,7 @@ type ConnectionLock = NonNullable<IntegrationConnectionSummary["locked_by"]>;
 export async function connectionLocks(
   executor: DbOrTx,
   ids: readonly string[],
+  spaceId?: string,
 ): Promise<Map<string, ConnectionLock>> {
   const locks = new Map<string, ConnectionLock>();
   if (ids.length === 0) return locks;
@@ -3241,12 +3437,21 @@ export async function connectionLocks(
     .select({ connectionIds: integrationPins.connectionIds })
     .from(integrationPins)
     .where(
-      and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+      and(
+        isNull(integrationPins.userId),
+        spaceId === undefined ? undefined : eq(integrationPins.spaceId, spaceId),
+        arrayOverlaps(integrationPins.connectionIds, [...ids]),
+      ),
     );
   const orgDefaults = await executor
     .select({ connectionIds: integrationOrgDefaults.connectionIds })
     .from(integrationOrgDefaults)
-    .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]));
+    .where(
+      and(
+        spaceId === undefined ? undefined : eq(integrationOrgDefaults.spaceId, spaceId),
+        arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]),
+      ),
+    );
   const wanted = new Set(ids);
   // Pins last, so they overwrite a default naming the same id.
   for (const row of orgDefaults) {
@@ -3263,8 +3468,9 @@ export async function assertConnectionsUnpinned(
   tx: Tx,
   ids: readonly string[],
   refused: string,
+  spaceId?: string,
 ): Promise<void> {
-  const locks = new Set((await connectionLocks(tx, ids)).values());
+  const locks = new Set((await connectionLocks(tx, ids, spaceId)).values());
   if (locks.has("admin_pin")) {
     throw conflict(
       "connection_pinned",
@@ -3279,53 +3485,37 @@ export async function assertConnectionsUnpinned(
   }
 }
 
-/** Delete one connection row the caller owns ({@link forgetDeletedConnection}). */
-export async function deleteIntegrationConnection(
-  scope: SpaceScope | ActorScope,
-  connectionId: string,
+/** Delete one own row within `authority` ({@link forgetDeletedConnection}); `null` when none. */
+export async function deleteOwnConnection(
   actor: Actor,
-): Promise<{ disabledScheduleIds: string[] }> {
-  // Confirm the target space belongs to the caller's org before touching
-  // any connection — same escalation guard the other connection mutations run.
-  // Without it a caller could pass a space id from another org and the
-  // WHERE (id + spaceId + owner) would silently match zero rows and 404,
-  // masking the cross-org attempt instead of rejecting it up front.
-  //
-  // The `/me/connections` path passes an `ActorScope` (no `orgId`): it is
-  // actor-scoped, so the actor-ownership predicate below is the authoritative
-  // boundary and the space∈org check does not apply. The escalation guard runs
-  // only for `SpaceScope` callers (those that resolved an org). See docs: /me
-  // routes skip org context.
-  if ("orgId" in scope) await assertSpaceInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
-  const [owned] = await db
-    .select({ id: integrationConnections.id })
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.spaceId, scope.spaceId),
-        ownerPredicate,
-      ),
-    )
-    .limit(1);
-  if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+  connectionId: string,
+  authority: MeConnectionAuthority,
+): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
   return db.transaction(async (tx) => {
-    await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
-    const deleted = await tx
-      .delete(integrationConnections)
+    const [row] = await tx
+      .select({
+        ...deletedConnectionOwner,
+        orgId: integrationConnections.orgId,
+        spaceId: integrationConnections.spaceId,
+      })
+      .from(integrationConnections)
       .where(
         and(
           eq(integrationConnections.id, connectionId),
-          eq(integrationConnections.spaceId, scope.spaceId),
-          ownerPredicate,
+          actorFilter(actor, integrationConnections),
+          meConnectionAuthorityFilter(authority),
         ),
       )
-      .returning(deletedConnectionOwner);
-    if (deleted.length === 0) {
-      throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+      .for("update");
+    if (!row) return null;
+    if (authority.kind === "bound" && authority.spaceId && row.spaceId === null) {
+      throw forbidden(
+        "A credential bound to a space cannot delete a connection serving the whole organization",
+      );
     }
-    return { disabledScheduleIds: await forgetDeletedConnection(tx, deleted[0]!) };
+    await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
+    await tx.delete(integrationConnections).where(eq(integrationConnections.id, row.id));
+    return { orgId: row.orgId, disabledScheduleIds: await forgetDeletedConnection(tx, row) };
   });
 }
 
@@ -3410,12 +3600,16 @@ interface ConnectionForgetPlan {
  * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
  * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
  * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
- * lists: a schedule may name a connection of another space.
+ * lists (a schedule may name a connection of another space), `pinFilter` the pins.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
-  { lock = false, scheduleFilter }: { lock?: boolean; scheduleFilter?: SQL } = {},
+  {
+    lock = false,
+    scheduleFilter,
+    pinFilter,
+  }: { lock?: boolean; scheduleFilter?: SQL; pinFilter?: SQL } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
   const pinQuery = executor
@@ -3427,7 +3621,11 @@ export async function planConnectionForget(
     })
     .from(integrationPins)
     .where(
-      and(eq(integrationPins.userId, owner.id), arrayContains(integrationPins.connectionIds, [id])),
+      and(
+        eq(integrationPins.userId, owner.id),
+        arrayContains(integrationPins.connectionIds, [id]),
+        pinFilter,
+      ),
     )
     .orderBy(
       asc(integrationPins.packageId),
@@ -3495,13 +3693,30 @@ function compareBinary(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** A row's scope, and its shares and origin `within` one space (`null`: all — the owner's session). */
+export function connectionReachView(
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "spaceId" | "sharedSpaceIds" | "originSpaceId"
+  >,
+  within: string | null,
+): { scope: "org" | "space"; shared_space_ids: string[]; origin_space_id: string | null } {
+  const seen = (id: string | null) => id !== null && (within === null || id === within);
+  return {
+    scope: row.spaceId === null ? "org" : "space",
+    shared_space_ids: row.sharedSpaceIds.filter(seen),
+    origin_space_id: seen(row.originSpaceId) ? row.originSpaceId : null,
+  };
+}
+
 /**
  * Single wire serializer for an `integration_connections` row — every route
  * that returns a connection (list, connect flows, metadata PATCH) goes
- * through this so the DTO shape never forks.
+ * through this so the DTO shape never forks. Only the `owner` sees the identity claims.
  */
 export function serializeIntegrationConnection(
   row: typeof integrationConnections.$inferSelect,
+  view: { owner: boolean; within: string | null },
 ): IntegrationConnectionSummary {
   if (row.userId && row.endUserId) {
     // DB check constraint rules this out; guard against drift.
@@ -3512,14 +3727,16 @@ export function serializeIntegrationConnection(
     integration_package_id: row.integrationId,
     auth_key: row.authKey,
     account_id: row.accountId,
-    identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,
+    identity_claims: view.owner
+      ? ((row.identityClaims as Record<string, unknown> | null) ?? null)
+      : null,
     scopes_granted: row.scopesGranted,
     needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     owner_type: row.userId ? "user" : "end_user",
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    shared_with_org: row.sharedWithOrg,
+    ...connectionReachView(row, view.within),
     // Which registered client minted this connection (system env id or custom
     // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
     // UI can show, per connection, exactly which client is in use.
@@ -3564,6 +3781,7 @@ export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
   packageId: string,
   actor: Actor,
+  wholeReach = false,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
@@ -3648,7 +3866,7 @@ export async function getIntegrationAuthStatuses(
     mcpServerTools,
   });
 
-  const allConnections = await listIntegrationConnections(scope, packageId, actor);
+  const allConnections = await listIntegrationConnections(scope, packageId, actor, wholeReach);
   // Same precedence rule as the settings list endpoint, via the shared
   // resolver — env-backed SYSTEM integrations stay `active` here too.
   const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
@@ -3684,7 +3902,7 @@ export async function getIntegrationAuthStatuses(
       // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
       // a run's authoritative readiness still comes from `validateInlineRun`.
       //
-      // Reads the own ∪ org-shared union (see `listIntegrationConnections`),
+      // Reads the usable set (see `listIntegrationConnections`),
       // so an actor who owns nothing but inherits a shared connection is
       // `ready: true` — deliberately, because their run resolves that
       // connection. This is what makes the state correct under

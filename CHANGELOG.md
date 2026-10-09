@@ -80,6 +80,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
+- **`pg_dump` the platform database BEFORE deploying, then after the deploy
+  run `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
+  Migration `0086` is one-way at boot (`shared_with_org` dropped, `org_id`
+  NOT NULL): rolling back means restoring that dump. Drizzle `0086` adds `org_id` to `integration_connections`, makes
+  `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
+  leaving every row space-scoped with the reach it had. With the app up,
+  take a `pg_dump`, run the dry run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`),
+  read the rows it will widen per organization and the labels it will rename
+  `<label> (n)`, then run it again with `--apply`. It widens the user-owned
+  connections not minted by a space's own OAuth client (`space_id` NULL,
+  `origin_space_id` the old space, shares kept), then checks three
+  invariants and rolls back with exit 1 if one fails; a second run finds
+  nothing. Until it runs, those connections keep working in their space
+  only. Details: `scripts/migration/README.md`.
+
 - **Remove `INTEGRATION_RUNTIME_ADAPTER` from the environment** (#1819). It
   is retired and now ignored: each orchestrator pins its sidecar's runtime.
   Local integrations run under `RUN_ADAPTER=docker` or `firecracker`; under
@@ -115,6 +131,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (API): a connection may serve the whole organization, and is
+  shared with a set of spaces** (#1870).
+  - `shared_with_org` is gone from the connection DTOs (connection list,
+    accessible connections, pin candidates) and from the body of
+    `PATCH /api/integrations/{packageId}/connections/{connectionId}`, which
+    takes `shared_space_ids`, the full target set, instead. The DTOs add
+    `scope` (`"org"` | `"space"`), `shared_space_ids` (the full set for the
+    owner; for anyone else the current space when shared into it, else
+    `[]`) and `origin_space_id` (owner only). New refusals:
+    `400 invalid_share_target`, `403` on a share into a space where the
+    owner lacks `integrations:connect`, `403 connection_blocked_by_admin` on
+    one into a space blocking user connections without
+    `integrations:configure` there, `403` on renaming an org-scoped
+    connection one does not own, and `403` on reconnecting one with an API
+    key or a third-party token.
+  - New `PATCH /api/me/connections/{connectionId}` (owner,
+    `integrations:connect` ceiling): label and `shared_space_ids`.
+  - `GET /api/me/connections`: `space` is `null` for an org-scoped
+    connection; new `scope`, `origin_space` and `shared_spaces`.
+  - The realtime `connection_update` event adds `orgId`, and `spaceId` is
+    `null` for an org-scoped connection, delivered to its owner in every
+    space of the org.
+  - An org-scoped connection reconnects through an org or system OAuth
+    client, never a space's own: `409 connection_scope_narrowing` when
+    neither exists;
+    `409 auto_client_exists_at_org` on promoting a DCR client to an org that
+    already holds one for that server.
+
+- **A connection is reusable across the spaces of its organization**
+  (#1870). Its scope is the tier of the OAuth client that minted it: the
+  system client, an org client or none (API key, basic, fields) makes it
+  usable by its owner in every space of the org; a space's own OAuth client,
+  an end user, or a delegated credential (API key, third-party token)
+  keeps it in that space. A space whose default OAuth client
+  for that auth is its own uses only the org-wide connections connected from
+  it. The
+  owner shares a connection with chosen spaces; losing access to a space
+  withdraws that share only, and deleting a space withdraws it from every
+  share. With several of their own connections, a member's run binds the one
+  made in the run's space. Promoting a space OAuth client to the org widens
+  its connections.
+- **Remote MCP clients registered by DCR/CIMD live at the org tier**
+  (#1870): one client per organization, integration, auth and authorization
+  server, reused by every space. A client registered in a space before this
+  release keeps refreshing its connections, which move to the org client at
+  their next reconnect.
+- **A token refresh that narrows the granted scopes no longer flags the
+  connection for reconnection** (#1870): `scopes_granted` is updated, and an
+  agent needing a dropped scope gets `insufficient_scopes` when it binds.
+- **`block_user_connections` applies when a run binds, not only when a
+  connection is created** (#1870): in a space blocking user connections for
+  an integration, a member's own connection binds only when shared into that
+  space or made in it.
+- **Connection labels are unique per owner** (#1622, #1870): a label no
+  longer collides with another member's private connection. Two members'
+  equal labels in one pin or default are suffixed ` (2)` in the run.
 - **BREAKING (MCP): a connection reaches every space the caller holds a role
   in, and each call names its space; a space is pinned by the URL, never by
   `X-Space-Id`** (#1825). Every tool that acts in a space requires a
@@ -126,7 +198,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is a `403`; no request lands on the default space any more. The CLI's Claude
   Code plugin now pins by URL, so its first sync after the upgrade asks for the
   plugin's OAuth login once. Details: `docs/guides/connecting-mcp-clients.md`.
-
 - **The repository requires Bun 1.4.2 or later** (#1878): `packageManager`
   moves to `bun@1.4.2` and the root `engines.bun` to `>=1.4.2`, which the root
   test preload enforces. CI reads the version from `packageManager` (setup-bun
@@ -361,8 +432,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   incoherent OAuth client configuration makes the sidecar refresh endpoint
   answer `500`, and the credential proxy logs it as an error while relaying
   the upstream `401`.
-- **One refresh decision for every credential path** (#1829). A scope shrink
-  seen by the platform credential proxy now flags `needsReconnection` too; a
+- **One refresh decision for every credential path** (#1829). A
   2xx token response carrying `error: invalid_grant` is classified revoked,
   on a refresh and on a code exchange; the `410` problem's `detail` wording
   changed.
@@ -640,9 +710,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `needs_reconnection` item carries no `required_scopes`, and its link
   re-consents what the connection holds plus the auth's `default_scopes`. It
   used to request the current agent's scopes, which then reached every agent
-  bound to the connection. A refresh that shrinks a grant now flags the
-  connection only for a scope it held and an agent requires, not for scopes
-  other agents' connections hold.
+  bound to the connection.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

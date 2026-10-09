@@ -414,7 +414,7 @@ describe("schedule writes for another actor — only what both reach", () => {
   async function share(id: string): Promise<void> {
     await db
       .update(integrationConnections)
-      .set({ sharedWithOrg: true })
+      .set({ sharedSpaceIds: [ctx.defaultSpaceId] })
       .where(eq(integrationConnections.id, id));
   }
 
@@ -637,7 +637,9 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
         integrationId: API,
         authKey: "backup",
         accountId: "spare",
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
@@ -675,7 +677,9 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
         integrationId: API,
         authKey: "backup",
         accountId: "private-account",
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: member.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
@@ -729,7 +733,9 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
       integrationId: API,
       authKey: "backup",
       accountId: "member-spare",
-      spaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
       userId: member.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
       scopesGranted: [],
@@ -800,6 +806,7 @@ describe("schedule writes for an end user — the caller picks among its connect
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: label,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),

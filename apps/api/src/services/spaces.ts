@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, asc, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, arrayContains, asc, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
   files,
+  integrationConnections,
   organizations,
   packages,
   runs,
@@ -467,6 +468,20 @@ async function deleteSpaceInTx(
 
   const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
   if (bytes > 0) await decrementOrgFileBytes(tx, orgId, bytes);
+
+  // No FK covers a share target; `origin_space_id` nulls by its own.
+  await tx
+    .update(integrationConnections)
+    .set({
+      sharedSpaceIds: sql`array_remove(${integrationConnections.sharedSpaceIds}, ${spaceId}::text)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(integrationConnections.orgId, orgId),
+        arrayContains(integrationConnections.sharedSpaceIds, [spaceId]),
+      ),
+    );
 
   const deleted = await tx
     .delete(spaces)

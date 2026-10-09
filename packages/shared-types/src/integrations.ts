@@ -41,6 +41,9 @@ export interface IntegrationSummary {
   block_user_connections?: boolean;
 }
 
+/** Where a connection is usable: its whole org, or the one space whose OAuth client minted it. */
+export type ConnectionScope = "org" | "space";
+
 export interface IntegrationConnection {
   id: string;
   integration_package_id: string;
@@ -75,8 +78,11 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label: string;
-  /** Opt-in: makes this connection selectable by other members of the same space. */
-  shared_with_org?: boolean;
+  scope: ConnectionScope;
+  /** Spaces whose members may use it: all for the owner's own session, else the current one only. */
+  shared_space_ids: string[];
+  /** The space an org-scoped row was connected from, projected as `shared_space_ids` is. */
+  origin_space_id: string | null;
   /**
    * The registered OAuth client that minted this connection — a flat client id
    * (system env id or `integration_oauth_clients.id`). `null` for non-oauth2
@@ -176,7 +182,7 @@ export interface IntegrationOAuthClient {
 
 /**
  * One connection an actor can pick from for a given (space,
- * integration): own + shared-with-org, with caller-facing display fields.
+ * integration): own + shared into the space, with caller-facing display fields.
  * Base wire shape for the annotated candidate list surfaced by
  * `GET /api/agents/:scope/:name/connection-readiness`
  * (extended by `IntegrationCandidate`).
@@ -192,7 +198,10 @@ export interface AccessibleIntegrationConnection {
   owner_name: string | null;
   /** OAuth scopes granted to this connection (empty for api_key/basic). */
   scopes_granted: string[];
-  shared_with_org: boolean;
+  scope: ConnectionScope;
+  /** Same projection as {@link IntegrationConnection.shared_space_ids}. */
+  shared_space_ids: string[];
+  origin_space_id: string | null;
   needs_reconnection: boolean;
 }
 

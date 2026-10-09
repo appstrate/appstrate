@@ -44,6 +44,7 @@ import {
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
+  isOrgScopedConnection,
   resolveConnectClient,
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
@@ -138,7 +139,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       clientId,
       redirectUri: clientRedirectUri,
       clientRef,
-    } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
+    } = resolveConnectClient(
+      ctx.integrationId,
+      ctx.authKey,
+      manifest,
+      auth,
+      resolved,
+      ctx.connectionId !== undefined && (await isOrgScopedConnection(ctx.connectionId)),
+    );
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
@@ -179,6 +187,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
       ...(perConnection && issuer ? { redirectTag: authorizationServerTag(issuer) } : {}),
       ...(variables ? { variables } : {}),
     });
@@ -402,6 +411,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
       clientRef: result.clientRef,
       variables: result.variables ?? null,
       ...(result.resource ? { oauthResource: result.resource } : {}),

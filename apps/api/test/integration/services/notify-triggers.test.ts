@@ -409,18 +409,24 @@ describe("NOTIFY triggers (regression)", () => {
     // process lifetime (the ListenClient abstraction in db/client.ts hides
     // postgres.js's unlisten by casting to Promise<void>). `afterAll` drops
     // the trigger so no more NOTIFYs fire on integration_connections, and
-    // the space_id filter inside the handler scopes to this test only.
-    const received: Array<{ operation: string; needs_reconnection: boolean | null }> = [];
+    // the org_id filter inside the handler scopes to this test only.
+    const received: Array<{
+      operation: string;
+      space_id: string | null;
+      needs_reconnection: boolean | null;
+    }> = [];
     await listenClient.listen("connection_update", (raw) => {
       try {
         const payload = JSON.parse(raw) as {
           operation: string;
-          space_id: string;
+          org_id: string;
+          space_id: string | null;
           needs_reconnection: boolean | null;
         };
-        if (payload.space_id !== ctx.defaultSpaceId) return;
+        if (payload.org_id !== ctx.orgId) return;
         received.push({
           operation: payload.operation,
+          space_id: payload.space_id,
           needs_reconnection: payload.needs_reconnection,
         });
       } catch {
@@ -435,6 +441,7 @@ describe("NOTIFY triggers (regression)", () => {
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
         label: `acct-${ctx.user.id.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -466,5 +473,23 @@ describe("NOTIFY triggers (regression)", () => {
     expect(insert?.needs_reconnection).toBe(false);
     expect(update?.needs_reconnection).toBe(true);
     expect(del?.needs_reconnection).toBeNull();
+    expect(received.every((r) => r.space_id === ctx.defaultSpaceId)).toBe(true);
+
+    // An org-scoped row carries its org and a NULL space.
+    await db.insert(integrationConnections).values({
+      integrationId: INTEG,
+      authKey: "primary",
+      accountId: "acct-org",
+      label: "acct-org",
+      orgId: ctx.orgId,
+      spaceId: null,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),
+      scopesGranted: [],
+    });
+    for (let i = 0; i < 20 && received.length < 4; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(received.at(-1)).toMatchObject({ operation: "INSERT", space_id: null });
   });
 });

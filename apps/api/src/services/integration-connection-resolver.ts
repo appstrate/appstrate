@@ -9,10 +9,11 @@
  *   3. launch override — the run body's or the schedule row's `connection_overrides`
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
- *   6. fallback — the actor's ONE own connection on an auth serving the selection;
+ *   6. fallback — the actor's ONE own usable connection on an auth serving the selection;
+ *      several → those OF this space (`space_id`, else `origin_space_id`) when any; of those,
  *      several oauth2 rows of one known account, auth and instance → the least-privileged
  *      covering the agent (never without an agent selection); otherwise several →
- *      `must_choose_connection`; none → as below
+ *      `must_choose_connection`; none → as below.
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -20,18 +21,15 @@
  * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
  * bind (or switched off in the space), a `required` integration is an error, any other binds
  * none with a warning carrying the same code — `integration_unbound` (a layer's `[]`) aside.
+ * Equal labels in a bound set (two owners') get ` (n)` in set order: the snapshot and the
+ * sidecar read the same names.
  * `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { db } from "@appstrate/db/client";
-import {
-  integrationConnections,
-  integrationPins,
-  packageShares,
-  packages,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, spaces } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -64,8 +62,9 @@ import {
   type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
-import type { Actor } from "../lib/actor.ts";
-import { actorOrSharedFilter } from "../lib/actor.ts";
+import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
+import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
+import { usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
@@ -76,7 +75,6 @@ import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
 import {
   connectionVariablesOf,
@@ -121,6 +119,8 @@ export interface IntegrationRequirement {
 }
 
 interface ResolveConnectionsInput {
+  /** The space resolved in: the fallback prefers the actor's rows of this space. */
+  spaceId: string;
   requirements: IntegrationRequirement[];
   accessibleConnections: ConnectionRow[];
   /** Admin pins (`userId` null) and the actor's member pins for (space, agent). */
@@ -235,6 +235,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       candidates,
       candidateIndex: new Map(candidates.map((c) => [c.id, c])),
       accessibleIndex,
+      spaceId: input.spaceId,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
       auth,
@@ -273,6 +274,7 @@ interface ResolveOneArgs {
   candidateIndex: ReadonlyMap<string, ConnectionRow>;
   /** Before the auth filters: tells a row they dropped from one the actor cannot reach. */
   accessibleIndex: ReadonlyMap<string, ConnectionRow>;
+  spaceId: string;
   actorUserId: string | null;
   actorEndUserId: string | null;
   /** Already applied to the candidates; kept to name the connect target on `not_connected`. */
@@ -323,12 +325,15 @@ function bindSet(
 ): ResolveOneResult {
   const boundConnectionIds = rows.map((c) => c.id);
   const value: ResolvedConnection[] = [];
+  const labels: string[] = [];
   for (const conn of rows) {
     const health = checkHealth(args, conn, source);
     if (health.kind === "error") {
       return { kind: "error", error: { ...health.error, boundConnectionIds } };
     }
-    value.push(health.value);
+    const label = dedupeLabel(health.value.label, labels, { maxLength: CONNECTION_LABEL_MAX });
+    labels.push(label);
+    value.push({ ...health.value, label });
   }
   return { kind: "resolved", value };
 }
@@ -454,8 +459,10 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
   // Health never switches the pick: a dead own row is still bound and answers needs_reconnection.
   const own = serving.filter((c) => isOwnedByActor(args, c));
-  if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
-  const sameAccount = own.length > 1 ? leastPrivilegedOfOneAccount(args, own) : null;
+  const here = own.filter((c) => (c.spaceId ?? c.originSpaceId) === args.spaceId);
+  const mine = here.length > 0 ? here : own;
+  if (mine.length === 1) return bindSet(args, [mine[0]!], "fallback_auto");
+  const sameAccount = mine.length > 1 ? leastPrivilegedOfOneAccount(args, mine) : null;
   if (sameAccount) return bindSet(args, [sameAccount], "fallback_auto");
   if (own.length > 1) {
     return errorOf(args, {
@@ -674,10 +681,7 @@ function isOwnedByActor(
   actor: ActorIdentity,
   conn: Pick<ConnectionRow, "userId" | "endUserId">,
 ): boolean {
-  return (
-    (actor.actorUserId !== null && conn.userId === actor.actorUserId) ||
-    (actor.actorEndUserId !== null && conn.endUserId === actor.actorEndUserId)
-  );
+  return actorOwns(actorFromIds(actor.actorUserId, actor.actorEndUserId), conn);
 }
 
 interface ActorIdentity {
@@ -820,6 +824,7 @@ export async function resolveConnectionsForRun(
   ]);
 
   return resolveConnections({
+    spaceId: input.scope.spaceId,
     requirements: validReqs,
     accessibleConnections,
     pins,
@@ -1006,20 +1011,15 @@ async function loadAccessibleConnections(
   integrationIds: string[],
 ): Promise<ConnectionRow[]> {
   if (integrationIds.length === 0) return [];
-  // Own OR shared-with-org, both scoped to THIS space (the
-  // spaceId predicate is applied outside the OR) and to the
-  // integrations the agent actually requires, to avoid loading the world.
-  const rows = await db
+  return db
     .select()
     .from(integrationConnections)
     .where(
       and(
         inArray(integrationConnections.integrationId, integrationIds),
-        eq(integrationConnections.spaceId, spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
+        usableInSpace(spaceId, actor),
       ),
     );
-  return rows;
 }
 
 async function loadPins(
@@ -1050,35 +1050,23 @@ async function loadPins(
   return rows;
 }
 
-// ─────────────────────────── block_user_connections gate ──────────────────────
-
 /**
  * Used at POST /api/integration-connections — refuses non-admin actors
  * when the (space, integration) row has block_user_connections=true.
  * Surfaced as a permission check, not a resolution error, because it
- * fires *before* the connection exists (so the resolver path doesn't
- * see this case in practice).
+ * fires *before* the connection exists. The predicate is the one
+ * resolution applies ({@link userConnectionsBlocked}). `enabled` is
+ * deliberately NOT required — a lock on a switched-off integration is
+ * still the space's call.
  */
 export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
 ): Promise<boolean> {
-  // PLACEMENT, not activation (`placementReadFilter` + its `packageShares`
-  // join): the flag is this space's decision about an integration it HOLDS, so
-  // an ORPHAN row is nobody's decision here. `enabled` is deliberately NOT
-  // required — a lock on a switched-off integration is still the space's call.
+  // In WHERE position, unlike a select field, drizzle qualifies the predicate's columns.
   const rows = await db
-    .select({ blocked: spacePackages.blockUserConnections })
-    .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
-    .where(
-      and(
-        eq(spacePackages.spaceId, spaceId),
-        eq(spacePackages.packageId, integrationId),
-        placementReadFilter(spaceId),
-      ),
-    )
-    .limit(1);
-  return rows[0]?.blocked === true;
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.id, spaceId), userConnectionsBlocked(spaceId, integrationId)));
+  return rows.length > 0;
 }

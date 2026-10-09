@@ -198,6 +198,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: integrationId,
         authKey: "primary",
         accountId: overrides?.accountId ?? `acct-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
@@ -436,6 +437,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -1098,7 +1100,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
       async function seedDeadConnection(
         userId: string,
-        sharedWithOrg = false,
+        shared = false,
         scopesGranted = ["base", "search.read"],
       ): Promise<string> {
         const [row] = await db
@@ -1107,13 +1109,14 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
             scopesGranted,
             needsReconnection: true,
-            sharedWithOrg,
+            sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
@@ -1183,6 +1186,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,

@@ -334,6 +334,7 @@ describe("module auth strategy pipeline", () => {
         authKey: "primary",
         accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
         label: `acct-${crypto.randomUUID().slice(0, 8)}`,
+        orgId: opts.orgId,
         spaceId: opts.spaceId,
         userId: opts.endUserId ? null : currentCtx!.user.id,
         endUserId: opts.endUserId ?? null,

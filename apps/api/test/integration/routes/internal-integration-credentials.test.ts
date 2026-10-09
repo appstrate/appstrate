@@ -15,7 +15,7 @@
  *
  * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
- * scope-shrink behaviour) live in the service-level test
+ * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
  * the HTTP route boundary: auth, dep, install, the `connection_id` selector,
  * response shape.
@@ -160,7 +160,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       authKey?: string;
       credentialsEncrypted?: string;
       userId?: string;
-      sharedWithOrg?: boolean;
+      shared?: boolean;
     } = {},
   ): Promise<string> {
     const label = `acct-test-${++seededConnections}`;
@@ -171,6 +171,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
         authKey: opts.authKey ?? "primary",
         accountId: label,
         label,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? ctx.user.id,
         endUserId: null,
@@ -178,7 +179,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
+        sharedSpaceIds: opts.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -346,7 +347,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnectionRow(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const fetchCredentials = () =>
@@ -580,9 +581,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
   async function seedConnection(
     integrationId: string,
-    owner: { userId: string; sharedWithOrg: boolean } = {
+    owner: { userId: string; shared: boolean } = {
       userId: ctx.user.id,
-      sharedWithOrg: false,
+      shared: false,
     },
   ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
@@ -593,11 +594,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId: null,
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
-        ...owner,
+        userId: owner.userId,
+        sharedSpaceIds: owner.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -804,6 +807,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
           authKey: "primary",
           accountId: "acct-oauth",
           label: "acct-oauth",
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: encryptCredentialEnvelope({
@@ -815,7 +819,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       const connectionId = conn!.id;
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
       const held = await heldRevision(connectionId);
-      // Flagged after kickoff — a scope shrink seen by another caller, a peer's invalid_grant.
+      // Flagged after kickoff — a peer's invalid_grant.
       await db
         .update(integrationConnections)
         .set({ needsReconnection: true })
@@ -928,13 +932,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnection(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const held = await heldRevision(connectionId);
     await db
       .update(integrationConnections)
-      .set({ sharedWithOrg: false, refreshFailureCount: 2 })
+      .set({ sharedSpaceIds: [], refreshFailureCount: 2 })
       .where(eq(integrationConnections.id, connectionId));
 
     expect((await reportSuccess(connectionId, held)).status).toBe(204);
@@ -1042,6 +1046,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

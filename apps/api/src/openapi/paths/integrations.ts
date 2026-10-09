@@ -178,9 +178,30 @@ const connectionVariablesSchema = {
 // universal DB-convention carve-outs (camelCase everywhere per
 // docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
-// `owner_id`, `shared_with_org`, `client_ref`) is snake_case wire. Matches the
+// `owner_id`, `shared_space_ids`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
-const integrationConnectionSchema = {
+export const connectionScopeSchema = {
+  type: "string",
+  enum: ["org", "space"],
+  description:
+    "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.",
+} as const;
+
+/** The projection every non-owner reads: the current space only, and only when shared into it. */
+export const sharedSpaceIdsSchema = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`.",
+} as const;
+
+export const originSpaceIdSchema = {
+  type: ["string", "null"],
+  description:
+    "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted.",
+} as const;
+
+export const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
@@ -194,6 +215,9 @@ const integrationConnectionSchema = {
     "owner_type",
     "owner_id",
     "label",
+    "scope",
+    "shared_space_ids",
+    "origin_space_id",
     "client_ref",
     "variables",
     "createdAt",
@@ -213,18 +237,20 @@ const integrationConnectionSchema = {
     owner_name: {
       type: ["string", "null"],
       description:
-        "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
+        "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own.",
     },
     locked_by: {
       ...lockedBySchema,
-      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`.`,
+      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.`,
     },
     label: {
       type: "string",
       description:
         "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
     },
-    shared_with_org: { type: "boolean" },
+    scope: connectionScopeSchema,
+    shared_space_ids: sharedSpaceIdsSchema,
+    origin_space_id: originSpaceIdSchema,
     client_ref: {
       type: ["string", "null"],
       description:
@@ -605,6 +631,76 @@ const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
 
+/** Shared by both connection-edit doors: this one and `PATCH /api/me/connections/{connectionId}`. */
+export const connectionUpdateDescription =
+  "The owner may rename the connection and set the WHOLE set of spaces it is shared into " +
+  "(`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` " +
+  "in the space the request is made from) may rename a space-scoped connection of that space, and withdraw " +
+  "any connection from that space by sending the projection it reads without it (`[]`); nothing else. " +
+  "A connection may be shared into a space of its org it serves: an org-scoped one into any space but one " +
+  "whose default OAuth client for the integration is its own (unless connected from there), a space-scoped " +
+  "one only into its own space. Every target space must still be reached by the owning member, an added one " +
+  "takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the " +
+  "integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
+  "and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay " +
+  "untouched, and it renames only a connection scoped to it. Sharing an end user's connection " +
+  "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
+  "`connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin " +
+  "does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
+  "again. Removing a space disables, in the same transaction, every enabled schedule of that space of " +
+  "another actor than the owner whose `connection_overrides` name the connection " +
+  "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays " +
+  "unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is " +
+  "unique per owner among the connections of the integration sharing its scope, compared verbatim: renaming " +
+  "to one another holds is refused with 409 `connection_label_taken`. Each space added or removed is " +
+  "audited on its own (`integration.connection.share_added` / `share_removed`). Scopes are not edited " +
+  "here: for an agent that needs more scopes, create a new connection with them rather than reconnecting " +
+  "a shared one, which widens every agent that uses it.";
+
+export const connectionUpdateRequestBody = {
+  required: true,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        minProperties: 1,
+        properties: {
+          label: {
+            type: "string",
+            minLength: 1,
+            maxLength: CONNECTION_LABEL_MAX,
+            description:
+              "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of the same owner holds with 409 `connection_label_taken`.",
+          },
+          shared_space_ids: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: 100 },
+            maxItems: 100,
+            uniqueItems: true,
+            description:
+              "The WHOLE set of spaces whose members may bind this connection by an explicit pick; this write replaces it. `[]` shares it nowhere.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const;
+
+export const connectionUpdateRefusals400 =
+  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`).";
+
+export const connectionUpdateConflicts = {
+  description:
+    "Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`)",
+  headers: STD_RESPONSE_HEADERS,
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetail" },
+    },
+  },
+} as const;
+
 export const integrationsPaths = {
   "/api/integrations": {
     get: {
@@ -841,8 +937,9 @@ export const integrationsPaths = {
         "Moves one of this space's custom clients to the org level (`spaceId: " +
         "null`), inherited by every space of the org. It keeps its id and secret, " +
         "so the connections it minted keep working; it becomes the org default " +
-        "when the org has none. Auto-provisioned (DCR/CIMD) clients stay per " +
-        "space (400). Requires both `integrations:configure` and " +
+        "when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, " +
+        "unless the org already holds the auto-provisioned client of the same authorization " +
+        "server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and " +
         "`org-integrations:configure`, which are never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -859,6 +956,16 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`auto_client_exists_at_org`: the client is auto-provisioned and the org already holds the auto-provisioned client of its authorization server",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -1310,7 +1417,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and org-scoped ones unless the space's default OAuth client for their auth is a manual one of its own, except in the space they were connected from), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1342,56 +1449,15 @@ export const integrationsPaths = {
     patch: {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],
-      summary: "Update an integration connection's label and/or shared_with_org flag",
-      description:
-        "The connection owner or a holder of `integrations:configure` may edit it. Sharing " +
-        "(`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; " +
-        "unsharing is open to both, so a governor can withdraw a colleague's shared credentials. " +
-        "Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. " +
-        "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
-        "or an org default (enforced or soft) names the connection. A member pin does not block it: " +
-        "that member's next run fails with `pinned_connection_unavailable` until they pick again. " +
-        "Unsharing a shared connection disables, in the same transaction, every enabled schedule of " +
-        "another actor than its owner whose `connection_overrides` name it " +
-        "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the " +
-        "connection stays unreachable, re-enabling it requires a new choice. The owner's own " +
-        "schedules are untouched. " +
-        "A label is unique per " +
-        "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
-        "with 409 `connection_label_taken`. " +
-        "Scopes are not edited here: for an agent that needs more scopes, create a new connection " +
-        "with them rather than reconnecting a shared one, which widens every agent that uses it.",
+      summary: "Rename an integration connection and/or set the spaces it is shared into",
+      description: connectionUpdateDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         connectionIdParam,
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                label: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: CONNECTION_LABEL_MAX,
-                  description:
-                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`.",
-                },
-                shared_with_org: {
-                  type: "boolean",
-                  description:
-                    "`true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`.",
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
+      requestBody: connectionUpdateRequestBody,
       responses: {
         "200": {
           description: "Updated — returns the bare connection resource",
@@ -1405,19 +1471,21 @@ export const integrationsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it once its owning member no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`)",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionUpdateRefusals400,
         },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id: of the caller and reaching this space, or scoped to or shared into it.",
+        },
+        "409": connectionUpdateConflicts,
       },
     },
   },
@@ -1547,7 +1615,7 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
-      summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
+      summary: "Pin a set of shared connections to an agent for all members of the space (admin)",
       description:
         "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
@@ -1567,7 +1635,7 @@ export const integrationsPaths = {
                 connection_ids: {
                   ...connectionIdSetJsonSchema,
                   description:
-                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration, reach this space and be shared into it by the member who owns it.",
                 },
               },
               additionalProperties: false,
@@ -1591,7 +1659,7 @@ export const integrationsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
+            "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
       },
     },
@@ -1618,7 +1686,7 @@ export const integrationsPaths = {
     get: {
       operationId: "getIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Get the space default connection for this integration",
+      summary: "Get the space-wide default connection for this integration",
       description:
         "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
@@ -1650,7 +1718,7 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Set the space default connection for this integration (admin)",
+      summary: "Set the space-wide default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
         "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
@@ -1699,14 +1767,14 @@ export const integrationsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed.",
+            "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed.",
         },
       },
     },
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Remove the space default connection (admin)",
+      summary: "Remove the space-wide default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

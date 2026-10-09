@@ -75,10 +75,10 @@ beforeAll(async () => {
   const inserts: [string, unknown[]][] = [
     [
       `INSERT INTO integration_connections
-         (id, integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted, label)
-       VALUES ('d0370000-0000-4000-8000-000000000001', $1, 'primary', 'a@acme.test', $2, $3, $4, 'A'),
-              ('d0370000-0000-4000-8000-000000000002', $1, 'primary', 'b@acme.test', $2, $3, $5, 'B')`,
-      [GMAIL, SPACE, USER, OLD.conn, alien],
+         (id, integration_package_id, auth_key, account_id, org_id, space_id, user_id, credentials_encrypted, label)
+       VALUES ('d0370000-0000-4000-8000-000000000001', $1, 'primary', 'a@acme.test', $6, $2, $3, $4, 'A'),
+              ('d0370000-0000-4000-8000-000000000002', $1, 'primary', 'b@acme.test', $6, $2, $3, $5, 'B')`,
+      [GMAIL, SPACE, USER, OLD.conn, alien, ORG],
     ],
     [
       `INSERT INTO integration_oauth_clients

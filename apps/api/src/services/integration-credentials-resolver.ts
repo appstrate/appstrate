@@ -213,7 +213,6 @@ export async function resolveLiveIntegrationCredentials(
   const outcome = await refreshConnectionCredential({
     connection,
     integrationId,
-    manifest,
     authDef,
     scope: { orgId: context.orgId, spaceId: context.spaceId },
     actor: context.actor,

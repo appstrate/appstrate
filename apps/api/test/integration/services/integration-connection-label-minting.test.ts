@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Label minting. A set spans owners and a tool call names a connection by its
- * label, so labels are unique per (space, integration) across every owner:
- * "Connexion N" is one past the highest N already minted, never a row count,
- * and a named label that is taken gets the first free " (n)".
+ * Label minting. Labels are unique per owner, integration and scope (the org,
+ * or one space): "Connexion N" is one past the owner's highest N, never a row
+ * count, and a named label the owner already holds gets the first free " (n)".
+ * Two owners may hold the same label; the resolver disambiguates a bound set.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
 import { CONNECTION_LABEL_MAX } from "../../../src/lib/connection-label.ts";
 
@@ -27,9 +27,14 @@ describe("integration connection — label minting", () => {
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
   });
 
-  function connect(userId: string, accountId = "default", labelHint?: string) {
+  function connect(
+    userId: string,
+    accountId = "default",
+    labelHint?: string,
+    spaceId = ctx.defaultSpaceId,
+  ) {
     return saveIntegrationConnection(
-      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      { orgId: ctx.orgId, spaceId },
       {
         packageId: INTEGRATION,
         authKey: "pat",
@@ -54,14 +59,53 @@ describe("integration connection — label minting", () => {
     expect(next.label).toBe("Connexion 4");
   });
 
-  it("numbers across owners, so two members' connections never share a label", async () => {
+  it("numbers per owner: two members each hold a Connexion 1", async () => {
     const other = await memberContext(ctx, "member");
 
     const mine = await connect(ctx.user.id);
     const theirs = await connect(other.user.id);
 
     expect(mine.label).toBe("Connexion 1");
-    expect(theirs.label).toBe("Connexion 2");
+    expect(theirs.label).toBe("Connexion 1");
+  });
+
+  it("numbers one org scope across the spaces the owner connects from", async () => {
+    const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
+    const first = await connect(ctx.user.id);
+    const second = await connect(ctx.user.id, "default", undefined, team.id);
+
+    expect(first.scope).toBe("org");
+    expect(second.scope).toBe("org");
+    expect(second.label).toBe("Connexion 2");
+  });
+
+  it("numbers the owner's space-scoped rows apart from their org rows", async () => {
+    const [client] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        authKey: "pat",
+        clientId: "space-client",
+        clientSecretEncrypted: "unused",
+      })
+      .returning();
+    await connect(ctx.user.id);
+    const spaceRow = await saveIntegrationConnection(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      {
+        packageId: INTEGRATION,
+        authKey: "pat",
+        accountId: "default",
+        credentials: { token: "t" },
+        actor: { type: "user", id: ctx.user.id },
+        clientRef: client!.id,
+      },
+    );
+
+    expect(spaceRow.scope).toBe("space");
+    expect(spaceRow.label).toBe("Connexion 1");
   });
 
   it("strips control and bidi characters from an identity label, falling back to N when nothing remains", async () => {
@@ -72,9 +116,10 @@ describe("integration connection — label minting", () => {
     expect(blank.label).toBe("Connexion 1");
   });
 
-  it("suffixes a taken identity with the first free (n), whoever holds it", async () => {
+  it("suffixes an identity the owner holds with the first free (n), not one another owner holds", async () => {
     const other = await memberContext(ctx, "member");
     expect((await connect(other.user.id, "ops@example.com")).label).toBe("ops@example.com");
+    expect((await connect(ctx.user.id, "ops@example.com")).label).toBe("ops@example.com");
     expect((await connect(ctx.user.id, "ops@example.com")).label).toBe("ops@example.com (2)");
 
     // A rename already took "(3)": it is skipped, not duplicated.

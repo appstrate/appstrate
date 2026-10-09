@@ -611,7 +611,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     method: "PATCH",
     path: "/api/integrations/{packageId}/connections/{connectionId}",
     jsonSchema: toJsonSchema(updateConnectionSchema),
-    description: "Update integration connection metadata",
+    description: "Rename a connection and/or set the spaces it is shared into",
+  },
+  {
+    method: "PATCH",
+    path: "/api/me/connections/{connectionId}",
+    jsonSchema: toJsonSchema(updateConnectionSchema),
+    description: "Rename one of the caller's connections and/or set its share targets",
   },
   {
     method: "POST",

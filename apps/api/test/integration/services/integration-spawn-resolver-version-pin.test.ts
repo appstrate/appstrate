@@ -80,6 +80,7 @@ async function seedConnection(ctx: TestContext) {
     authKey: "oauth",
     accountId: "default",
     label: "default",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

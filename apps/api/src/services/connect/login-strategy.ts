@@ -120,6 +120,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       variables,
       labelHint: maskCredentialLabel(auth.credentials?.schema, credentials),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
     });
   }
 }

@@ -13,7 +13,7 @@
  *
  *   PUT    /api/integrations/:packageId/pins/:agentPackageId
  *   DELETE /api/integrations/:packageId/pins/:agentPackageId
- *          Admin org-level pins (sharedWithOrg-required, layer 1 of the
+ *          Admin pins (shared-into-the-space required, layer 1 of the
  *          resolver cascade). Gated on `integrations:configure`.
  *
  *   GET    /api/integrations/:packageId/pins
@@ -22,7 +22,7 @@
  *   GET    /api/integrations/:packageId/consuming-agents
  *          Drives the "pin a new agent" picker.
  *
- * Service-layer behaviour (validation rules, sharedWithOrg enforcement,
+ * Service-layer behaviour (validation rules, share enforcement,
  * cascade resolution semantics) is covered by
  * `services/integration-pins-service.test.ts` and
  * `unit/services/integration-connection-resolver.test.ts`. This file pins
@@ -105,12 +105,13 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-shared`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `Partagée ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
@@ -124,12 +125,12 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-private-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
-        sharedWithOrg: false,
         label: `Perso ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });

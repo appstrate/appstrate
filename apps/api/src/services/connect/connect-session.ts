@@ -72,6 +72,7 @@ export function connectClaimsFor(input: {
   packageId: string;
   authKey: string;
   connectionId?: string;
+  delegated?: boolean;
   scopes?: readonly string[];
   forceAccountSelect?: boolean;
 }): ConnectSessionInput {
@@ -84,6 +85,7 @@ export function connectClaimsFor(input: {
     package_id: input.packageId,
     auth_key: input.authKey,
     ...(input.connectionId ? { connection_id: input.connectionId } : {}),
+    ...(input.delegated ? { delegated: true as const } : {}),
     ...(input.scopes && input.scopes.length > 0 ? { scopes: [...input.scopes] } : {}),
     ...(input.forceAccountSelect ? { force_account_select: true } : {}),
   };

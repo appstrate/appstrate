@@ -17,10 +17,9 @@
  *     map (§7.4) — the connect layer renders it into the row's
  *     `identityClaims` JSONB and `accountId` discriminator.
  *
- *   - Connections are scoped per space (every connect-able
- *     surface in Appstrate is space-scoped — see the "Multi-tenant"
- *     bullet of `apps/api/AGENTS.md`), with the owner being either a
- *     dashboard user (`userId`) or a headless end-user
+ *   - A connection belongs to an organization; its scope is the minting
+ *     client's tier (`apps/api/src/services/connection-reach.ts`). The owner is
+ *     either a dashboard user (`userId`) or a headless end-user
  *     (`endUserId`), enforced by a check constraint.
  *
  * The runtime spawn flow (Phase 1.2a) hits this table once per declared
@@ -59,10 +58,13 @@ export const integrationConnections = pgTable(
     authKey: text("auth_key").notNull(),
     /** Discriminator for multi-account-per-auth (e.g. `sub` claim, email). */
     accountId: text("account_id").notNull(),
-    /** Space scope — mirrors the rest of the platform. */
-    spaceId: text("space_id")
+    orgId: uuid("org_id")
       .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** NULL = org scope; else the only space this row serves (the minting client's tier). */
+    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    /** Org scope only: the space it was connected from. */
+    originSpaceId: text("origin_space_id").references(() => spaces.id, { onDelete: "set null" }),
     /** Owner: dashboard user XOR headless end-user (constraint below). */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
@@ -119,18 +121,19 @@ export const integrationConnections = pgTable(
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = 1 + the highest
-    // "Connexion <n>" in the same (space, integration), every owner), suffixed
+    // "Connexion <n>" of the owner in the same scope and integration), suffixed
     // " (n)" when taken. Stable for the row's lifetime; user-editable. The UI
     // shows it verbatim — a single source of truth, no render-time fallback
-    // gymnastics. Never empty and unique per (space, integration): the
-    // sidecar's `connection` tool argument addresses a bound connection by it.
+    // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
+    // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
-    // Owner-set opt-in: when true, any actor of the same space may
-    // bind this connection by an explicit pick (member pin, launch
-    // override, admin pin, org default); the resolver's fallback never
-    // binds it (see integration-connection-resolver). Off by default
-    // — sharing is explicit consent, never silent.
-    sharedWithOrg: boolean("shared_with_org").notNull().default(false),
+    // Owner-set opt-in: the spaces where any actor may bind this connection by
+    // an explicit pick (member pin, launch override, admin pin, org default);
+    // the resolver's fallback never binds a share. Empty by default.
+    sharedSpaceIds: text("shared_space_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -140,33 +143,34 @@ export const integrationConnections = pgTable(
     // (even pointing at the same upstream account — it's their call to
     // keep duplicates or clean up). Reconnect / upgrade flows target a
     // specific row via its `id` (threaded through the OAuth state).
-    // Covering lookup index so the resolver's per-actor queries stay fast.
-    // Column order is (integrationId, spaceId, authKey): the hot
-    // reads filter (integrationId, spaceId) — with or without
-    // authKey — so spaceId must precede authKey for both shapes to get
-    // a full prefix match. Its leftmost prefix (integrationId) also
-    // serves package-only scans + the package FK cascade, so no separate
-    // single-column package index is needed.
+    // Its leftmost prefix (integrationId) also serves package-only scans and
+    // the package FK cascade.
     index("idx_integration_conn_lookup").on(table.integrationId, table.spaceId, table.authKey),
+    // Reach of one space: its org's rows for (integration, auth).
+    index("idx_integration_conn_org").on(table.orgId, table.integrationId, table.authKey),
+    // FK cascade / set null on space delete.
+    index("idx_integration_conn_space")
+      .on(table.spaceId)
+      .where(sql`${table.spaceId} IS NOT NULL`),
+    index("idx_integration_conn_origin")
+      .on(table.originSpaceId)
+      .where(sql`${table.originSpaceId} IS NOT NULL`),
     index("idx_integration_conn_user")
       .on(table.userId)
       .where(sql`${table.userId} IS NOT NULL`),
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // The shared side of `actorOrSharedFilter` for one (space, integration):
-    // the connection pickers and the resolver's selectable rows (own +
-    // shared), and the shared-only checks of admin pins, org defaults and a
-    // schedule written for another member. Partial, so it stays the size of
-    // the sharing set.
-    index("idx_integration_conn_shared")
-      .on(table.spaceId, table.integrationId, table.authKey)
-      .where(sql`${table.sharedWithOrg} = true`),
-    // A bound set spans owners of one (space, integration) and a tool call
-    // names its connection by label, so no two rows there share one. Its
-    // leading spaceId also serves spaceId-only scans (FK cascade on space
-    // delete).
-    uniqueIndex("idx_integration_conn_label").on(table.spaceId, table.integrationId, table.label),
+    // Serves `shared_space_ids @> ARRAY[$space]` (drizzle `arrayContains`), not `= ANY`.
+    index("idx_integration_conn_shared").using("gin", table.sharedSpaceIds),
+    // `coalesce` stands in for NULLS NOT DISTINCT (drizzle cannot express it).
+    uniqueIndex("idx_integration_conn_owner_label").on(
+      table.orgId,
+      sql`coalesce(${table.spaceId}, '')`,
+      table.integrationId,
+      sql`coalesce(${table.userId}, ${table.endUserId})`,
+      table.label,
+    ),
     check(
       "integration_conn_exactly_one_owner",
       sql`(user_id IS NOT NULL AND end_user_id IS NULL) OR (user_id IS NULL AND end_user_id IS NOT NULL)`,
@@ -176,7 +180,20 @@ export const integrationConnections = pgTable(
     // either (`assertConnectionShareable` refuses the share with 409 first).
     check(
       "integration_connections_end_user_not_shared",
-      sql`NOT shared_with_org OR user_id IS NOT NULL`,
+      sql`cardinality(shared_space_ids) = 0 OR user_id IS NOT NULL`,
+    ),
+    check(
+      "integration_connections_end_user_is_space",
+      sql`end_user_id IS NULL OR space_id IS NOT NULL`,
+    ),
+    check(
+      "integration_connections_origin_is_org",
+      sql`origin_space_id IS NULL OR space_id IS NULL`,
+    ),
+    // A space-scoped row is shared with its own space or nowhere.
+    check(
+      "integration_connections_space_shares_own",
+      sql`space_id IS NULL OR shared_space_ids <@ ARRAY[space_id]`,
     ),
     // AFPS §7.2 (audit 03c §D-4): manifest auth keys MUST match
     // `^[a-z][a-z0-9_]*$`. The DB mirrors the manifest-side validation
@@ -254,7 +271,7 @@ export const integrationOauthClients = pgTable(
     // Provenance: `true` for a client minted automatically via DCR/CIMD at
     // connect time (remote MCP public client), `false` for an admin-registered
     // (BYO-app) client. Multi-custom registration is an oauth2-classic feature;
-    // an auto-provisioned auth keeps exactly ONE machine client, enforced by the
+    // an auto-provisioned auth keeps ONE machine client per tier, enforced by the
     // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
     // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
@@ -271,12 +288,18 @@ export const integrationOauthClients = pgTable(
     uniqueIndex("idx_ioc_one_org_default")
       .on(table.orgId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
-    // At most one auto-provisioned (DCR/CIMD) client per (space, integration,
+    // At most one auto-provisioned (DCR/CIMD) client per (org, tier, integration,
     // auth, issuer) — replaces the old global UNIQUE for the find-or-create path
     // while leaving classic custom clients free to be N. `coalesce` stands in for
     // NULLS NOT DISTINCT (drizzle cannot express it); `ioc_issuer_is_auto` keeps `''` out.
     uniqueIndex("idx_ioc_one_auto")
-      .on(table.spaceId, table.integrationId, table.authKey, sql`coalesce(${table.issuer}, '')`)
+      .on(
+        table.orgId,
+        sql`coalesce(${table.spaceId}, '')`,
+        table.integrationId,
+        table.authKey,
+        sql`coalesce(${table.issuer}, '')`,
+      )
       .where(sql`${table.autoProvisioned}`),
     // Values are the three methods `@appstrate/connect` implements.
     check(
@@ -296,10 +319,6 @@ export const integrationOauthClients = pgTable(
     check(
       "ioc_public_iff_no_secret",
       sql`(${table.tokenEndpointAuthMethod} = 'none' AND ${table.clientSecretEncrypted} = '') OR (${table.tokenEndpointAuthMethod} IS DISTINCT FROM 'none' AND ${table.clientSecretEncrypted} <> '')`,
-    ),
-    check(
-      "ioc_auto_provisioned_is_space",
-      sql`NOT ${table.autoProvisioned} OR ${table.spaceId} IS NOT NULL`,
     ),
     check(
       "ioc_issuer_is_auto",

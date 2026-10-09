@@ -4,15 +4,20 @@
  * Unit tests for the connection ownership helper.
  *
  * `isConnectionOwnedBy` gates every owner-only control on the integration
- * detail page — delete, the share toggle, the OAuth renew CTA — against lists
- * that now contain org-shared connections owned by OTHER members. A false
+ * detail page — delete, the share editor, the OAuth renew CTA — against lists
+ * that contain connections OTHER members share into the space. A false
  * positive renders a button whose request comes back 403/404; a false negative
  * hides a control from the person who owns the row. Both halves of the check
  * are load-bearing, so they are pinned here rather than left to the component.
  */
 
 import { describe, it, expect } from "bun:test";
-import { connectionRowGrants, isConnectionOwnedBy } from "../connection-ownership";
+import {
+  connectionRowGrants,
+  isConnectionOwnedBy,
+  isSharedInSpace,
+  withSpaceShare,
+} from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;
@@ -46,61 +51,96 @@ describe("connectionRowGrants", () => {
   const base = {
     isOwn: false,
     isShared: false,
+    scope: "org",
     canConnect: true,
     canConfigure: false,
-    locked: false,
-  };
+  } as const;
 
-  it("gives the owner rename and the share toggle", () => {
-    expect(connectionRowGrants({ ...base, isOwn: true })).toEqual({
+  it("gives the owner rename and the share targets, never the governor's withdrawal", () => {
+    expect(connectionRowGrants({ ...base, isOwn: true, isShared: true })).toEqual({
       canRename: true,
-      canToggleShare: true,
-      shareLocked: false,
+      canEditShares: true,
+      canUnshareHere: false,
     });
   });
 
-  it("lets a governor withdraw a colleague's share, never grant one", () => {
-    // Sharing is the owner's consent; `integrations:configure` only unshares.
-    expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toEqual({
-      canRename: true,
-      canToggleShare: true,
-      shareLocked: false,
+  it("gives an owner who governs the space the same, not a second door", () => {
+    expect(
+      connectionRowGrants({ ...base, isOwn: true, isShared: true, canConfigure: true }),
+    ).toEqual({ canRename: true, canEditShares: true, canUnshareHere: false });
+  });
+
+  it("lets a governor withdraw a colleague's row from this space, never share one", () => {
+    // Sharing is the owner's consent; `integrations:configure` only unshares here.
+    expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toMatchObject({
+      canEditShares: false,
+      canUnshareHere: true,
     });
-    expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toEqual({
-      canRename: true,
-      canToggleShare: false,
-      shareLocked: false,
+    expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toMatchObject({
+      canEditShares: false,
+      canUnshareHere: false,
     });
+  });
+
+  it("lets a governor rename a space-scoped row, never an org-scoped one", () => {
+    // An org-scoped row spans spaces: the API refuses a governor's rename (403).
+    expect(
+      connectionRowGrants({ ...base, isShared: true, canConfigure: true, scope: "space" })
+        .canRename,
+    ).toBe(true);
+    expect(
+      connectionRowGrants({ ...base, isShared: true, canConfigure: true, scope: "org" }).canRename,
+    ).toBe(false);
   });
 
   it("gives a plain member nothing on a colleague's shared row", () => {
-    expect(connectionRowGrants({ ...base, isShared: true })).toEqual({
+    expect(connectionRowGrants({ ...base, isShared: true, scope: "space" })).toEqual({
       canRename: false,
-      canToggleShare: false,
-      shareLocked: false,
+      canEditShares: false,
+      canUnshareHere: false,
     });
   });
 
   it("gives nothing without integrations:connect, whoever owns the row", () => {
+    const denied = { canRename: false, canEditShares: false, canUnshareHere: false };
+    expect(
+      connectionRowGrants({ ...base, isOwn: true, isShared: true, canConnect: false }),
+    ).toEqual(denied);
     expect(
       connectionRowGrants({
         ...base,
-        isOwn: true,
         isShared: true,
+        scope: "space",
         canConnect: false,
         canConfigure: true,
       }),
-    ).toEqual({ canRename: false, canToggleShare: false, shareLocked: false });
+    ).toEqual(denied);
+  });
+});
+
+describe("isSharedInSpace", () => {
+  it("reads the current space in the owner's full set", () => {
+    expect(isSharedInSpace({ shared_space_ids: ["spc_b", "spc_a"] }, "spc_a")).toBe(true);
+    expect(isSharedInSpace({ shared_space_ids: ["spc_b"] }, "spc_a")).toBe(false);
   });
 
-  it("locks unsharing a pinned row, never sharing one", () => {
-    // An admin pin or the space default binding the row refuses unsharing (409
-    // `connection_pinned`); sharing an unshared row breaks nothing.
-    expect(connectionRowGrants({ ...base, isOwn: true, isShared: true, locked: true })).toEqual({
-      canRename: true,
-      canToggleShare: true,
-      shareLocked: true,
-    });
-    expect(connectionRowGrants({ ...base, isOwn: true, locked: true }).shareLocked).toBe(false);
+  it("is false without a current space", () => {
+    expect(isSharedInSpace({ shared_space_ids: ["spc_a"] }, null)).toBe(false);
+  });
+});
+
+describe("withSpaceShare", () => {
+  it("adds the space to the owner's set, keeping the other targets", () => {
+    expect(withSpaceShare(["spc_b"], "spc_a", true)).toEqual(["spc_b", "spc_a"]);
+    expect(withSpaceShare(["spc_a"], "spc_a", true)).toEqual(["spc_a"]);
+  });
+
+  it("removes only that space", () => {
+    expect(withSpaceShare(["spc_b", "spc_a"], "spc_a", false)).toEqual(["spc_b"]);
+  });
+
+  it("sends an empty set for a governor withdrawing a colleague's share here", () => {
+    // A non-owner sees `[current space]`; the API accepts only that minus the space.
+    expect(withSpaceShare(["spc_a"], "spc_a", false)).toEqual([]);
   });
 });

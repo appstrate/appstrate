@@ -25,7 +25,11 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpaces } from "../../hooks/use-spaces";
+import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
+import { isSharedInSpace } from "./connection-ownership";
 import { NoConnectionLabel } from "./no-connection-label";
 import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
@@ -62,6 +66,8 @@ export function PickerMenu({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
+  const spaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
   const {
     runBlocking,
     candidates,
@@ -107,6 +113,16 @@ export function PickerMenu({
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
+  };
+  // The owner of an org-scoped row reads where it was connected from; anyone else, who owns it.
+  const provenance = (c: IntegrationCandidate): string => {
+    const origin =
+      c.is_own && c.scope === "org"
+        ? spaces?.find((s) => s.id === c.origin_space_id)?.name
+        : undefined;
+    return origin
+      ? t("detail.integrationMemberPicker.connectedFrom", { space: origin })
+      : t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) });
   };
   // A fresh connect requests the agent's scopes: saying so is what makes it the safe choice
   // over upgrading a shared connection.
@@ -218,7 +234,7 @@ export function PickerMenu({
                       {tl}
                     </Badge>
                   )}
-                  {c.shared_with_org && (
+                  {isSharedInSpace(c, spaceId) && (
                     <Badge variant="secondary" className="text-[0.6rem]">
                       {t("detail.integrationMemberPicker.sharedBadge")}
                     </Badge>
@@ -230,7 +246,7 @@ export function PickerMenu({
                   )}
                 </div>
                 <span className="text-muted-foreground truncate text-[0.65rem]">
-                  {t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) })}
+                  {provenance(c)}
                   {c.needs_reconnection &&
                     ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                 </span>
@@ -365,7 +381,7 @@ export function PickerMenu({
             </DropdownMenuItem>
           ))}
         {/* Escape hatch to the integration page for the full connection
-            management surface (rename, share-with-org, delete, OAuth client). */}
+            management surface (rename, sharing, delete, OAuth client). */}
         {canOpenIntegration && (
           <>
             <DropdownMenuSeparator />

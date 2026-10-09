@@ -445,11 +445,9 @@ async function nextRunNumber(
  * object (every one threads `{ orgId, spaceId }` from `string`-typed pipeline
  * params); and the module contract (`PlatformServices` in
  * `@appstrate/core/module`) exposes no run-creation surface, so no out-of-tree
- * JS caller exists either. The sibling `ActorScope` deliberately carries NO
- * `orgId`, but it is not structurally assignable to `SpaceScope` — passing one
- * here is a compile error, not an `"undefined"` lock. The same reasoning
- * covers `orgRunConcurrencyLockKey` below. If a dynamically-typed caller is
- * ever added, a defined-key guard has to land WITH it.
+ * JS caller exists either. The same reasoning covers `orgRunConcurrencyLockKey`
+ * below. If a dynamically-typed caller is ever added, a defined-key guard has
+ * to land WITH it.
  */
 async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
   const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;

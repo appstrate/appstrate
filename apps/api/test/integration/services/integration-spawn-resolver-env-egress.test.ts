@@ -110,6 +110,7 @@ async function resolveWith(
     authKey: "main",
     accountId: "default",
     label: "default",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,

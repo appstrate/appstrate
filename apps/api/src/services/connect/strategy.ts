@@ -34,6 +34,8 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
+  /** Started by a delegated credential: the row it writes or reconnects is scoped to the space. */
+  delegated?: boolean;
   /**
    * The connection variables submitted (AFPS §7.12); absent when none were. Every strategy
    * validates them (`resolveConnectionVariables`) before use and persists what that returns.
@@ -172,6 +174,12 @@ export function connectionTarget(ctx: ConnectContext): PersistTarget {
         // zero rows instead of overwriting an unrelated connection.
         packageId: ctx.integrationId,
         authKey: ctx.authKey,
+        ...(ctx.delegated ? { delegated: true } : {}),
       }
-    : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
+    : {
+        kind: "insert",
+        scope: ctx.scope,
+        actor: ctx.actor,
+        ...(ctx.delegated ? { delegated: true } : {}),
+      };
 }

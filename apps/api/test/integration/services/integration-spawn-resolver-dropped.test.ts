@@ -92,6 +92,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       authKey: "primary",
       accountId: "default",
       label: "default",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
