@@ -519,7 +519,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the weekly conformance monitor checks tool parity without a credential.
 
 - **Browserless — headless browsers over Browserless's MCP server, Cloud or
-  self-hosted (#1892).** `@appstrate/browserless@1.0.0` speaks `streamable-http`
+  self-hosted (#1893).** `@appstrate/browserless@1.0.0` speaks `streamable-http`
   to a `base_url` connection variable defaulting to the Cloud
   (`https://mcp.browserless.io/mcp`), as `twenty-mcp` and `gitlab-mcp` do.
   Self-hosted is `@browserless.io/mcp` (SSPL-1.0, for operators who run it)
