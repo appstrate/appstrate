@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -47,9 +48,10 @@ import { TestResultSpan } from "../../components/test-result-span";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { authStore } from "../../stores/auth-store";
 import { isModelUnpriced } from "./model-pricing";
 
-function ModelsList({
+export function ModelsList({
   models,
   isLoading,
   error,
@@ -95,6 +97,7 @@ function ModelsList({
               <TableRow>
                 <TableHead className="text-xs">{t("models.col.source")}</TableHead>
                 <TableHead className="text-xs">{t("models.col.model")}</TableHead>
+                <TableHead className="text-xs">{t("models.col.credential")}</TableHead>
                 <TableHead className="text-xs">{t("models.col.default")}</TableHead>
                 <TableHead className="w-px text-right text-xs">{t("models.col.actions")}</TableHead>
               </TableRow>
@@ -136,6 +139,18 @@ function ModelsList({
                           </div>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {/* A managed (aliased) row hides its binding, so it names no credential. */}
+                      {m.aliased ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : m.credentialId === null ? (
+                        <span className="text-muted-foreground">
+                          {t("models.credentialEachMember")}
+                        </span>
+                      ) : (
+                        <span className="truncate">{m.credential_label ?? "—"}</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* Shown but disabled, not hidden: `PUT /api/models/default`
@@ -233,7 +248,7 @@ function ModelsList({
   );
 }
 
-function CredentialsSection({
+export function CredentialsSection({
   credentials,
   isLoading,
   error,
@@ -243,6 +258,7 @@ function CredentialsSection({
   onConnectOAuth,
   canWrite,
   canDelete,
+  userId,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
@@ -253,6 +269,8 @@ function CredentialsSection({
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
   canWrite: boolean;
   canDelete: boolean;
+  /** The caller: a personal credential is editable only by its owner. */
+  userId: string | undefined;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -261,6 +279,13 @@ function CredentialsSection({
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
+
+  const isOwnCredential = (pk: ModelProviderCredentialInfo) =>
+    pk.owner_type === "user" && pk.owner_id === userId;
+  // A personal credential is changed by its holder alone (404 to anyone else),
+  // so an admin's write right covers the organization's rows only.
+  const canEditCredential = (pk: ModelProviderCredentialInfo) =>
+    pk.owner_type === "org" ? canWrite : isOwnCredential(pk);
 
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
@@ -277,6 +302,7 @@ function CredentialsSection({
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">{t("credentials.col.provider")}</TableHead>
+                <TableHead className="text-xs">{t("credentials.col.owner")}</TableHead>
                 <TableHead className="text-xs">{t("credentials.col.auth")}</TableHead>
                 <TableHead className="text-xs">{t("credentials.col.created")}</TableHead>
                 <TableHead className="text-xs">{t("credentials.col.status")}</TableHead>
@@ -289,6 +315,17 @@ function CredentialsSection({
               {credentials.map((pk) => {
                 const ProviderIcon = getProviderIcon(resolveProviderEntry(pk, registry ?? []));
                 const isOauth = pk.authMode === "oauth2";
+                const editButton = (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => onEdit(pk)}
+                    aria-label={t("credentials.edit")}
+                  >
+                    <Pencil size={14} />
+                  </Button>
+                );
                 return (
                   <TableRow key={pk.id} data-testid={`credential-row-${pk.id}`}>
                     <TableCell>
@@ -305,6 +342,9 @@ function CredentialsSection({
                           )}
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {pk.owner_type === "org" ? t("source.org") : (pk.owner_name ?? "—")}
                     </TableCell>
                     <TableCell>
                       {isOauth ? (
@@ -342,7 +382,7 @@ function CredentialsSection({
                             failedKey="credentials.testFailed"
                           />
                         )}
-                        {!isOauth && pk.source === "custom" && canWrite && (
+                        {!isOauth && pk.source === "custom" && canEditCredential(pk) && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -355,17 +395,7 @@ function CredentialsSection({
                         )}
                         {pk.source === "custom" && !isOauth && (
                           <>
-                            {canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onEdit(pk)}
-                                aria-label={t("credentials.edit")}
-                              >
-                                <Pencil size={14} />
-                              </Button>
-                            )}
+                            {canEditCredential(pk) && editButton}
                             {canDelete && (
                               <Button
                                 variant="ghost"
@@ -381,7 +411,8 @@ function CredentialsSection({
                         )}
                         {isOauth && (
                           <>
-                            {pk.needs_reconnection && pk.providerId && canWrite && (
+                            {canEditCredential(pk) && editButton}
+                            {pk.needs_reconnection && pk.providerId && isOwnCredential(pk) && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -435,6 +466,7 @@ export function OrgSettingsModelsPage() {
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canDeleteCredentials = can("model-provider-credentials:delete");
+  const userId = useStore(authStore, (s) => s.user?.id);
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
@@ -529,6 +561,7 @@ export function OrgSettingsModelsPage() {
           }}
           canWrite={canWriteCredentials}
           canDelete={canDeleteCredentials}
+          userId={userId}
         />
       )}
 
@@ -548,12 +581,15 @@ export function OrgSettingsModelsPage() {
         onSubmit={(data) => {
           if (editPk) {
             // The PATCH body only accepts mutable fields — the protocol and
-            // endpoint are pinned by `providerId` at create time. Strip them
-            // here even though the form disables those inputs on edit.
+            // endpoint are pinned by `providerId` at create time. A subscription
+            // has no key to send: its label is the only thing that changes here.
             updatePkMutation.mutate(
               {
                 params: { path: { id: editPk.id } },
-                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
+                body: {
+                  label: data.label,
+                  ...(data.apiKey && editPk.authMode !== "oauth2" ? { api_key: data.apiKey } : {}),
+                },
               },
               { onSuccess: () => setPkModalOpen(false) },
             );

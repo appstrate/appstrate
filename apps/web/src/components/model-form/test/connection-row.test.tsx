@@ -30,6 +30,9 @@ const CONNECTION: ModelProviderCredentialInfo = {
   oauth_email: "dev@example.com",
   source: "custom",
   authMode: "oauth2",
+  owner_type: "user",
+  owner_id: "usr_1",
+  owner_name: "Alice",
   created_by: null,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
@@ -69,5 +72,24 @@ describe("ConnectionRow — connections the org already has", () => {
     expect(html).toContain(settingsFr["models.form.useExistingConnection"]);
     expect(html).toContain("Connecter un autre compte Claude Code");
     expect(html).not.toContain("Connecter Claude Code");
+  });
+});
+
+describe("ConnectionRow — a model left to each member, with nothing to pair from here", () => {
+  const html = render(
+    <ConnectionRow
+      connections={[]}
+      providerName="Claude Code"
+      invalid={false}
+      onSelect={() => {}}
+      eachMember={{ onSelect: () => {} }}
+    />,
+  );
+
+  it("offers the each-member choice as the picker, and no pairing button", () => {
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(html).not.toContain("Connecter Claude Code");
+    expect(html).not.toContain(settingsFr["models.form.connectProviderHint"]);
   });
 });

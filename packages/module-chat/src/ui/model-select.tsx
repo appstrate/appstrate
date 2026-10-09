@@ -126,6 +126,14 @@ export function ModelSelect({
                   // user learns what to fix) but not pickable — the server's
                   // `pickModel` refuses it anyway.
                   const dead = !isModelLive(m);
+                  // Who pays, for the caller. An organization credential says nothing; a
+                  // `null` means the turn is refused until the caller adds their own.
+                  const billingLabel =
+                    m.billed_to === "user"
+                      ? t("model.billedToUser")
+                      : m.billed_to === null
+                        ? t("model.credentialRequired")
+                        : null;
                   return (
                     <button
                       key={m.id}
@@ -148,6 +156,11 @@ export function ModelSelect({
                         )}
                       />
                       <span className="flex-1 truncate text-left">{m.label ?? m.modelId}</span>
+                      {billingLabel && (
+                        <span className="text-muted-foreground shrink-0 text-[0.65rem] whitespace-nowrap">
+                          {billingLabel}
+                        </span>
+                      )}
                       {dead && (
                         <span className="text-destructive shrink-0 text-[0.65rem] whitespace-nowrap">
                           {t("model.needsReconnection")}

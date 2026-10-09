@@ -9,7 +9,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
-import { KeyRound, Plug, X } from "lucide-react";
+import { KeyRound, Plug, Users, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { getProviderIcon } from "../icons";
-import { ConnectionRow } from "./connection-row";
+import { ConnectionRow, EACH_MEMBER_ITEM } from "./connection-row";
 import type {
   ModelProviderCredentialInfo,
   ProviderRegistryEntry,
@@ -36,17 +36,29 @@ interface ExistingKeys {
   onClear: () => void;
 }
 
+/**
+ * The "each member" choice: no organization credential is bound, and every
+ * member's own credential for the provider serves the model.
+ */
+export interface EachMemberChoice {
+  selected: boolean;
+  onSelect: () => void;
+  onClear: () => void;
+}
+
 /** "Type a new key, or pick one you already saved." Label and hint belong to the host. */
 function ApiKeyRow({
   id,
   apiKeyProps,
   invalid,
   existingKeys,
+  eachMember,
 }: {
   id: string;
   apiKeyProps: UseFormRegisterReturn;
   invalid: boolean;
   existingKeys?: ExistingKeys;
+  eachMember?: { onSelect: () => void };
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const pickable = existingKeys?.items ?? [];
@@ -61,10 +73,21 @@ function ApiKeyRow({
         className={cn("min-w-0 flex-1", invalid && "border-destructive")}
         aria-invalid={invalid ? true : undefined}
       />
-      {existingKeys && pickable.length > 0 && (
-        <Select value="" onValueChange={existingKeys.onSelect}>
-          <SelectTrigger className="w-32 shrink-0">
-            <SelectValue placeholder={t("models.form.useExistingKey")} />
+      {(pickable.length > 0 || eachMember) && (
+        <Select
+          value=""
+          onValueChange={(value) =>
+            value === EACH_MEMBER_ITEM ? eachMember?.onSelect() : existingKeys?.onSelect(value)
+          }
+        >
+          <SelectTrigger className="w-40 shrink-0">
+            <SelectValue
+              placeholder={
+                pickable.length > 0
+                  ? t("models.form.useExistingKey")
+                  : t("models.form.chooseIdentity")
+              }
+            />
           </SelectTrigger>
           <SelectContent>
             {pickable.map((k) => (
@@ -72,6 +95,9 @@ function ApiKeyRow({
                 {k.label}
               </SelectItem>
             ))}
+            {eachMember && (
+              <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
+            )}
           </SelectContent>
         </Select>
       )}
@@ -163,6 +189,7 @@ export function EndpointFields({
   apiKeyError,
   apiKeyHint,
   existingKeys,
+  eachMember,
   onConnect,
 }: {
   /** Namespaces the field ids so two forms can render this on one page. */
@@ -181,12 +208,15 @@ export function EndpointFields({
   apiKeyError?: string;
   apiKeyHint?: string;
   existingKeys?: ExistingKeys;
-  /** Opens the pairing dialog. Required wherever an oauth2 entry is offered. */
+  /** Offered where a member's own credential may serve the model. */
+  eachMember?: EachMemberChoice;
+  /** Opens the pairing dialog. Required wherever an oauth2 entry offers connecting. */
   onConnect?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const selectedKey = existingKeys?.selected ?? null;
   const isOauth = provider?.authMode === "oauth2";
+  const bound = !!eachMember?.selected || (!!selectedKey && !!existingKeys);
 
   if (!provider) return null;
 
@@ -234,10 +264,16 @@ export function EndpointFields({
       )}
 
       <div className="space-y-2">
-        <Label htmlFor={selectedKey || isOauth ? undefined : `${idPrefix}-apiKey`}>
+        <Label htmlFor={bound || isOauth ? undefined : `${idPrefix}-apiKey`}>
           {isOauth ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
         </Label>
-        {selectedKey && existingKeys ? (
+        {eachMember?.selected ? (
+          <CredentialChip
+            label={t("models.form.eachMember")}
+            icon={<Users className="text-muted-foreground size-3.5 shrink-0" />}
+            onClear={eachMember.onClear}
+          />
+        ) : selectedKey && existingKeys ? (
           <CredentialChip
             label={selectedKey.label}
             icon={
@@ -251,8 +287,9 @@ export function EndpointFields({
             connections={existingKeys?.items ?? []}
             providerName={provider.displayName}
             invalid={!!apiKeyError}
+            eachMember={eachMember}
             onSelect={(id) => existingKeys?.onSelect(id)}
-            onConnect={() => onConnect?.()}
+            onConnect={onConnect}
           />
         ) : (
           <ApiKeyRow
@@ -260,7 +297,11 @@ export function EndpointFields({
             apiKeyProps={apiKeyProps}
             invalid={!!apiKeyError}
             existingKeys={existingKeys}
+            eachMember={eachMember}
           />
+        )}
+        {eachMember?.selected && (
+          <div className="text-muted-foreground text-sm">{t("models.form.eachMemberHint")}</div>
         )}
         {apiKeyHint && <div className="text-muted-foreground text-sm">{apiKeyHint}</div>}
         {apiKeyError && <div className="text-destructive text-sm">{apiKeyError}</div>}

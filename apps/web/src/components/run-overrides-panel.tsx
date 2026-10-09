@@ -12,6 +12,7 @@ import {
 import { useModels } from "../hooks/use-models";
 import { isModelSelectable } from "../lib/model-selectability";
 import { ModelUnselectableNote } from "./model-availability-badge";
+import { ModelBillingHint } from "./model-billing-hint";
 import { useProxies } from "../hooks/use-proxies";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { getModelIcon } from "./icons";
@@ -201,6 +202,7 @@ export function RunOverridesPanel({
                     <span className="inline-flex items-center gap-1.5">
                       {MIcon && <MIcon className="size-3.5" />}
                       {m.label}
+                      <ModelBillingHint billedTo={m.billed_to} />
                       <ModelUnselectableNote model={m} />
                     </span>
                   </SelectItem>

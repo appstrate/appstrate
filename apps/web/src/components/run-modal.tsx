@@ -9,6 +9,7 @@ import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
 import { isModelPinUnavailable, isModelSelectable } from "../lib/model-selectability";
+import { ModelBillingHint } from "./model-billing-hint";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunModalProps {
@@ -146,7 +147,8 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   return (
     <div className="space-y-1">
       <p className="text-muted-foreground text-xs" data-testid="run-resolved-model">
-        {t("input.modelResolved", { name: resolved.label, source })}
+        {t("input.modelResolved", { name: resolved.label, source })}{" "}
+        <ModelBillingHint billedTo={resolved.billed_to} />
       </p>
       {isModelPinUnavailable(orgModels, agentModel?.modelId) && (
         <p className="text-warning text-xs" data-testid="run-model-pin-unavailable">

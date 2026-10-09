@@ -31,7 +31,11 @@ function isDuplicate(err: unknown): boolean {
   return err instanceof ApiError && err.code === "model_already_added";
 }
 
-export type ModelFormCreateBody = ModelFormModelEntry & { credentialId: string };
+export type ModelFormCreateBody = ModelFormModelEntry & {
+  /** `null` when each member serves the model with their own personal credential. */
+  credentialId: string | null;
+  providerId?: string;
+};
 type ModelFormUpdateBody = Omit<ModelFormData, "newCredential">;
 
 /** The three writes a submission can make. */
@@ -42,19 +46,19 @@ export interface ModelFormWrites {
 }
 
 /**
- * The credential the model(s) bind to: the picked one, or the typed key created
- * first — or `null` when minting that key was itself refused, which is the one
- * case where a retry has nothing to rebind to.
+ * The credential the model(s) bind to: the picked one (`null` when each member
+ * brings their own), or the typed key created first. `undefined` when minting
+ * that key was itself refused, the one case where a retry has nothing to rebind to.
  */
 async function bindCredential(
   writes: ModelFormWrites,
   data: ModelFormSubmission,
-): Promise<string | null> {
-  if (!data.newCredential) return data.credentialId;
+): Promise<{ credentialId: string | null } | undefined> {
+  if (!data.newCredential) return { credentialId: data.credentialId };
   try {
-    return (await writes.createCredential(data.newCredential)).id;
+    return { credentialId: (await writes.createCredential(data.newCredential)).id };
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -66,10 +70,12 @@ export function submitModelForm(opts: {
 }) {
   return async (data: ModelFormSubmission): Promise<ModelFormSubmitOutcome> => {
     const entries = "models" in data ? data.models : [toCreateModelBody(data, data.credentialId)];
-    const credentialId = await bindCredential(opts.writes, data);
-    if (!credentialId) {
+    const bound = await bindCredential(opts.writes, data);
+    if (!bound) {
       return { failedModelIds: entries.map((entry) => entry.modelId), duplicateModelIds: [] };
     }
+    const { credentialId } = bound;
+    const providerBinding = data.providerId !== undefined ? { providerId: data.providerId } : {};
 
     const failedModelIds: string[] = [];
     const duplicateModelIds: string[] = [];
@@ -79,7 +85,7 @@ export function submitModelForm(opts: {
           const { newCredential: _, ...modelData } = data;
           await opts.writes.updateModel(opts.editModelId, { ...modelData, credentialId });
         } else {
-          await opts.writes.createModel({ ...entry, credentialId });
+          await opts.writes.createModel({ ...entry, credentialId, ...providerBinding });
         }
       } catch (err) {
         failedModelIds.push(entry.modelId);
@@ -87,6 +93,10 @@ export function submitModelForm(opts: {
       }
     }
     if (failedModelIds.length === 0) opts.onSuccess();
-    return { failedModelIds, duplicateModelIds, credentialId };
+    return {
+      failedModelIds,
+      duplicateModelIds,
+      ...(credentialId ? { credentialId } : {}),
+    };
   };
 }

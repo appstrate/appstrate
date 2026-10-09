@@ -32,6 +32,7 @@ const orgModelOptionSchema = z.object({
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
+  billed_to: z.enum(["user", "org"]).nullable().optional(),
 });
 
 export interface OrgModelOption {
@@ -48,6 +49,8 @@ export interface OrgModelOption {
    * OpenAI). `null` for aliases (binding hidden) or rows with no registry entry.
    */
   provider_name?: string | null;
+  /** Who pays for the caller: their own credential, the org's, or `null` (they must add one). */
+  billed_to?: "user" | "org" | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;

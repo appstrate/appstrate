@@ -115,6 +115,8 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     iconUrl: null,
     source: "custom",
     credentialId: "cred_1",
+    credential_label: null,
+    billed_to: "org",
     created_by: null,
     createdAt: "2026-07-01T10:00:00.000Z",
     updatedAt: "2026-07-01T10:00:00.000Z",
@@ -152,6 +154,9 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   providerId: "openai-compatible",
   source: "custom",
   authMode: "api_key",
+  owner_type: "org",
+  owner_id: null,
+  owner_name: null,
   created_by: null,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
@@ -175,6 +180,7 @@ const ANTHROPIC_KEY: ModelProviderCredentialInfo = {
   providerId: "anthropic",
 };
 
+/** A subscription is always personal: no organization model can bind it. */
 const CONNECTION: ModelProviderCredentialInfo = {
   ...ANTHROPIC_KEY,
   id: "cred_cc",
@@ -182,6 +188,9 @@ const CONNECTION: ModelProviderCredentialInfo = {
   providerId: "claude-code",
   authMode: "oauth2",
   oauth_email: "dev@example.com",
+  owner_type: "user",
+  owner_id: "usr_1",
+  owner_name: "Alice",
 };
 
 function form(
@@ -358,25 +367,31 @@ describe("ModelFormBody — editing a catalogued row that does override it", () 
   });
 });
 
-describe("ModelFormBody — editing a subscription row", () => {
+describe("ModelFormBody — editing a subscription row the org left to each member", () => {
   const html = form(
     catalogued({
       providerId: "claude-code",
       provider_name: "Claude Code",
-      credentialId: "cred_cc",
+      credentialId: null,
+      credential_label: null,
     }),
     [CONNECTION],
   );
 
-  it("shows the connection it runs on, and the account behind it", () => {
+  it("shows each member's own connection as the identifier, in place of a connection", () => {
     expect(html).toContain(settingsFr["models.form.connectionLabel"]);
-    expect(html).toContain(CONNECTION.label);
-    expect(html).toContain(CONNECTION.oauth_email!);
+    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
   });
 
-  it("asks for no key: a subscription is opened by a connection, not a secret", () => {
+  it("offers no personal connection of a member, and asks for no key", () => {
+    // A subscription is personal: the org model cannot bind it, so it is not offered.
+    expect(html).not.toContain(CONNECTION.oauth_email!);
     expect(html).not.toContain('placeholder="sk-..."');
     expect(html).not.toContain('id="mdl-apiKey"');
+  });
+
+  it("offers no pairing from here: a personal connection cannot serve the org model", () => {
     expect(html).not.toContain(settingsFr["models.form.connectProviderHint"]);
   });
 
@@ -384,6 +399,26 @@ describe("ModelFormBody — editing a subscription row", () => {
     expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
     expect(html).not.toContain(settingsFr["models.form.manualButton"]);
     expect(html).not.toContain(settingsFr["models.form.pickFromList"]);
+  });
+});
+
+describe("ModelFormBody — catalogued row left to each member", () => {
+  const html = form(catalogued({ credentialId: null, credential_label: null }), [ANTHROPIC_KEY]);
+
+  it("shows the each-member choice as the identifier, and the model as an editable id", () => {
+    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain('id="mdl-modelId"');
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+});
+
+describe("ModelFormBody — custom endpoint is never left to each member", () => {
+  // A custom endpoint is the operator's to describe, so the choice is not offered.
+  const html = form(model({ credentialId: null, credential_label: null }), [LOCAL_KEY]);
+
+  it("asks for the endpoint's key, and offers no each-member choice", () => {
+    expect(html).toContain('placeholder="sk-..."');
+    expect(html).not.toContain(settingsFr["models.form.eachMember"]);
   });
 });
 

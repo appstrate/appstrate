@@ -65,6 +65,11 @@ const FIX = {
     label: "turn.error.manageModels",
     href: "/org-settings/models",
   },
+  personalModels: {
+    permissions: ["model-provider-credentials:connect"],
+    label: "turn.error.managePersonalModels",
+    href: "/preferences/models",
+  },
 } as const;
 
 /** `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for. */
@@ -96,6 +101,7 @@ const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
     fix: "models",
   },
   org_deleting: { text: "turn.error.orgDeleting" },
+  model_credential_required: { text: "turn.error.modelCredentialRequired", fix: "personalModels" },
 };
 
 interface TurnErrorState {

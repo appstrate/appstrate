@@ -96,6 +96,11 @@ export const ROUTE_ACCESS = {
   "/preferences/security": OWN_ACCOUNT,
   "/preferences/devices": OWN_ACCOUNT,
   "/preferences/connections": OWN_ACCOUNT,
+  // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.
+  "/preferences/models": {
+    anyOf: ["model-provider-credentials:read", "model-provider-credentials:connect"],
+    operations: ["listModelProviderCredentials"],
+  },
 
   // Both levels; the detail's guard is the row's level, resolved in its handler.
   "/webhooks": { feature: "webhooks", anyOf: WEBHOOKS_READ, operations: ["listWebhooks"] },

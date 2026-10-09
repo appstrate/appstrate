@@ -34,7 +34,7 @@ const DUPLICATE = new ApiError(
 /** Records every write; `refuse` names the step that throws. */
 function harness(refuse?: "credential" | "model" | "duplicate") {
   const created: ModelFormCreateBody[] = [];
-  const updated: { id: string; credentialId: string }[] = [];
+  const updated: { id: string; credentialId: string | null }[] = [];
   const credentials: NewCredentialBody[] = [];
   let successes = 0;
 
@@ -159,6 +159,64 @@ describe("submitModelForm — single model", () => {
       duplicateModelIds: ["gpt-6"],
       credentialId: "cred_1",
     });
+    expect(h.successes).toBe(0);
+  });
+});
+
+describe("submitModelForm — each member's own credential (unbound)", () => {
+  const unbound: ModelFormData = { modelId: "gpt-6", credentialId: null, providerId: "openai" };
+
+  it("creates the model with no credential, naming the provider, and mints none", async () => {
+    const h = harness();
+    const outcome = await submitModelForm({
+      writes: h.writes,
+      editModelId: null,
+      onSuccess: h.onSuccess,
+    })(unbound);
+
+    expect(outcome).toEqual({ failedModelIds: [], duplicateModelIds: [] });
+    expect(h.credentials).toEqual([]);
+    expect(h.created).toEqual([{ modelId: "gpt-6", credentialId: null, providerId: "openai" }]);
+    expect(h.successes).toBe(1);
+  });
+
+  it("creates every entry of an unbound batch against the same provider", async () => {
+    const h = harness();
+    await submitModelForm({
+      writes: h.writes,
+      editModelId: null,
+      onSuccess: h.onSuccess,
+    })({
+      credentialId: null,
+      providerId: "openai",
+      models: [{ modelId: "gpt-6" }, { modelId: "gpt-6-mini" }],
+    });
+
+    expect(h.created).toEqual([
+      { modelId: "gpt-6", credentialId: null, providerId: "openai" },
+      { modelId: "gpt-6-mini", credentialId: null, providerId: "openai" },
+    ]);
+  });
+
+  it("sends an unbound edit as an update that clears the credential", async () => {
+    const h = harness();
+    await submitModelForm({ writes: h.writes, editModelId: "mdl_1", onSuccess: h.onSuccess })(
+      unbound,
+    );
+
+    expect(h.updated).toEqual([{ id: "mdl_1", credentialId: null }]);
+    expect(h.successes).toBe(1);
+  });
+
+  it("reports a refused unbound model without naming a credential", async () => {
+    const h = harness("model");
+    const outcome = await submitModelForm({
+      writes: h.writes,
+      editModelId: null,
+      onSuccess: h.onSuccess,
+    })(unbound);
+
+    expect(outcome).toEqual({ failedModelIds: ["gpt-6"], duplicateModelIds: [] });
     expect(h.successes).toBe(0);
   });
 });
