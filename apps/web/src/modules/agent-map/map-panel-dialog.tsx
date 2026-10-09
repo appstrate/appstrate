@@ -29,11 +29,9 @@ import {
 } from "../../components/package-detail/agent-configuration-tab";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { ModelFormModal } from "../../components/model-form-modal";
-import { ScheduleForm } from "../../components/schedule-form";
+import { NewScheduleForm } from "../../components/new-schedule-modal";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useCreateSchedule, useScheduleFormDeps } from "../../hooks/use-schedules";
-import { scheduleConnectionChoices } from "../../lib/connection-choice";
 import { agentMapQueryKeyPrefix } from "./use-agent-map";
 
 /** Which existing panel to show. */
@@ -49,47 +47,13 @@ const TITLE_KEY: Record<MapPanelKind, string> = {
 };
 
 /**
- * Creating a schedule WITHOUT leaving for `/schedules/new`.
- *
- * That page defaults its agent selector to the first agent in the list, which is
- * almost never the one you were looking at — so creating a schedule from an
- * agent's page meant re-picking the agent by hand. Here the agent is pinned: the
- * selector is handed a single option, so `ScheduleForm` (unchanged) cannot offer
- * anything else.
- *
- * The form opens straight away. An earlier version showed the schedule list
- * first, with its own "add" button — but the card that opened this dialog IS
- * that list, so the panel re-listed what the reader was already looking at and
- * buried the one action a plus can mean behind a second click.
+ * Creating a schedule from the map: the shared new-schedule form, its agent
+ * fixed to the one the map shows, opened straight away (the card that opened
+ * this dialog already lists the agent's schedules).
  */
 function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: () => void }) {
-  const { t } = useTranslation(["agents", "agent-map", "common"]);
-  const { data: detail } = usePackageDetail("agent", packageId);
-  // The hook now answers `{ deps, error }`, and `deps` stays null until the
-  // agent detail lands — the form seeds its input state once, so mounting it
-  // early would seed a field that has since been locked.
-  const { deps } = useScheduleFormDeps(packageId);
-  const createSchedule = useCreateSchedule(packageId);
-
   return (
-    <ScheduleForm
-      // One option only — this agent. The map is agent-scoped, so letting the
-      // form retarget another agent would be a trap, not a feature.
-      agents={[{ id: packageId, displayName: detail?.display_name ?? packageId }]}
-      selectedAgentId={packageId}
-      onAgentChange={() => undefined}
-      inputWrapper={deps?.inputWrapper}
-      persistedModelId={deps?.persistedModelId ?? null}
-      persistedGenerationConfig={deps?.persistedGenerationConfig ?? null}
-      persistedProxyId={deps?.persistedProxyId ?? null}
-      homeWritable={deps?.homeWritable}
-      packageId={packageId}
-      blockedMessage={deps?.hasFileInputs ? t("agents:schedule.fileInputBlocked") : undefined}
-      isPending={createSchedule.isPending}
-      connectionChoices={scheduleConnectionChoices(createSchedule.error)}
-      onSubmit={(data) => createSchedule.mutate(data, { onSuccess: onDone })}
-      onCancel={onDone}
-    />
+    <NewScheduleForm initialAgentId={packageId} fixedAgent onCreated={onDone} onCancel={onDone} />
   );
 }
 

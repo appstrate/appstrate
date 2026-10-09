@@ -2,8 +2,6 @@
 
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
-import { type ActorValue, sameActor } from "./schedule-payload";
-import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
 export function integrationIdOfField(field: string): string {
@@ -57,44 +55,6 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
         ]
       : [],
   );
-}
-
-/**
- * The refused integrations whose current set is still the one the refused save sent. Derived,
- * so a mark clears as soon as the user picks — and comes back if they undo it.
- */
-export function pendingConnectionChoices(
-  choices: readonly ConnectionChoice[],
-  submitted: Readonly<Record<string, string[]>> | null | undefined,
-  current: Readonly<Record<string, string[]>> | null | undefined,
-): ConnectionChoice[] {
-  return choices.filter((c) =>
-    sameSet(submitted?.[c.integrationId] ?? [], current?.[c.integrationId] ?? []),
-  );
-}
-
-/** What a schedule save was sent with — what its refusal, if any, speaks for. */
-export interface SubmittedPicks {
-  runsAs: ActorValue | undefined;
-  picks: Readonly<Record<string, string[]>>;
-}
-
-/** A refusal judged the identity the save was sent for: once the actor moves it is stale. */
-export function refusalForActor(
-  choices: readonly ConnectionChoice[] | undefined,
-  submitted: SubmittedPicks | null,
-  runsAs: ActorValue | undefined,
-): readonly ConnectionChoice[] {
-  return submitted && sameActor(submitted.runsAs, runsAs) ? (choices ?? []) : [];
-}
-
-/** Picks name the previous identity's connections, so an actor change drops them. */
-export function picksAfterActorChange(args: {
-  picks: Record<string, string[]> | undefined;
-  runsAs: ActorValue | undefined;
-  nextRunsAs: ActorValue | undefined;
-}): Record<string, string[]> | undefined {
-  return sameActor(args.nextRunsAs, args.runsAs) ? args.picks : undefined;
 }
 
 /**

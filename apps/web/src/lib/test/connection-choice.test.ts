@@ -4,9 +4,6 @@ import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
   integrationIdOfField,
-  pendingConnectionChoices,
-  picksAfterActorChange,
-  refusalForActor,
   refusalReasonKey,
   scheduleConnectionChoices,
   type ConnectionChoice,
@@ -70,72 +67,6 @@ describe("scheduleConnectionChoices", () => {
     expect(scheduleConnectionChoices(new Error("network"))).toEqual([]);
     expect(scheduleConnectionChoices(null)).toEqual([]);
     expect(scheduleConnectionChoices(missingConnection(undefined))).toEqual([]);
-  });
-});
-
-describe("pendingConnectionChoices", () => {
-  const choices: ConnectionChoice[] = [
-    { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
-    { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
-  ];
-  const submitted = { "@acme/notion": ["gone"] };
-  const ids = (current: Record<string, string[]>) =>
-    pendingConnectionChoices(choices, submitted, current).map((c) => c.integrationId);
-
-  it("keeps every choice while the picks are the ones the refused save sent", () => {
-    expect(ids({ "@acme/notion": ["gone"] })).toEqual(["@acme/gmail", "@acme/notion"]);
-  });
-
-  it("clears a choice as soon as its pick moves", () => {
-    expect(ids({ "@acme/gmail": ["c1"], "@acme/notion": ["gone"] })).toEqual(["@acme/notion"]);
-    expect(ids({})).toEqual(["@acme/gmail"]);
-  });
-
-  it("brings it back when the pick is undone", () => {
-    expect(ids({ "@acme/gmail": [], "@acme/notion": ["gone"] })).toEqual([
-      "@acme/gmail",
-      "@acme/notion",
-    ]);
-  });
-});
-
-const ALICE = { userId: "usr_alice" };
-const BOB = { userId: "usr_bob" };
-const ALICE_PICKS = { "@acme/gmail": ["c_alice"] };
-const BOB_PICKS = { "@acme/gmail": ["c_bob"] };
-
-describe("picksAfterActorChange", () => {
-  it("keeps the picks while the identity does not change", () => {
-    expect(picksAfterActorChange({ picks: BOB_PICKS, runsAs: ALICE, nextRunsAs: ALICE })).toBe(
-      BOB_PICKS,
-    );
-  });
-
-  it("drops them on a real change: they named the previous identity's connections", () => {
-    expect(
-      picksAfterActorChange({ picks: ALICE_PICKS, runsAs: ALICE, nextRunsAs: BOB }),
-    ).toBeUndefined();
-  });
-});
-
-describe("refusalForActor", () => {
-  const choices: ConnectionChoice[] = [
-    { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
-  ];
-
-  it("speaks for the identity the refused save was sent for", () => {
-    expect(refusalForActor(choices, { runsAs: ALICE, picks: {} }, ALICE)).toBe(choices);
-  });
-
-  it("goes stale once the actor moves, and comes back with it", () => {
-    const submitted = { runsAs: ALICE, picks: {} };
-    expect(refusalForActor(choices, submitted, BOB)).toEqual([]);
-    expect(refusalForActor(choices, submitted, ALICE)).toBe(choices);
-  });
-
-  it("is empty before any save and without a refusal", () => {
-    expect(refusalForActor(choices, null, ALICE)).toEqual([]);
-    expect(refusalForActor(undefined, { runsAs: ALICE, picks: {} }, ALICE)).toEqual([]);
   });
 });
 

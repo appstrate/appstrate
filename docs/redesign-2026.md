@@ -1658,6 +1658,19 @@ detail/`, filled with the redesign's content (one OAuth client table, lock
   cards open their section, and the create form is create-only. The time
   zone select lists every IANA zone the browser knows (the old short list
   left America/Toronto blank).
+- A schedule is created in a modal, like the small objects (a model, a
+  webhook), not on a page like a package: `?newSchedule=<agent|1>` opens it on
+  any page (`NewScheduleModalHost` in the shell), so the schedules list, an
+  agent's Actions and its settings preselect that agent (`/schedules/new`
+  defaulted to the first agent of the list); the map embeds the same form.
+  It asks what a schedule needs to exist (agent, name, frequency, the inputs)
+  and leads to the schedule, whose Paramètres take the rest.
+- When a schedule fires is composed, not typed: a rhythm (every N minutes or
+  hours, every day, some weekdays, a day of the month) and a time, or a raw
+  cron expression for anything else (`lib/cron-frequency.ts`, each shape
+  round-trips). A sentence and the next three fires read it back, computed by
+  `cron-parser`, the scheduler's own parser. The five presets are gone, and
+  a new schedule starts in the browser's time zone, not UTC.
 - Every Alert is shadcn's grid alert: the icon sits on the middle of the
   text's first line, one line or several (the old absolute icon sat 5px
   low). An alert with a button in its row centres the button on that line

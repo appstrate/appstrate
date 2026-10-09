@@ -27,6 +27,8 @@ import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { openAsModal } from "../../lib/modal-route";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
 export function AgentRunsTab({
   packageId,
@@ -102,6 +104,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const [states, setStates] = useState<string[]>([]);
   const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
   const { can } = usePermissions();
+  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
 
   if (!detail) return null;
 
@@ -137,9 +140,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
           {can("schedules:write") && (
-            <Button asChild>
-              <Link to="/schedules/new">{t("btn.add")}</Link>
-            </Button>
+            <Button onClick={() => newSchedule.open(packageId)}>{t("btn.add")}</Button>
           )}
         </EmptyState>
       ) : (

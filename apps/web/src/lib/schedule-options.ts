@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What the schedule create form and the schedule's Paramètres tab share. */
+/** The schedule's Paramètres tab: its sections, their URLs, the inherit sentinel. */
 
 import {
   BrainCircuit,
@@ -15,15 +15,6 @@ import {
 // agent's version resolution applies at fire time, which means the latest
 // published version.
 export const VERSION_INHERIT = "__inherit__";
-
-/** The frequency shortcuts, shared with the schedule's Récurrence settings. */
-export const CRON_PRESETS = [
-  { labelKey: "schedule.preset30min", cron: "*/30 * * * *" },
-  { labelKey: "schedule.presetHourly", cron: "0 * * * *" },
-  { labelKey: "schedule.presetDaily9", cron: "0 9 * * *" },
-  { labelKey: "schedule.presetWeekday9", cron: "0 9 * * 1-5" },
-  { labelKey: "schedule.presetMonday9", cron: "0 9 * * 1" },
-] as const;
 
 export const SCHEDULE_SETTINGS_SECTIONS = [
   {

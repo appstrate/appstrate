@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus, SearchX } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -20,6 +19,8 @@ import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { useScheduleViewStore } from "../stores/list-view-store";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import { useModalParam } from "../hooks/use-modal-param";
+import { NEW_SCHEDULE_PARAM } from "../components/new-schedule-modal";
 
 /** The values the state dimension accepts — a URL is user input. */
 const STATES = ["enabled", "disabled"] as const;
@@ -27,7 +28,7 @@ const STATES = ["enabled", "disabled"] as const;
 export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { can } = usePermissions();
-  const navigate = useNavigate();
+  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
   const { data: schedules, isLoading, isError, error } = useAllSchedules();
   const { data: agents } = useAgents();
   const placeholder = useSearchPlaceholder(t("schedules.title"));
@@ -36,7 +37,7 @@ export function SchedulesListPage() {
 
   const actions = (
     <PageActionsMenu>
-      <DropdownMenuItem data-page-action="create" onSelect={() => navigate("/schedules/new")}>
+      <DropdownMenuItem data-page-action="create" onSelect={() => newSchedule.open()}>
         <Plus />
         {t("schedules.create")}
       </DropdownMenuItem>

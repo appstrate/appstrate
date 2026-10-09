@@ -1730,6 +1730,41 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 200, body: f.agentProxy }),
   },
   {
+    // The new-schedule modal: the row joins the list and opens as its detail.
+    method: "POST",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/schedules$/,
+    handler: (url, scenario, _headers, body) => {
+      const fields = (typeof body === "object" && body !== null ? body : {}) as Partial<
+        (typeof f.schedules.data)[number]
+      >;
+      const template = f.schedules.data[0]!;
+      const created = {
+        ...template,
+        ...fields,
+        id: `sch_lab_${f.schedules.data.length + 1}`,
+        packageId: agentPackageId(url),
+        name: fields.name ?? null,
+        // Only what the modal sends: the overrides are set afterwards, in Paramètres.
+        version_override: null,
+        model_id_override: null,
+        generation_config_override: null,
+        proxy_id_override: null,
+        connection_overrides: fields.connection_overrides ?? null,
+        enabled: true,
+        disabled_reason: null,
+        last_run_at: null,
+        last_run_number: 0,
+        unread_count: 0,
+        running_runs: 0,
+      };
+      if (scenario !== "error") {
+        f.schedules.data.push(created);
+        f.scheduleDetails[created.id] = created;
+      }
+      return { status: 201, body: created };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/schedules$/,
     handler: (url, scenario) => {

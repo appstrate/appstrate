@@ -30,36 +30,3 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
     (a?.userId ?? null) === (b?.userId ?? null) && (a?.endUserId ?? null) === (b?.endUserId ?? null)
   );
 }
-
-interface ScheduleOverridePayload {
-  model_id_override?: string;
-  generation_config_override?: ModelGenerationSettings;
-  proxy_id_override?: string;
-  version_override?: string;
-  connection_overrides?: Record<string, string[]>;
-  actor?: ActorValue;
-}
-
-/**
- * The override half of a schedule CREATE: whatever is empty is omitted. An
- * existing schedule is patched one setting at a time by its Paramètres tab.
- */
-export function scheduleOverridePayload(args: {
-  overrides: RunOverridesValue;
-  versionOverride: string | undefined;
-  actor: ActorValue | undefined;
-}): ScheduleOverridePayload {
-  const { overrides, versionOverride, actor } = args;
-  return {
-    ...(overrides.model_id_override ? { model_id_override: overrides.model_id_override } : {}),
-    ...(overrides.generation_config_override
-      ? { generation_config_override: overrides.generation_config_override }
-      : {}),
-    ...(overrides.proxy_id_override ? { proxy_id_override: overrides.proxy_id_override } : {}),
-    ...(versionOverride ? { version_override: versionOverride } : {}),
-    ...(overrides.connection_overrides
-      ? { connection_overrides: overrides.connection_overrides }
-      : {}),
-    ...(actor ? { actor } : {}),
-  };
-}

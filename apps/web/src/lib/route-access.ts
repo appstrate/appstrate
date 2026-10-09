@@ -66,7 +66,6 @@ export const ROUTE_ACCESS = {
   "/files": { anyOf: ["files:read"], operations: ["listFiles"] },
 
   "/schedules": { anyOf: ["schedules:read"], operations: ["listSchedules"] },
-  "/schedules/new": { anyOf: ["schedules:write"], operations: ["createSchedule"] },
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },

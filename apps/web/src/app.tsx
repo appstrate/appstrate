@@ -22,6 +22,7 @@ import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
+import { NewScheduleModalHost } from "./components/new-schedule-modal";
 
 import { useAuth, useCanCreateOrg } from "./hooks/use-auth";
 import { signedOutDestination } from "./lib/auth-flow";
@@ -77,9 +78,6 @@ const SchedulesListPage = lazy(() =>
 );
 const ScheduleDetailPage = lazy(() =>
   import("./pages/schedule-detail").then((m) => ({ default: m.ScheduleDetailPage })),
-);
-const ScheduleCreatePage = lazy(() =>
-  import("./pages/schedule-create").then((m) => ({ default: m.ScheduleCreatePage })),
 );
 const SkillsPage = lazy(() =>
   import("./pages/skills-page").then((m) => ({ default: m.SkillsPage })),
@@ -259,11 +257,6 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules": (
     <LazyRoute>
       <SchedulesListPage />
-    </LazyRoute>
-  ),
-  "/schedules/new": (
-    <LazyRoute>
-      <ScheduleCreatePage />
     </LazyRoute>
   ),
   "/schedules/:id": (
@@ -514,6 +507,8 @@ function MainLayout() {
         {/* Must stay visible on every route, including the settings layouts and
             the permission-denied pages a persona is precisely there to provoke. */}
         <ViewAsBanner />
+        {/* Opened by `?newSchedule=` from any page: the schedules list, an agent. */}
+        <NewScheduleModalHost />
         {/* Full-bleed surfaces (anything that owns its own height) opt out
             with `data-full-bleed` on their root. */}
         <div className="max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0">

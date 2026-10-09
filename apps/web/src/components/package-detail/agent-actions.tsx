@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -20,6 +19,8 @@ import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
 import { launchFromOptions } from "../../lib/run-launch";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
 export function AgentActions({
   packageId,
@@ -42,7 +43,7 @@ export function AgentActions({
   onFork?: () => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
+  const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
   const deleteAgent = useDeleteAgent();
@@ -153,7 +154,7 @@ export function AgentActions({
             label: t("detail.clearRunsConfirm"),
           })
         }
-        onAddSchedule={() => navigate("/schedules/new")}
+        onAddSchedule={() => newSchedule.open(packageId)}
         onDeleteMemories={() =>
           setConfirmState({
             type: "clearMemories",

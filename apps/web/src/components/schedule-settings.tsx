@@ -16,15 +16,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
-import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
 import { AgentDetailSectionHeader, AgentDetailSplit } from "./agent-detail/agent-detail-split";
 import { RailLink } from "./settings/rail-link";
 import { SettingRow } from "./settings/setting-row";
@@ -37,6 +29,7 @@ import { RunOverridesPanel, ScheduleConnectionOverridesSection } from "./run-ove
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
 import { ErrorState, LoadingState } from "./page-states";
+import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
@@ -47,10 +40,8 @@ import { changedInputValues, hasInputFields, initialInputValues } from "../lib/a
 import { type ConnectionChoice, scheduleConnectionChoices } from "../lib/connection-choice";
 import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
 import { type ActorValue, type RunOverridesValue, sameActor } from "../lib/schedule-payload";
-import { timezoneOptions } from "../lib/timezones";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
-  CRON_PRESETS,
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
   type ScheduleSettingsSection,
   scheduleSettingsHref,
@@ -177,57 +168,27 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
 // ─── Récurrence ──────────────────────────────────────────
 
 function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: Save }) {
-  const { t } = useTranslation(["agents"]);
-  const save = (patch: { cron_expression?: string; timezone?: string }) =>
-    update.mutate({ id: schedule.id, ...patch });
+  // A rhythm is composed field by field (a number typed, a day ticked): it is
+  // saved once the composing pauses, and only when it is complete.
+  const [cron, setCron] = useState(schedule.cron_expression);
+  const [edited, setEdited] = useState(false);
+  useSaveAfterPause(
+    cron,
+    edited,
+    (next) => update.mutate({ id: schedule.id, cron_expression: next }),
+    () => setEdited(false),
+  );
   return (
-    <>
-      <SettingRow label={t("schedule.frequency")}>
-        <div className="flex flex-wrap gap-1">
-          {CRON_PRESETS.map((preset) => (
-            <Button
-              key={preset.cron}
-              type="button"
-              variant="outline"
-              size="sm"
-              className={cn(
-                "text-xs",
-                schedule.cron_expression === preset.cron
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "text-muted-foreground",
-              )}
-              onClick={() => save({ cron_expression: preset.cron })}
-            >
-              {t(preset.labelKey)}
-            </Button>
-          ))}
-        </div>
-      </SettingRow>
-      <SettingRow label={t("schedule.cronLabel")} description={t("schedule.cronHint")}>
-        <InlineTextSetting
-          value={schedule.cron_expression}
-          aria-label={t("schedule.cronLabel")}
-          className="font-mono"
-          onCommit={(cron) => {
-            if (cron) save({ cron_expression: cron });
-          }}
-        />
-      </SettingRow>
-      <SettingRow label={t("schedule.timezone")}>
-        <Select value={schedule.timezone} onValueChange={(timezone) => save({ timezone })}>
-          <SelectTrigger aria-label={t("schedule.timezone")}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {timezoneOptions(schedule.timezone).map((zone) => (
-              <SelectItem key={zone} value={zone}>
-                {zone}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </SettingRow>
-    </>
+    <FrequencyComposer
+      cron={schedule.cron_expression}
+      timezone={schedule.timezone}
+      onChange={(next) => {
+        if (!next || next === cron) return;
+        setCron(next);
+        setEdited(true);
+      }}
+      onTimezoneChange={(timezone) => update.mutate({ id: schedule.id, timezone })}
+    />
   );
 }
 
