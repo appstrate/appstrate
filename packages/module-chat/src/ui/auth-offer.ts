@@ -130,11 +130,7 @@ export function isOfferExpired(expiresAt: string | undefined, now = Date.now()):
   return Number.isFinite(at) && at <= now;
 }
 
-/**
- * Withheld while the call is in flight (a preliminary result): a connect then would
- * append a resume turn over the live one. Its settled result shows them, whether the
- * run ended (`done:true`) or the wait did (`done:false`).
- */
+/** Withheld while the call is in flight: a connect then would append a resume turn over it. */
 export function extractRunAndWaitAuthOffers(part: {
   result?: unknown;
   isPreliminary?: boolean;

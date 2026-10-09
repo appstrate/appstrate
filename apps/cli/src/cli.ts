@@ -102,8 +102,7 @@ import { CLI_VERSION } from "./lib/version.ts";
 // a cooked-mode restore on every exit path is cheap and catches the
 // edge cases clack's own cleanup misses.
 //
-// Wired through both `process.on("exit", …)` (covers every command exit
-// + stray crashes) and the shutdown
+// Wired through both `process.on("exit", …)` (covers every exit) and the shutdown
 // coordinator (covers signal-driven exits, where the coordinator awaits
 // hooks before calling `process.exit`). The coordinator route is what
 // lets subcommands like `appstrate run` complete their cooperative
@@ -152,9 +151,8 @@ function parseSkillSource(val: string): SkillSource {
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after
-// commander's callback completes. Unlike the command's own chain (bottom of
-// this file), whatever is still running is in an unknown state, so these
-// end the process at once.
+// commander's callback completes. Whatever still runs is then in an unknown
+// state, so these end the process at once.
 const settleStray = (err: unknown): never => {
   settleCommand(err);
   process.exit();

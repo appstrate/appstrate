@@ -169,11 +169,8 @@ const outputValidator = new AjvJsonSchemaValidator();
 const compiledOutputSchemas = new WeakMap<object, JsonSchemaValidator<unknown>>();
 
 /**
- * A tool declaring an `outputSchema` must return `structuredContent` matching it
- * on success (MCP 2025-06-18 §tools; the SDK client rejects a mismatch, as
- * `McpServer.validateToolOutput` checks it). A mismatch is a server bug, never the
- * caller's, so it is a JSON-RPC internal error rather than a tool result the
- * model could mistake for an outcome. An `isError` result is not checked.
+ * A tool's successful result must match its `outputSchema` (MCP 2025-06-18). A mismatch is a
+ * server bug: a JSON-RPC internal error, never a tool result the model could take for an outcome.
  */
 function assertToolOutput(descriptor: Tool, result: CallToolResult): void {
   const schema = descriptor.outputSchema;

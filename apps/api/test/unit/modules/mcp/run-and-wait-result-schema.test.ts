@@ -8,13 +8,13 @@ import { describe, expect, it } from "bun:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType } from "@modelcontextprotocol/sdk/validation";
 import { runAndWaitStepsWithFiles } from "@appstrate/core/run-and-wait-client";
-import { componentJsonSchema, getCatalog } from "../../../../src/modules/mcp/catalog.ts";
+import { getRunAndWaitOutputSchema } from "../../../../src/modules/mcp/catalog.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 await registerTestPlatformApp();
 
 const validate = new AjvJsonSchemaValidator().getValidator(
-  componentJsonSchema("RunAndWaitResult", getCatalog().componentSchemas) as JsonSchemaType,
+  getRunAndWaitOutputSchema() as JsonSchemaType,
 );
 
 const warning = {

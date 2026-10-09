@@ -267,27 +267,27 @@ describe("startReportSession — integration readiness", () => {
     );
   });
 
-  it("names the layer that chose no connection, and drops items outside the warning contract", async () => {
+  it("names the layer that chose no connection, and keeps codes and sources it does not know", async () => {
     const chosenNone = {
       field: "integrations.@appstrate/notion",
       code: "integration_unbound" as const,
       source: "member_pin" as const,
       message: "Integration '@appstrate/notion' is bound to no connection by your pin",
     };
-    const stray = [
-      { field: "integrations.@appstrate/slack", code: "something_else", message: "x" },
-      { field: "integrations.@appstrate/slack", code: "not_connected", source: "nowhere" },
-      { code: "not_connected", message: "no field" },
-      "not an item",
-    ];
+    const newer = { field: "integrations.@appstrate/slack", code: "newer_code", source: "newer" };
+    const runLevel = { code: "not_connected", message: "no field" };
+    const malformed = ["not an item", { field: "integrations.x" }, { code: "c", source: 1 }];
     stub = installStubFetch(() =>
-      ok({ ...SUCCESS_BODY, warnings: [WARNING, chosenNone, ...stray] }),
+      ok({ ...SUCCESS_BODY, warnings: [WARNING, chosenNone, newer, runLevel, ...malformed] }),
     );
     const live = await session();
-    expect(live.warnings).toEqual([WARNING, chosenNone]);
-    expect(announce(live, false).stderr).toContain(
+    expect(live.warnings).toEqual([WARNING, chosenNone, newer, runLevel]);
+    const { stderr } = announce(live, false);
+    expect(stderr).toContain(
       "⚠ @appstrate/notion: Integration '@appstrate/notion' is bound to no connection by your pin (integration_unbound via member_pin)\n",
     );
+    expect(stderr).toContain("⚠ @appstrate/slack: newer_code (newer_code via newer)\n");
+    expect(stderr).toContain("⚠ run: no field (not_connected)\n");
   });
 
   it("announces nothing on stdout for an unreported local run under --json", () => {

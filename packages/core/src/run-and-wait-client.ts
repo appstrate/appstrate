@@ -19,11 +19,8 @@ export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
 
 /**
- * What a `done:false` result asks of its reader, on every surface. `done` is the
- * only discriminant of a run_and_wait result: `false` means the wait ended and
- * the run did not, so the payload carries no `error` — that field only ever
- * reports the run's own failure. No long-poll advice: the chat reads this with
- * only its closing-reply margin left; a surface with time adds `wait`.
+ * What a `done:false` result asks of its reader (`error` only ever reports the run's own
+ * failure). No long-poll advice: the chat reads this with only its closing-reply margin left.
  */
 export const RUN_AND_WAIT_RESUME_INSTRUCTION =
   "The run is still going: never call `run_and_wait` again for it — read its outcome " +
@@ -363,7 +360,7 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   return { overrides };
 }
 
-/** The launch's `warnings` (REST's required `LaunchWarnings`) on every payload: the run resource the poll reads lacks them. */
+/** The launch's `warnings` on every payload: the run resource the poll reads lacks them. */
 function withLaunchWarnings(
   payload: Record<string, unknown>,
   launchRecord: Record<string, unknown>,
@@ -378,8 +375,8 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
 
 /**
  * Project a run record onto the documented run_and_wait payload —
- * `{ id, packageId, status, done, result?, error? }`, `result`/`error` only once
- * `done` (the `RunAndWaitResult` OpenAPI component is its contract). The full run resource also carries operational fields
+ * `{ id, packageId, status, done, result?, error? }` (`result`/`error` only once
+ * `done`). The full run resource also carries operational fields
  * (cost, token usage, timestamps) the model has no use for: the
  * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
@@ -895,11 +892,8 @@ export async function fetchRunFiles(
 }
 
 /**
- * The ONE enrichment of a terminal (`done:true`) step: an oversized `result`
- * truncated ({@link truncateRunAndWaitPayload}) and the run's published `files`
- * added, so the model sees `{ uri, name, … }` it can chain into a follow-up run.
- * Any other step — still running, or a failed poll — has no outcome to enrich and
- * is returned as is, without a file read.
+ * The ONE enrichment of a terminal (`done:true`) step: an oversized `result` truncated and the
+ * run's published `files` added, so the model can chain them into a follow-up run.
  */
 export async function enrichTerminalRunAndWaitStep(
   step: RunAndWaitStep,
@@ -912,7 +906,7 @@ export async function enrichTerminalRunAndWaitStep(
   return { step: { ...step, payload: files.length > 0 ? { ...payload, files } : payload }, files };
 }
 
-/** {@link runAndWaitSteps} with {@link enrichTerminalRunAndWaitStep} applied. Used by the chat's `run_and_wait` tool. */
+/** {@link runAndWaitSteps} with {@link enrichTerminalRunAndWaitStep} applied. */
 export async function* runAndWaitStepsWithFiles(
   rawArgs: unknown,
   opts: RunAndWaitClientOptions,

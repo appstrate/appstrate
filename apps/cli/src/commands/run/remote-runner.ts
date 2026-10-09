@@ -52,8 +52,8 @@ import { createConsoleSink } from "./sink.ts";
 import {
   announceLaunch,
   connectionRefusalLines,
-  parseLaunchWarnings,
-  type LaunchWarning,
+  parseLaunchItems,
+  type LaunchItem,
 } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
@@ -564,7 +564,7 @@ function refusalHint(body: unknown): string | undefined {
 async function triggerRun(
   opts: RunRemoteOptions,
   deps: HttpDeps,
-): Promise<{ runId: string; warnings: LaunchWarning[] }> {
+): Promise<{ runId: string; warnings: LaunchItem[] }> {
   // Don't encode scope/name. They're already validated by `package-spec.ts`
   // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
@@ -654,7 +654,7 @@ async function triggerRun(
       hint: "Expected the created run resource (`{ id: string, ... }`). The platform may be incompatible with this CLI version.",
     });
   }
-  return { runId: payload.id, warnings: parseLaunchWarnings(payload.warnings) };
+  return { runId: payload.id, warnings: parseLaunchItems(payload.warnings) };
 }
 
 async function fetchRunRecord(

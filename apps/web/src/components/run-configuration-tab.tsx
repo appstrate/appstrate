@@ -24,6 +24,7 @@ import { EmptyState } from "./page-states";
 import { RunTrigger } from "./run-trigger";
 import { inlineRunDisplayName } from "../lib/run-title";
 import { groupByIntegration } from "../lib/run-connections";
+import { causeSentence } from "../lib/launch-warnings";
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 interface RunConfigurationTabProps {
@@ -34,10 +35,11 @@ interface RunConfigurationTabProps {
 
 export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const connectionRows = groupByIntegration(
-    run.connections_used ?? [],
-    (run.integrations_unbound ?? []).map((u) => u.integration_package_id),
+  // Why each integration started without a connection, in the launch toast's words.
+  const unboundCause = new Map(
+    (run.integrations_unbound ?? []).map((u) => [u.integration_package_id, causeSentence(u)]),
   );
+  const connectionRows = groupByIntegration(run.connections_used ?? [], [...unboundCause.keys()]);
   const isInline = run.package_ephemeral;
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but the agent page it would link to is gone.
@@ -97,10 +99,11 @@ export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps
                 value={
                   bound.length === 0 ? (
                     <span
-                      className="text-muted-foreground"
+                      className="text-muted-foreground flex flex-col"
                       data-testid={`run-integration-unbound-${integrationId}`}
                     >
-                      {t("run.integrationUnbound")}
+                      <span>{t("run.integrationUnbound")}</span>
+                      <span className="text-xs">{unboundCause.get(integrationId)}</span>
                     </span>
                   ) : (
                     <span className="flex flex-col gap-1.5">

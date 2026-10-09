@@ -232,6 +232,9 @@ try {
     // content, so a 2xx would be a lie — the same shape as POST /activate
     // above. Scoped to GET /api/integrations/connect/start only.
     "operation-2xx-response@#/paths/~1api~1integrations~1connect~1start/get/responses",
+    // RunAndWaitResult is the MCP `run_and_wait` tool's `outputSchema` (`modules/mcp/catalog.ts`),
+    // which no HTTP path references. Scoped to that component only.
+    "no-unused-components@#/components/schemas/RunAndWaitResult",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";

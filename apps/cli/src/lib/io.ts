@@ -44,11 +44,8 @@
  * migrated onto it — `sink.ts` and `commands/run/remote-runner.ts` each still
  * declare their own writer pair, for the bridge reason above.
  *
- * Four members, deliberately — no colour, TTY or logger abstraction. A
- * command that needs more than "write bytes, exit" keeps that logic in the
- * command; widening the seam would put it in everyone's way. (The one TTY
- * decision the CLI does make — repaint or plain lines — lives in `lib/ui.ts`'s
- * `spinner`, which reads `process.stdout.isTTY` directly.)
+ * Four members, deliberately — no colour, TTY or logger abstraction: a command
+ * that needs more keeps that logic in the command.
  */
 
 import * as clack from "@clack/prompts";
@@ -69,10 +66,8 @@ export interface CommandIO {
 }
 
 /**
- * What `DEFAULT_IO.exit` throws. `cli.ts` turns it into `process.exitCode` and
- * lets the process end on its own: Bun drains stdio on a natural exit, whereas
- * `process.exit` drops whatever a pipe has not taken yet (#1824). A `catch`
- * that can see one must rethrow it.
+ * What `DEFAULT_IO.exit` throws, so the process ends naturally: `process.exit` drops what a pipe
+ * has not taken yet. A `catch` that can see one must rethrow it.
  */
 export class CommandExit extends Error {
   constructor(readonly code: number) {

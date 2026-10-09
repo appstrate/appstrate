@@ -370,8 +370,7 @@ export function formatError(err: unknown): string {
  * Render `err` and end the command. `io` defaults to `DEFAULT_IO`, whose
  * `cancel` is `clack.cancel` — so the production rendering is byte-for-byte
  * what it has always been, on the same stream. Tests inject a sink instead of
- * swapping the global streams (issue #1180). A `CommandExit` passes through
- * unrendered: it is an exit already decided, caught on its way out.
+ * swapping the global streams. A `CommandExit` (an exit already decided) passes through.
  */
 export function exitWithError(err: unknown, io: CommandIO = DEFAULT_IO, code = 1): never {
   if (err instanceof CommandExit) throw err;
@@ -379,12 +378,7 @@ export function exitWithError(err: unknown, io: CommandIO = DEFAULT_IO, code = 1
   io.exit(code);
 }
 
-/**
- * `cli.ts`'s one terminal handler. A `CommandExit` was already reported by
- * the command; anything else is rendered here. Either way only
- * `process.exitCode` is set, so the process ends on its own once its output
- * is out.
- */
+/** `cli.ts`'s one terminal handler: sets only `process.exitCode`, so pending output is drained. */
 export function settleCommand(err: unknown): void {
   if (err instanceof CommandExit) {
     process.exitCode = err.code;

@@ -56,8 +56,11 @@ function warningsByIntegration(warnings: readonly LaunchWarning[]): Map<string, 
   return byId;
 }
 
-/** The sentence for warnings sharing one cause; `count` picks the plural. */
-function causeSentence(w: LaunchWarning, count: number): string {
+/** Why integrations started without a connection, for warnings sharing one cause. */
+export function causeSentence(
+  w: { code: ConnectionResolutionWarningCode; source?: ConnectionResolutionSource | null },
+  count = 1,
+): string {
   const by = w.code === "integration_unbound" ? noneChosenBy(w.source) : null;
   return by
     ? i18n.t("launchWarnings.cause.chosenNoneBy", { ns: "agents", count, by })

@@ -29,11 +29,7 @@ import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import type { ConnectionResolutionWarningCode } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
-import {
-  connectionRefusalLines,
-  parseLaunchWarnings,
-  type LaunchWarning,
-} from "./launch-warnings.ts";
+import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -81,7 +77,7 @@ export interface ReportSession {
    */
   runSecret: string;
   /** The registration's `warnings`: integrations the run starts without. */
-  warnings: LaunchWarning[];
+  warnings: LaunchItem[];
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -224,14 +220,11 @@ export async function startReportSession(
     proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
     runSecret: payload.secret,
-    warnings: parseLaunchWarnings(payload.warnings),
+    warnings: parseLaunchItems(payload.warnings),
   };
 }
 
-/**
- * The agent-facing reason per warning code, worded as the platform's own prompt words it: the run
- * binds `[]` whatever the cause, so every code but a switched-off integration reads "unbound".
- */
+/** The agent-facing reason per warning code, worded as the platform's own prompt words it. */
 const UNAVAILABLE_REASON: Record<ConnectionResolutionWarningCode, string> = {
   not_connected: UNAVAILABLE_INTEGRATION_REASONS.unbound,
   must_choose_connection: UNAVAILABLE_INTEGRATION_REASONS.unbound,
@@ -242,13 +235,19 @@ const UNAVAILABLE_REASON: Record<ConnectionResolutionWarningCode, string> = {
 
 /** Integrations the run is bound to none of, one per id, for "Unavailable Integrations". */
 export function unavailableIntegrations(
-  warnings: readonly LaunchWarning[],
+  warnings: readonly LaunchItem[],
 ): Array<{ id: string; reason: string }> {
   const byId = new Map<string, string>();
   for (const { field, code } of warnings) {
-    if (!field.startsWith("integrations.")) continue;
+    if (!field?.startsWith("integrations.")) continue;
     const id = field.slice("integrations.".length);
-    if (!byId.has(id)) byId.set(id, UNAVAILABLE_REASON[code]);
+    if (!byId.has(id))
+      byId.set(
+        id,
+        Object.hasOwn(UNAVAILABLE_REASON, code)
+          ? UNAVAILABLE_REASON[code as ConnectionResolutionWarningCode]
+          : code,
+      );
   }
   return [...byId].map(([id, reason]) => ({ id, reason }));
 }

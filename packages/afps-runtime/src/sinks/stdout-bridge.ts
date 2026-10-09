@@ -115,9 +115,8 @@ export function isStdoutEventLine(value: unknown): value is RunEvent {
 }
 
 /**
- * An `appstrate.metric` line with its `usage` read by `parseTokenUsage`, the rule every ingestion
- * seam applies: malformed bands and unknown keys are dropped before the strict guard, so a bad band
- * never costs the event its counters. Any other line, and a usage malformed as a whole, is unchanged.
+ * An `appstrate.metric` line with its `usage` read by `parseTokenUsage`, so a bad band never costs
+ * the event its counters. Any other line, and a usage malformed as a whole, is unchanged.
  */
 function withParsedMetricUsage(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;

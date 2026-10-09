@@ -49,16 +49,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run starts, and its `run.started` delivery carries `integrationsUnbound`.
 
 - **Before the deploy, run
-  `DATABASE_URL=<platform> bun scripts/migration/0040-report-token-usage-shape.ts`**
-  (#1846), read-only. It lists the runs whose stored `token_usage` the
-  stricter `TokenUsage` component (below) refuses; expected 0.
+  `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts`,
+  then again with `--apply` if it lists rows** (#1846). It rewrites each run
+  whose stored `token_usage` the strict `TokenUsage` component refuses:
+  undeclared keys and malformed `tiers` bands are dropped, and a value
+  malformed as a whole becomes NULL. Nothing is added; the cost ledger is
+  untouched.
+
+- **A connection whose OAuth client registration is broken
+  (`invalid_client` / `unauthorized_client`) is never flagged for
+  reconnection** (#1853): every refresh answers `502` `oauth_client_rejected`
+  and logs an error. Fix the client registration.
 
 - **Upgrade the `appstrate-runner` daemon together with this release, and pin
   its artifacts** (Firecracker only, #1852). The runner protocol goes from 2
   to 3: a daemon left on protocol 2 is refused ("daemon speaks protocol 2,
   platform expects 3"). An unpinned runner host never refreshes the kernel and
   rootfs it already has, so set `FIRECRACKER_ARTIFACTS_VERSION` to the
-  platform version on the runner host before or with the upgrade.
+  platform version on the runner host before or with the upgrade. Rolling
+  back the platform needs the runner daemon rolled back too: a beta.66
+  platform refuses protocol 3.
 
 ### Changed
 
@@ -71,13 +81,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration, and the same fields:
   - `not_connected` (`auth_key`, `required_scopes`, plus a `connect_url` on
     an agent-run or inline-run launch that sent `X-Appstrate-Connect-Offers`;
-    never stored with an idempotent `201`, so a replay carries none; MCP `run_and_wait` warnings carry no connect link,
-    so an MCP client gets the warning and can call
+    never stored with an idempotent `201`, so a replay carries none; MCP
+    `run_and_wait` warnings carry no connect link, so an MCP client gets the
+    warning and can call
     `initiateIntegrationConnect`, and the in-app chat gets them through its
     own launcher);
   - `must_choose_connection` when only connections other members share
     serve (`candidate_connections`);
-  - `auth_key_mismatch` (`required_auth_key`, `available_auth_keys`);
+  - `auth_key_mismatch`: the item (`409` or warning) carries `auth_key` and
+    `required_scopes` and, when connect offers are requested, a
+    `connect_url` to connect the agent's required auth;
   - `integration_not_active` when the integration is switched off in the
     space; the run's `integrations_unbound` lists it too;
   - `integration_unbound` only when a cascade layer holds `[]` (below),
@@ -107,8 +120,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `version_override`, `dependency_overrides`, switching it on — or the actor
   is another member, whose connections the caller must not learn of), `[]`
   when it was judged and the fires lack nothing. A schedule written for
-  another member keeps the shared-only filtering on its errors. The MCP and chat `run_and_wait` results carry the launch's
-  `warnings` when there are some.
+  another member keeps the shared-only filtering on its errors. The MCP and
+  chat `run_and_wait` results always carry the launch's `warnings` (`[]` when
+  none).
 - **BREAKING (API): connection sets accept `[]`, "use none"** (#1830): admin
   pins, member pins, run and schedule `connection_overrides`, and MCP
   `run_and_wait`'s `connection_overrides`. A layer holding `[]` wins and stops
@@ -142,6 +156,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the rest of the platform, instead of absent = `true`: `auths[].required` on
   the integration status no longer reports an auth as required when its
   manifest does not say so.
+- **BREAKING (MCP): `run_and_wait`'s result changes shape and its unstreamed
+  wait is bounded** (#1844, #1851).
+  - A call without a `progressToken` returns `done:false` with the run `id`
+    after ~45 s, launch included, instead of waiting to the end: nothing keeps
+    such a request alive past the 60 s timeout of MCP clients. The run keeps
+    going: continue with `getRun` (`query: { wait: true }`), never with a
+    second `run_and_wait`.
+  - `done:false` carries no `error`; the next step comes as a second text
+    block.
+  - The tool declares a strict `outputSchema` (`RunAndWaitResult`, pending or
+    terminal), and the server validates every `structuredContent` against
+    it. `warnings` is always present.
+
+  The result is truncated on the MCP path too, and files are fetched only once
+  `done`. The 15 s heartbeat and the 45 s unstreamed wait derive from the
+  SDK's 60 s request timeout.
+
 - **`@afps-spec/schema` `^0.9.0`** (was `^0.8.0`; root, `@appstrate/core`,
   `@appstrate/afps-runtime`), which declares
   `integrations_configuration.<id>.required` as a boolean (afps-spec#28): an
@@ -150,6 +181,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The launch and schedule `409`s type `errors[].code`**
   (`MissingIntegrationConnectionProblem`), and connection-id sets declare
   `uniqueItems` in OpenAPI (#1848).
+
+- **A subscription run or chat turn prices each model call at its price tier**
+  (#1552). The runner's cumulative usage and a subscription chat turn's usage
+  now carry per-tier token bands (`token_usage.tiers`, documented in OpenAPI),
+  and the `runner` / chat ledger rows price each band at its tier instead of
+  the whole sum at the base rate. The agent container keeps the `MODEL_COST`
+  tiers, so its reported cost still matches the server's. A subscription
+  provider is therefore offered tiered models too: Claude Haiku 5.5 becomes
+  selectable on `claude-code`, and `verify:system-models` no longer fails on a
+  reachable subscription price tier. Ship the runtime-pi image and the
+  Firecracker rootfs with this release: an older runner strips the
+  `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
+  Malformed bands are dropped (and logged); the counters are kept.
+
+- **One `token_usage` contract** (#1846). OpenAPI publishes a `TokenUsage`
+  component (integer counters, `tiers`, no other key) used by
+  `Run.token_usage` (`TokenUsage | null`) and the finalize body's `usage`. A
+  fractional counter makes the usage invalid — a `success` finalize answers
+  `400` — and unknown keys inside `usage` and malformed bands are dropped,
+  never stored. `TokenUsageTier` documents that `input_tokens_above` is
+  compared to the whole prompt while its counters stay net of cache.
+
+- **`GET /api/runs/{id}?wait` documentation names the cap from its single
+  constant** (#1851).
+- **The chat holds back a `run_and_wait` call's connect offers only while its
+  live (preliminary) updates stream** (#1851).
+
+- **Firecracker guest artifacts join the version contract** (#1852). The
+  runner daemon reports the release of its installed kernel and rootfs on
+  `/v1/health` (`artifactsVersion`). A released platform refuses at the
+  handshake a daemon whose artifacts come from another release, and names the
+  fix: `FIRECRACKER_ARTIFACTS_VERSION=<APP_VERSION>` on the runner host. Until
+  the handshake passes, the agent runtime stays not ready and the platform
+  keeps retrying. A `dev` platform or locally built artifacts
+  (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
+
+- **The `integration_dropped` run log is `warn`** unless a layer chose no
+  connection (`info`), and names the code; the agent prompt's reason for a
+  switched-off integration reads "it is switched off" (#1849).
+- **Credential refresh failures speak one vocabulary** (#1853; sidecar
+  protocol: the platform and the images ship together). The
+  integration-credentials `410` code `INTEGRATION_CONNECTION_NEEDS_RECONNECTION`
+  becomes `integration_connection_needs_reconnection`; the OAuth model-token
+  codes `OAUTH_REFRESH_REVOKED`, `OAUTH_REFRESH_TOKEN_MISSING` and
+  `OAUTH_CONNECTION_NEEDS_RECONNECTION` become one
+  `oauth_connection_needs_reconnection`; every `410`/`502` carries a `cause`.
+  The sidecar reads only the status.
+- **A failed model-token refresh answers `502`** with a `cause` (was `500`)
+  (#1853).
+- **"No connection" works the same way on every screen** (#1855): a schedule
+  run by another member, agent pins, the connection picker. Unticking the
+  last connection clears the choice; only the explicit "No connection" box
+  records "no connection".
+- **The dashboard shows a schedule's "will start without" toast only when the
+  server reports `warnings`** (#1850), with no client-side guess.
+- **`Idempotency-Key` stores only a request that executed (a 2xx)** (#1856).
+  A refusal (4xx) is no longer replayed for 24 h: the key is released and a
+  retry is judged again, so a launch retried after connecting the missing
+  integration runs. The `Idempotency-Key` and `Idempotent-Replayed` docs say
+  a replay re-serves the stored 2xx under current permissions, without the
+  bearer connect links of its `warnings`.
+- **Every `appstrate` command ends through one handler** (#1858): it sets the
+  exit code instead of calling `process.exit`, so no command has to drain
+  stdout itself.
+
+- **`@appstrate/connect` `parseTokenResponse` returns
+  `scopesReturned: string[] | null`** instead of `scopesGranted`, and no
+  longer takes the requested scopes (#1854): `null` means the response omitted
+  `scope` (RFC 6749 §5.1), and an echoed `scope` with no token (`""`, `" "`)
+  is treated as omitted. `exchangeAuthorizationCode` drops its
+  `scopesRequested` input; the integration callback applies the
+  requested-scopes fallback itself.
+
+- **An internal error during an integration credential refresh is no longer
+  reported as a transient upstream failure** (#1847). A database fault or an
+  incoherent OAuth client configuration makes the sidecar refresh endpoint
+  answer `500`, and the credential proxy logs it as an error while relaying
+  the upstream `401`.
+- **A run's Configuration tab says why each integration started without a
+  connection** (#1849): not connected, a pick needed, another auth method,
+  switched off, or no connection chosen and by whom.
 
 ### Added
 
@@ -223,99 +335,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   model catalog drops a record whose `off` cannot be derived or differs from
   the payload Pi builds.
 
-### Changed
-
-- **A subscription run or chat turn prices each model call at its price tier**
-  (#1552). The runner's cumulative usage and a subscription chat turn's usage
-  now carry per-tier token bands (`token_usage.tiers`, documented in OpenAPI),
-  and the `runner` / chat ledger rows price each band at its tier instead of
-  the whole sum at the base rate. The agent container keeps the `MODEL_COST`
-  tiers, so its reported cost still matches the server's. A subscription
-  provider is therefore offered tiered models too: Claude Haiku 5.5 becomes
-  selectable on `claude-code`, and `verify:system-models` no longer fails on a
-  reachable subscription price tier. Ship the runtime-pi image and the
-  Firecracker rootfs with this release: an older runner strips the
-  `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
-  Malformed bands are dropped (and logged); the counters are kept.
-
-- **One `token_usage` contract** (#1846). OpenAPI publishes a `TokenUsage`
-  component (integer counters, `tiers`, no other key) used by
-  `Run.token_usage` (`TokenUsage | null`) and the finalize body's `usage`. A
-  fractional counter makes the usage invalid — a `success` finalize answers
-  `400` — and unknown keys inside `usage` and malformed bands are dropped,
-  never stored. `TokenUsageTier` documents that `input_tokens_above` is
-  compared to the whole prompt while its counters stay net of cache.
-
-- **MCP `run_and_wait` without a `progressToken` returns after ~45 s**
-  (#1844). Nothing keeps such a request alive, so instead of holding it up to
-  30 min the tool answers `done:false` with the run `id` once 45 s have
-  passed, launch included, before the 60 s timeout of MCP clients. The run
-  keeps going: continue with `getRun` (`query: { wait: true }`), never with a
-  second `run_and_wait`.
-- **MCP `run_and_wait` declares an `outputSchema`** (#1851):
-  `RunAndWaitResult`, pending or terminal, and the server validates every
-  `structuredContent` against the tool's declared schema. `done:false`
-  carries no `error`, and the next step comes as a second text block;
-  `warnings` is always present. The result is truncated on the MCP path too,
-  and files are fetched only once `done`. The 15 s heartbeat and the 45 s
-  unstreamed wait derive from the SDK's 60 s request timeout.
-- **`GET /api/runs/{id}?wait` documentation names the cap from its single
-  constant** (#1851).
-- **The chat holds back a `run_and_wait` call's connect offers only while its
-  live (preliminary) updates stream** (#1851).
-
-- **Firecracker guest artifacts join the version contract** (#1852). The
-  runner daemon reports the release of its installed kernel and rootfs on
-  `/v1/health` (`artifactsVersion`). A released platform refuses at the
-  handshake a daemon whose artifacts come from another release, and names the
-  fix: `FIRECRACKER_ARTIFACTS_VERSION=<APP_VERSION>` on the runner host. Until
-  the handshake passes, the agent runtime stays not ready and the platform
-  keeps retrying. A `dev` platform or locally built artifacts
-  (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
-
-- **The `integration_dropped` run log is `warn`** unless a layer chose no
-  connection (`info`), and names the code; the agent prompt's reason for a
-  switched-off integration reads "it is switched off" (#1849).
-- **Credential refresh failures speak one vocabulary** (#1853; sidecar
-  protocol: the platform and the images ship together). The
-  integration-credentials `410` code `INTEGRATION_CONNECTION_NEEDS_RECONNECTION`
-  becomes `integration_connection_needs_reconnection`; the OAuth model-token
-  codes `OAUTH_REFRESH_REVOKED`, `OAUTH_REFRESH_TOKEN_MISSING` and
-  `OAUTH_CONNECTION_NEEDS_RECONNECTION` become one
-  `oauth_connection_needs_reconnection`; every `410`/`502` carries a `cause`.
-  The sidecar reads only the status.
-- **A failed model-token refresh answers `502`** with a `cause` (was `500`)
-  (#1853).
-- **"No connection" works the same way on every screen** (#1855): a schedule
-  run by another member, agent pins, the connection picker. Unticking the
-  last connection clears the choice; only the explicit "No connection" box
-  records "no connection".
-- **The dashboard shows a schedule's "will start without" toast only when the
-  server reports `warnings`** (#1850), with no client-side guess.
-- **`Idempotency-Key` stores only a request that executed (a 2xx)** (#1856).
-  A refusal (4xx) is no longer replayed for 24 h: the key is released and a
-  retry is judged again, so a launch retried after connecting the missing
-  integration runs. The `Idempotency-Key` and `Idempotent-Replayed` docs say
-  a replay re-serves the stored 2xx under current permissions, without the
-  bearer connect links of its `warnings`.
-- **Every `appstrate` command ends through one handler** (#1858): it sets the
-  exit code instead of calling `process.exit`, so no command has to drain
-  stdout itself.
-
-- **`@appstrate/connect` `parseTokenResponse` returns
-  `scopesReturned: string[] | null`** instead of `scopesGranted`, and no
-  longer takes the requested scopes (#1854): `null` means the response omitted
-  `scope` (RFC 6749 §5.1), and an echoed `scope` with no token (`""`, `" "`)
-  is treated as omitted. `exchangeAuthorizationCode` drops its
-  `scopesRequested` input; the integration callback applies the
-  requested-scopes fallback itself.
-
-- **An internal error during an integration credential refresh is no longer
-  reported as a transient upstream failure** (#1847). A database fault or an
-  incoherent OAuth client configuration makes the sidecar refresh endpoint
-  answer `500`, and the credential proxy logs it as an error while relaying
-  the upstream `401`.
-
 ### Fixed
 
 - **Saving an agent in the editor no longer drops the
@@ -354,7 +373,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`client_secret_basic` form-urlencodes the client id and secret before
   base64** (#1854, RFC 6749 §2.3.1): a space becomes `+` and `!'()~` are
-  percent-encoded, the same encoding `client_secret_post` uses.
+  percent-encoded, the same encoding `client_secret_post` uses. This changes
+  the bytes sent for a secret containing `~ ! ' ( )` or a space: an IdP that
+  does not form-decode Basic credentials (non-compliant) now rejects such a
+  secret.
 
 - **A rejected credential on a connection already flagged for reconnection
   ends the run's credential refresh with `410`** (#1847), the run marked
@@ -373,7 +395,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`invalid_client` / `unauthorized_client` on a token refresh no longer
   counts toward the failure streak** (#1853), so a broken client registration
   no longer ends with the connection flagged for reconnection: it answers
-  `502` with cause `oauth_client_rejected`, and the connect popup names it.
+  `502` with cause `oauth_client_rejected`, and for an integration the
+  connect popup names it.
+- **`appstrate run` no longer stays open after a failure while the platform
+  is unreachable** (#1858): unanswered report requests are cancelled.
+- **`appstrate run` prints and keeps launch warnings whose code or source it
+  does not know yet** (#1848).
 
 ### Security
 

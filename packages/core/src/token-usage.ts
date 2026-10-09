@@ -5,7 +5,6 @@ import { z } from "zod";
 import { parseTokenUsage, type TokenUsage } from "@appstrate/afps-shared/token-usage";
 
 export type { TokenUsage } from "@appstrate/afps-shared/token-usage";
-export { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
 
 /** {@link parseTokenUsage} as a Zod schema: fails where the snapshot is malformed. */
 export const tokenUsageSchema = z.unknown().transform((raw, ctx): TokenUsage => {

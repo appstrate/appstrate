@@ -264,7 +264,7 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -341,7 +341,7 @@ export const schemas = {
   },
   ConnectionResolutionWarning: {
     description:
-      "A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`.",
+      "A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`, and the `auth_key` to connect when the dep's own auth serves the selection), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`.",
     allOf: [
       { $ref: "#/components/schemas/ResolutionFieldError" },
       {

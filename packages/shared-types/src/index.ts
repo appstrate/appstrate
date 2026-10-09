@@ -163,11 +163,9 @@ export interface RunConnectionUsed {
   source: ConnectionResolutionSource;
 }
 
-/** A declared integration the run started bound to no connection, and why (`runs.integrations_unbound`). */
+/** A declared integration the run started bound to no connection, and why. */
 export interface RunIntegrationUnboundWire {
-  /** Integration package id (`@scope/integration`). */
   integration_package_id: string;
-  /** The resolver's warning code at kickoff. */
   code: ConnectionResolutionWarningCode;
   /** The cascade layer that chose no connection, on `integration_unbound` only. */
   source: ConnectionResolutionSource | null;
@@ -181,10 +179,7 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
-  /**
-   * Declared integrations the run started bound to no connection, in declaration order; null when
-   * the run recorded none (no connection resolution ran, or it predates the record).
-   */
+  /** In declaration order; null when the run recorded none (no connection resolution ran). */
   integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
    * True when the requesting recipient has an unread notification for this run

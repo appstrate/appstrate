@@ -261,9 +261,8 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "integrations",
 ): ResourceEntry[] {
-  // Integrations: the version from `dependencies.integrations` (§4.1), the selection from
-  // `integrations_configuration` (§4.4). Entries pass through whole, so every key the core
-  // models survives a save.
+  // Integrations: version from `dependencies.integrations` (§4.1), selection from
+  // `integrations_configuration` (§4.4); entries pass through whole, so no key is lost on save.
   if (type === "integrations") return parseManifestIntegrations(m);
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;

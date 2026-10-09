@@ -30,11 +30,8 @@ export interface TokenUsage extends TokenUsageCounters {
 }
 
 /**
- * The share of a {@link TokenUsage} priced at the tier above `input_tokens_above`.
- *
- * `input_tokens_above` is compared to a request's whole prompt (input + cache read + cache
- * write), while the band's own counters stay net of cache like the usage's. It is the join key
- * with a rate card tier's `inputTokensAbove`.
+ * The share of a {@link TokenUsage} priced at the tier above `input_tokens_above`, compared to a
+ * request's whole prompt (cache included) while the band's own counters stay net of cache.
  */
 export interface TokenUsageTier extends TokenUsageCounters {
   input_tokens_above: number;
@@ -43,7 +40,6 @@ export interface TokenUsageTier extends TokenUsageCounters {
 /** Bounds what is stored verbatim from untrusted runners; a Pi card has one or two tiers. */
 export const MAX_TOKEN_USAGE_TIERS = 16;
 
-/** A {@link TokenUsage} counter the wire can carry: a non-negative safe integer. */
 export function isTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -73,11 +69,8 @@ export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
 }
 
 /**
- * The one {@link TokenUsage} rule, applied at every seam that reads untrusted usage. A counter
- * that fails {@link isTokenCount}, or a value that is not an object, makes the snapshot malformed
- * (`usage` null). Keys outside the declared ones are dropped. Bands that fail
- * {@link isTokenUsageTiers} are dropped alone and flagged, so the counters still price, at the
- * base rate.
+ * The one {@link TokenUsage} rule for untrusted usage. Invalid bands are dropped alone and
+ * flagged, so the counters still price at the base rate; any other fault makes `usage` null.
  */
 export function parseTokenUsage(raw: unknown): {
   usage: TokenUsage | null;

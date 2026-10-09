@@ -180,11 +180,7 @@ async function handleScanJob(_job: QueueJob<ScanJobData>): Promise<void> {
   }
 }
 
-/**
- * Refresh one credential and log the verdict. A 410 is the resolver's own conclusion — the
- * credential is flagged, by this refresh or before it — so it warns; anything else failed.
- * `log` is injectable for tests.
- */
+/** Refresh one credential and log the verdict: a 410 (already flagged) only warns. */
 export async function handleRefreshJob(
   job: Pick<QueueJob<RefreshJobData>, "data">,
   log: Logger = logger,

@@ -2,12 +2,13 @@
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 
-/**
- * A `410`/`502` of a credential endpoint: a problem carrying why the credential was not
- * refreshed as the RFC 9457 extension member `cause`.
- */
+/** A credential endpoint's `410`/`502`: a problem whose `cause` member says why. */
 function credentialFailure(description: string) {
+  const causes = CREDENTIAL_FAILURE_CAUSES.map(
+    (c) => `\`${c}\`: ${CREDENTIAL_FAILURE_SENTENCES[c]}.`,
+  );
   return {
     description,
     content: {
@@ -22,7 +23,7 @@ function credentialFailure(description: string) {
                 cause: {
                   type: "string",
                   enum: [...CREDENTIAL_FAILURE_CAUSES],
-                  description: "Why the platform did not hand back a refreshed credential.",
+                  description: `Why the platform did not hand back a refreshed credential. ${causes.join(" ")}`,
                 },
               },
             },
@@ -34,12 +35,10 @@ function credentialFailure(description: string) {
 }
 
 const OAUTH_TOKEN_410 = credentialFailure(
-  "`oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection` — already flagged, refresh token revoked (`invalid_grant`), or no refresh token stored. The sidecar propagates it to the agent as a 401.",
+  "`oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401.",
 );
 
-const OAUTH_TOKEN_502 = credentialFailure(
-  "Not refreshed now; the credential stays usable. `upstream_transient` (network, upstream 5xx, unreadable response) counts toward the failure streak; `oauth_client_rejected` (the token endpoint refused the OAuth client: `invalid_client`, `unauthorized_client`) is never counted, since a reconnect cannot fix a client registration.",
-);
+const OAUTH_TOKEN_502 = credentialFailure("Not refreshed now; the credential stays usable.");
 
 /**
  * The `409` shared by the `/internal/integration-credentials/{scope}/{name}`
@@ -335,10 +334,10 @@ export const internalPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": integrationCredentialsConflict409,
         "410": credentialFailure(
-          "`integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection`, `cause` naming why — among them the stored credentials being unreadable (`credentials_undecryptable`: corrupted blob, failed integrity check, malformed envelope), which is terminal on the plain read too, not only on a forced refresh. A key id missing from the keyring is NOT one of them: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's semantics.",
+          "`integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection` — on the plain read too when the stored credentials are unreadable. A key id missing from the keyring is NOT a cause: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner.",
         ),
         "502": credentialFailure(
-          "A proactive OAuth refresh failed and the credential is not refreshed now (`upstream_transient`, `connection_changed`, or `oauth_client_rejected` — never counted toward the failure streak, since a reconnect cannot fix a client registration). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
+          "A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401.",
         ),
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -385,10 +384,10 @@ export const internalPaths = {
           description: `${integrationCredentialsConflict409.description} A fourth cause is unique to this operation: \`connect_run_no_refresh\` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched.`,
         },
         "410": credentialFailure(
-          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. `cause`: `connection_flagged` (already flagged, no token exchange), `refresh_token_revoked` (`invalid_grant`), `refresh_token_missing` (an OAuth2 connection holding no refresh token), `refresh_failures_exhausted` (failures escalated past `INTEGRATION_REFRESH_MAX_FAILURES` on a token expired past `INTEGRATION_REFRESH_GRACE_SECONDS`), `unrefreshable` (an unrefreshable auth's rejections reached that threshold), or `credentials_undecryptable`.",
+          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
         ),
         "502": credentialFailure(
-          "Not refreshed now; the connection stays usable. `cause`: a transient OAuth refresh failure that does not escalate the failure streak (`upstream_transient`, `discovery_transient`, `connection_changed` — reconnected during the refresh); `oauth_client_rejected` (the token endpoint refused the OAuth client: `invalid_client`, `unauthorized_client`), never counted, since a reconnect cannot fix a client registration; or `unrefreshable` — an auth nothing can refresh (api_key, basic, custom, oauth2 with no refresh client) rejected upstream: the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count.",
+          "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",
         ),
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },

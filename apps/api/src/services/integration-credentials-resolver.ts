@@ -8,9 +8,8 @@
  * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
- *   2. Ask {@link refreshConnectionCredential} and translate its outcome: a dead
- *      credential (flagged needsReconnection) bubbles a structured 410, a
- *      retryable failure a 502.
+ *   2. Ask {@link refreshConnectionCredential} and translate its outcome (dead →
+ *      410, retry → 502).
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -68,15 +67,9 @@ interface MutableCredentialsWire {
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
  *     be valid under another version, so it is NOT flagged.
- *   - 410 `integration_connection_needs_reconnection`: the credential is dead
- *     and the connection is flagged `needsReconnection`. The sidecar propagates
- *     it as a 401 to the integration so the LLM sees a clean "please re-connect"
- *     surface, and stops retrying.
- *   - 502: not refreshed now, the connection stays usable — the cached
- *     credential may still be valid; the sidecar treats it as retry-later and
- *     the listener's `refreshOnUnauthorized` cooldown keeps a flapping upstream
- *     from hammering this endpoint.
- *   Both carry the `CredentialFailureCause` as the `cause` extension member.
+ *   - 410 `integration_connection_needs_reconnection`: dead, the connection flagged;
+ *     the sidecar answers the integration a 401 and stops retrying.
+ *   - 502: not refreshed now, still usable; the listener's cooldown backs off.
  *   - 503 `encryption_key_unavailable`: a stored credential or client secret
  *     it needs is under a key id the keyring lacks — operator config, NOT flagged.
  */

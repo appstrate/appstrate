@@ -168,7 +168,6 @@ export async function resolveOAuthTokenForSidecar(
  *
  * On `invalid_grant` (refresh token revoked), flips `needsReconnection=true`
  * on the row and throws the 410; a failure that leaves it usable throws a 502.
- * Both carry the `CredentialFailureCause` as the `cause` extension member.
  *
  * `options.force` defaults to TRUE — "regardless of expiry" is the contract
  * this function's name promises, and the sidecar calls it precisely because it
@@ -244,7 +243,6 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
         await markCredentialNeedsReconnection(state.orgId, credentialId);
         throw needsReconnection(credentialId, "refresh_token_revoked");
       case "client_rejected":
-        // A broken client registration: a reconnect cannot fix it, so it is never counted.
         logger.error("oauth model provider: token endpoint rejected the OAuth client", {
           credentialId,
           providerId: state.config.providerId,
@@ -252,9 +250,7 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
         });
         throw notRefreshed(credentialId, "oauth_client_rejected", err);
       case "transient": {
-        // Not terminal — the cached token may still be valid. The streak escalates to
-        // needsReconnection only past the threshold on a token expired past the grace window: the
-        // same platform-wide policy as integrations (#596).
+        // The streak flags the credential only once its token expired past the grace window.
         const env = getEnv();
         await recordModelCredentialRefreshFailure(
           state.orgId,

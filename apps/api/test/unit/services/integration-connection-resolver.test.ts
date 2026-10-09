@@ -1240,6 +1240,8 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     expect(err.integrationId).toBe(INTEG);
     expect(err.requiredAuthKey).toBe("nonexistent");
     expect(err.availableAuthKeys).toEqual(["oauth"]);
+    // An auth the manifest does not declare is no connect target.
+    expect(err.authKey).toBeUndefined();
   });
 
   it("a non-required integration binds none on a mismatch, warning auth_key_mismatch with both keys", () => {
@@ -1256,15 +1258,20 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
       code: "auth_key_mismatch",
       requiredAuthKey: "pat",
       availableAuthKeys: ["oauth"],
+      // Connecting the dep's own auth clears it.
+      authKey: "pat",
     });
     expect(warning.candidateConnections).toBeUndefined();
     expect(warning.message).toContain("requires auth 'pat'");
-    expect(translateResolutionError(warning)).toMatchObject({
+    const item = translateResolutionError(warning);
+    expect(item).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "auth_key_mismatch",
       required_auth_key: "pat",
       available_auth_keys: ["oauth"],
+      auth_key: "pat",
     });
+    expect(connectOfferTarget(item)).toEqual({ integrationId: INTEG, authKey: "pat", scopes: [] });
   });
 
   it("a non-required mismatch still yields to an explicit layer: a pin on the off-auth row fails", () => {

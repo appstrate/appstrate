@@ -25,10 +25,7 @@ type CommonSentenceCode =
   | (typeof INTEGRATION_MANIFEST_FAILURE_CODES)[number]
   | "remote_binds_one_connection";
 
-/**
- * Every other `409 missing_integration_connection` item code, and the `required_integration_unbound`
- * item of a `connection_overrides` 400.
- */
+/** Every other `missing_integration_connection` code, and a 400's `required_integration_unbound`. */
 const RESOLUTION_ERROR_KEYS = {
   pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
   override_connection_unavailable: "error.overrideConnectionUnavailable",

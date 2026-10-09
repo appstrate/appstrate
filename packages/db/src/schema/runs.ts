@@ -211,9 +211,8 @@ export const runs = pgTable(
     // back through this column even after pins/connections are mutated.
     // Read back through `resolvedConnectionMapSchema` (the `$type` is an assertion).
     resolvedConnections: jsonb("resolved_connections").$type<ResolvedConnectionMap>(),
-    // Why the run started without each `[]` integration of that snapshot — the resolver's
-    // warnings at kickoff, without candidate detail. NULL = not recorded (no resolution ran).
-    // Read back through `runIntegrationsUnboundSchema`.
+    // Why the run started without each `[]` integration of that snapshot, without candidate
+    // detail. NULL = not recorded. Read back through `runIntegrationsUnboundSchema`.
     integrationsUnbound: jsonb("integrations_unbound").$type<RunIntegrationUnbound[]>(),
     // Snapshot of the integration manifest VERSION resolved per declared
     // integration at run kickoff (#686). Shape:

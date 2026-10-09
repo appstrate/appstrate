@@ -1180,10 +1180,7 @@ export interface RunStatusChangeParams {
    * round-trip.
    */
   packageEphemeral?: boolean;
-  /**
-   * On `started` only: the declared integrations the run starts without, and why. Omitted when
-   * the run recorded none (no connection resolution ran); `[]` when every one is bound.
-   */
+  /** On `started` only; omitted when not recorded, `[]` when every integration is bound. */
   integrationsUnbound?: RunIntegrationUnbound[];
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;

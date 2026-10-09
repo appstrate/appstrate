@@ -5622,7 +5622,7 @@ export interface components {
             /** @enum {string} */
             code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "required_integration_unbound" | "integration_not_active" | "integration_not_found" | "integration_wrong_type" | "integration_invalid_manifest" | "remote_binds_one_connection";
         };
-        /** @description A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`. */
+        /** @description A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`, and the `auth_key` to connect when the dep's own auth serves the selection), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`. */
         ConnectionResolutionWarning: components["schemas"]["ResolutionFieldError"] & {
             /** @enum {string} */
             code?: "not_connected" | "must_choose_connection" | "auth_key_mismatch" | "integration_not_active" | "integration_unbound";
@@ -6399,9 +6399,9 @@ export interface components {
             missing_scopes?: string[];
             /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error). */
             owned_by_actor?: boolean;
-            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them. */
             required_scopes?: string[];
-            /** @description Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
+            /** @description Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`). */
             auth_key?: string;
             /** @description Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. */
             required_auth_key?: string;
@@ -6414,7 +6414,7 @@ export interface components {
             source?: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
             /**
@@ -7342,7 +7342,7 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `not_connected` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
@@ -8358,7 +8358,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `not_connected` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
@@ -14870,10 +14870,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: {
-                            /** @description A `tools/call` result's structured payload. A tool declaring an `outputSchema` returns one matching it — `run_and_wait`'s is RunAndWaitResult — or the call fails with a JSON-RPC internal error. */
-                            structuredContent?: components["schemas"]["RunAndWaitResult"] | {
-                                [key: string]: unknown;
-                            };
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            structuredContent?: Record<string, never>;
                         } & {
                             [key: string]: unknown;
                         };
@@ -21889,7 +21887,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each `not_connected` item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
@@ -25532,7 +25530,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection`, `cause` naming why — among them the stored credentials being unreadable (`credentials_undecryptable`: corrupted blob, failed integrity check, malformed envelope), which is terminal on the plain read too, not only on a forced refresh. A key id missing from the keyring is NOT one of them: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's semantics. */
+            /** @description `integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection` — on the plain read too when the stored credentials are unreadable. A key id missing from the keyring is NOT a cause: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -25540,7 +25538,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -25548,7 +25546,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description A proactive OAuth refresh failed and the credential is not refreshed now (`upstream_transient`, `connection_changed`, or `oauth_client_rejected` — never counted toward the failure streak, since a reconnect cannot fix a client registration). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401. */
+            /** @description A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -25556,7 +25554,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -25615,7 +25613,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. `cause`: `connection_flagged` (already flagged, no token exchange), `refresh_token_revoked` (`invalid_grant`), `refresh_token_missing` (an OAuth2 connection holding no refresh token), `refresh_failures_exhausted` (failures escalated past `INTEGRATION_REFRESH_MAX_FAILURES` on a token expired past `INTEGRATION_REFRESH_GRACE_SECONDS`), `unrefreshable` (an unrefreshable auth's rejections reached that threshold), or `credentials_undecryptable`. */
+            /** @description `integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`). */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -25623,7 +25621,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -25631,7 +25629,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Not refreshed now; the connection stays usable. `cause`: a transient OAuth refresh failure that does not escalate the failure streak (`upstream_transient`, `discovery_transient`, `connection_changed` — reconnected during the refresh); `oauth_client_rejected` (the token endpoint refused the OAuth client: `invalid_client`, `unauthorized_client`), never counted, since a reconnect cannot fix a client registration; or `unrefreshable` — an auth nothing can refresh (api_key, basic, custom, oauth2 with no refresh client) rejected upstream: the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count. */
+            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -25639,7 +25637,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -26333,7 +26331,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection` — already flagged, refresh token revoked (`invalid_grant`), or no refresh token stored. The sidecar propagates it to the agent as a 401. */
+            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -26341,14 +26339,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
-            /** @description Not refreshed now; the credential stays usable. `upstream_transient` (network, upstream 5xx, unreadable response) counts toward the failure streak; `oauth_client_rejected` (the token endpoint refused the OAuth client: `invalid_client`, `unauthorized_client`) is never counted, since a reconnect cannot fix a client registration. */
+            /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -26356,7 +26354,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
@@ -26389,7 +26387,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection` — already flagged, refresh token revoked (`invalid_grant`), or no refresh token stored. The sidecar propagates it to the agent as a 401. */
+            /** @description `oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401. */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -26397,14 +26395,14 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";
                     };
                 };
             };
-            /** @description Not refreshed now; the credential stays usable. `upstream_transient` (network, upstream 5xx, unreadable response) counts toward the failure streak; `oauth_client_rejected` (the token endpoint refused the OAuth client: `invalid_client`, `unauthorized_client`) is never counted, since a reconnect cannot fix a client registration. */
+            /** @description Not refreshed now; the credential stays usable. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -26412,7 +26410,7 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"] & {
                         /**
-                         * @description Why the platform did not hand back a refreshed credential.
+                         * @description Why the platform did not hand back a refreshed credential. `connection_flagged`: the connection is flagged as needing re-connection. `refresh_token_revoked`: the refresh token was revoked upstream (invalid_grant). `refresh_token_missing`: no refresh token is stored, so nothing can refresh the token. `refresh_failures_exhausted`: the token refresh failed too many consecutive times and the token has expired. `unrefreshable`: the credential was rejected upstream and its auth cannot be refreshed; each rejection is counted. `credentials_undecryptable`: the stored credentials could not be decrypted. `upstream_transient`: the token refresh failed upstream (transient); the failure is counted. `discovery_transient`: the token endpoint could not be discovered (transient). `connection_changed`: the connection was reconnected or changed while its token was refreshed. `oauth_client_rejected`: the token endpoint rejected the OAuth client (invalid_client or unauthorized_client): its registration must be fixed, a reconnect cannot, so the failure is never counted.
                          * @enum {string}
                          */
                         cause: "connection_flagged" | "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | "upstream_transient" | "discovery_transient" | "connection_changed" | "oauth_client_rejected";

@@ -97,10 +97,7 @@ interface RunnerAppDeps {
     platformReachable: boolean;
     guestPathVerified: boolean | null;
   };
-  /**
-   * Release of the installed guest artifacts, as `ensureGuestArtifacts`
-   * returned it. Absent = no release identity (locally built artifacts).
-   */
+  /** Release of the installed guest artifacts; absent when locally built. */
   artifactsVersion?: string | null;
 }
 

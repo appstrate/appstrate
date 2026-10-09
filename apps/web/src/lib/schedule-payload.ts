@@ -59,11 +59,7 @@ interface ScheduleOverrideArgs {
   currentActor: ActorValue | undefined;
 }
 
-/**
- * The override half of a schedule write. Create omits whatever is empty. Edit sends every
- * override, `null` for a cleared one (an absent key leaves the row untouched), except
- * `version_override` and the actor, sent only when they changed.
- */
+/** The override half of a schedule write; an edit sends the version and actor only if changed. */
 export function scheduleOverridePayload(
   args: ScheduleOverrideArgs & { isEdit: true },
 ): ScheduleEditOverrides;

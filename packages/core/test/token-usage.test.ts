@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import {
-  totalTokens,
-  accumulateTokenUsage,
-  parseTokenUsage,
-  tokenUsageSchema,
-} from "../src/token-usage.ts";
+import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
+import { totalTokens, accumulateTokenUsage, tokenUsageSchema } from "../src/token-usage.ts";
 
 describe("totalTokens", () => {
   it("sums all four buckets", () => {

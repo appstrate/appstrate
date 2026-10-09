@@ -106,17 +106,21 @@ async function sharedConnections(spaceId: string, ids: string[]): Promise<Map<st
   return new Map(rows.map((r) => [r.id, r.integrationId]));
 }
 
-function sameSet(a: readonly string[], b: readonly string[] | undefined): boolean {
+export function sameSet(a: readonly string[], b: readonly string[] | undefined): boolean {
   return b !== undefined && a.length === b.length && a.every((id) => b.includes(id));
 }
 
-/** Whether two override maps bind the same sets; `null` and `{}` both bind nothing. */
-export function sameConnectionOverrides(
-  a: ConnectionOverrides | null,
-  b: ConnectionOverrides | null,
+/** Whether two maps hold the same keys with `eq` values; `null` and `{}` are both empty. */
+export function sameRecord<T>(
+  a: Readonly<Record<string, T>> | null,
+  b: Readonly<Record<string, T>> | null,
+  eq: (x: T, y: T) => boolean,
 ): boolean {
   const ids = Object.keys(a ?? {});
-  return ids.length === Object.keys(b ?? {}).length && ids.every((id) => sameSet(a![id]!, b?.[id]));
+  return (
+    ids.length === Object.keys(b ?? {}).length &&
+    ids.every((id) => b !== null && id in b && eq(a![id]!, b[id]!))
+  );
 }
 
 /**

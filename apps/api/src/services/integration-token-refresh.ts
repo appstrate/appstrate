@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth2 token refresh for `integration_connections` rows, and the one decision over a connection
- * whose credential is due for refresh ({@link refreshConnectionCredential}). The token exchange is
- * `performRefreshTokenExchange` (`@appstrate/connect`); `dedupedRefresh` (`lib/deduped-refresh.ts`)
- * serializes the refreshes of one connection, in process and across instances.
- *
- * Lives in apps/api rather than packages/connect because `integration_connections` is
- * platform-internal: connect stays free of `@appstrate/db` so the sidecar can consume it.
+ * OAuth2 token refresh for `integration_connections` rows ({@link refreshConnectionCredential}).
+ * Lives in apps/api: connect stays free of `@appstrate/db` so the sidecar can consume it.
  */
 
 import { eq } from "drizzle-orm";
@@ -51,25 +46,13 @@ interface IntegrationRefreshResult {
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
-  /**
-   * Scope set the IdP authoritatively granted on this refresh (its response's `scope`). `null`
-   * when the response omitted `scope` — per OAuth 2 §5.1 "same scopes as previously issued", so
-   * never "no scopes granted".
-   */
+  /** `null`: `scope` omitted, i.e. unchanged (RFC 6749 §5.1), never "none granted". */
   scopesGranted: string[] | null;
-  /**
-   * `true` when {@link scopesGranted} is non-null AND strictly narrower than the connection's
-   * previously stored `scopesGranted`: {@link refreshConnectionCredential} then re-checks the
-   * space's required scopes.
-   */
+  /** {@link scopesGranted} is strictly narrower than the stored grant. */
   shrinkDetected: boolean;
 }
 
-/**
- * What a refresh under the lock concluded, thrown out of `dedupedRefresh`: `dead` (the connection
- * is flagged `needsReconnection`) or `retry` (it stays usable). `flaggedBefore`: the flag was
- * already set when the refresh took the lock. `cause` (`ErrorOptions`) is the underlying failure.
- */
+/** A refresh's verdict, thrown out of `dedupedRefresh`. `flaggedBefore`: before the lock. */
 class RefreshVerdictError extends Error {
   readonly flaggedBefore: boolean;
   constructor(
@@ -95,12 +78,7 @@ export interface RefreshTarget {
   oauthResource: string | null;
 }
 
-/**
- * Refresh the OAuth2 access token of a connection under `dedupedRefresh`, and write it back.
- * Throws a {@link RefreshVerdictError}, or any other error as is.
- *
- * `forced` (an upstream 401): the freshness short-circuit after the lock is skipped.
- */
+/** `forced` (an upstream 401) skips the freshness short-circuit after the lock. */
 async function refreshUnderLock(
   connection: RefreshTarget,
   packageIdForLog: string,
@@ -174,10 +152,8 @@ async function doRefresh(
   const current = decryptCredentialsToStringMap(credentialsEncrypted);
   const refreshToken = current.refresh_token;
   if (!refreshToken) {
-    // A refresh is warranted (expiring, or a 401) and nothing can perform it. Throw rather than
-    // serve the stored token: the sidecar would re-inject the credential that 401'd and answer
-    // 200, contradicting the flag. (Google issues none without `access_type=offline`, see
-    // `auths.{key}.authorizationParams`.)
+    // Throw rather than serve the stored token: the sidecar would re-inject the credential that
+    // 401'd and answer 200. (Google issues none without `access_type=offline`.)
     logger.warn(
       "Integration connection unrefreshable — no refresh_token; flagging needsReconnection",
       {
@@ -198,7 +174,6 @@ async function doRefresh(
     }));
   } catch (err) {
     if (err instanceof ClientAuthInvariantError) {
-      // A configuration/programming fault: it is never counted against the connection.
       logger.error("Integration refresh aborted — incoherent client auth", {
         packageId,
         authKey,
@@ -216,8 +191,6 @@ async function doRefresh(
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
-  // Only an echoed `scope` is authoritative; an omitted one (`null`) is the grant already stored
-  // (RFC 6749 §5.1).
   const responseScopes = parsed.scopesReturned;
 
   // The stored outputs, with what this response carries: a field the IdP does not
@@ -270,11 +243,6 @@ async function doRefresh(
   return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
 }
 
-/**
- * Record what a failed token exchange says about the connection, and conclude. `revoked` flags it;
- * `client_rejected` blames the client registration, which a reconnect cannot fix, so it is never
- * counted; `transient` counts toward the streak that flags a token expired past the grace window.
- */
 async function exchangeFailureVerdict(
   err: RefreshError,
   log: { packageId: string; authKey: string; connectionId: string },
@@ -304,22 +272,9 @@ async function exchangeFailureVerdict(
 }
 
 /**
- * What {@link refreshConnectionCredential} concluded about a connection's credential. Each caller
- * only translates it (the sidecar credentials resolver → 200/502/410, the credential proxy →
- * replay/relay the 401); what was written to the connection row is already written.
- *
- * - `refreshed`: a new credential is stored — or, on a proactive refresh, a peer's fresher one
- *   was read back. If the refresh narrowed the grant below the space's required scopes, the
- *   connection is already flagged `needsReconnection`; the credential is still served.
- * - `kept`: nothing concluded against the stored credential, which stands — a proactive refresh
- *   that was not due, or could not run (`cause` says why), or a rejection of a credential the
- *   connection no longer holds.
- * - `retry`: not refreshed now, the connection stays usable. `rejections`: the count of an
- *   unrefreshable auth's rejections, below `INTEGRATION_REFRESH_MAX_FAILURES`.
- * - `dead`: the credential can never be used again and the connection is flagged
- *   `needsReconnection`.
- *
- * `detail` carries the underlying error, for logs only.
+ * What {@link refreshConnectionCredential} concluded; callers only translate it, the row is
+ * already written. `refreshed` is served even when a narrowed grant got the connection flagged;
+ * `kept`: the stored one stands; `retry`: still usable; `dead`: flagged. `detail` is for logs.
  */
 type ConnectionRefreshOutcome =
   | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
@@ -332,31 +287,18 @@ type ConnectionRefreshOutcome =
     }
   | { status: "dead"; cause: CredentialFailureCause; detail?: string };
 
-/** Why a caller asks for a connection's credential to be refreshed. */
 export type RefreshTrigger =
-  /** A read: the stored credential is refreshed only once it nears expiry. */
   | { kind: "expiring" }
-  /**
-   * Upstream rejected the credential of `revision` (its `credential_revision`); `null` when the
-   * caller cannot name it, and the rejection then concerns the credential the connection holds.
-   */
+  /** Upstream rejected the credential of `revision`; `null`: the one the connection holds. */
   | { kind: "rejected"; revision: string | null };
 
 /**
- * The one decision over a connection's credential: refresh it, keep it, retry later, or declare it
- * dead. A rejection is evidence only against the credential it names: one the connection no longer
- * holds is treated as a read, and nothing is counted.
+ * The one decision over a connection's credential. A rejection is evidence only against the
+ * credential it names: one the connection no longer holds is treated as a read, nothing counted.
+ * A narrowed grant is checked against the space's scope floor on every path, since the refresh
+ * that narrows `scopes_granted` is the only one that can see the shrink.
  *
- * Builds the refresh context from the connection's pinned client, refreshes, classifies the
- * failure, and checks a narrowed grant against the space's scope floor — on every path, since the
- * refresh that narrows `scopes_granted` is the only one that can see the shrink. A rejection
- * nothing can refresh (not oauth2, no client, no token endpoint) is counted by
- * `recordUnrefreshableRejection` while `actor` still reaches the connection and it still holds
- * that credential.
- *
- * Throws the 503 of a key id missing from the keyring, and any error that is not a verdict on the
- * connection (a database fault, an incoherent client auth). A scope-floor check that fails is
- * logged; the refreshed credential is still returned.
+ * Throws only what is not a verdict on the connection (missing key id → 503, a database fault).
  */
 export async function refreshConnectionCredential(input: {
   connection: RefreshTarget & {
@@ -411,8 +353,7 @@ export async function refreshConnectionCredential(input: {
     );
   } catch (err) {
     if (!(err instanceof RefreshError && err.kind === "transient")) throw err;
-    // Never terminal: the row stays untouched and the next attempt re-discovers. A proactive
-    // refresh has no evidence against the stored token, so it keeps serving it.
+    // Never terminal; a proactive refresh has no evidence against the stored token.
     return { status: forced ? "retry" : "kept", cause: "discovery_transient", detail: err.message };
   }
   if (!refreshContext) return unrefreshable("no OAuth client or token endpoint");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { HttpSink } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
 import type { RunEvent } from "@afps-spec/types";
@@ -416,4 +416,58 @@ describe("HttpSink", () => {
     // Not the all-zero forbidden value.
     expect(sent).not.toContain("00000000000000000000000000000000");
   });
+});
+
+describe("HttpSink.abort", () => {
+  const silent = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
+  const silentUrl = `http://localhost:${silent.port}/events`;
+  afterAll(() => silent.stop(true));
+
+  it("rejects a request the platform never answers with the abort reason", async () => {
+    const sink = new HttpSink({ url: silentUrl, runSecret: RUN_SECRET });
+    const pending = sink.finalize(SAMPLE_RESULT);
+    setTimeout(() => sink.abort(new Error("gave up")), 20);
+    await expect(pending).rejects.toThrow("gave up");
+  });
+
+  it("cuts a retry backoff short", async () => {
+    const server = startTestServer();
+    try {
+      server.setTransientFailures(10, 503);
+      const sink = new HttpSink({
+        url: server.url,
+        runSecret: RUN_SECRET,
+        initialBackoffMs: 60_000,
+      });
+      const pending = sink.handle(SAMPLE_EVENT);
+      while (server.received.length === 0) await Bun.sleep(5);
+      const started = performance.now();
+      sink.abort(new Error("gave up"));
+      await expect(pending).rejects.toThrow("gave up");
+      expect(performance.now() - started).toBeLessThan(1_000);
+    } finally {
+      server.shutdown();
+    }
+  });
+
+  it("leaves nothing that keeps the process alive", async () => {
+    const module = JSON.stringify(`${import.meta.dir}/../../src/sinks/http-sink.ts`);
+    const started = performance.now();
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `const { HttpSink } = await import(${module});
+         const sink = new HttpSink({ url: ${JSON.stringify(silentUrl)}, runSecret: "s" });
+         const pending = sink.finalize({ status: "failed" }).catch((err) => console.log(err.message));
+         setTimeout(() => sink.abort(new Error("gave up")), 50);
+         await pending;`,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    expect(stdout).toBe("gave up\n");
+    expect(exitCode).toBe(0);
+    expect(performance.now() - started).toBeLessThan(5_000);
+  }, 15_000);
 });

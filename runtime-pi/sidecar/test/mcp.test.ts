@@ -279,11 +279,9 @@ describe("GET /mcp", () => {
 
 describe("/mcp — progress relay over SSE, end to end", () => {
   it("delivers an upstream's progress to an agent client that asked for it, throttled", async () => {
-    // The relay's one-second windows, ended by hand from inside the upstream.
-    const windows: Array<() => void> = [];
-    const endWindows = async () => {
-      await Bun.sleep(0);
-      for (const end of windows.splice(0)) end();
+    // Fake timers hold every macrotask: the in-process hops settle on microtasks.
+    const settle = async () => {
+      for (let i = 0; i < 50; i++) await Promise.resolve();
     };
     // Upstream integration: reports progress under whatever token it receives.
     const upstream = await createInProcessPair([
@@ -300,23 +298,17 @@ describe("/mcp — progress relay over SSE, end to end", () => {
             await report(1);
             await report(2);
             await report(3);
-            await endWindows();
+            await settle();
+            jest.advanceTimersByTime(1000);
             // Still inside the window when the call answers: never relayed.
             await report(4);
-            await Bun.sleep(0);
+            await settle();
           }
           return { content: [{ type: "text", text: "done" }] };
         },
       },
     ]);
-    const host = new McpHost({
-      progressTimers: {
-        setTimeout: (fn) => windows.push(fn),
-        clearTimeout: () => {
-          windows.length = 0;
-        },
-      },
-    });
+    const host = new McpHost();
     await host.register({
       connection: { label: "work", accountId: null },
       namespace: "up",
@@ -336,6 +328,7 @@ describe("/mcp — progress relay over SSE, end to end", () => {
     });
     try {
       const received: unknown[] = [];
+      jest.useFakeTimers();
       const result = await agent.callTool(
         { name: "up__long" },
         { onProgress: (p) => received.push(p) },
@@ -346,8 +339,8 @@ describe("/mcp — progress relay over SSE, end to end", () => {
         { progress: 1, message: "step 1" },
         { progress: 3, message: "step 3" },
       ]);
-      expect(windows).toEqual([]);
     } finally {
+      jest.useRealTimers();
       await agent.close();
       await upstream.close();
     }

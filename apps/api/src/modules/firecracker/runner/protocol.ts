@@ -224,9 +224,7 @@ export const healthResponseSchema = z.object({
   // (tooling absent or platform down).
   platformReachable: z.boolean(),
   guestPathVerified: z.boolean().nullable(),
-  // Release the installed guest kernel + rootfs were published under (the
-  // signed manifest's `version`). Null when the daemon runs locally built
-  // artifacts (FIRECRACKER_ARTIFACTS_LOCAL), which carry no release identity.
+  // The installed guest artifacts' release; null when locally built (FIRECRACKER_ARTIFACTS_LOCAL).
   artifactsVersion: z.string().nullable(),
 });
 

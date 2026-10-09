@@ -56,19 +56,8 @@ import { logger } from "./logger.ts";
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
 
-/** At most one relayed progress per call per window: each relay restarts the agent's idle timeout. */
+/** At most one relayed progress per call per window: each relay restarts the agent's timeout. */
 const PROGRESS_RELAY_WINDOW_MS = 1000;
-
-/** Scheduling seam of the progress relay. */
-interface ProgressRelayTimers {
-  setTimeout(fn: () => void, ms: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
-const systemTimers: ProgressRelayTimers = {
-  setTimeout: (fn, ms) => setTimeout(fn, ms),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
 
 interface ProgressRelay {
   onProgress(update: Progress): void;
@@ -77,20 +66,15 @@ interface ProgressRelay {
 }
 
 /**
- * Relays upstream progress under the agent's own token, so its client's timeout
- * restarts too. Upstream progress is untrusted: a value that does not increase
- * is dropped (MCP requires progress to increase), and relays are throttled to
- * one per window, the latest value sent when the window ends.
+ * Relays upstream progress under the agent's own token, so its client's timeout restarts too.
+ * Untrusted: a value that does not increase is dropped (MCP requires progress to increase).
  */
-function relayProgress(
-  extra: AppstrateRequestExtra,
-  timers: ProgressRelayTimers,
-): ProgressRelay | undefined {
+function relayProgress(extra: AppstrateRequestExtra): ProgressRelay | undefined {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return undefined;
   let highest = -Infinity;
   let pending: Progress | undefined;
-  let windowTimer: unknown;
+  let windowTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
 
   const send = ({ progress, total, message }: Progress) => {
@@ -115,7 +99,7 @@ function relayProgress(
           error: err instanceof Error ? err.message : String(err),
         }),
     );
-    windowTimer = timers.setTimeout(endWindow, PROGRESS_RELAY_WINDOW_MS);
+    windowTimer = setTimeout(endWindow, PROGRESS_RELAY_WINDOW_MS);
   };
   const endWindow = () => {
     windowTimer = undefined;
@@ -134,7 +118,7 @@ function relayProgress(
     close() {
       closed = true;
       pending = undefined;
-      if (windowTimer !== undefined) timers.clearTimeout(windowTimer);
+      if (windowTimer !== undefined) clearTimeout(windowTimer);
       windowTimer = undefined;
     },
   };
@@ -211,8 +195,6 @@ interface McpHostUpstream {
 interface McpHostOptions {
   /** Sink for `notifications/message` from third-party servers. */
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
-  /** Timers of the progress relay window; the system timers by default. */
-  progressTimers?: ProgressRelayTimers;
 }
 
 /** Reserved: a tool that declares it cannot sit in a namespace served by several connections. */
@@ -696,7 +678,7 @@ export class McpHost {
         args: Record<string, unknown>,
         extra: AppstrateRequestExtra,
       ): Promise<CallToolResult> => {
-        const relay = relayProgress(extra, this.options.progressTimers ?? systemTimers);
+        const relay = relayProgress(extra);
         try {
           return stripForgedRuntimeEvents(
             await route.client.callTool(

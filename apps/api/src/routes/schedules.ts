@@ -55,7 +55,8 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
   assertScheduleOverridesReachable,
-  sameConnectionOverrides,
+  sameRecord,
+  sameSet,
 } from "../services/schedule-connections.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
@@ -185,15 +186,6 @@ function movedDependencyOverrides(
     if (stored?.[dependencyId] !== selector) moved[dependencyId] = selector;
   }
   return moved;
-}
-
-/** Whether two dependency maps pin the same selectors; `null` and `{}` both pin nothing. */
-function sameDependencyOverrides(
-  a: Readonly<Record<string, string>> | null,
-  b: Readonly<Record<string, string>> | null,
-): boolean {
-  const ids = Object.keys(a ?? {});
-  return ids.length === Object.keys(b ?? {}).length && ids.every((id) => a![id] === b?.[id]);
 }
 
 /**
@@ -785,8 +777,8 @@ export function createSchedulesRouter() {
       actorChanged ||
       (data.enabled === true && !existing.enabled) ||
       draftSelectorMoved(data.version_override, existing.version_override) ||
-      !sameConnectionOverrides(nextOverrides, existing.connection_overrides) ||
-      !sameDependencyOverrides(effectiveDependencyOverrides, existing.dependency_overrides);
+      !sameRecord(nextOverrides, existing.connection_overrides, sameSet) ||
+      !sameRecord(effectiveDependencyOverrides, existing.dependency_overrides, (x, y) => x === y);
     let warnings: ResolutionFieldError[] | null = null;
     if (data.enabled ?? existing.enabled) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);

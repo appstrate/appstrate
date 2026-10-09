@@ -148,17 +148,11 @@ export async function resolveIntegrationProxyCredentials(
 
 /**
  * The proxy's reactive 401 path: the payload to replay the call with, after
- * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`.
- * `input.connectionId` names the connection the failed call used; the selection still re-checks
- * reach. `refreshed` replays with the new credential, `kept` (the rejected credential was
- * superseded) with the one the connection holds now.
+ * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
+ * (`kept`: superseded, so replay with the one the connection holds now).
  *
- * Throws the 503 of a key missing from the keyring, which `core.ts` answers instead of the
- * upstream 401, and any error that is not a verdict on the connection. Returns `null` — the proxy
- * relays the upstream 401 unchanged — when there is no accessible connection or declared auth,
- * and on `retry` (row untouched, or a rejection counted below the threshold) and `dead` (the
- * connection is flagged `needsReconnection`, so the relayed 401 is not what stands between the
- * user and a reconnect prompt).
+ * `null` — the proxy relays the upstream 401 unchanged — when nothing accessible serves, and on
+ * `retry` and `dead` (already flagged: the relayed 401 does not hide a reconnect prompt).
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,

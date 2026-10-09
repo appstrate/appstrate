@@ -9,7 +9,7 @@ import { ConnectionVariablesLine } from "../integration-connect/connection-varia
 import { NoConnectionLabel } from "../integration-connect/no-connection-label";
 import type { IntegrationConnection } from "../../hooks/use-integrations";
 
-export interface ChecklistOption {
+interface ChecklistOption {
   id: string;
   label: ReactNode;
   /** Refuses a tick; a ticked one can still be unticked. */

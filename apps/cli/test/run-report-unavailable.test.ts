@@ -14,7 +14,7 @@ import {
   type Bundle,
 } from "@appstrate/afps-runtime/bundle";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
-import { parseLaunchWarnings } from "../src/commands/run/launch-warnings.ts";
+import { parseLaunchItems } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
 
 const GMAIL = "@appstrate/gmail";
@@ -66,7 +66,7 @@ function makeBundle(): Bundle {
   } as unknown as Bundle;
 }
 
-const WARNINGS = parseLaunchWarnings([
+const WARNINGS = parseLaunchItems([
   { field: `integrations.${GMAIL}`, code: "not_connected", message: "not connected" },
   { field: "run", code: "something_else", message: "ignored" },
 ]);
@@ -122,6 +122,12 @@ describe("--report local run — integrations bound to none", () => {
           : UNAVAILABLE_INTEGRATION_REASONS.unbound,
       ),
     );
+  });
+
+  it("withholds an integration on a code this CLI does not know, naming the code", () => {
+    expect(
+      unavailableIntegrations([{ field: `integrations.${GMAIL}`, code: "newer_code" }]),
+    ).toEqual([{ id: GMAIL, reason: "newer_code" }]);
   });
 
   it("tells the agent which integrations it runs without", () => {

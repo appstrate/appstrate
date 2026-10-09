@@ -487,12 +487,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // watchdog wait into an instant transition. Best-effort — if it
       // fails, the watchdog still backs us up.
       //
-      // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS` because HttpSink
-      // retries 4× with exponential backoff and Bun's `fetch` has no
-      // default timeout — an unreachable platform would otherwise hang
-      // the CLI for tens of seconds after Ctrl-C. The coordinator's
-      // own 10-s ceiling is the outer bound; this 5-s cap leaves
-      // headroom for the filesystem teardown that follows.
+      // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS`: under the coordinator's own 10-s
+      // ceiling, with headroom for the filesystem teardown that follows.
       if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
         const aborted = shutdownSignal.aborted;
         const result: TerminalRunResult = {
@@ -504,19 +500,20 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
               : "Runner exited before completion (CLI bootstrap or teardown error).",
           },
         };
-        await raceFinalizeAgainstTimeout(
-          reportSession.httpSink.finalize(result),
-          SAFETY_NET_FINALIZE_TIMEOUT_MS,
-        ).catch((err) => {
-          if (!opts.json) {
-            process.stderr.write(`warn: finalize on cancel failed: ${getErrorMessage(err)}\n`);
-          }
-        });
+        await finalizeWithin(reportSession.httpSink, result, SAFETY_NET_FINALIZE_TIMEOUT_MS).catch(
+          (err) => {
+            if (!opts.json) {
+              process.stderr.write(`warn: finalize on cancel failed: ${getErrorMessage(err)}\n`);
+            }
+          },
+        );
       }
+      // The run is over: no report request may outlive it, or a stalled
+      // platform would keep the process from exiting.
+      reportSession?.httpSink.abort(new Error("run ended"));
       // Tear down env-var + stdout-bridge mutations in the reverse order
       // they were installed. `bridge.restore()` swaps `process.stdout.write`
-      // back to the original — required for tests; production processes
-      // exit immediately after cleanup but the symmetry costs nothing.
+      // back to the original.
       bridge.restore();
       restoreAgentRunId();
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
@@ -740,39 +737,30 @@ function attachFinalizeTracker(sink: HttpSink): () => boolean {
 }
 
 /**
- * Cap on the safety-net finalize POST. HttpSink itself retries 4× with
- * exponential backoff and Bun's `fetch` has no default request timeout,
- * so a partition or dead platform could otherwise hold the CLI open for
- * tens of seconds after the user hit Ctrl-C. 5s is the standard cleanup
- * cap (Node graceful-shutdown guides converge on 5–10s); the run
- * watchdog (60s default) covers everything we abandon here.
+ * Cap on the safety-net finalize POST: HttpSink retries with backoff and Bun's
+ * `fetch` has no default timeout, so a dead platform could hold the CLI open
+ * after Ctrl-C. The run watchdog (60s default) covers what is abandoned here.
  */
 const SAFETY_NET_FINALIZE_TIMEOUT_MS = 5_000;
 
 /**
- * Race a finalize promise against a timeout. If the timeout wins,
- * resolve with a `TimeoutError` rejection so the caller's `.catch`
- * surfaces a clean warning. The abandoned finalize promise keeps
- * running in the background — we do NOT cancel it (HttpSink does not
- * accept an AbortSignal), but the host process exits seconds later so
- * the in-flight fetch is dropped at the OS layer regardless.
+ * Finalize through `sink`, aborting it once `timeoutMs` has passed: the
+ * request and its retries are cancelled, so nothing is left running.
  */
-function raceFinalizeAgainstTimeout(p: Promise<void>, timeoutMs: number): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`finalize POST timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    p.then(
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      (err: unknown) => {
-        clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      },
-    );
-  });
+async function finalizeWithin(
+  sink: HttpSink,
+  result: TerminalRunResult,
+  timeoutMs: number,
+): Promise<void> {
+  const timer = setTimeout(
+    () => sink.abort(new Error(`finalize POST timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  try {
+    await sink.finalize(result);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1237,7 +1225,7 @@ export async function _buildResolverInputsForTesting(
 }
 
 /**
- * Test-only access to the finalize tracker and safety-net timeout race.
+ * Test-only access to the finalize tracker and the bounded safety-net finalize.
  * Exercised by `apps/cli/test/run-finalize-tracker.test.ts` to assert
  * the cancel-path safety net (detect runner cancellation immediately
  * rather than waiting for the heartbeat watchdog).
@@ -1246,11 +1234,12 @@ export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => boolean 
   return attachFinalizeTracker(sink);
 }
 
-export function _raceFinalizeAgainstTimeoutForTesting(
-  p: Promise<void>,
+export function _finalizeWithinForTesting(
+  sink: HttpSink,
+  result: TerminalRunResult,
   timeoutMs: number,
 ): Promise<void> {
-  return raceFinalizeAgainstTimeout(p, timeoutMs);
+  return finalizeWithin(sink, result, timeoutMs);
 }
 
 /** Pi loop knobs from the user's shell, strictly parsed like the container's. */

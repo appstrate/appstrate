@@ -239,9 +239,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
    * GET /v1/health and validate the payload — the single health round-trip
    * that both initialize() (the handshake) and resolvePlatformApiUrl() (the
    * guest-visible platform URL) share. Throws an actionable error when the
-   * URL does not answer with a runner health payload. The protocol is read
-   * before the full payload: a daemon on another protocol answers another
-   * health shape, and the mismatch is the error to report.
+   * URL does not answer with a runner health payload. The protocol is read first: a daemon on
+   * another protocol answers another health shape, and that mismatch is the error to report.
    */
   private async fetchHealth() {
     const env = this.requireEnv();
@@ -266,9 +265,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
 
   /**
    * Handshake with the daemon. This is where a misconfigured deployment
-   * fails — missing env vars, unreachable daemon, protocol drift, guest
-   * artifacts from another release — all with actionable messages, BEFORE
-   * the first run is accepted.
+   * fails — missing env vars, unreachable daemon, protocol drift, guest artifacts from another
+   * release — all with actionable messages, BEFORE the first run is accepted.
    */
   async initialize(): Promise<void> {
     const env = this.requireEnv();
@@ -279,10 +277,8 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `orchestrator failed to initialize — check the daemon's logs (KVM, artifacts)`,
       );
     }
-    // The guest rootfs carries the agent runtime and sidecar, so it is part
-    // of the platform's version contract, under the image trio's rule: only
-    // two release versions are comparable (a `dev` platform or locally built
-    // artifacts take no part).
+    // The guest rootfs carries the agent runtime and sidecar: part of the version contract,
+    // under the image trio's rule (only two release versions are comparable).
     const appVersion = this.appVersion ?? getVersionInfo().app;
     const platformRelease = releaseVersion(appVersion);
     const artifactsRelease = releaseVersion(health.artifactsVersion ?? undefined);

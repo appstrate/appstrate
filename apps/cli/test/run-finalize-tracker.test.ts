@@ -23,7 +23,7 @@ import {
 } from "@appstrate/afps-runtime/runner";
 import {
   _attachFinalizeTrackerForTesting as attach,
-  _raceFinalizeAgainstTimeoutForTesting as raceTimeout,
+  _finalizeWithinForTesting as finalizeWithin,
 } from "../src/commands/run.ts";
 
 const failedResult = (): TerminalRunResult => ({ ...emptyRunResult(), status: "failed" });
@@ -137,29 +137,33 @@ describe("attachFinalizeTracker", () => {
     expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(2);
   });
 
-  it("raceFinalizeAgainstTimeout: rejects with a clear error if the inner promise outlasts the cap", async () => {
-    // Without the timeout cap, an unreachable platform would let
-    // HttpSink retry for tens of seconds — exactly the UX problem the
-    // safety-net is trying to eliminate. The cap MUST fire even if the
-    // inner promise never settles.
-    const slow = new Promise<void>(() => {
-      // never resolves — simulates a partitioned platform
+  it("finalizeWithin: aborts a finalize the platform never answers, at the cap", async () => {
+    // Without the cap, an unreachable platform would let HttpSink retry for
+    // tens of seconds, and its pending fetch would keep the process alive.
+    const silent = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
+    try {
+      const sink = new HttpSink({
+        url: `http://localhost:${silent.port}/events`,
+        runSecret: RUN_SECRET,
+      });
+      const start = Date.now();
+      await expect(finalizeWithin(sink, failedResult(), 50)).rejects.toThrow(
+        /timed out after 50ms/,
+      );
+      expect(Date.now() - start).toBeLessThan(500);
+    } finally {
+      silent.stop(true);
+    }
+  });
+
+  it("finalizeWithin: resolves when the platform answers in time", async () => {
+    const sink = new HttpSink({
+      url: server.url,
+      finalizeUrl: server.finalizeUrl,
+      runSecret: RUN_SECRET,
     });
-    const start = Date.now();
-    await expect(raceTimeout(slow, 50)).rejects.toThrow(/timed out after 50ms/);
-    const elapsed = Date.now() - start;
-    // 50ms cap + small scheduler slack — must NOT take seconds.
-    expect(elapsed).toBeLessThan(500);
-  });
-
-  it("raceFinalizeAgainstTimeout: resolves normally when the inner promise wins the race", async () => {
-    const fast = Promise.resolve();
-    await expect(raceTimeout(fast, 5_000)).resolves.toBeUndefined();
-  });
-
-  it("raceFinalizeAgainstTimeout: surfaces inner rejection when it wins the race", async () => {
-    const failing = Promise.reject(new Error("boom"));
-    await expect(raceTimeout(failing, 5_000)).rejects.toThrow("boom");
+    await expect(finalizeWithin(sink, failedResult(), 5_000)).resolves.toBeUndefined();
+    expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(1);
   });
 
   it("does not interfere with regular event POSTs (handle still works)", async () => {

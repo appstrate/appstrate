@@ -95,7 +95,7 @@ export function ScheduleActorConnectionChoice({
   );
 }
 
-/** A refused save's candidate: the actor's own or shared by another member, and whether it is dead. */
+/** A refused save's candidate: own or shared by another member, and whether it is dead. */
 function CandidateLabel({ candidate: c }: { candidate: ConnectionChoice["candidates"][number] }) {
   const { t } = useTranslation(["agents"]);
   return (

@@ -205,7 +205,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       // Not `not_connected`: that would hide the real cause.
       record(
         req.integrationId,
-        gapOf(req, authKeyMismatch(req.integrationId, req.requiredAuthKey!, availableAuthKeys)),
+        gapOf(req, authKeyMismatch({ ...req, auth }, req.requiredAuthKey!, availableAuthKeys)),
       );
       continue;
     }
@@ -466,7 +466,6 @@ type GapCode = Exclude<ConnectionResolutionWarningCode, "integration_unbound">;
 /** The state alone; {@link gapOf} adds the integration and finishes `message` per severity. */
 type Gap = Omit<ConnectionResolutionWarning, "integrationId" | "code"> & { code: GapCode };
 
-/** Refused on a `required` integration; any other binds none and starts with the same item as a warning. */
 function gapOf(req: { integrationId: string; required: boolean }, gap: Gap): ResolveOneResult {
   const item = { ...gap, integrationId: req.integrationId };
   return req.required
@@ -478,8 +477,9 @@ function gapOf(req: { integrationId: string; required: boolean }, gap: Gap): Res
       };
 }
 
+/** Connecting the dep's own `auth_key` clears it, so it carries that connect target. */
 function authKeyMismatch(
-  integrationId: string,
+  args: ConnectTargetArgs & { integrationId: string },
   requiredAuthKey: string,
   availableAuthKeys: string[],
 ): Gap {
@@ -487,7 +487,8 @@ function authKeyMismatch(
     code: "auth_key_mismatch",
     requiredAuthKey,
     availableAuthKeys,
-    message: `Integration '${integrationId}' requires auth '${requiredAuthKey}' but the actor's accessible connections use [${availableAuthKeys.join(", ")}]`,
+    ...connectTarget(args),
+    message: `Integration '${args.integrationId}' requires auth '${requiredAuthKey}' but the actor's accessible connections use [${availableAuthKeys.join(", ")}]`,
   };
 }
 
@@ -495,7 +496,7 @@ function authKeyMismatch(
 function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
   const { requiredAuthKey } = args.auth;
   if (args.availableAuthKeys && requiredAuthKey !== undefined) {
-    return authKeyMismatch(args.integrationId, requiredAuthKey, args.availableAuthKeys);
+    return authKeyMismatch(args, requiredAuthKey, args.availableAuthKeys);
   }
   if (serving.length > 0) {
     return {
@@ -514,8 +515,10 @@ function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
   };
 }
 
+type ConnectTargetArgs = Pick<ResolveOneArgs, "manifest" | "auth" | "agentTools" | "agentScopes">;
+
 /** The auth and scopes a connect flow needs, so its consent clears the next resolution. */
-function connectTarget(args: ResolveOneArgs): { authKey?: string; requiredScopes?: string[] } {
+function connectTarget(args: ConnectTargetArgs): { authKey?: string; requiredScopes?: string[] } {
   const authKey = connectTargetAuthKey(args);
   if (authKey === null) return {};
   const requiredScopes = oauthScopesForAuth(args, authKey);
@@ -557,7 +560,7 @@ function servesSelection(auth: AuthFilter, key: string): boolean {
   );
 }
 
-function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
+function servesAuth(args: Pick<ResolveOneArgs, "auth">, authKey: string): boolean {
   return args.auth.serving === null || args.auth.serving.has(authKey);
 }
 
@@ -566,7 +569,7 @@ function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
  * serving auth of any type, else the single serving `oauth2` one (the only type a connect link
  * is minted for); `null` when that is ambiguous, and the user chooses.
  */
-function connectTargetAuthKey(args: ResolveOneArgs): string | null {
+function connectTargetAuthKey(args: ConnectTargetArgs): string | null {
   if (args.auth.requiredAuthKey !== undefined) {
     const key = declaredAuthKey(args.manifest, args.auth.requiredAuthKey);
     return key !== null && servesAuth(args, key) ? key : null;
@@ -583,7 +586,7 @@ function declaredAuthKey(manifest: IntegrationManifest, key: string): string | n
   return manifest.auths?.[key] ? key : null;
 }
 
-function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
+function oauthScopesForAuth(args: ConnectTargetArgs, authKey: string): string[] {
   if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
   return requiredScopesForAgent({
     manifest: args.manifest,
@@ -756,10 +759,7 @@ export async function resolveConnectionsForRun(
   });
 }
 
-/**
- * A launch passes `versionRef`, the `runs.version_ref` of the definition it judged: an omitted
- * `?version=` launches the latest published, while readiness reads the draft for its writer.
- */
+/** `versionRef`: the launch's `runs.version_ref`, not necessarily the draft readiness reads. */
 export function missingIntegrationConnection(
   errors: ValidationFieldError[],
   versionRef?: string,
@@ -783,10 +783,7 @@ type ResolveRunConnectionsOutcome =
     }
   | { ok: false; error: ApiError };
 
-/**
- * The run's connection snapshot (`null` when empty, all-`[]` kept) and why each `[]` is unbound,
- * else the kickoff 409.
- */
+/** The run's connection snapshot (`null` when empty, all-`[]` kept), else the kickoff 409. */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
   versionRef: string,

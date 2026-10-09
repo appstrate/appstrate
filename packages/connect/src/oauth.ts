@@ -16,8 +16,7 @@ import { type TokenErrorKind } from "./token-utils.ts";
  *   a generic 400.
  *
  * - `"client_rejected"`: the token endpoint refused the client itself
- *   (`invalid_client` / `unauthorized_client`). Retrying cannot help until an
- *   admin fixes the client registration.
+ *   (`invalid_client` / `unauthorized_client`); only fixing its registration helps.
  *
  * - `"transient"`: anything else (network, 5xx, non-JSON, other 4xx, other
  *   OAuth error codes, a 2xx with neither `access_token` nor `error`). The

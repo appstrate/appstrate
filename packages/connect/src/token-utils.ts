@@ -11,7 +11,6 @@
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 
-/** `application/x-www-form-urlencoded` encoding of one value — the serializer {@link buildTokenBody} uses. */
 function formUrlEncode(value: string): string {
   return new URLSearchParams([["", value]]).toString().slice(1);
 }
@@ -31,8 +30,7 @@ export function buildTokenHeaders(
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
-    // RFC 6749 §2.3.1: each credential is form-urlencoded (Appendix B), which leaves only
-    // ASCII for `btoa`.
+    // RFC 6749 §2.3.1: each credential is form-urlencoded (Appendix B), leaving ASCII for `btoa`.
     headers["Authorization"] =
       `Basic ${btoa(`${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`)}`;
   }
@@ -50,11 +48,7 @@ export interface ParsedTokenResponse {
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
-  /**
-   * The response's `scope`, split; `null` when the response omits it or echoes one holding no
-   * token. RFC 6749 §5.1 defines an omitted `scope` as "identical to the scope requested by the
-   * client" — never "no scopes".
-   */
+  /** `null` when the response omits `scope`: unchanged (RFC 6749 §5.1), never "no scopes". */
   scopesReturned: string[] | null;
 }
 
@@ -64,11 +58,10 @@ export interface ParsedTokenResponse {
  * error object (some IdPs answer `200 {"error":"invalid_grant"}`).
  *
  * A dead authorization code or refresh token is signaled by
- * `{ "error": "invalid_grant" }` (RFC 6749 §5.2), a client the server refuses
- * by `invalid_client` / `unauthorized_client` (`"client_rejected"`). Any other
- * failure (network, 5xx, non-JSON body, other 4xx, other OAuth error codes, a
- * 2xx with neither `access_token` nor `error`) is treated as transient because
- * the credential might still be valid.
+ * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). Any other failure (network,
+ * 5xx, non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
+ * `access_token` nor `error`) is treated as transient because the credential
+ * might still be valid — except a refused client (`"client_rejected"`).
  *
  * Both the initial token exchange (token-exchange.ts) and the refresh flow
  * (token-refresh.ts) read the response through {@link readTokenResponse} so
@@ -76,7 +69,6 @@ export interface ParsedTokenResponse {
  */
 export type TokenErrorKind = "revoked" | "client_rejected" | "transient";
 
-/** RFC 6749 §5.2 codes that blame the client registration, never the grant. */
 const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
   "invalid_client",
   "unauthorized_client",
@@ -116,12 +108,10 @@ function redactErrorDescription(description: string): string {
  *
  * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
  * refresh token, where retrying is pointless and the stored PKCE state should
- * be dropped. `invalid_client` and `unauthorized_client` map to
- * `"client_rejected"`: the grant is untouched, the client registration is
- * wrong, and only an operator fixing it makes the same attempt work. Every
- * other code (provider-specific ones such as GitHub's `bad_refresh_token`) and
- * a body with no string `error` stay `"transient"`: an ambiguous signal never
- * declares a credential dead.
+ * be dropped. `invalid_client` / `unauthorized_client` map to `"client_rejected"`:
+ * the grant is untouched, only fixing the client registration helps. Any other
+ * code or a body with no string `error` stays `"transient"`: an ambiguous signal
+ * never declares a credential dead.
  *
  * `error_description` is redacted here, at the source, so every consumer that
  * folds it into `Error.message` gets the sanitized value.
@@ -257,7 +247,6 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
  *
  * Scope parsing is universal: splits by comma, space, or %20 to handle all
  * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
- * An echoed `scope` that holds no token carries no information and parses as omitted.
  *
  * Scope comparison against the request is not done here: it needs the
  * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
@@ -305,9 +294,8 @@ export function parseTokenResponse(
  * A client-authentication pair that cannot be correct — thrown by
  * {@link assertClientAuthCoherent}.
  *
- * A distinct type so a configuration/programming fault never reads like an
- * upstream failure: the refresh path counts only a `RefreshError` toward the
- * streak that flags a connection `needs_reconnection`, and rethrows this one.
+ * A distinct type: the refresh path counts only a `RefreshError` toward the
+ * `needs_reconnection` streak, so a configuration fault never spends it.
  */
 export class ClientAuthInvariantError extends Error {
   constructor(message: string) {

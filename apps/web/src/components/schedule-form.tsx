@@ -85,7 +85,7 @@ const TIMEZONES = [
   "Asia/Tokyo",
 ] as const;
 
-/** The fields both writes send; the override half differs (`ScheduleCreateOverrides` / `ScheduleEditOverrides`). */
+/** The fields both writes send; only the override half differs. */
 interface ScheduleSaveFields {
   name?: string;
   cron_expression: string;

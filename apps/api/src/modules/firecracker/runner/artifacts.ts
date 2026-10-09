@@ -464,9 +464,8 @@ function verifyManifestSignature(
  * Ensure the guest kernel + rootfs are present and match the requested
  * version. Called once at daemon boot, before orchestrator.initialize().
  *
- * Returns the release the installed artifacts were published under (the
- * signed manifest's `version`, as recorded in the marker), or `null` under
- * FIRECRACKER_ARTIFACTS_LOCAL — locally built artifacts have no release.
+ * Returns the installed artifacts' release (the signed manifest's `version`),
+ * or `null` under FIRECRACKER_ARTIFACTS_LOCAL.
  */
 export async function ensureGuestArtifacts(
   config: ArtifactsConfig,

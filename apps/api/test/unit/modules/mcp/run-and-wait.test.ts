@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import {
   RUN_AND_WAIT_LONG_POLL_RESUME,
@@ -399,16 +399,46 @@ describe("run_and_wait", () => {
     );
   });
 
-  it("truncates an oversized result, as the chat's path does", async () => {
+  it("serves a truncated, file-enriched result that passes the server's outputSchema check", async () => {
     const { tool } = makeRunAndWait({
       getRun: [
         jsonResponse({ id: "run_1", status: "success", result: { blob: "x".repeat(40_000) } }),
       ],
+      files: [
+        {
+          id: "file_1",
+          uri: "appfile://file_1",
+          name: "report.md",
+          mime: "text/markdown",
+          size: 12,
+          purpose: "agent_output",
+          runId: "run_1",
+        },
+      ],
+    });
+    // Through `createMcpServer`, so a projection drifting from RunAndWaitResult fails here.
+    const pair = await createInProcessPair([tool]);
+    try {
+      const res = (await pair.client.callTool({
+        name: "run_and_wait",
+        arguments: { kind: "agent", scope: "@acme", name: "writer" },
+      })) as CallToolResult;
+      expect(res.structuredContent).toMatchObject({ done: true, truncated: true });
+      expect(res.structuredContent).not.toHaveProperty("result");
+      expect((res.structuredContent as { files: unknown[] }).files).toHaveLength(1);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("reports a failed poll's own HTTP status in telemetry", async () => {
+    const { tool, events } = makeRunAndWait({
+      getRun: [jsonResponse({ type: "about:blank", status: 404 }, 404)],
     });
     const res = await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
 
-    expect(res.structuredContent).toMatchObject({ done: true, truncated: true });
-    expect(res.structuredContent).not.toHaveProperty("result");
+    expect(res.isError).toBe(true);
+    expect(events.find((e) => e.operationId === "getRun")?.status).toBe(404);
   });
 
   describe("progress heartbeat and unstreamed wait cap", () => {

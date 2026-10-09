@@ -12,10 +12,7 @@ export class ApiError extends Error {
     public status: number,
     /** RFC 9457 `errors` — the field-level items, polymorphic by `code`. */
     public errors?: unknown[],
-    /**
-     * RFC 9457 §3.2 extension members — the code-specific half the server writes beside the
-     * standard fields (`member_count`, `active_version`, `version_ref`).
-     */
+    /** RFC 9457 §3.2 extension members (`member_count`, `active_version`, `version_ref`). */
     public details?: Record<string, unknown>,
     public requestId?: string,
     /**

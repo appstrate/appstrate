@@ -56,7 +56,7 @@ import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
   collectReferencedSchemas,
-  componentJsonSchema,
+  getRunAndWaitOutputSchema,
   operationGranted,
   operationIdGranted,
   type CatalogOperation,
@@ -276,12 +276,9 @@ function fileResourceLink(doc: RunAndWaitFile): {
   };
 }
 
-/**
- * Map a run's status to an HTTP-shaped code for telemetry, so a failed /
- * timed-out / cancelled run is reported distinctly rather than always as 200
- * (the polling GET's status), and a run still going as 202.
- */
+/** A run's status as an HTTP-shaped telemetry code; a failed poll's `status` already is one. */
 function runStatusToHttp(status: unknown): number {
+  if (typeof status === "number") return status;
   switch (status) {
     case "success":
       return 200;
@@ -885,16 +882,17 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
-/** Heartbeat period: well under the SDK client's request timeout, which each progress notification can reset. */
+/** Well under the SDK client's request timeout, which each progress notification resets. */
 export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 4;
-/** Wait cap (launch included) without a progress token: one heartbeat period before that timeout. */
+/** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
 export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
   DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
 
-/**
- * The resume instruction for a caller that has time to wait — an external client,
- * not the chat (see {@link RUN_AND_WAIT_RESUME_INSTRUCTION}).
- */
+export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
+  ", ",
+);
+
+/** The resume instruction for a caller with time to wait (not the chat). */
 export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
 
 function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
@@ -1020,7 +1018,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       "`{ id, packageId, status, done:true, result?, error?, warnings }` when the run reaches a " +
       "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
       "integrations the run started without, each with the code that state raises as an error " +
-      `on a required integration (${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")}; ` +
+      `on a required integration (${WARNING_CODES_PHRASE}; ` +
       "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
@@ -1129,7 +1127,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       required: ["kind"],
       additionalProperties: false,
     },
-    outputSchema: componentJsonSchema("RunAndWaitResult", getCatalog().componentSchemas),
+    outputSchema: getRunAndWaitOutputSchema(),
   };
 
   const handler = async (
@@ -1227,13 +1225,12 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     }).finally(() => stopHeartbeat?.());
 
     // The run's outcome, not the polling GET's HTTP status (200 for any run read).
-    const runStatus = waited.payload.status;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: "getRun",
       method: "GET",
-      status: typeof runStatus === "number" ? runStatus : runStatusToHttp(runStatus),
+      status: runStatusToHttp(waited.payload.status),
       outcome: "invoked",
     });
 

@@ -69,7 +69,7 @@ export function unboundLabel(warning: IntegrationAgentResolution["warning"]): st
     : i18n.t(UNBOUND_LABEL_KEYS[warning.code], { ns: "agents" });
 }
 
-/** Who chose no connection for an integration the agent requires — which refuses the run — else `null`. */
+/** Who chose no connection for a required integration (which refuses the run), else `null`. */
 export function requiredNoneLabel(
   resolution: Pick<IntegrationAgentResolution, "error_code" | "source">,
 ): string | null {

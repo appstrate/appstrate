@@ -81,11 +81,8 @@ async function runCompose(dir: string, projectName: string, args: string[]): Pro
   });
   if (res.ok) return;
   // SIGINT (130) / SIGTERM (143) are graceful Ctrl-C exits — surface
-  // them as a clean exit with the same code rather than a rendered
-  // error. Without this, `appstrate logs -f` followed by Ctrl-C would
-  // render "docker compose logs failed with exit code 130", masking the
-  // fact that the user intentionally ended the stream. The CLI's own
-  // shutdown coordinator (lib/shutdown.ts) also exits 130 on SIGINT, so
+  // them as a clean exit with the same code, not a rendered "failed with exit
+  // code 130". The shutdown coordinator (lib/shutdown.ts) also exits 130, so
   // picking the same code here keeps shell pipelines coherent.
   if (res.exitCode === 130 || res.exitCode === 143) {
     DEFAULT_IO.exit(res.exitCode);

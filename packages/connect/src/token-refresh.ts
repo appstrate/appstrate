@@ -61,8 +61,7 @@ export interface RefreshContext {
  *
  * - `"client_rejected"`: the server rejected the client itself (`invalid_client`
  *   or `unauthorized_client`). The grant may be intact: callers MUST NOT flag
- *   the connection nor count it as a transient failure — only fixing the client
- *   registration helps.
+ *   the connection nor count it as a transient failure.
  */
 export class RefreshError extends Error {
   constructor(
@@ -86,7 +85,7 @@ export class RefreshError extends Error {
 export interface RefreshExchangeResult {
   /** Normalised token response (access/refresh token, expiry, scopes). */
   parsed: ParsedTokenResponse;
-  /** Raw JSON body — callers that need provider-specific fields (e.g. `id_token`) read it directly. */
+  /** Raw JSON body, for provider-specific fields (e.g. `id_token`). */
   raw: Record<string, unknown>;
 }
 

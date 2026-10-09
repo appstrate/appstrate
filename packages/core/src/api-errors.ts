@@ -89,10 +89,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
   required_auth_key?: string;
   /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
-  /**
-   * The cascade layer the item is about: the one whose set failed (a layer-bound error), or the one
-   * that chose `[]` (`integration_unbound`, `required_integration_unbound`).
-   */
+  /** The cascade layer whose set failed, or that chose `[]` (the `*integration_unbound` codes). */
   source?: ConnectionResolutionSource;
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a

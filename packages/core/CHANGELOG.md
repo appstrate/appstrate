@@ -23,9 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same state raises as an error on a `required` integration, with the same
   fields. Only `integration_unbound` has no error twin: a cascade layer
   (`source`) chose `[]`. (#1830, #1848)
-- **`CONNECT_FLOW_CODES`** and **`ConnectFlowCode`**
-  (`@appstrate/core/integration`): the codes a connect flow can resolve, the
-  ones carrying `auth_key` and `required_scopes`. (#1848)
+- **`CONNECT_FLOW_CODES`** (`@appstrate/core/integration`; `not_connected`,
+  `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`): the codes
+  a connect flow resolves. An `auth_key_mismatch` item carries `auth_key` and
+  `required_scopes`, the agent's own auth to connect. (#1848)
 - **`INTEGRATION_MANIFEST_FAILURE_CODES`**,
   **`MISSING_INTEGRATION_CONNECTION_CODES`** and
   **`MissingIntegrationConnectionCode`** (`@appstrate/core/integration`): every
@@ -51,11 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   terminal step (applied only when `done`), and the next-step instruction of a
   `done: false` step. (#1851)
 
-- **`parseTokenUsage`** (`@appstrate/core/token-usage`), re-exported from
-  `@appstrate/afps-shared/token-usage`, the rule's single home: the
-  `TokenUsage` rule at an ingestion seam — `{ usage, tiersDropped }`, `usage`
-  null when the snapshot is malformed, `tiersDropped` set when bands the raw
-  usage carried were dropped, for the seam to log. (#1552, #1846)
 - **`ALIAS_BACKING_API_SHAPES`** (`@appstrate/core/model-swap`): every
   `AliasBackingApiShape`, the vendor protocols a provider can declare. (#1846)
 - **`releaseVersion`** (`@appstrate/core/image-ref`) is exported: the
@@ -112,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipe over afps-shared's `parseTokenUsage` (`z.unknown().transform(...)`), no
   longer a `z.object`: `.shape`, `.extend()` and `.strict()` are gone, and a
   fractional counter now fails the parse. (#1846)
+- **`parseTokenUsage`** lives in `@appstrate/afps-shared/token-usage`;
+  `@appstrate/core/token-usage` does not re-export it (`tokenUsageSchema`
+  wraps it). (#1846)
 
 - **BREAKING: `modelCostSchema`** (`@appstrate/core/module`) refuses a rate
   card whose tiers break the rule its usage bands follow: `inputTokensAbove` must be an
@@ -133,12 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
-
-### Removed
-
-- **`RUN_GET_WAIT_MAX_SECONDS`** (`@appstrate/core/run-and-wait-client`) —
-  BREAKING. The wait poll no longer caps its own request; the server clamps.
-  (#1851)
 
 ## [15.0.0] — 2026-10-08
 

@@ -108,14 +108,10 @@ export const mcpPaths = {
                     additionalProperties: true,
                     properties: {
                       structuredContent: {
+                        type: "object",
                         description:
-                          "A `tools/call` result's structured payload. A tool declaring an " +
-                          "`outputSchema` returns one matching it — `run_and_wait`'s is " +
-                          "RunAndWaitResult — or the call fails with a JSON-RPC internal error.",
-                        anyOf: [
-                          { $ref: "#/components/schemas/RunAndWaitResult" },
-                          { type: "object", additionalProperties: true },
-                        ],
+                          "A `tools/call` result's structured payload, matching the tool's " +
+                          "`outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult).",
                       },
                     },
                   },

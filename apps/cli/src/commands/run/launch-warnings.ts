@@ -3,51 +3,30 @@
 // A launch's integration items (a 201's `warnings`, a 409's `errors`), one line each — shared
 // by `--remote` and `--report`, whose routes answer the same item shape.
 
-import {
-  CONNECTION_RESOLUTION_SOURCES,
-  CONNECTION_RESOLUTION_WARNING_CODES,
-  type ConnectionResolutionSource,
-  type ConnectionResolutionWarningCode,
-} from "@appstrate/core/integration";
-
-/** One item of a launch response; the wire's other fields ride along untouched. */
-interface LaunchItem {
+/** Codes and sources stay open strings: a newer server may send ones this CLI does not know. */
+export interface LaunchItem {
   field?: string;
   code: string;
   message?: string;
-  source?: ConnectionResolutionSource;
+  source?: string;
 }
 
-/** A `warnings[]` item: an integration the run starts without. */
-export interface LaunchWarning extends LaunchItem {
-  field: string;
-  code: ConnectionResolutionWarningCode;
-}
+const optionalString = (value: unknown): boolean =>
+  value === undefined || typeof value === "string";
 
-const isIn = <T extends string>(values: readonly T[], value: unknown): value is T =>
-  values.includes(value as T);
-
-/** The well-formed items of a launch response array; anything else is dropped. */
-function launchItems(items: unknown): LaunchItem[] {
+/** A launch response's `warnings` / `errors`; items without a code are dropped. */
+export function parseLaunchItems(items: unknown): LaunchItem[] {
   if (!Array.isArray(items)) return [];
   return items.filter((item): item is LaunchItem => {
     if (item === null || typeof item !== "object") return false;
     const { field, code, message, source } = item as Record<string, unknown>;
     return (
       typeof code === "string" &&
-      (field === undefined || typeof field === "string") &&
-      (message === undefined || typeof message === "string") &&
-      (source === undefined || isIn(CONNECTION_RESOLUTION_SOURCES, source))
+      optionalString(field) &&
+      optionalString(message) &&
+      optionalString(source)
     );
   });
-}
-
-/** A launch response's `warnings`, parsed once at the boundary. */
-export function parseLaunchWarnings(items: unknown): LaunchWarning[] {
-  return launchItems(items).filter(
-    (item): item is LaunchWarning =>
-      item.field !== undefined && isIn(CONNECTION_RESOLUTION_WARNING_CODES, item.code),
-  );
 }
 
 /** `<integration>: <message> (<code> via <source>)` per item. */
@@ -65,7 +44,7 @@ export interface LaunchAnnouncement {
   bundleLabel: string;
   instance: string;
   /** The platform run, or null for a local run nothing reports to. */
-  run: { runId: string; warnings: readonly LaunchWarning[] } | null;
+  run: { runId: string; warnings: readonly LaunchItem[] } | null;
   writeStdout: (chunk: string) => void;
   writeStderr: (chunk: string) => void;
 }
@@ -90,6 +69,6 @@ export function connectionRefusalLines(body: unknown): string[] | null {
   if (body === null || typeof body !== "object") return null;
   const { code, errors } = body as { code?: unknown; errors?: unknown };
   if (code !== "missing_integration_connection") return null;
-  const lines = launchItemLines(launchItems(errors));
+  const lines = launchItemLines(parseLaunchItems(errors));
   return lines.length > 0 ? lines : null;
 }

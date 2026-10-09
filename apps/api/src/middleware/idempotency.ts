@@ -6,9 +6,8 @@
  *
  * Pattern: Stripe `Idempotency-Key` header (IETF draft-ietf-httpapi-idempotency-key-header).
  *
- * Only a request that executed is stored, as at Stripe: a 2xx. On every mount a 4xx is a refusal
- * — the operation did not run — and most depend on state the caller can change (a missing
- * connection, a quota, a rate limit): its key is released and a retry is judged again.
+ * Only a 2xx is stored, as at Stripe: a 4xx is a refusal that often depends on state the caller
+ * can change (a connection, a quota), so its key is released and a retry is judged again.
  */
 
 import type { Context, Next } from "hono";
@@ -155,9 +154,8 @@ export function idempotency(
     (c.req as { raw: Request }).raw = freshRequest;
 
     // Hono's compose turns an `Error` thrown downstream into `c.res` through
-    // the app's `onError` before `next()` returns, so a thrown `ApiError` is
-    // judged below by its status like a returned one. This catch only sees
-    // what compose rethrows; release the lock so the client can retry.
+    // the app's `onError` before `next()` returns, so a thrown `ApiError` is judged by its status
+    // below. This catch only sees what compose rethrows: release the lock so the client can retry.
     try {
       await next();
     } catch (err) {
