@@ -581,6 +581,34 @@ describe("integration-egress-listener (#543)", () => {
       expect(upstream.requests).toHaveLength(0);
     });
 
+    it("vets each pipelined request on its own and answers them in order", async () => {
+      const upstream = await startHttpUpstream();
+      const { handle, events } = await makeListener({
+        egressPolicy: {
+          allowsAuthority: (h) => h === "allowed.example.com",
+          skipsSsrfFloor: () => false,
+          isSelf: () => false,
+        },
+        // The allowed request is vetted last, so its answer is ready after the refusal's.
+        resolveHostFn: () => Bun.sleep(100).then(() => ["127.0.0.1"]),
+      });
+      const allowed = `http://allowed.example.com:${upstream.port}/`;
+      const denied = `denied.example.com:${upstream.port}`;
+
+      const response = await exchange(handle.address().port, [
+        get(allowed, ["Connection: keep-alive"]) + get(`http://${denied}/`),
+      ]);
+      expect([...response.matchAll(/HTTP\/1\.1 (\d{3})/g)].map((m) => Number(m[1]))).toEqual([
+        200, 403,
+      ]);
+      expect(upstream.requests).toHaveLength(1);
+      expect(events).toContainEqual({
+        kind: "tunnel-refused",
+        target: denied,
+        reason: "not-authorized",
+      });
+    });
+
     it("answers 502 when the vetted upstream cannot be reached, closing as HTTP/1.0 asks", async () => {
       const deadPort = await new Promise<number>((resolve) => {
         const server = netCreateServer().listen(0, "127.0.0.1", () => {

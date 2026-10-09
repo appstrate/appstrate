@@ -142,13 +142,9 @@ export function forwardHttpRequest(
     return fail(err instanceof Error ? err : new Error(String(err)));
   }
   proxyReq.setTimeout(timeoutMs, () => {
-    const err = new Error(`Request timeout after ${timeoutMs}ms`);
-    // Bun 1.3 emits no `error` for this destroy: answer here.
-    fail(err);
-    proxyReq.destroy(err);
+    proxyReq.destroy(new Error(`Request timeout after ${timeoutMs}ms`));
   });
-  // Unheard on Bun 1.4, a 101 leaves `res` unanswered and the client waiting for good (Bun 1.3
-  // emits `error` instead).
+  // Unheard, a 101 leaves `res` unanswered and the client waiting for good.
   proxyReq.on("upgrade", (_upgradeRes, socket: Socket) => {
     socket.destroy();
     fail(new Error("upstream switched protocols"));
