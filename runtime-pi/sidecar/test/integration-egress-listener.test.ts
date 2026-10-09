@@ -714,6 +714,35 @@ describe("integration-egress-listener (#543)", () => {
       expect(events.some((e) => e.kind === "tunnel-error")).toBe(true);
     });
 
+    it("drops the upstream request when the client leaves mid-answer", async () => {
+      let markClosed!: () => void;
+      const upstreamClosed = new Promise<void>((res) => (markClosed = res));
+      const server = createHttpServer((_req, res) => {
+        res.writeHead(200);
+        const streaming = setInterval(() => res.write("x"), 20);
+        res.once("close", () => {
+          clearInterval(streaming);
+          markClosed();
+        });
+      });
+      httpServers.push(server);
+      await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+      const { port } = server.address() as { port: number };
+      const { handle } = await makeListener();
+
+      const client = netConnect(handle.address().port, "127.0.0.1", () =>
+        client.write(get(`http://127.0.0.1:${port}/`)),
+      );
+      client.on("error", () => {});
+      await new Promise((res) => client.once("data", res));
+      client.destroy();
+      const outcome = await Promise.race([
+        upstreamClosed.then(() => "closed"),
+        new Promise((res) => setTimeout(() => res("still streaming"), 1000)),
+      ]);
+      expect(outcome).toBe("closed");
+    });
+
     it("shares no upstream connection between two runners' listeners", async () => {
       const upstream = await startHttpUpstream();
       const resolveHostFn = async () => ["127.0.0.1"];
@@ -912,6 +941,35 @@ describe("integration-egress-listener (#543)", () => {
     /** CONNECT to the granted `allowed.example.com:<port>`, then write `segments`. */
     const throughAllowed = (proxyPort: number, port: number, segments: Buffer[]) =>
       tunnel(proxyPort, [connectTo(`allowed.example.com:${port}`)], segments);
+    /** The CONNECT head and `first` in ONE write: the status, and what echoes past it by close. */
+    const sameWrite = (proxyPort: number, port: number, first: Buffer) =>
+      new Promise<{ statusCode: number; echoed: Buffer }>((resolve, reject) => {
+        const connect = Buffer.from(connectTo(`allowed.example.com:${port}`));
+        const socket = netConnect(proxyPort, "127.0.0.1", () =>
+          socket.write(Buffer.concat([connect, first])),
+        );
+        let buf = Buffer.alloc(0);
+        const finish = () => {
+          clearTimeout(timer);
+          socket.destroy();
+          const end = buf.indexOf("\r\n\r\n");
+          resolve({
+            statusCode: parseInt(buf.toString("latin1").split(" ")[1] ?? "0"),
+            echoed: end === -1 ? Buffer.alloc(0) : buf.subarray(end + 4),
+          });
+        };
+        socket.on("data", (chunk: Buffer) => {
+          buf = Buffer.concat([buf, chunk]);
+          const end = buf.indexOf("\r\n\r\n");
+          if (end !== -1 && buf.length - end - 4 >= first.length) finish();
+        });
+        socket.on("close", finish);
+        socket.on("error", () => {}); // a reset surfaces as `close`
+        const timer = setTimeout(() => {
+          socket.destroy();
+          reject(new Error("tunnel timeout"));
+        }, 5000);
+      });
 
     it("splices a ClientHello whose SNI the policy grants, even split across segments", async () => {
       const echo = await startTcpEcho();
@@ -943,6 +1001,34 @@ describe("integration-egress-listener (#543)", () => {
         target: `attacker-zone.example:${echo.port}`,
         reason: "not-authorized",
       });
+      expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
+    });
+
+    it("vets a ClientHello sent in the same write as the CONNECT head", async () => {
+      const echo = await startTcpEcho();
+      const { handle } = await tlsListener(echo.port);
+      const hello = buildClientHello("allowed.example.com");
+
+      const res = await sameWrite(handle.address().port, echo.port, hello);
+      await echo.closed;
+      expect(res.statusCode).toBe(200);
+      expect(res.echoed.equals(hello)).toBe(true);
+      expect(Buffer.concat(echo.received).equals(hello)).toBe(true);
+    });
+
+    it("refuses another host's SNI sent with the CONNECT head; upstream gets nothing", async () => {
+      const echo = await startTcpEcho();
+      const { handle, events } = await tlsListener(echo.port);
+
+      const res = await sameWrite(
+        handle.address().port,
+        echo.port,
+        buildClientHello("attacker-zone.example"),
+      );
+      await echo.closed;
+      expect(res.echoed.length).toBe(0);
+      expect(echo.received).toEqual([]);
+      expect(events.some((e) => e.reason === "not-authorized")).toBe(true);
       expect(events.some((e) => e.kind === "tunnel-opened")).toBe(false);
     });
 

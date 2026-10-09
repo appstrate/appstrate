@@ -142,6 +142,10 @@ export function forwardHttpRequest(
   });
   req.on("error", () => proxyReq.destroy());
   res.on("error", () => proxyReq.destroy());
+  // A client gone mid-answer: drop the upstream, or it keeps streaming into a sidecar socket.
+  res.on("close", () => {
+    if (!res.writableFinished) proxyReq.destroy();
+  });
   proxyReq.on("error", fail);
   req.pipe(proxyReq);
 }

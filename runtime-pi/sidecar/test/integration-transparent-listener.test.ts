@@ -449,6 +449,17 @@ describe("transparent egress listener — internal hosts: the runner rule (#1819
     }
   });
 
+  it("judges an uppercase SNI or Host by its lowercase name", async () => {
+    const upstream = await startTcpEcho(privateIpv4());
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    for (const preamble of [buildClientHello("INTERNAL.TEST"), httpTo("INTERNAL.TEST")]) {
+      const { port, events } = await runnerListener(upstream.port, egress);
+      const { received } = await driveClient(port, [preamble], preamble.length);
+      expect(received.equals(preamble)).toBe(true);
+      expect(events[0]?.kind).toBe("tunnel-opened");
+    }
+  });
+
   it("never splices to a listed declared host that resolves to loopback", async () => {
     const upstream = await startTcpEcho();
     const egress = literal([`https://internal.test:${upstream.port}`]);

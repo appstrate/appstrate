@@ -103,8 +103,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **On `RUN_ADAPTER=firecracker`, narrow the runner host's
   `FIRECRACKER_EGRESS_DENY_CIDRS` to reach a listed private host** (#1819).
-  Its default drops RFC1918 and link-local ranges, so a run never reaches
-  such a host, exempt or not, until the list leaves its range out.
+  Its default drops RFC1918, CGNAT `100.64.0.0/10` (Tailscale included),
+  link-local and other reserved ranges, so a run never reaches such a host,
+  exempt or not, until the list leaves its range out. The cost: the list is
+  the runner host's forward chain for every guest, so narrowing a range
+  removes that range's L3 backstop for every run on that host, leaving only
+  the sidecar's app-layer floor. That exemption ships in the sidecar, i.e. in
+  this release's Firecracker rootfs: pin the runner's artifacts to this
+  release.
 
 ### Changed
 
@@ -112,11 +118,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
   transparent listeners refused every private, loopback or link-local
   address whatever the list said. They now exempt a listed host on a port a
-  declared, untemplated `authorized_uris` entry names (the scheme's default
-  port when it names none), with `allow_all_uris` off. Loopback, literal or
-  resolved, stays refused on every path; a host from a connection value or
-  a wildcard is never exempt; the runner's allowlist still applies. An
-  `api_call` keeps its per-host rule. The rule:
+  declared, untemplated `authorized_uris` entry names (a known scheme's
+  default port when it names none), with `allow_all_uris` off. Loopback,
+  literal or resolved, stays refused on every path; a host from a
+  connection value or a wildcard is never exempt; the runner's allowlist
+  still applies. An `api_call` keeps its per-host rule. The rule:
   `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
 - **BREAKING (operators): `RUN_ADAPTER=process` with
   `INTEGRATION_RUNTIME_ADAPTER=docker` is refused at boot** (#1819); see
@@ -399,17 +405,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Origin-form and `https://` absolute-form requests answer 405, and the
   listener that injects credentials still refuses plain HTTP.
 - **A sidecar tunnel no longer discards bytes queued for one side when the
-  other side closes first** (#1819). On the `CONNECT` tunnels of the runner
-  egress listener and the agent's forward proxy, a half-close now reaches
-  the other side, and a close flushes the other side before closing it.
+  other side closes first** (#1819). On every tunnel (the runner egress
+  listener's `CONNECT`, the transparent plane, the agent's forward proxy), a
+  clean close now flushes what is queued for the other side before
+  destroying it, a client that closes while the upstream is still dialing
+  takes the upstream down with it, and the idle timeout closes both sides.
+- **An abandoned relayed `http://` request tears down its upstream
+  request** (#1819): a client gone mid-response no longer leaves it running,
+  on the runner egress listener and the agent's forward proxy.
 - **A relayed `http://` request whose upstream answers `101` gets a `502`**
   on the runner egress listener and the agent's forward proxy, instead of
   leaving both sockets open forever (#1819). The forward proxy now also
   strips hop-by-hop headers from responses (RFC 9110 §7.6.1).
 - **A `CONNECT` to a port outside 1–65535 (`0`, `70000`, a non-numeric
   port) answers `400`** on the runner egress listener and the agent's
-  forward proxy, and a failing connection no longer crashes the sidecar
-  (#1819).
+  forward proxy, and such a `CONNECT` no longer crashes the sidecar (#1819).
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each

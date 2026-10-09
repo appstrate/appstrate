@@ -137,8 +137,8 @@ export interface IntegrationRuntimeAdapter {
 /**
  * Factory entry keyed by `id`. Selection is purely by `id` — the platform
  * orchestrator that launches the sidecar sets `INTEGRATION_RUNTIME_ADAPTER`
- * to mirror its own `RUN_ADAPTER`, so the integration runtime always matches
- * the run runtime. There is NO availability probing / auto-detection: the
+ * (docker forwards the operator's value, process and firecracker pin
+ * "process"). There is NO availability probing / auto-detection: the
  * sidecar never guesses its backend.
  */
 interface IntegrationRuntimeAdapterEntry {
@@ -157,10 +157,9 @@ export function registerIntegrationRuntimeAdapter(entry: IntegrationRuntimeAdapt
 
 /**
  * Pick the adapter for this sidecar process by `INTEGRATION_RUNTIME_ADAPTER`.
- * The platform orchestrator that launched the sidecar sets it to mirror its
- * own `RUN_ADAPTER` (docker-orchestrator → `docker`, process-orchestrator →
- * `process`), so the integration runtime deterministically matches the run
- * runtime — no probing, no guessing. The id MUST be registered. Throws when
+ * The platform orchestrator that launched the sidecar sets it (docker
+ * forwards the operator's value, process and firecracker pin "process") —
+ * no probing, no guessing. The id MUST be registered. Throws when
  * the var is unset or unknown (a fail-fast, since every launch path sets it).
  */
 export function selectIntegrationRuntimeAdapter(
