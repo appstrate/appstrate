@@ -49,6 +49,10 @@ import type { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   createMcpServer,
+  isSseResponse,
+  parseMcpPost,
+  releaseWhenSettled,
+  type McpPost,
   ErrorCode,
   McpError,
   API_CALL_ERROR_META_KEY,
@@ -1838,6 +1842,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // body larger than MAX_MCP_REQUEST_BODY_SIZE.
     const method = c.req.method.toUpperCase();
     let forwarded: Request = c.req.raw;
+    let post: McpPost | null = null;
     if (method === "POST" || method === "PUT" || method === "PATCH") {
       const envelopeOversizeError = (actual: number | null) => ({
         jsonrpc: "2.0" as const,
@@ -1881,6 +1886,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
         headers: c.req.raw.headers,
         body: bodyBytes,
       });
+      post = parseMcpPost(bodyBytes);
     }
 
     // Wait for the integration runtime to finish its first bootstrap
@@ -1933,23 +1939,33 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // host/origin check is therefore disabled.
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+      // JSON unless the agent asked for progress: then SSE, so the progress an
+      // upstream reports (relayed by the McpHost) reaches the agent's client.
+      enableJsonResponse: !post?.requestsProgress,
       enableDnsRebindingProtection: false,
       // The envelope was already bounded above; without this the SDK's own
       // 4 MB default rejects it first and the tool never answers 413 itself.
       maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
-    try {
-      await server.connect(transport);
-      // `handleRequest` returns a `Promise<Response>` we hand straight
-      // back to Hono. Awaiting before returning ensures the `finally`
-      // teardown runs after the response has been fully composed (the
-      // SDK populates the response body synchronously into the Response
-      // object before resolving the promise).
-      return await transport.handleRequest(forwarded);
-    } finally {
+    const release = async () => {
       await transport.close();
       await server.close();
+    };
+    let response: Response;
+    try {
+      await server.connect(transport);
+      response = await transport.handleRequest(
+        forwarded,
+        post ? { parsedBody: post.payload } : undefined,
+      );
+    } catch (err) {
+      await release();
+      throw err;
     }
+    // A JSON answer is complete here. An SSE one is still being written by the
+    // tool, so closing now would abort the call: release once the stream is over.
+    if (isSseResponse(response)) return releaseWhenSettled(response, release);
+    await release();
+    return response;
   });
 }

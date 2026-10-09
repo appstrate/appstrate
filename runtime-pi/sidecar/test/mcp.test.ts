@@ -226,6 +226,43 @@ describe("POST /mcp — tools/call run_history", () => {
   });
 });
 
+describe("POST /mcp — answer format", () => {
+  async function callRunHistory(meta?: Record<string, unknown>): Promise<Response> {
+    const app = createTestApp(makeDeps());
+    return app.request("/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Host: "localhost",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "run_history", arguments: {}, ...(meta ? { _meta: meta } : {}) },
+      }),
+    });
+  }
+
+  it("answers JSON when the call asks for no progress", async () => {
+    const res = await callRunHistory();
+    expect(res.headers.get("content-type")).toStartWith("application/json");
+    expect(((await res.json()) as { id: number }).id).toBe(1);
+  });
+
+  it("streams over SSE, opened at once, when the call carries a progressToken", async () => {
+    const res = await callRunHistory({ progressToken: "agent_tok" });
+    expect(res.headers.get("content-type")).toStartWith("text/event-stream");
+    const text = await res.text();
+    // The open comment first, then the result frame: the server lived until the
+    // tool answered, it was not torn down when the response was returned.
+    expect(text.startsWith(": stream open\n\n")).toBe(true);
+    const frame = text.split("\n").find((line) => line.startsWith("data: "));
+    expect(JSON.parse(frame!.slice("data: ".length))).toMatchObject({ id: 1, result: {} });
+  });
+});
+
 describe("POST /mcp — tools/call recall_memory", () => {
   it("delegates to the platform's /internal/memories and forwards q + limit", async () => {
     const fetchFn = mock(

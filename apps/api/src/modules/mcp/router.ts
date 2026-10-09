@@ -36,7 +36,6 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { isJSONRPCRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `createInsufficientScopeError` marks the error it returns in a module-level
 // WeakSet, and `createResourceServerChallenge` recognises it by asking
@@ -55,7 +54,12 @@ import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `@better-auth/core/oauth2` here.
 import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
-import { createMcpServer } from "@appstrate/mcp-transport";
+import {
+  createMcpServer,
+  isSseResponse,
+  parseMcpPost,
+  releaseWhenSettled,
+} from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
@@ -232,7 +236,7 @@ export function buildServerInstructions(
     ? "read its outcome with `getRun` on that `id`"
     : "wait for it with `getRun` (`query: { wait: true }`) on that `id`";
   const runBullets = runs
-    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; a run it answered \`done:false\` for is covered by the shortcut below.
+    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; for a run \`run_and_wait\` returned with \`done:false\`, see the shortcut below.
 - Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` (with an \`error\`) means the run is still going: never call \`run_and_wait\` again for it — ${doneFalseFollowUp}.${inlineShortcut}
 `
     : "";
@@ -274,89 +278,6 @@ ${heavyListBullet}${concurrencyBullet}${
 
 ${OPERATION_INDEX_HEADING}
 ${buildOperationIndex(permissions, ceiling)}`;
-}
-
-/** A POSTed MCP body, parsed once for both the transport choice and the SDK. */
-interface McpPost {
-  payload: unknown;
-  /**
-   * Whether it holds a request asking for progress — `params._meta.progressToken`,
-   * the MCP spec's opt-in, on any request of a batch. Such a call is answered
-   * over SSE, so a long tool call stays alive through client first-byte timers
-   * and proxy idle limits.
-   */
-  requestsProgress: boolean;
-}
-
-/**
- * `body` as an MCP POST, or `null` when it is not JSON — the SDK then reads the
- * bytes itself and answers its own `-32700`. Validation stays the SDK's.
- */
-export function parseMcpPost(body: ArrayBuffer): McpPost | null {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(new TextDecoder().decode(body));
-  } catch {
-    return null;
-  }
-  const messages: unknown[] = Array.isArray(payload) ? payload : [payload];
-  return {
-    payload,
-    requestsProgress: messages.some(
-      (message) => isJSONRPCRequest(message) && message.params?._meta?.progressToken !== undefined,
-    ),
-  };
-}
-
-/** An SSE comment: clients ignore it, but it makes Bun send the headers at once. */
-const SSE_OPEN_COMMENT = ": stream open\n\n";
-
-/**
- * `response` with its SSE body re-exposed: it opens with a comment, then passes
- * the SDK's stream through unchanged, and runs `release` exactly once when that
- * is over — drained, failed, or cancelled by the client.
- *
- * The comment is there because Bun sends response headers with the first body
- * chunk, and the SDK's first write is otherwise its 15 s keep-alive or the
- * tool's first progress. A cancel is passed on to the SDK's stream first;
- * `release` closing the transport then aborts the in-flight handler's
- * `extra.signal`, so a gone client stops the work.
- */
-export function releaseWhenSettled(
-  response: Response,
-  sse: ReadableStream<Uint8Array>,
-  release: () => Promise<void>,
-): Response {
-  const reader = sse.getReader();
-  let released = false;
-  const settle = async () => {
-    if (released) return;
-    released = true;
-    await release();
-  };
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(SSE_OPEN_COMMENT));
-    },
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (!done) {
-          controller.enqueue(value);
-          return;
-        }
-        controller.close();
-      } catch (err) {
-        controller.error(err);
-      }
-      await settle();
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-      await settle();
-    },
-  });
-  return new Response(body, { status: response.status, headers: response.headers });
 }
 
 function forwardAuthHeaders(src: Headers): Headers {
@@ -655,7 +576,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const post = parseMcpPost(body);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      // JSON unless the caller asked for progress (see `McpPost`).
+      // JSON unless the caller asked for progress (see `parseMcpPost`).
       enableJsonResponse: !post?.requestsProgress,
       // Disabled deliberately: the SDK's Host-header allowlist would reject
       // legitimate reverse-proxied hosts, and the rebinding threat it guards
@@ -694,9 +615,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // A JSON answer is complete here. An SSE one is not: the SDK hands the
     // stream back at once and the tool fills it later, so closing now would
     // abort the call — the server lives until the stream is over.
-    if (response.body && response.headers.get("content-type")?.startsWith("text/event-stream")) {
-      return releaseWhenSettled(response, response.body, release);
-    }
+    if (isSseResponse(response)) return releaseWhenSettled(response, release);
     await release();
     return response;
   });

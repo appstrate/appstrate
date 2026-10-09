@@ -292,6 +292,15 @@ export type {
 // exported above.
 export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
 
+// Serving one stateless Streamable HTTP POST: JSON unless progress was asked
+// for, and a server kept alive until its SSE answer is over.
+export {
+  isSseResponse,
+  parseMcpPost,
+  releaseWhenSettled,
+  type McpPost,
+} from "./streamable-post.ts";
+
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible
 // with the SDK's Transport interface so the same `Client` works against

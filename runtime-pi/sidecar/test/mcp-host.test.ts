@@ -20,6 +20,7 @@ import {
   API_UPLOAD_TOOL_META_KEY,
   createInProcessPair,
   wrapClient,
+  type AppstrateRequestExtra,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { McpHost, normaliseNamespace } from "../mcp-host.ts";
@@ -429,6 +430,76 @@ describe("McpHost — buildTools", () => {
     } finally {
       await upstream.pair.close();
     }
+  });
+});
+
+describe("McpHost — progress relay", () => {
+  /** An upstream tool reporting two steps of progress when the caller asked for it. */
+  const reportingTool = (): AppstrateToolDefinition[] => [
+    {
+      descriptor: { name: "long", inputSchema: { type: "object" } },
+      handler: async (_args, extra) => {
+        const progressToken = extra._meta?.progressToken;
+        if (progressToken !== undefined) {
+          for (const progress of [1, 2]) {
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress, message: `step ${progress}` },
+            });
+          }
+        }
+        return { content: [{ type: "text", text: "done" }] };
+      },
+    },
+  ];
+
+  async function callLong(extra: Partial<AppstrateRequestExtra>) {
+    const upstream = await makeUpstream(reportingTool());
+    try {
+      const host = new McpHost();
+      await host.register({ connection: CONN_A, namespace: "up", client: upstream.client });
+      const tool = host.buildTools().find((t) => t.descriptor.name === "up__long")!;
+      return await tool.handler({}, extra as AppstrateRequestExtra);
+    } finally {
+      await upstream.pair.close();
+    }
+  }
+
+  it("re-emits upstream progress under the agent's own token", async () => {
+    const sent: unknown[] = [];
+    const result = await callLong({
+      _meta: { progressToken: "agent_tok" },
+      sendNotification: async (n) => {
+        sent.push(n);
+      },
+    });
+    expect(result.content).toEqual([{ type: "text", text: "done" }]);
+    expect(sent).toEqual(
+      [1, 2].map((progress) => ({
+        method: "notifications/progress",
+        params: { progress, message: `step ${progress}`, progressToken: "agent_tok" },
+      })),
+    );
+  });
+
+  it("relays nothing when the agent asked for no progress", async () => {
+    const sent: unknown[] = [];
+    await callLong({
+      sendNotification: async (n) => {
+        sent.push(n);
+      },
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("never fails the call when relaying throws", async () => {
+    const result = await callLong({
+      _meta: { progressToken: 3 },
+      sendNotification: () => {
+        throw new Error("agent gone");
+      },
+    });
+    expect(result.content).toEqual([{ type: "text", text: "done" }]);
   });
 });
 

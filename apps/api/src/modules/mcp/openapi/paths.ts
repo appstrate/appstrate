@@ -106,7 +106,8 @@ export const mcpPaths = {
           },
         },
         "400": jsonRpcTransportError(
-          "Unparseable JSON (`-32700`) or an invalid JSON-RPC message or batch (`-32700`/`-32600`).",
+          "Unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), " +
+            "or an unsupported `MCP-Protocol-Version` header (`-32000`).",
         ),
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

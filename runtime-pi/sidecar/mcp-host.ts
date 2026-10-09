@@ -44,10 +44,40 @@ import {
   sanitiseTextField,
   sanitiseToolDescriptor,
   type AppstrateMcpClient,
+  type AppstrateRequestExtra,
   type AppstrateToolDefinition,
   type CallToolResult,
   type Tool,
 } from "@appstrate/mcp-transport";
+import { logger } from "./logger.ts";
+
+/**
+ * Relay the upstream's progress for one call to the agent under the agent's own
+ * `progressToken`, so its client's timeout restarts too; `undefined` when the
+ * agent asked for none. A failed send is logged and never fails the call.
+ */
+function relayProgress(
+  extra: AppstrateRequestExtra,
+): Parameters<AppstrateMcpClient["callTool"]>[1] {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return undefined;
+  return {
+    onProgress: (progress) => {
+      Promise.resolve()
+        .then(() =>
+          extra.sendNotification({
+            method: "notifications/progress",
+            params: { ...progress, progressToken },
+          }),
+        )
+        .catch((err: unknown) => {
+          logger.debug("mcp: progress relay to the agent failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    },
+  };
+}
 
 /**
  * Drop the first-party runtime-event channel from a third-party tool result.
@@ -601,12 +631,12 @@ export class McpHost {
       const forward = async (
         route: ToolRoute,
         args: Record<string, unknown>,
-        extra: { signal?: AbortSignal },
+        extra: AppstrateRequestExtra,
       ): Promise<CallToolResult> =>
         stripForgedRuntimeEvents(
           await route.client.callTool(
             { name: route.originalName, arguments: args },
-            { ...(extra.signal ? { signal: extra.signal } : {}) },
+            { ...(extra.signal ? { signal: extra.signal } : {}), ...relayProgress(extra) },
           ),
         );
       // One connection: the upstream descriptor as is. Several: every tool of the

@@ -136,6 +136,52 @@ describe("mcp transport: SSE only when progress is asked for", () => {
   });
 });
 
+describe("mcp transport: progress on the wire", () => {
+  // Waits one real heartbeat (15 s) on purpose: fake timers would stall the run pipeline.
+  it("streams the heartbeat's notifications/progress, with the caller's token, before the result", async () => {
+    await seedDefaultOrgModel(ctx);
+    holdRuns();
+    const res = await app.request(
+      mcpPath(headers),
+      toolCall(
+        "run_and_wait",
+        { kind: "inline", manifest: inlineAgentManifest(), prompt: "do the thing" },
+        { progressToken: "beat-1" },
+      ),
+    );
+    expect(res.headers.get("content-type")).toStartWith("text/event-stream");
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    // Complete events only: a chunk may end mid-line.
+    const hasBeat = () =>
+      sseMessages(text.slice(0, text.lastIndexOf("\n\n") + 1)).some(
+        (m) => m.method === "notifications/progress",
+      );
+
+    // The run is held, so the first beat necessarily precedes the result.
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      text += decoder.decode(chunk.value, { stream: true });
+      if (hasBeat()) break;
+    }
+    expect(hasBeat()).toBe(true);
+    openGate();
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+
+    const messages = sseMessages(text);
+    const beatAt = messages.findIndex((m) => m.method === "notifications/progress");
+    const resultAt = messages.findIndex((m) => m.result !== undefined || m.error !== undefined);
+    expect(beatAt).toBeGreaterThanOrEqual(0);
+    expect(resultAt).toBeGreaterThan(beatAt);
+    expect(
+      (messages[beatAt] as { params?: { progressToken?: unknown } }).params?.progressToken,
+    ).toBe("beat-1");
+    expect(toolData(messages[resultAt]!).done).toBe(true);
+  }, 30_000);
+});
+
 describe("mcp transport: a held run_and_wait over a real socket", () => {
   it("sends the headers and a first byte while the run is still going, then the result", async () => {
     await seedDefaultOrgModel(ctx);

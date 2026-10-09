@@ -187,8 +187,9 @@ it returns `done:false` with the run `id`; continue with `getRun`
 (`query: { wait: true }`) on that id, never with a second `run_and_wait`.
 Progress only helps a client that resets its request timeout on it: the MCP
 TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
-`false`), and a client that does not will still hit its own timeout on a long
-run.
+`false`). A client that sends a token without resetting its timeout on progress
+hits its own timeout on a long run, not the `done:false` fallback: the server
+cannot tell it apart from one that does.
 
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you

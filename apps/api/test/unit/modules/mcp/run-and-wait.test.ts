@@ -140,6 +140,10 @@ function makeRunAndWait(opts: {
 }
 
 describe("run_and_wait", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("is registered as the single launch-and-wait tool", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.name).toBe("run_and_wait");
@@ -340,6 +344,8 @@ describe("run_and_wait", () => {
   });
 
   it("launches an agent run, then waits for the final result", async () => {
+    // Frozen clock: the poll's `wait` must not depend on how long the launch took.
+    jest.useFakeTimers();
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_42", packageId: "@acme/writer", status: "pending" }),
       getRun: [
@@ -366,7 +372,9 @@ describe("run_and_wait", () => {
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
     // No progress token: the wait is capped below the clients' 60 s timeout.
-    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=44");
+    expect(calls.find((c) => c.method === "GET")?.search).toBe(
+      `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
+    );
   });
 
   describe("progress heartbeat and unstreamed wait cap", () => {
@@ -379,10 +387,6 @@ describe("run_and_wait", () => {
       expect(description).toContain("read its outcome with `getRun` on that `id`");
       // The chat reuses this text with only its closing-reply margin left: no long-poll advice.
       expect(description).not.toContain("wait: true");
-    });
-
-    afterEach(() => {
-      jest.useRealTimers();
     });
 
     function extraWith(

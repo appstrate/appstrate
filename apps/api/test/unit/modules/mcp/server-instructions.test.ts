@@ -183,7 +183,7 @@ describe("MCP server instructions — run guidance", () => {
     // The generic run bullet defers to the shortcut instead of contradicting it.
     for (const contextInjected of [false, true]) {
       expect(instructionsFor(RUNNER, contextInjected)).toContain(
-        "a run it answered `done:false` for is covered by the shortcut below",
+        "for a run `run_and_wait` returned with `done:false`, see the shortcut below",
       );
     }
   });

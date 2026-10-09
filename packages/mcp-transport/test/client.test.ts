@@ -323,6 +323,37 @@ describe("wrapClient — cancellation", () => {
   });
 });
 
+describe("wrapClient — progress", () => {
+  it("requests progress and treats the timeout as an idle timeout", async () => {
+    const TIMEOUT_MS = 50;
+    // Runs well past the timeout, but reports progress more often than it.
+    const reporting: AppstrateToolDefinition = {
+      descriptor: { name: "reporting", inputSchema: { type: "object" } },
+      handler: async (_args, extra) => {
+        const progressToken = extra._meta?.progressToken;
+        if (progressToken !== undefined) {
+          for (let progress = 1; progress <= 6; progress++) {
+            await new Promise((r) => setTimeout(r, TIMEOUT_MS / 2));
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress },
+            });
+          }
+        }
+        return { content: [{ type: "text", text: String(progressToken !== undefined) }] };
+      },
+    };
+    const pair = await createInProcessPair([reporting]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, TIMEOUT_MS);
+    try {
+      const res = await wrapped.callTool({ name: "reporting" });
+      expect(res.content).toEqual([{ type: "text", text: "true" }]);
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
 describe("wrapClient — surface narrowing", () => {
   it("exposes listTools/callTool via the wrapped client", async () => {
     const [a, b] = InMemoryTransport.createLinkedPair();

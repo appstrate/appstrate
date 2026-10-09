@@ -895,7 +895,10 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
   let progress = 0;
+  // A tick already queued when the wait ends must not report after the result.
+  let stopped = false;
   const timer = setInterval(() => {
+    if (stopped) return;
     progress += 1;
     const elapsedS = Math.round((performance.now() - startedAt) / 1000);
     Promise.resolve()
@@ -916,7 +919,10 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
         });
       });
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
-  return () => clearInterval(timer);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 
 /**
