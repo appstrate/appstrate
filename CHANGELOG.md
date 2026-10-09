@@ -406,6 +406,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint: unless the token response names the account, connections to
   different Expo accounts share one account key and a reconnect is unchecked.
 
+- **Browser Use — delegate web tasks to Browser Use Cloud's browser agent
+  (#1880).** `@appstrate/browser-use@1.0.0` targets the hosted v3 MCP server,
+  `streamable-http` against `https://api.browser-use.com/v3/mcp`, with an API
+  key sent as `X-Browser-Use-API-Key` with no prefix: the first remote
+  integration delivering its credential outside `Authorization`. Not OAuth:
+  Browser Use's RFC 9728 protected-resource metadata names only the v1 `/mcp`
+  resource (`/.well-known/oauth-protected-resource/v3/mcp` is 404), and its
+  authorization server issues no refresh token, so an OAuth connection would die
+  when its access token expires. `run_session` and `send_task` consume credits,
+  `stop_session` changes state; `get_session`, `get_session_messages`,
+  `list_sessions` and `list_browser_profiles` read. Tasks can run for minutes,
+  so the agent polls `get_session`. Cloud only: the open-source `browser-use`
+  library is not a self-hostable copy of this API (its MCP server is stdio-only,
+  with other tools); a self-hosted browser is #1827. `tools/list` is public, so
+  the weekly conformance monitor checks tool parity without a credential.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
