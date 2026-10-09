@@ -120,8 +120,8 @@ export function IntegrationConnectionPicker({
           })}
         </PickerWarning>
       )}
-      {/* Under-scoped → blocked server-side. The owner can upgrade in place;
-          a foreign owner can only be flagged. */}
+      {/* Under-scoped → blocked server-side: a new connection with the agent's
+          scopes first, an in-place upgrade (owner only) second. */}
       {underScopedConns.map((conn) => (
         <UnderScopedWarning key={conn.id} conn={conn} picker={picker} />
       ))}

@@ -121,6 +121,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
 - **BREAKING (operators): `INTEGRATION_RUNTIME_ADAPTER` is retired and
   ignored** (#1819); see Operators.
+- **BREAKING (agents): a Gmail connection no longer gets write access by
+  default** (#1871). `@appstrate/gmail` 1.1.7 drops `gmail.send` and
+  `@appstrate/gmail-mcp` 2.3.6 drops `gmail.compose` from `default_scopes`,
+  which every connection of the auth requests: a connection made for a
+  read-only agent is read-only. `@appstrate/gmail` has no `tools_policy`, so an
+  agent that sends mail without declaring the scope now gets a read-only
+  connection and fails at run time. Migration: declare it,
+  `integrations_configuration["@appstrate/gmail"].scopes:
+["https://www.googleapis.com/auth/gmail.send"]`. A `@appstrate/gmail-mcp`
+  agent selecting `create_draft` gets `gmail.compose` from its tool; one with
+  `tools: "*"` declares it the same way. Existing connections keep what they
+  were granted.
+- **The fallback binds among your own connections of one account** (#1871):
+  when every own connection serving an integration is an `oauth2` one of the
+  same known account, auth and instance (connection variables), the run binds
+  the least-privileged one covering the agent's scopes plus the auth's
+  `default_scopes` (else the closest, which answers `insufficient_scopes`)
+  instead of answering `must_choose_connection`, whether or not the agent
+  declares scopes. Grants beyond what the agent and the defaults need weigh
+  before a missing default and before health: a narrow connection short of a
+  newer default is not swapped for a write-capable one, and a dead narrow one
+  is reported `needs_reconnection`, never swapped for a live broader one. A new
+  connection made for one agent no longer breaks the others. Several
+  accounts, auths or instances, an unknown identity, and a credential-proxy
+  call without an agent selection still ask.
+- **Google integrations request `userinfo.email` by default** (#1871):
+  `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
+  `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
+  `default_scopes` next to `email`, the form Google grants in its place, so a
+  connection no longer reads as granting more than its baseline.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the
@@ -534,6 +564,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent or keep a call open with repeated values. With progress,
   `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
   the call's total duration.
+- **An `insufficient_scopes` item no longer carries a `connect_url`** (#1871).
+  The link upgraded the existing connection in place, which widens every agent
+  that uses it. MCP clients are pointed at a new connection with the item's
+  `required_scopes`, bound by the layer its `source` names. The OpenAPI
+  descriptions of the connect kickoffs, `connection_id`, pins and space
+  defaults state the same rule, and an `integration.connection.reconnected`
+  audit event that changed a connection's granted scopes carries them before
+  and after (`scopesGranted`).
+- **A reconnect no longer adds the current agent's scopes** (#1871): a
+  `needs_reconnection` item carries no `required_scopes`, and its link
+  re-consents what the connection holds plus the auth's `default_scopes`. It
+  used to request the current agent's scopes, which then reached every agent
+  bound to the connection. A refresh that shrinks a grant now flags the
+  connection only for a scope it held and an agent requires, not for scopes
+  other agents' connections hold.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

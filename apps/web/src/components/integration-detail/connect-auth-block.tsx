@@ -3,12 +3,13 @@
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions } from "../../hooks/use-permissions";
-import type { IntegrationAuthStatus } from "../../hooks/use-integrations";
-import { InlineConnectButton } from "../integration-connect/inline-connect-button";
+import type { IntegrationAuthStatus, IntegrationManifestView } from "../../hooks/use-integrations";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { AuthHeader } from "./auth-header";
 import { ConnectionsTable } from "./connections-table";
+import { AddAccountButton } from "./connect-scopes-dialog";
+import { scopeChoiceFor } from "./connect-scope-choice";
 
 // ─────────────────────────────────────────────
 // Connexions tab — per-auth connect CTA + accounts table
@@ -20,17 +21,20 @@ import { ConnectionsTable } from "./connections-table";
  * connected accounts with rename/share/reconnect/disconnect. Runtime view — the
  * OAuth client setup lives in the Configuration tab (see {@link ConfigAuthBlock}).
  *
- * Scope-aware connect/upgrade still also lives on the agent surfaces
- * (AgentIntegrationsBlock + MissingConnectionsModal) where the per-agent scope
- * context is known; the "+ Ajouter" here connects with default scopes.
+ * On an oauth2 auth with a `scope_catalog`, "+ Ajouter" first asks which scopes
+ * to request on top of the `default_scopes` baseline, optionally ticked from an
+ * agent of the space ({@link AddAccountButton}). Otherwise it connects
+ * with the baseline alone.
  */
 export function ConnectAuthBlock({
   packageId,
   status,
+  manifest,
   personalConnectionsBlocked,
 }: {
   packageId: string;
   status: IntegrationAuthStatus;
+  manifest: IntegrationManifestView;
   /** The space's `block_user_connections` gate — `integrations:configure` is exempt, as on the server. */
   personalConnectionsBlocked: boolean;
 }) {
@@ -55,9 +59,7 @@ export function ConnectAuthBlock({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <AuthHeader status={status} />
         {/* Connect CTA / locked state. A missing oauth2 client blocks connecting:
-            admins are pointed at the Configuration tab, members get a hint. User-
-            facing connect also lives on agent surfaces where the agent's scope
-            context is known; here the "+ Ajouter" connects with default scopes. */}
+            admins are pointed at the Configuration tab, members get a hint. */}
         {clientMissing ? (
           <p
             className="text-muted-foreground text-xs"
@@ -77,13 +79,13 @@ export function ConnectAuthBlock({
             {t("integration.auth.blockedByAdminHint")}
           </p>
         ) : (
-          <InlineConnectButton
+          <AddAccountButton
             packageId={packageId}
             authKey={status.auth_key}
-            intent="connect"
+            manifest={manifest}
+            choice={scopeChoiceFor(manifest.auths?.[status.auth_key])}
             label={t("integration.auth.addAccount")}
             forceAccountSelect={ownConnectionCount > 0}
-            lockToAuthKey
           />
         )}
       </div>
@@ -93,6 +95,7 @@ export function ConnectAuthBlock({
         authKey={status.auth_key}
         authType={status.type}
         connections={status.connections}
+        manifest={manifest}
         // Renew via OAuth needs a usable client; when none is available the
         // connect CTA is already hidden, so gate the per-row renew button the
         // same way to avoid a guaranteed 403.

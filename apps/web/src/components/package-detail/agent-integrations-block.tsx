@@ -5,7 +5,6 @@ import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import {
-  useIntegrations,
   useIntegrationDetail,
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
@@ -15,6 +14,8 @@ import {
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { useSetPackageActive } from "../../hooks/use-library";
+import { ApiError } from "../../api/errors";
+import { errorMessage } from "../../lib/mutation-error";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
@@ -54,15 +55,6 @@ interface AgentIntegrationsBlockProps {
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
-  // The list carries `active` (placed here and switched on). An agent can
-  // declare an integration that was never activated here (or got disabled);
-  // those cards render a read-only "not active" state instead of a connect
-  // affordance, mirroring the run-time `integration_not_active` gate.
-  const { data: integrations } = useIntegrations();
-  const activeIds = integrations
-    ? new Set(integrations.filter((i) => i.active).map((i) => i.id))
-    : null;
-
   if (entries.length === 0) return null;
 
   return (
@@ -74,9 +66,6 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           agentTools={entry.tools}
           agentScopes={entry.scopes}
           required={entry.required === true}
-          // Optimistic while the list loads (null) so the card doesn't flash
-          // a "not active" state; once loaded, gate strictly on membership.
-          appActive={activeIds ? activeIds.has(entry.id) : true}
           {...(agentPackageId ? { agentPackageId } : {})}
         />
       ))}
@@ -90,8 +79,6 @@ interface IntegrationConnectionCardProps {
   agentScopes: string[] | undefined;
   /** The agent's `required` flag: an inactive required integration refuses the run. */
   required: boolean;
-  /** Whether the integration is active — placed in this space and switched on. */
-  appActive: boolean;
   agentPackageId?: string;
 }
 
@@ -100,26 +87,47 @@ function IntegrationConnectionCard({
   agentTools,
   agentScopes,
   required,
-  appActive,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
+  const { data: detail, isLoading, error } = useIntegrationDetail(packageId);
   const displayName = detail?.manifest.display_name ?? packageId;
 
-  if (detailPending || !detail) {
+  if (!detail) {
+    // A spinner only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
+    if (isLoading) {
+      return (
+        <CardShell
+          icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
+          title={displayName}
+          subtitle={packageId}
+        />
+      );
+    }
+    // 404: the integration is not placed in this space, which is what activating it fixes.
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        <InactiveIntegrationCard
+          packageId={packageId}
+          displayName={displayName}
+          required={required}
+        />
+      );
+    }
+    // Any other failure is named; a disabled read has none to name.
     return (
       <CardShell
-        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
         title={displayName}
         subtitle={packageId}
+        extraSubtitle={error ? errorMessage(error) : null}
+        extraSubtitleTone="warning"
       />
     );
   }
 
-  // Not active in this space → no connection is possible. Show a
-  // disabled, explanatory control rather than a picker the run-time gate would
-  // reject with `integration_not_active`.
-  if (!appActive) {
+  // Not active in this space (the integration's own detail says so) → no
+  // connection is possible. Show a disabled, explanatory control rather than a
+  // picker the run-time gate would reject with `integration_not_active`.
+  if (!detail.active) {
     return (
       <InactiveIntegrationCard
         packageId={packageId}
@@ -190,7 +198,7 @@ function ManagedIntegrationCard({
       : null;
   const requiredNone = resolution ? requiredNoneLabel(resolution) : null;
 
-  // The verdict can know it is off when the list did not; an `inactive` verdict is a warning,
+  // The verdict can know it is off when the detail did not; an `inactive` verdict is a warning,
   // so the run starts without it.
   if (resolution?.warning?.code === "integration_not_active") {
     return (

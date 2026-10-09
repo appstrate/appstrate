@@ -21,6 +21,8 @@ const { $api } = await import("../../api/client.ts");
 const { AMBER_TEXT } = await import("../integration-connect/connection-picker-states.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
+const { ApiError } = await import("../../api/errors.ts");
+const { errorMessage } = await import("../../lib/mutation-error.ts");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
@@ -79,16 +81,15 @@ function renderCard(
   entry: { required?: boolean; blocking?: boolean; active?: boolean } = {},
 ): string {
   const qc = new QueryClient();
-  qc.setQueryData($api.queryOptions("get", "/api/integrations", { params: { header } }).queryKey, {
-    object: "list",
-    data: [{ id: GMAIL, active: entry.active ?? true, manifest: { display_name: "Gmail" } }],
-    hasMore: false,
-  });
   qc.setQueryData(
     $api.queryOptions("get", "/api/integrations/{packageId}", {
       params: { path: { packageId: GMAIL }, header },
     }).queryKey,
-    { manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } }, auths: [] },
+    {
+      manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+      auths: [],
+      active: entry.active ?? true,
+    },
   );
   qc.setQueryData(
     $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
@@ -183,7 +184,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     expect(html).not.toContain(label("integrationUnbound"));
   });
 
-  it("off in the space per the list: blocking only when the agent requires it", () => {
+  it("off in the space per its detail: blocking only when the agent requires it", () => {
     const optional = renderCard(unbound({ warning: warning("integration_not_active") }), {
       active: false,
     });
@@ -252,5 +253,57 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     ]) {
       expect(html).not.toContain(label(key));
     }
+  });
+});
+
+describe("AgentIntegrationsBlock — the integration's own detail does not land", () => {
+  const detailKey = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: { path: { packageId: GMAIL }, header },
+  }).queryKey;
+
+  /** The detail query in `state`; none seeded is a read the actor may not run (disabled). */
+  function renderWith(state: { error: Error } | { fetching: true } | null): string {
+    const qc = new QueryClient();
+    if (state) {
+      const query = qc.getQueryCache().build(qc, { queryKey: detailKey });
+      query.setState(
+        "error" in state
+          ? { ...query.state, status: "error", error: state.error, fetchStatus: "idle" }
+          : { ...query.state, fetchStatus: "fetching" },
+      );
+    }
+    return render(
+      <AgentIntegrationsBlock
+        entries={[{ id: GMAIL, version: "1.0.0", tools: undefined, scopes: undefined }]}
+        agentPackageId={AGENT}
+      />,
+      { queryClient: qc },
+    );
+  }
+
+  it("spins while the detail is being fetched", () => {
+    expect(renderWith({ fetching: true })).toContain("animate-spin");
+  });
+
+  it("never spins on a read that does not run: the card shows without a picker", () => {
+    const html = renderWith(null);
+    expect(html).not.toContain("animate-spin");
+    expect(html).toContain(GMAIL);
+    expect(html).not.toContain(`member-picker-${GMAIL}`);
+  });
+
+  it("offers the activation when the detail answers 404: not placed in this space", () => {
+    const html = renderWith({ error: new ApiError("not_found", "no such integration", 404) });
+    expect(html).not.toContain("animate-spin");
+    expect(html).toContain(`integration-activate-${GMAIL}`);
+  });
+
+  it("names any other failure, in the warning tone, and claims no inactivity", () => {
+    const failure = new ApiError("internal_error", "boom", 500);
+    const html = renderWith({ error: failure });
+    expect(html).not.toContain("animate-spin");
+    expect(html).not.toContain(`integration-activate-${GMAIL}`);
+    expect(html).toContain(errorMessage(failure));
+    expect(html).toContain(`${AMBER_TEXT} mt-0.5`);
   });
 });

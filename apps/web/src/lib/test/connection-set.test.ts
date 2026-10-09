@@ -224,6 +224,52 @@ describe("placeCreatedConnection", () => {
       placeCreatedConnection({ explicitIds: ["c0"], checkedIds: full, createdId: "conn_new" }),
     ).toEqual({ draft: full });
   });
+
+  describe("replacing an under-scoped member", () => {
+    it("binds only the created connection when the member was the cascade's fallback", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: null,
+          checkedIds: ["conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_new"] });
+    });
+
+    it("writes the swap of a sole pin straight away, so the fix outlives the closed menu", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_old"],
+          checkedIds: ["conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_new"] });
+    });
+
+    it("swaps it in place within a pinned set, which keeps its size", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_a", "conn_old", "conn_b"],
+          checkedIds: ["conn_a", "conn_old", "conn_b"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_a", "conn_new", "conn_b"] });
+    });
+
+    it("swaps an unsaved tick in the draft when the pin does not hold it", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_mine"],
+          checkedIds: ["conn_mine", "conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ draft: ["conn_mine", "conn_new"] });
+    });
+  });
 });
 
 describe("unavailableConnectionIds", () => {
