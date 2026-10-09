@@ -571,32 +571,23 @@ export async function canSeeCredential(
 }
 
 /**
- * The editability rule, shared by PATCH, DELETE and pairing reconnect. An
- * organization credential needs `writesOrg`; a personal one needs to be the
- * caller's own, except that a `delete` by a `writesOrg` holder may remove any
- * personal credential (break-glass). Anything else reads as absent.
+ * The editability rule, shared by PATCH, DELETE and pairing reconnect: an
+ * organization credential needs `writesOrg`; a personal one must be the caller's
+ * own, except that a `writesOrg` holder may delete any personal credential
+ * (break-glass). Anything else is a 404: to the caller, it does not exist.
  */
-export async function canEditCredential(
-  caller: ModelCredentialCaller,
-  id: string,
-  action: "edit" | "delete",
-): Promise<boolean> {
-  const row = await loadCredentialOwner(caller, id);
-  if (!row) return false;
-  if (row.ownerUserId === null) return caller.writesOrg;
-  if (row.ownerUserId === caller.userId) return true;
-  return action === "delete" && caller.writesOrg;
-}
-
-/** {@link canEditCredential} as a 404: a credential the caller may not edit is, to them, absent. */
 export async function assertCredentialEditable(
   caller: ModelCredentialCaller,
   id: string,
   action: "edit" | "delete",
 ): Promise<void> {
-  if (!(await canEditCredential(caller, id, action))) {
-    throw notFound("Model provider credential not found");
-  }
+  const row = await loadCredentialOwner(caller, id);
+  const editable =
+    !!row &&
+    (row.ownerUserId === null
+      ? caller.writesOrg
+      : row.ownerUserId === caller.userId || (action === "delete" && caller.writesOrg));
+  if (!editable) throw notFound("Model provider credential not found");
 }
 
 // ─── Label derivation ──────────────────────────────────────────────────────
