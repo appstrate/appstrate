@@ -23,10 +23,9 @@ import { isQueryInFlight } from "../../lib/query-state";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { DisabledReasonTooltip } from "../../components/disabled-reason-tooltip";
-import {
-  connectionLockHintKey,
-  withSpaceShare,
-} from "../../components/integration-connect/connection-ownership";
+import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
+import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
+import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -123,14 +122,14 @@ function ConnectionRow({
   conn,
   onDisconnect,
   onUpdateLabel,
-  onToggleShare,
+  onChangeShares,
   disconnecting,
   updating,
 }: {
   conn: MeConnectionEntry;
   onDisconnect: () => void;
   onUpdateLabel?: (label: string, onSuccess: () => void) => void;
-  onToggleShare?: (sharedSpaceIds: string[]) => void;
+  onChangeShares: (sharedSpaceIds: string[]) => void;
   disconnecting: boolean;
   updating: boolean;
 }) {
@@ -138,9 +137,6 @@ function ConnectionRow({
   // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
   const lockKey = connectionLockHintKey(conn.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
-  // The space the row lives in, or was connected from when it spans the org.
-  const home = conn.space ?? conn.origin_space;
-  const sharedHome = !!home && conn.shared_spaces.some((s) => s.id === home.id);
 
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -152,20 +148,31 @@ function ConnectionRow({
     });
   }
 
-  // Org + space
+  // Org, and the one space a space-scoped row lives in
   rows.push({
     label: t("connections.orgLabel"),
     value: (
       <>
         <span>{conn.org.name}</span>
-        {home && <span className="text-muted-foreground"> &middot; {home.name}</span>}
+        {conn.space && <span className="text-muted-foreground"> &middot; {conn.space.name}</span>}
       </>
     ),
   });
 
-  // Reuse hint — tells the user this connection is
-  // shared across N agents in the space, killing the "do I need
-  // one connection per agent?" confusion.
+  if (conn.origin_space) {
+    rows.push({ label: t("connections.originLabel"), value: conn.origin_space.name });
+  }
+
+  rows.push({
+    label: t("connections.sharedSpacesLabel"),
+    value:
+      conn.shared_spaces.length > 0
+        ? conn.shared_spaces.map((s) => s.name).join(", ")
+        : t("connections.sharedSpacesNone"),
+  });
+
+  // Reuse hint — the agents of its spaces that use it, killing the "do I need one
+  // connection per agent?" confusion.
   if (typeof conn.reused_by_agents === "number") {
     rows.push({
       label: t("connections.reusedByLabel"),
@@ -201,11 +208,7 @@ function ConnectionRow({
             <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
           {statusBadge(t, conn)}
-          {conn.shared_spaces.length > 0 && (
-            <span className="rounded-full border border-blue-500/40 bg-blue-500/10 px-2 py-px text-[0.65rem] text-blue-700">
-              {t("connections.sharedBadge")}
-            </span>
-          )}
+          <ConnectionScopeBadge scope={conn.scope} />
         </div>
 
         {/* Detail rows */}
@@ -218,28 +221,23 @@ function ConnectionRow({
           ))}
         </div>
 
-        {/* Share toggle */}
-        {onToggleShare && home && (
-          <DisabledReasonTooltip reason={sharedHome ? lockHint : null}>
-            <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={sharedHome}
-                disabled={updating || (sharedHome && !!lockHint)}
-                onChange={(e) =>
-                  onToggleShare(
-                    withSpaceShare(
-                      conn.shared_spaces.map((s) => s.id),
-                      home.id,
-                      e.target.checked,
-                    ),
-                  )
-                }
-              />
-              <span>{t("connections.shareWithOrgLabel")}</span>
-            </label>
-          </DisabledReasonTooltip>
-        )}
+        {/* Share targets: the lock names no space here, a refused removal answers 409 */}
+        <div className="flex flex-wrap items-center gap-2">
+          <ConnectionShareEditor
+            connectionId={conn.connection_id}
+            orgId={conn.org.id}
+            scope={conn.scope}
+            sharedSpaceIds={conn.shared_spaces.map((s) => s.id)}
+            ownSpaceId={conn.space?.id ?? null}
+            hereSpaceId={null}
+            canEditShares
+            canUnshareHere={false}
+            lockHint={null}
+            pending={updating}
+            onChange={onChangeShares}
+          />
+          {lockHint && <span className="text-muted-foreground text-[0.65rem]">{lockHint}</span>}
+        </div>
       </div>
 
       <DisabledReasonTooltip reason={lockHint}>
@@ -423,7 +421,7 @@ export function PreferencesConnectionsPage() {
                         { onSuccess },
                       )
                     }
-                    onToggleShare={(sharedSpaceIds) =>
+                    onChangeShares={(sharedSpaceIds) =>
                       updateIntegration.mutate({
                         connectionId: conn.connection_id,
                         body: { shared_space_ids: sharedSpaceIds },

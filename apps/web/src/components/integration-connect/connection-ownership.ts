@@ -22,23 +22,24 @@ export function connectionLockHintKey(lockedBy: "admin_pin" | "org_default" | nu
 }
 
 /**
- * The write controls a connection row offers, as the API enforces them (every write needs
- * `integrations:connect`): rename is the owner's or a governor's; sharing is the owner's
- * consent, a governor only withdraws one. A `locked` row refuses an unshare (409
- * `connection_pinned`): the toggle stays, disabled.
+ * The write controls a connection row offers in the current space, as the API enforces them
+ * (every write needs `integrations:connect`). Sharing is the owner's consent: only the owner
+ * edits the target spaces; a governor (`integrations:configure`) only withdraws a colleague's
+ * row from this space. Rename is the owner's, or a governor's on a space-scoped row (it lives
+ * here); an org-scoped row spans spaces, so a governor renaming it is refused (403).
  */
 export function connectionRowGrants(args: {
   isOwn: boolean;
   isShared: boolean;
+  scope: "org" | "space";
   canConnect: boolean;
   canConfigure: boolean;
-  locked: boolean;
-}): { canRename: boolean; canToggleShare: boolean; shareLocked: boolean } {
-  const canRename = args.canConnect && (args.isOwn || args.canConfigure);
+}): { canRename: boolean; canEditShares: boolean; canUnshareHere: boolean } {
+  const governs = args.canConnect && args.canConfigure && !args.isOwn;
   return {
-    canRename,
-    canToggleShare: (args.isOwn && args.canConnect) || (args.isShared && canRename),
-    shareLocked: args.locked && args.isShared,
+    canRename: args.canConnect && (args.isOwn || (governs && args.scope === "space")),
+    canEditShares: args.canConnect && args.isOwn,
+    canUnshareHere: governs && args.isShared,
   };
 }
 
@@ -54,4 +55,18 @@ export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: stri
 export function withSpaceShare(ids: string[], spaceId: string, shared: boolean): string[] {
   const rest = ids.filter((id) => id !== spaceId);
   return shared ? [...rest, spaceId] : rest;
+}
+
+/**
+ * The spaces an owner may pick as share targets: those of the org they are a member of. A
+ * personal space has no one to share with, so it is offered only while already a target, to be
+ * removed.
+ */
+export function shareTargetSpaces<S extends { id: string; access: string; personal: boolean }>(
+  spaces: readonly S[],
+  sharedSpaceIds: readonly string[],
+): S[] {
+  return spaces.filter(
+    (s) => s.access === "member" && (!s.personal || sharedSpaceIds.includes(s.id)),
+  );
 }

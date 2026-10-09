@@ -88,6 +88,7 @@
   "detail.integrationMemberPicker.byYou": "Vous",
   "detail.integrationMemberPicker.ownerUnknown": "Propriétaire inconnu",
   "detail.integrationMemberPicker.connectedBy": "Connectée par {{owner}}",
+  "detail.integrationMemberPicker.connectedFrom": "Connectée depuis {{space}}",
   "detail.integrationMemberPicker.sharedBadge": "Partagée",
   "detail.integrationMemberPicker.needsReconnection": "Reconnexion requise",
   "detail.integrationMemberPicker.renew": "Renouveler",
