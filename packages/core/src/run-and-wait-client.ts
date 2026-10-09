@@ -353,10 +353,7 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
   return { overrides };
 }
 
-/**
- * The launch response's non-empty `warnings` (integrations the run started without), carried
- * onto every payload: the run resource the poll reads does not repeat them.
- */
+/** The launch's `warnings` on every payload: the run resource the poll reads lacks them. */
 function withLaunchWarnings(
   payload: Record<string, unknown>,
   launchRecord: Record<string, unknown>,

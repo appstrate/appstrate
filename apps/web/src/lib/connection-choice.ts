@@ -131,10 +131,7 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
 /** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
 export type ConnectionOverridesMap = Record<string, string[]>;
 
-/**
- * The package-level verdicts and the agent's own `auth_key` serving none of its selected tools,
- * all raised before any account is looked at: no pick fixes them.
- */
+/** Verdicts raised before any account is looked at: no pick fixes them. */
 export function isStructuralCode(code: string): boolean {
   return (
     code === "integration_not_active" ||
@@ -145,10 +142,7 @@ export function isStructuralCode(code: string): boolean {
   );
 }
 
-/**
- * The Re-run button's state: a `must_choose_connection` row waits for a pick (`[]` counts —
- * "no connection" is a choice); the others re-run freely (a fresh 409 reopens this).
- */
+/** Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), others don't. */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   picks: ConnectionOverridesMap,

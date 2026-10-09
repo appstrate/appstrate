@@ -10,16 +10,15 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      several → `must_choose_connection`; none → `not_connected` for a `required`
- *      integration, else bound to none with an `integration_unbound` warning
+ *      several → `must_choose_connection`, none → as below
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
  * naming anything outside it is `override_outranked`. A shared connection is never bound
  * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
- * bind (or switched off in the space), a `required` integration is an error, any other is
- * bound to none with a warning. `resolveConnections()` is pure; `resolveConnectionsForRun()`
- * loads its inputs.
+ * bind (or switched off in the space), a `required` integration is an error, any other binds
+ * none with a warning. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its
+ * inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -244,7 +243,6 @@ function launchOverrideFor(
   return launch && ids ? { ids, source: launch.source } : null;
 }
 
-/** Every layer's set: `null` = absent (the next layer decides), `[]` = none (wins). */
 interface ResolveOneArgs {
   integrationId: string;
   required: boolean;
@@ -463,7 +461,6 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   });
 }
 
-/** Who set a layer, as messages name it. */
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
   admin_pin: "an admin pin",
   org_default_enforced: "an enforced org default",
@@ -788,11 +785,8 @@ const CONNECT_FLOW_CODES: ReadonlySet<ResolutionItem["code"]> = new Set([
 ]);
 
 /**
- * Map a resolution error (a 409 item) or warning (a launch `warnings` item) to the wire-format
- * `ResolutionFieldError` (a `ValidationFieldError` plus the resolution smuggle fields).
- *
- * Field path: `integrations.{packageId}` — one item per integration; the
- * dashboard's MissingConnectionsModal reads the same prefix.
+ * A resolution error (a 409 item) or warning (a launch `warnings` item) as the wire-format
+ * `ResolutionFieldError`, one per integration on `integrations.{packageId}`.
  */
 export function translateResolutionError(e: ResolutionItem): ResolutionFieldError {
   const title = TITLE_BY_CODE[e.code];

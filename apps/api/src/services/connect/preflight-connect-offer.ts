@@ -58,7 +58,6 @@ const FIELD_PREFIX = "integrations.";
  */
 const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
 
-/** A fresh connect clears both: the blocking absence and the warned one. */
 const FRESH_CONNECT_CODES: ReadonlySet<string> = new Set(["not_connected", "integration_unbound"]);
 
 /**
@@ -183,9 +182,8 @@ export async function attachConnectOffers(params: {
 }
 
 /**
- * `items` without the fields {@link attachConnectOffers} adds. A link connects
- * as the actor it was minted for, so a response that is stored — and replayed
- * to whoever reuses its `Idempotency-Key` — must not keep one.
+ * `items` without the fields {@link attachConnectOffers} adds: a link connects as the actor it
+ * was minted for, and a stored response is replayed to whoever reuses its `Idempotency-Key`.
  */
 export function withoutConnectOffers(items: ResolutionFieldError[]): ResolutionFieldError[] {
   return items.map((item) => {

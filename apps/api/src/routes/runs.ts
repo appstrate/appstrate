@@ -224,10 +224,7 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
-/**
- * A launch body as the idempotency cache keeps it: the 201's `warnings` and the
- * 409's `errors` without connect links.
- */
+/** A launch body as the idempotency cache keeps it: no connect link on `warnings` or `errors`. */
 function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown> {
   const stripped = { ...body };
   for (const key of ["warnings", "errors"] as const) {

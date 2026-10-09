@@ -24,10 +24,8 @@
  * `ResourceSection`); the resulting `ResourceEntry` is split into the
  * `dependencies.integrations[id]` version (§4.1) and the
  * `integrations_configuration[id]` selection (§4.4) by
- * `setResourceEntries('integrations')`.
- *
- * Above it, the §4.4 `required` flag: set, a run refuses to start without a
- * connection; unset (an absent key), it starts without the integration.
+ * `setResourceEntries('integrations')`. Above it, the §4.4 `required` flag: set, a run refuses
+ * to start without a connection; unset (an absent key), it starts without the integration.
  */
 
 import { useState } from "react";

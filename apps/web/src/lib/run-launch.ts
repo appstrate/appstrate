@@ -117,9 +117,8 @@ export function retryLaunch(
 }
 
 /**
- * The definition a launch runs, as the readiness selector judging it. Spelled out: an omitted
- * `?version=` runs the latest published version, while readiness reads it as the draft for a
- * caller who can write the agent.
+ * The version a launch runs, spelled out: an omitted `?version=` runs the latest published,
+ * while readiness reads it as the draft for a caller who can write the agent.
  */
 export function launchedVersion(launch: RunLaunch): string {
   return launch.version ?? VERSION_PUBLISHED;

@@ -229,10 +229,7 @@ const UNAVAILABLE_REASON: Record<string, string> = {
   integration_not_active: UNAVAILABLE_INTEGRATION_REASONS.not_active,
 };
 
-/**
- * The integrations the platform bound this run to none of, from the session's warnings: one
- * entry per integration id, for the prompt's "Unavailable Integrations" section.
- */
+/** Integrations the run is bound to none of, one per id, for "Unavailable Integrations". */
 export function unavailableIntegrations(
   warnings: readonly unknown[],
 ): Array<{ id: string; reason: string }> {
@@ -250,10 +247,7 @@ export function unavailableIntegrations(
   return [...byId].map(([id, reason]) => ({ id, reason }));
 }
 
-/**
- * The bundle with `ids` removed from the root's `dependencies.integrations`, so no tool of an
- * integration the run is bound to none of is exposed: its credential-proxy calls would be refused.
- */
+/** The bundle minus the root's `ids` integrations, whose proxy calls would be refused. */
 export function withoutIntegrations(bundle: Bundle, ids: readonly string[]): Bundle {
   const root = bundle.packages.get(bundle.root);
   const manifest = root?.manifest as

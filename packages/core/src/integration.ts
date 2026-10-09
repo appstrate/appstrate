@@ -1607,7 +1607,6 @@ export const CONNECTION_RESOLUTION_WARNING_CODES = [
   "integration_not_active",
 ] as const;
 
-/** Warning codes the resolver emits per integration. */
 export type ConnectionResolutionWarningCode = (typeof CONNECTION_RESOLUTION_WARNING_CODES)[number];
 
 /** A non-required integration the run starts without; fields as on {@link ConnectionResolutionError}. */

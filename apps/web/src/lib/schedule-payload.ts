@@ -97,9 +97,8 @@ function overridesKey(overrides: Record<string, string[]> | null | undefined): s
 }
 
 /**
- * Whether a schedule update can change what its fires start without, so its `warnings` are news:
- * the connection picks, the actor or the frozen version moved, or the schedule was switched on.
- * A rename or a pause repeats what the last write already said. An unknown prior state counts.
+ * Whether an update can change what the fires start without (picks, actor, frozen version, or a
+ * switch-on), so its `warnings` are news. An unknown prior state counts.
  */
 export function scheduleUpdateMayChangeFires(
   body: {

@@ -254,10 +254,8 @@ export function useReadIntegrationResolution(
 }
 
 /**
- * One declared integration's readiness entry: the server-side picker verdict
- * (`resolution`: what the next run binds, the annotated candidates, the pins),
- * `run_blocking` and `required`. Selected out of the single bulk readiness
- * query so the picker, badge, and modal all share one cache entry per agent.
+ * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
+ * out of the single bulk readiness query so the picker, badge, and modal share one cache entry.
  */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,

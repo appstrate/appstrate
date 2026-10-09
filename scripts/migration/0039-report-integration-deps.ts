@@ -7,15 +7,11 @@
  *
  *   DATABASE_URL=<platform> bun scripts/migration/0039-report-integration-deps.ts
  *
- * Lists, per organization and home space, every agent (draft and `latest` published version)
- * declaring integrations, with each one's `integrations_configuration.<id>.required`, then every
- * ENABLED schedule firing such an agent — the version its `version_override` names included,
- * which is listed with the agents. An integration printed `optional` used to refuse a run with
- * no usable connection; after the deploy that run starts without it. Also counts the schedules,
- * enabled and disabled apart, whose `connection_overrides` hold an empty set: no write could
- * store one before the deploy, and a disabled schedule fires again the day it is re-enabled, so
- * anything but 0 is a row to inspect. Writes nothing (one READ ONLY transaction); exits 0, 2
- * without `DATABASE_URL`.
+ * Lists every agent version a run can fire (draft, `latest`, a schedule's `version_override`)
+ * declaring integrations, each `required` or `optional` — an optional one with no usable
+ * connection starts its run without it after the deploy — then the enabled schedules firing one.
+ * Also counts schedules holding an empty `connection_overrides` set, disabled ones included: no
+ * write could store one before, so anything but 0 is a row to inspect. One READ ONLY transaction.
  */
 
 import { SQL } from "bun";
@@ -40,7 +36,6 @@ interface ScheduleRow {
   connection_overrides: string | null;
 }
 
-/** Schedules whose `connection_overrides` hold at least one `[]`, by `enabled`. */
 interface EmptySetCounts {
   enabled: number;
   disabled: number;
@@ -121,7 +116,6 @@ const PINNED_DIST_TAGS_QUERY = `
     FROM package_dist_tags
    WHERE package_id IN (${PINNED_PACKAGES})`;
 
-/** Every row the report reads, through `run` (one statement, its rows). */
 export async function readSnapshot(
   run: (query: string) => Promise<unknown[]>,
 ): Promise<ReportSnapshot> {
@@ -164,7 +158,6 @@ function integrationsOf(manifest: string | null): string[] {
   );
 }
 
-/** Padded columns, one line per row, a header and a rule. */
 function table(header: string[], rows: string[][]): string[] {
   const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
   const line = (cells: string[]) =>
@@ -175,7 +168,6 @@ function table(header: string[], rows: string[][]): string[] {
   return [line(header), widths.map((w) => "-".repeat(w)).join("  "), ...rows.map(line)];
 }
 
-/** The report's lines: the agents declaring integrations, then the enabled schedules firing one. */
 export function report({
   agents,
   schedules,

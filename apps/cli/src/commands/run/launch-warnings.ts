@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The integration items a launch answers with, one line each: a 201's `warnings` (the run
- * started without a non-required integration) and a 409 `missing_integration_connection`'s
- * `errors`. Shared by `--remote` and `--report`, whose routes answer the same item shape.
- */
+// A launch's integration items (a 201's `warnings`, a 409's `errors`), one line each — shared
+// by `--remote` and `--report`, whose routes answer the same item shape.
 
 /** `<integration>: <message> (<code>)` per well-formed item; anything else is skipped. */
 function launchItemLines(items: unknown): string[] {
@@ -22,7 +19,6 @@ function launchItemLines(items: unknown): string[] {
 }
 
 export interface LaunchAnnouncement {
-  /** The `--json` envelope type. */
   type: "appstrate.remote.triggered" | "appstrate.report.started";
   json?: boolean | undefined;
   bundleLabel: string;
@@ -33,10 +29,7 @@ export interface LaunchAnnouncement {
   writeStderr: (chunk: string) => void;
 }
 
-/**
- * The run's preamble: `→ running …` and one `⚠` line per launch warning on stderr, or under
- * `--json` the launch envelope on stdout (nothing for an unreported local run).
- */
+/** `→ running …` and a `⚠` line per warning on stderr, or under `--json` the envelope on stdout. */
 export function announceLaunch(a: LaunchAnnouncement): void {
   if (a.json) {
     if (!a.run) return;

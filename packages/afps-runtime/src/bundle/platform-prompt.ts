@@ -54,10 +54,7 @@ export interface PlatformPromptSchema {
   required?: readonly string[];
 }
 
-/**
- * Why a declared integration is unavailable in a run, as the agent reads it in the
- * "Unavailable Integrations" section — one wording for every host that renders it.
- */
+/** Why a declared integration is unavailable, as the agent reads it; every host shares it. */
 export const UNAVAILABLE_INTEGRATION_REASONS = {
   unbound: "no connection is bound to this run",
   not_active: "it is switched off in this space",
@@ -126,10 +123,7 @@ export interface PlatformPromptOptions {
    */
   integrations?: ReadonlyArray<PlatformPromptIntegration>;
 
-  /**
-   * Declared integrations this run starts without, one per id, with a human-readable reason
-   * (worded from {@link UNAVAILABLE_INTEGRATION_REASONS}).
-   */
+  /** Integrations the run starts without, one per id ({@link UNAVAILABLE_INTEGRATION_REASONS}). */
   unavailableIntegrations?: ReadonlyArray<{ id: string; reason: string }>;
 
   /** Input schema — drives the `## User Input` section. */

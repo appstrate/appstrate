@@ -225,10 +225,7 @@ function ManagedIntegrationCard({
   );
 }
 
-/**
- * An integration switched off in this space: the reason and the activation button, no picker.
- * Only a required one blocks the run; a non-required one is merely left out of it.
- */
+/** Switched off in this space: the reason and the activation button. Only a required one blocks. */
 function InactiveIntegrationCard({
   packageId,
   displayName,
@@ -306,7 +303,6 @@ function CardShell({
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
   icon?: React.ReactNode;
   title: string;
-  /** Optional badge after the title. */
   badge?: React.ReactNode;
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */

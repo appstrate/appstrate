@@ -123,21 +123,14 @@ export function extractAuthOffers(result: unknown): AuthOffer[] {
   }));
 }
 
-/**
- * Whether the connect session behind an offer has lapsed. A started run's
- * offers are minted at launch but shown when the run ends, so they can outlive
- * their session. An absent or unparseable expiry is treated as live.
- */
+/** A started run's offers are shown when it ends, so they can lapse; no valid expiry = live. */
 export function isOfferExpired(expiresAt: string | undefined, now = Date.now()): boolean {
   if (!expiresAt) return false;
   const at = Date.parse(expiresAt);
   return Number.isFinite(at) && at <= now;
 }
 
-/**
- * A `run_and_wait` result's offers, withheld while its run is in flight (`done: false`, no
- * `error`): a connect completing mid-run would append a resume turn over the live one.
- */
+/** Withheld while the run is in flight: a connect mid-run would append a resume turn over it. */
 export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
   const payload = asRecord(unwrapResult(result));
   if (payload?.done === false && payload.error === undefined) return [];

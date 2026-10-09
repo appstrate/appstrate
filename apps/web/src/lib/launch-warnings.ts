@@ -10,10 +10,7 @@ export type LaunchWarning = components["schemas"]["ResolutionFieldError"];
 /** A run (always the viewer's), or a schedule running as `userId`. */
 export type LaunchTarget = { kind: "run" } | { kind: "schedule"; userId: string | null };
 
-/**
- * Whether the run resolves the VIEWER's connections — the only ones the Connexions tab offers.
- * An end-user's schedule warns but is not the viewer's.
- */
+/** Whether the run binds the VIEWER's connections, the only ones the Connexions tab offers. */
 export function isViewersLaunch(target: LaunchTarget, viewerId: string | undefined): boolean {
   return target.kind === "run" || (target.userId !== null && target.userId === viewerId);
 }

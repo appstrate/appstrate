@@ -1152,12 +1152,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return jsonResult(launched.step.payload, true);
     }
 
-    // A started run's warnings never carry a link from here, whoever calls: the in-app chat
-    // launches through its own extension (module-chat `pi-chat/mcp-tools.ts`), not this handler,
-    // and any caller reaching it — an agent run included — may persist what it returns. Stripped
-    // rather than never minted: the route's only signal for "this is the MCP re-entry" is the
-    // internal-dispatch marker, whose contract is confinement and nothing else, and a mint is a
-    // pure signature with no store write, so the discarded links leave nothing behind.
+    // Any caller of this handler (an agent run included) may persist what it returns; the
+    // in-app chat launches through its own extension instead. A mint writes nothing, so the
+    // stripped links leave nothing behind.
     const launch = withoutWarningOffers(launched.launch);
     const runId = launch.runId;
     emit(ctx, {
@@ -1214,7 +1211,6 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
   return { descriptor, handler };
 }
 
-/** `launch` with no connect link on its `warnings`. */
 function withoutWarningOffers(launch: RunAndWaitLaunch): RunAndWaitLaunch {
   const strip = (record: Record<string, unknown>) =>
     Array.isArray(record.warnings)

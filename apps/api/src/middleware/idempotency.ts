@@ -44,9 +44,8 @@ export function isIdempotencyAware(handler: unknown): boolean {
 }
 
 /**
- * `resBody` rewritten by `storedBody` when it parses as a JSON object, else unchanged. Never
- * throws on the body's shape: it runs after the handler has committed (a launch has created its
- * run), so a parse failure here would turn that success into a 500 and strand the lock.
+ * Never throws on the body's shape: it runs after the handler has committed (a launch has
+ * created its run), so a throw would turn that success into a 500 and strand the lock.
  */
 function storableBody(
   resBody: string,
@@ -78,10 +77,7 @@ function storableBody(
 export function idempotency(
   options: {
     replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
-    /**
-     * A JSON-object response body as it may be stored, and so replayed to any caller reusing the
-     * key. Any other body (plain text, an array, invalid JSON) is stored unchanged.
-     */
+    /** Rewrites a JSON-object body before it is stored, and so replayed to any key reuser. */
     storedBody?: (body: Record<string, unknown>) => Record<string, unknown>;
   } = {},
 ) {

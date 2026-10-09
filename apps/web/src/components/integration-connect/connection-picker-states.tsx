@@ -62,8 +62,7 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 /**
  * The locked set, read-only. A stored override within it narrows it, so that subset is what
  * binds (`[]`: none); one reaching outside it is refused (`override_outranked`). Either can be
- * cleared back to the locked set. In override mode, an integration the agent does not require
- * can be narrowed to none: `[]` is a subset of any lock.
+ * cleared back to the locked set; in override mode, `[]` (if not required) narrows any lock.
  */
 export function LockedPicker({
   integrationId,
