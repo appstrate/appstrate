@@ -349,6 +349,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A new organization's starter agent runs from the CLI, the chat and the
+  Claude Code plugin on its first try** (#1789). It was created as a draft
+  only, so `appstrate run @<scope>/hello-world`, which runs the latest
+  published version, answered `404 no_published_version`. Its version 1.0.0
+  is now published when the organization is created. An organization created
+  before this release publishes it from the agent's page (**Create version**).
 - **A run or a chat turn no longer picks up resources from the machine it
   runs on** (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, a
   run's prompt carried the skills of the host user's `~/.agents/skills`, of
