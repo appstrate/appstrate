@@ -120,6 +120,11 @@ export const ORG_SETTINGS_PROPERTIES = {
     description:
       "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
   },
+  personal_model_credentials: {
+    type: "boolean",
+    description:
+      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist are ignored: the models they would serve fall back to the organization's bindings.",
+  },
 };
 
 /**
@@ -1858,6 +1863,9 @@ export const schemas = {
       "base_url",
       "source",
       "authMode",
+      "owner_type",
+      "owner_id",
+      "owner_name",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1884,6 +1892,20 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
+      owner_type: {
+        type: "string",
+        enum: ["org", "user"],
+        description:
+          "`user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.",
+      },
+      owner_id: {
+        type: ["string", "null"],
+        description: "The owning member's user id for a personal credential; `null` for `org`.",
+      },
+      owner_name: {
+        type: ["string", "null"],
+        description: "Display name of `owner_id`; `null` for `org`.",
+      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1909,6 +1931,8 @@ export const schemas = {
       "iconUrl",
       "source",
       "credentialId",
+      "credential_label",
+      "billed_to",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1924,7 +1948,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. Also set on an unbound model (`credentialId: null`), where it names the provider each member's own credential must come from. `null` for managed models — binding not exposed.",
       },
       provider_name: {
         type: ["string", "null"],
@@ -1983,7 +2007,18 @@ export const schemas = {
       credentialId: {
         type: ["string", "null"],
         description:
-          "ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed.",
+          "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed.",
+      },
+      credential_label: {
+        type: ["string", "null"],
+        description:
+          "Label of the bound credential. `null` whenever `credentialId` is `null` (unbound model, or managed model).",
+      },
+      billed_to: {
+        type: ["string", "null"],
+        enum: ["user", "org", null],
+        description:
+          "Who pays for a call to this model, for the caller. `user` — the caller's own personal credential serves it. `org` — an organization or platform credential serves it. `null` — the caller has no usable credential for it: the spend is refused with `409 model_credential_required` until they add one. A personal credential never serves a managed (`aliased`) model.",
       },
       cost: {
         type: ["object", "null"],

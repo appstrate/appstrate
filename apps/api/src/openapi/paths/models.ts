@@ -10,7 +10,8 @@ export const modelsPaths = {
       operationId: "listModels",
       tags: ["Models"],
       summary: "List organization models",
-      description: "Returns all models (built-in + custom) for the current organization.",
+      description:
+        "Returns all models (built-in + custom) for the current organization. `billed_to` is computed for the caller: an unbound model (`credentialId: null`, each member brings their own credential) is `user` when the caller holds a usable personal credential for its provider, `null` otherwise.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -55,6 +56,8 @@ export const modelsPaths = {
                     needs_reconnection: false,
                     aliased: false,
                     credentialId: "pk_abc123",
+                    credential_label: "OpenAI Production",
+                    billed_to: "org",
                     contextWindow: 128000,
                     maxTokens: 16384,
                     reasoning: false,
@@ -76,7 +79,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Create a custom model",
       description:
-        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
+        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding. `credentialId` must be an organization credential: a member's personal credential is refused with `400 personal_credential_not_bindable`. `credentialId: null` creates an unbound model, served by each member's own credential for `providerId`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -98,10 +101,16 @@ export const modelsPaths = {
                   description: "Model identifier (e.g. gpt-4o)",
                 },
                 credentialId: {
+                  type: ["string", "null"],
+                  minLength: 1,
+                  description:
+                    "Organization provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId. `null` makes the model unbound: each member serves it with their own personal credential for `providerId`.",
+                },
+                providerId: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId.",
+                    "Canonical registry providerId. Required when `credentialId` is `null`; with a credential it is taken from that credential.",
                 },
                 input: {
                   type: "array",
@@ -155,7 +164,7 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -470,7 +479,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Update a custom model",
       description:
-        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `credentialId: null` unbinds the model and requires `providerId` in the same body; a non-null `credentialId` must be an organization credential (`400 personal_credential_not_bindable` otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -485,8 +494,15 @@ export const modelsPaths = {
                 label: { type: "string", minLength: 1 },
                 modelId: { type: "string", minLength: 1 },
                 credentialId: {
+                  type: ["string", "null"],
+                  description:
+                    "Organization provider credential ID to bind the model to. `null` unbinds it: each member then serves the model with their own personal credential for `providerId`.",
+                },
+                providerId: {
                   type: "string",
-                  description: "Provider key ID to change which key is used",
+                  minLength: 1,
+                  description:
+                    "Canonical registry providerId. Required in the same body when `credentialId` is `null`; with a credential it is taken from that credential.",
                 },
                 enabled: { type: "boolean" },
                 input: {
@@ -540,7 +556,7 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -601,6 +617,15 @@ export const modelsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "`model_credential_required` — the model is unbound (`credentialId: null`): each member's own credential serves it, so there is no organization credential to test.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },

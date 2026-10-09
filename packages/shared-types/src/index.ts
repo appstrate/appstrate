@@ -976,8 +976,21 @@ export interface OrgModelInfo extends ModelMetadata {
    */
   iconUrl: string | null;
   source: "built-in" | "custom";
-  /** `null` for model aliases — see {@link apiShape}. */
+  /**
+   * The bound organization credential. `null` for an unbound model (each member
+   * serves it with their own personal credential for {@link providerId}) and for
+   * model aliases — see {@link apiShape}.
+   */
   credentialId: string | null;
+  /** Label of {@link credentialId}; `null` when it is `null`. */
+  credential_label: string | null;
+  /**
+   * Who pays for a call to this model, as seen by the caller: `user` when their
+   * own personal credential serves it, `org` when an organization or platform
+   * credential does, `null` when they have neither (the spend is refused with
+   * `model_credential_required`). Never `user` for a model alias.
+   */
+  billed_to: "user" | "org" | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1012,6 +1025,12 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
+  /** `user` for a personal credential (usable and editable by {@link owner_id} only); `org` for an organization or built-in one. */
+  owner_type: "org" | "user";
+  /** The owning member's user id for a personal credential; `null` for `org`. */
+  owner_id: string | null;
+  /** Display name of {@link owner_id}; `null` for `org`. */
+  owner_name: string | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;

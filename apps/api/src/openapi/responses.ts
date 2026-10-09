@@ -240,7 +240,8 @@ export const responses = {
       "a declared integration blocks the launch: `errors[]` carries one item per integration " +
       "(`field: integrations.<id>`), and a `must_choose_connection` item lists " +
       "`candidate_connections` to pick from via `connection_overrides`. What does not block is " +
-      "a `warnings[]` item of the success response (see LaunchWarnings).",
+      "a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — " +
+      "the model is unbound and the caller has no usable personal credential for it.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
