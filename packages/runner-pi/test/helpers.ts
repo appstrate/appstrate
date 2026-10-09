@@ -13,7 +13,12 @@ import type {
   SessionBridgeHandle,
   ToolWideningSession,
 } from "../src/pi-runner.ts";
-import { PiRunner } from "../src/pi-runner.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PiRunner, type PiModelConfig, type PiRunnerOptions } from "../src/pi-runner.ts";
+import { buildPiModel } from "../src/pi-model.ts";
+import { LLM_PROXY_ROUTES } from "../src/llm-proxy-routes.ts";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
@@ -280,5 +285,81 @@ export class ScriptedPiRunner extends PiRunner {
       runId: context.runId,
       signal,
     });
+  }
+}
+
+// ─── Real run against a stub provider ────────────────────────────────
+
+/** One request a run sent to the stub provider. */
+export interface StubRequest {
+  method: string;
+  path: string;
+  headers: Headers;
+  body: string;
+}
+
+/** A gateway model of `apiShape` served by the stub at `origin`. */
+export function stubGatewayModel(
+  apiShape: keyof typeof LLM_PROXY_ROUTES,
+): (origin: string) => PiModelConfig {
+  return (origin) =>
+    buildPiModel({
+      id: "gateway-model",
+      dialect: null,
+      apiShape,
+      piProvider: null,
+      baseUrl: `${origin}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`,
+    });
+}
+
+/**
+ * Drive a real {@link PiRunner} session against a local stub standing in for
+ * the model provider, and return every request it received. The stub answers
+ * `respond(request)`, by default a non-retryable 400 that ends the run after
+ * its first request. `cwd` and `agentDir` default to a scratch directory.
+ */
+export async function runAgainstStub(opts: {
+  model: (origin: string) => PiModelConfig;
+  respond?: (request: StubRequest) => Response;
+  runner?: Partial<Omit<PiRunnerOptions, "model">>;
+}): Promise<{ requests: StubRequest[]; sink: CaptureSink }> {
+  const scratch = await mkdtemp(join(tmpdir(), "runner-pi-stub-"));
+  const requests: StubRequest[] = [];
+  const respond = opts.respond ?? (() => new Response("stop", { status: 400 }));
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const captured: StubRequest = {
+        method: request.method,
+        path: new URL(request.url).pathname,
+        headers: request.headers,
+        body: await request.text(),
+      };
+      requests.push(captured);
+      return respond(captured);
+    },
+  });
+  const sink = createCaptureSink();
+  try {
+    const runner = new PiRunner({
+      apiKey: "stub-key",
+      systemPrompt: "Answer briefly.",
+      startMessage: "Say done.",
+      cwd: scratch,
+      agentDir: join(scratch, "agent"),
+      authStoragePath: join(scratch, "auth.json"),
+      ...opts.runner,
+      model: opts.model(server.url.origin),
+    });
+    await runner.run({
+      bundle: makeTestBundle(makeBundlePackage("@test/stub-run", "0.0.0", "agent", {})),
+      context: makeContext(),
+      eventSink: sink,
+    });
+    return { requests, sink };
+  } finally {
+    await server.stop(true);
+    await rm(scratch, { recursive: true, force: true });
   }
 }

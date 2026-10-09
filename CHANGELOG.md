@@ -355,6 +355,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   published version, answered `404 no_published_version`. Its version 1.0.0
   is now published when the organization is created. An organization created
   before this release publishes it from the agent's page (**Create version**).
+- **A run or a chat turn no longer picks up resources from the machine it
+  runs on** (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, a
+  run's prompt carried the skills of the host user's `~/.agents/skills`, of
+  the Pi agent directory and of `.agents/skills` in the workspace's parent
+  directories, the `AGENTS.md` / `CLAUDE.md` of the agent directory and of
+  those parent directories, and the `APPEND_SYSTEM.md` of the agent directory
+  or of the workspace's `.pi/`. A chat turn appended an `APPEND_SYSTEM.md`
+  found in `/tmp/.pi/` or `/tmp/pi-chat/`. A run now sees only the skills its
+  bundle provides, the platform's prompt and its own tools; a chat turn, only
+  its prompt and tools.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
@@ -422,6 +432,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **A run never loads Pi extensions from its agent directory** (#1820). In
+  process mode that directory is `/tmp/pi-agent`, under the world-writable
+  `/tmp`, and Pi loaded the extensions it found there whenever the run had
+  extension factories of its own, as a platform run does. Any local user
+  could drop `/tmp/pi-agent/extensions/x.ts` and have it executed inside every
+  run, with the run's environment and workspace.
 - **The sidecar relays an integration MCP server's progress notifications only
   when the value increases** (#1857), as the MCP spec requires, and at most
   once per second per call: an untrusted upstream can no longer flood the
