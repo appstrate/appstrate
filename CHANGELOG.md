@@ -100,8 +100,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the least-privileged one covering the agent's scopes plus the auth's
   `default_scopes` (else the closest, which answers `insufficient_scopes`)
   instead of answering `must_choose_connection`, whether or not the agent
-  declares scopes. Health comes after breadth: a dead narrow connection is
-  reported `needs_reconnection`, never swapped for a live broader one. A new
+  declares scopes. Grants beyond what the agent and the defaults need weigh
+  before a missing default and before health: a narrow connection short of a
+  newer default is not swapped for a write-capable one, and a dead narrow one
+  is reported `needs_reconnection`, never swapped for a live broader one. A new
   connection made for one agent no longer breaks the others. Several
   accounts, auths or instances, an unknown identity, and a credential-proxy
   call without an agent selection still ask.

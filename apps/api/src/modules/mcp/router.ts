@@ -247,8 +247,11 @@ export function buildServerInstructions(
   // #1871: no link for it — an upgrade in place widens every agent using the connection. A launch
   // override beats a member pin and a soft default, and works for inline runs too.
   const stick = pins ? " For a stored agent, `upsertMyIntegrationPin` makes it stick." : "";
+  const newId = granted("listIntegrationConnections")
+    ? " Once the user finished the link, its id is the newest connection of that integration and account in `listIntegrationConnections`."
+    : " Once the user finished the link, retrying without overrides works for a connection of the same account: the fallback picks it.";
   const insufficientScopes = connects
-    ? ` An \`insufficient_scopes\` item carries no \`connect_url\`. When its \`source\` is \`admin_pin\`, \`org_default_enforced\` or \`schedule_override\`, create nothing: tell the user an admin (or the schedule's owner) must switch that binding. Otherwise create a NEW connection (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${stick} Pass \`connection_id\` instead, upgrading the connection in place, only when \`owned_by_actor\` is true and the user explicitly chose it after you told them it widens every agent using that connection.`
+    ? ` An \`insufficient_scopes\` item carries no \`connect_url\`. When its \`source\` is \`admin_pin\`, \`org_default_enforced\` or \`schedule_override\`, create nothing: tell the user an admin (or the schedule's owner) must switch that binding. Otherwise create a NEW connection (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${newId}${stick} Pass \`connection_id\` instead, upgrading the connection in place, only when \`owned_by_actor\` is true and the user explicitly chose it after you told them it widens every agent using that connection.`
     : ` An \`insufficient_scopes\` item carries no \`connect_url\`: tell the user to create a connection with its \`required_scopes\` (or have the existing one upgraded) in Appstrate and bind it to this run.`;
   const pinChoice = pins
     ? ` For a stored agent, a member pin makes the choice stick for its later runs: \`upsertMyIntegrationPin\` (path: the agent id and the integration id; body \`{ connection_ids: [...] }\`).`

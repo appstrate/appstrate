@@ -469,9 +469,10 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
 /**
  * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
- * scopes, so no account is chosen. Ranked by what the agent misses, then what the auth's
- * `default_scopes` miss, then breadth, then health: a dead narrow row is never traded for a live
- * broader one, it answers `needs_reconnection`. `null` otherwise, and with no agent selection.
+ * scopes, so no account is chosen. Ranked by what the agent misses, then what the row grants
+ * beyond the agent's scopes and `default_scopes`, then what the defaults miss, then breadth, then
+ * health: a narrow row (dead, or short of a newer default) is never traded for a broader one.
+ * `null` otherwise, and with no agent selection.
  */
 function leastPrivilegedOfOneAccount(
   args: ResolveOneArgs,
@@ -490,6 +491,14 @@ function leastPrivilegedOfOneAccount(
   if (!own.every(sameUpstream)) return null;
   const { manifest } = args;
   const authKey = first!.authKey;
+  const defaults = auth.default_scopes ?? [];
+  const allowed = new Set(
+    expandScopesGranted([...oauthScopesForAuth(args, authKey), ...defaults], manifest, authKey),
+  );
+  // Catalog scopes only (IdP echoes aside), `implies` expanded: an umbrella is never narrower.
+  const declared = (c: ConnectionRow) =>
+    partitionScopesByAuthCatalog(auth, expandScopesGranted(c.scopesGranted, manifest, authKey))
+      .declared;
   const ranked = own.map((c) => ({
     c,
     agentMissing: missingScopesForConnection({
@@ -499,17 +508,14 @@ function leastPrivilegedOfOneAccount(
       agentTools: args.agentTools,
       agentScopes: args.agentScopes,
     }).length,
-    defaultMissing: scopesNotCovered(auth.default_scopes ?? [], c.scopesGranted, manifest, authKey)
-      .length,
-    // Catalog scopes only (IdP echoes aside), `implies` expanded: an umbrella is never narrower.
-    breadth: partitionScopesByAuthCatalog(
-      auth,
-      expandScopesGranted(c.scopesGranted, manifest, authKey),
-    ).declared.length,
+    excess: declared(c).filter((scope) => !allowed.has(scope)).length,
+    defaultMissing: scopesNotCovered(defaults, c.scopesGranted, manifest, authKey).length,
+    breadth: declared(c).length,
   }));
   ranked.sort(
     (a, b) =>
       a.agentMissing - b.agentMissing ||
+      a.excess - b.excess ||
       a.defaultMissing - b.defaultMissing ||
       a.breadth - b.breadth ||
       Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||

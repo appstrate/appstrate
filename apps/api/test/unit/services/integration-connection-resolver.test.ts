@@ -982,6 +982,18 @@ describe("resolveConnections — fallback among own connections of one account",
     expect(result.resolved[INTEG]).toMatchObject([{ connectionId: baseline.id }]);
   });
 
+  it("never trades a narrow row short of a newer default for a write-capable one", () => {
+    const narrowRow = conn({ scopesGranted: ["read"] });
+    const writeRow = conn({ scopesGranted: ["base", "read", "write"] });
+    for (const rows of [
+      [narrowRow, writeRow],
+      [writeRow, narrowRow],
+    ]) {
+      const result = bind(withDefaults(["base"]), rows, ["read"]);
+      expect(result.resolved[INTEG]).toMatchObject([{ connectionId: narrowRow.id }]);
+    }
+  });
+
   it("prefers covering the agent over covering the defaults", () => {
     const missesAgent = conn({ scopesGranted: ["base", "read"] });
     const missesDefault = conn({ scopesGranted: ["write"] });
