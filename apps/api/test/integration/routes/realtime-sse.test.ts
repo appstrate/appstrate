@@ -887,6 +887,7 @@ describe("realtime SSE routes (integration)", () => {
         end_user_id: null,
         org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1027,6 +1028,7 @@ describe("realtime SSE routes (integration)", () => {
         end_user_id: null,
         org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1089,6 +1091,7 @@ describe("realtime SSE routes (integration)", () => {
         end_user_id: null,
         org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1148,6 +1151,7 @@ describe("realtime SSE routes (integration)", () => {
         end_user_id: null,
         org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });

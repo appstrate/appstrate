@@ -470,7 +470,7 @@ export interface MeConnectionEntry {
   shared_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
-  /** Distinct agents run by its home space and share targets that declare this integration. */
+  /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */
   reused_by_agents: number;
   org: { id: string; name: string };
   /** The one space a space-scoped connection lives in; `null` for an org-scoped one. */

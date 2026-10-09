@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `reused_by_agents` on `GET /api/me/connections`: the distinct agents run, declaring the row's
- * integration, by its home space (its space, else its origin) and its share targets — by the bound
- * space only for a credential bound to one.
+ * `reused_by_agents` on `GET /api/me/connections`: the distinct agents declaring the row's
+ * integration, run in every space where its owner runs agents and may use it, and in its share
+ * targets — within the bound space only for a credential bound to one.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { listMeConnections } from "../../../src/services/me-connections.ts";
 import type { MeConnectionAuthority } from "../../../src/services/connection-reach.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
@@ -95,8 +95,41 @@ describe("listMeConnections — reused_by_agents", () => {
     await seedAgentRunningIn("@reuse/in-b", b);
   });
 
-  it("counts the agents of an org row's home space and of its share targets", async () => {
+  async function seedOwnManualDefaultClient(spaceId: string): Promise<void> {
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      spaceId,
+      integrationId: INTEGRATION,
+      authKey: AUTH,
+      clientId: `manual-${spaceId}`,
+      clientSecretEncrypted: "x",
+      isDefault: true,
+      autoProvisioned: false,
+    });
+  }
+
+  it("counts an org row's agents in every space its owner runs it in, shared or not", async () => {
+    expect(await reuseOf(await seedConnection({ from: a }))).toBe(2);
+    expect(await reuseOf(await seedConnection({ from: a, sharedSpaceIds: [b] }))).toBe(2);
+  });
+
+  it("counts an org row made in A whose only agent runs in B", async () => {
+    await seedSpacePackage(a, "@reuse/in-a", { enabled: false });
     expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
+  });
+
+  it("does not count B when B blocks user connections", async () => {
+    await seedPlacedPackage(b, INTEGRATION, { blockUserConnections: true });
+    expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
+  });
+
+  it("does not count B when B defaults to its own manual client", async () => {
+    await seedOwnManualDefaultClient(b);
+    expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
+  });
+
+  it("still counts B when the row is shared into it", async () => {
+    await seedOwnManualDefaultClient(b);
     expect(await reuseOf(await seedConnection({ from: a, sharedSpaceIds: [b] }))).toBe(2);
   });
 

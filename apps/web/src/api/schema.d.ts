@@ -5808,7 +5808,7 @@ export interface components {
                 owner_name: string | null;
                 scopes_granted: string[];
                 /**
-                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                  * @enum {string}
                  */
                 scope: "org" | "space";
@@ -12697,7 +12697,7 @@ export interface operations {
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                             label: string;
                             /**
-                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                              * @enum {string}
                              */
                             scope: "org" | "space";
@@ -12856,7 +12856,7 @@ export interface operations {
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                                 label: string;
                                 /**
-                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
@@ -13043,7 +13043,7 @@ export interface operations {
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                         label: string;
                         /**
-                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                          * @enum {string}
                          */
                         scope: "org" | "space";
@@ -13423,7 +13423,7 @@ export interface operations {
                             /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                             label: string;
                             /**
-                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                             * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                              * @enum {string}
                              */
                             scope: "org" | "space";
@@ -13511,7 +13511,7 @@ export interface operations {
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                         label: string;
                         /**
-                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                          * @enum {string}
                          */
                         scope: "org" | "space";
@@ -14090,7 +14090,7 @@ export interface operations {
                                 /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                                 label: string;
                                 /**
-                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
@@ -15074,11 +15074,11 @@ export interface operations {
                                 needs_reconnection: boolean;
                                 expiresAt: string | null;
                                 identity: string;
-                                /** @description Distinct agents run by the connection's home space (its space, or the one an org-scoped connection was connected from) and by the spaces it is shared into, that declare this integration. */
+                                /** @description Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one. */
                                 reused_by_agents: number;
                                 auth_key: string;
                                 /**
-                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                                 * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                                  * @enum {string}
                                  */
                                 scope: "org" | "space";
@@ -15203,7 +15203,7 @@ export interface operations {
                         /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
                         label: string;
                         /**
-                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, or owned by an end user — it lives in that one space.
+                         * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                          * @enum {string}
                          */
                         scope: "org" | "space";

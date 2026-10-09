@@ -44,7 +44,14 @@ import {
   connectionReachView,
   planConnectionForget,
 } from "./integration-connections.ts";
-import { meConnectionAuthorityFilter, type MeConnectionAuthority } from "./connection-reach.ts";
+import {
+  meConnectionAuthorityFilter,
+  usableInSpace,
+  type MeConnectionAuthority,
+} from "./connection-reach.ts";
+import { listSpacesForPrincipal } from "./spaces.ts";
+import { spacePermissions } from "../lib/space-role.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 
 /**
  * The authority boundary of the credential presented on `/api/me/connections`.
@@ -88,6 +95,39 @@ const declaredIntegrationIds = sql<string[]>`ARRAY(
   )
 )`;
 
+/**
+ * For each of the user's rows, the spaces they run agents in (`agents:run`) where the row is
+ * {@link usableInSpace}: one listing per org, one query per space, never one per connection.
+ */
+async function spacesServedToOwner(
+  actor: Actor,
+  orgRoles: ReadonlyMap<string, OrgRole>,
+): Promise<{ byConnection: Map<string, string[]>; orgOfSpace: Map<string, string> }> {
+  const byConnection = new Map<string, string[]>();
+  const orgOfSpace = new Map<string, string>();
+  if (actor.type !== "user") return { byConnection, orgOfSpace };
+  const listed = await Promise.all(
+    [...orgRoles].map(([orgId, role]) => listSpacesForPrincipal(orgId, role, actor.id, actor.id)),
+  );
+  const runnable = listed
+    .flat()
+    .filter(({ role }) => spacePermissions(role).has("agents:run"))
+    .map(({ space }) => space);
+  await Promise.all(
+    runnable.map(async (space) => {
+      const usable = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(usableInSpace(space.id, actor));
+      if (usable.length > 0) orgOfSpace.set(space.id, space.orgId);
+      for (const { id } of usable) {
+        byConnection.set(id, [...(byConnection.get(id) ?? []), space.id]);
+      }
+    }),
+  );
+  return { byConnection, orgOfSpace };
+}
+
 /** Every connection the actor owns, within the authority ({@link meConnectionAuthorityFilter}). */
 async function listAllActorIntegrationConnections(
   actor: Actor,
@@ -126,14 +166,17 @@ async function listAllActorIntegrationConnections(
   // For dashboard users, additionally filter to orgs they're still a member of.
   // (An integration connection survives the user leaving the org via on-delete cascade,
   // but if no cascade fired we still don't want stale rows.)
+  const orgRoles = new Map<string, OrgRole>();
   if (actor.type === "user") {
     const memberOrgs = await db
-      .select({ orgId: organizationMembers.orgId })
+      .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
       .from(organizationMembers)
       .where(eq(organizationMembers.userId, actor.id));
-    const memberSet = new Set(memberOrgs.map((m) => m.orgId));
+    const memberRoles = new Map(memberOrgs.map((m) => [m.orgId, m.role]));
     for (const id of uniqueOrgIds) {
-      if (!memberSet.has(id)) orgNameMap.delete(id);
+      const role = memberRoles.get(id);
+      if (role) orgRoles.set(id, role);
+      else orgNameMap.delete(id);
     }
   }
 
@@ -176,20 +219,44 @@ async function listAllActorIntegrationConnections(
     });
   }
 
+  // Where a row serves agents: for the owner, every space they run in that it is usable in; for a
+  // bound credential, its home and shares within the binding. Share targets count either way.
+  const served =
+    authority.kind === "user_global"
+      ? await spacesServedToOwner(actor, orgRoles)
+      : { byConnection: new Map<string, string[]>(), orgOfSpace: new Map<string, string>() };
+  const servingSpaces = (r: (typeof rows)[number]) =>
+    authority.kind === "user_global"
+      ? [
+          ...new Set([
+            ...(served.byConnection.get(r.connectionId) ?? []),
+            ...views.get(r.connectionId)!.shared_space_ids,
+          ]),
+        ]
+      : reachedSpaces(r);
+  const orgOfSpace = new Map([
+    ...spaceRows.map((sp) => [sp.id, sp.orgId] as const),
+    ...served.orgOfSpace,
+  ]);
+  const countedSpaces = [...new Set(rows.flatMap(servingSpaces))].flatMap((id) => {
+    const orgId = orgOfSpace.get(id);
+    return orgId ? [{ id, orgId }] : [];
+  });
+
   // Count the agents each space RUNS that declare this integration in their
   // dependencies — "reused by N agents" is a statement about runs, so the
   // question is the ONE activation rule ({@link activeHereSql}) and not the
   // presence of a `space_packages` row: a deactivated agent, and an ORPHAN row
   // naming a package the space has lost, execute nowhere and reuse nothing.
   //
-  // That rule is per-space, so this is ONE query per space a row reaches
+  // That rule is per-space, so this is ONE query per space a row serves
   // (never per connection, never per integration), written in
   // the query builder so the predicate is CONJOINED rather than hand-copied
   // into SQL — a hand copy is the drift this rule exists to remove. An agent run
   // in two of a row's spaces is one agent.
   const agentsBySpace = new Map(
     await Promise.all(
-      spaceRows.map(
+      countedSpaces.map(
         async (sp) =>
           [
             sp.id,
@@ -212,7 +279,7 @@ async function listAllActorIntegrationConnections(
   );
   const reusingAgents = (r: (typeof rows)[number]) =>
     new Set(
-      reachedSpaces(r).flatMap((spaceId) =>
+      servingSpaces(r).flatMap((spaceId) =>
         (agentsBySpace.get(spaceId) ?? [])
           .filter((agent) => agent.integrationIds?.includes(r.packageId))
           .map((agent) => agent.id),

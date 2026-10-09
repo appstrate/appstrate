@@ -262,7 +262,8 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // refreshes on window-focus refetch and stays stale across tabs.
   //
   // Tenant scope: `org_id` always, `space_id` NULL for an org-scoped
-  // connection, which reaches every space of its org.
+  // connection, which reaches the spaces `connectionInSpace` admits —
+  // `origin_space_id` and the (integration, auth) pair are what it reads.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
   // invalidate the right cache; `needs_reconnection` is NULL on delete
@@ -285,6 +286,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'end_user_id', OLD.end_user_id,
           'org_id', OLD.org_id,
           'space_id', OLD.space_id,
+          'origin_space_id', OLD.origin_space_id,
           'needs_reconnection', NULL,
           'deleted', TRUE
         )::text);
@@ -299,6 +301,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'end_user_id', NEW.end_user_id,
           'org_id', NEW.org_id,
           'space_id', NEW.space_id,
+          'origin_space_id', NEW.origin_space_id,
           'needs_reconnection', NEW.needs_reconnection,
           'deleted', FALSE
         )::text);

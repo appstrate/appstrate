@@ -37,6 +37,21 @@ function orgOf(spaceId: string): SQL {
   return sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`;
 }
 
+/**
+ * Over `integration_oauth_clients`: a space's own manual default client for (integration, auth).
+ * The space holding one is closed to org rows of that auth not connected from it.
+ */
+export function ownManualDefaultClient(
+  integrationId: SQLWrapper | string,
+  authKey: SQLWrapper | string,
+): SQL {
+  return and(
+    eq(o.integrationId, integrationId),
+    eq(o.authKey, authKey),
+    sql`${o.isDefault} AND NOT ${o.autoProvisioned}`,
+  )!;
+}
+
 /** The rows that may serve space `spaceId`, whoever owns them. */
 export function connectionInSpace(spaceId: string): SQL {
   return and(
@@ -48,8 +63,7 @@ export function connectionInSpace(spaceId: string): SQL {
         or(
           eq(c.originSpaceId, spaceId),
           sql`NOT EXISTS (SELECT 1 FROM ${o} WHERE ${o.spaceId} = ${spaceId}
-            AND ${o.integrationId} = ${c.integrationId} AND ${o.authKey} = ${c.authKey}
-            AND ${o.isDefault} AND NOT ${o.autoProvisioned})`,
+            AND ${ownManualDefaultClient(c.integrationId, c.authKey)})`,
         ),
       ),
     ),

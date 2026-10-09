@@ -189,7 +189,7 @@ export const mePaths = {
                               reused_by_agents: {
                                 type: "integer",
                                 description:
-                                  "Distinct agents run by the connection's home space (its space, or the one an org-scoped connection was connected from) and by the spaces it is shared into, that declare this integration.",
+                                  "Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one.",
                               },
                               auth_key: { type: "string" },
                               scope: connectionScopeSchema,
