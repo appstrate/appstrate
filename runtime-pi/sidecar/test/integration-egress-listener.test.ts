@@ -19,6 +19,7 @@ import {
   type EgressListenerEvent,
 } from "../integration-egress-listener.ts";
 import type { MitmListenerHandle } from "../integration-mitm-listener.ts";
+import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { buildClientHello, tlsRecord } from "./helpers/tls-client-hello.ts";
 
 const listeners: MitmListenerHandle[] = [];
@@ -150,7 +151,7 @@ function makeListener(
     isBlockedHostFn: () => false,
     onEvent: (e) => events.push(e),
     // Permissive by default; the allowlist tests below override these.
-    egressPolicy: { allowsAuthority: () => true },
+    egressPolicy: { allowsAuthority: () => true, skipsSsrfFloor: () => false },
     isPeerAllowed: async () => true,
     ...overrides,
   });
@@ -270,7 +271,10 @@ describe("integration-egress-listener (#543)", () => {
     const echo = await startTcpEcho();
     let resolved = false;
     const { handle, events } = await makeListener({
-      egressPolicy: { allowsAuthority: (h) => h === "allowed.example.com" },
+      egressPolicy: {
+        allowsAuthority: (h) => h === "allowed.example.com",
+        skipsSsrfFloor: () => false,
+      },
       resolveHostFn: async () => {
         resolved = true;
         return ["127.0.0.1"];
@@ -296,6 +300,7 @@ describe("integration-egress-listener (#543)", () => {
           seen.push([h, p]);
           return h === "allowed.example.com" && p === 443;
         },
+        skipsSsrfFloor: () => false,
       },
       resolveHostFn: async () => ["127.0.0.1"],
     });
@@ -323,6 +328,7 @@ describe("integration-egress-listener (#543)", () => {
           policyConsulted = true;
           return true;
         },
+        skipsSsrfFloor: () => false,
       },
     });
 
@@ -351,11 +357,78 @@ describe("integration-egress-listener (#543)", () => {
     expect(events.some((e) => e.reason === "peer-not-allowed")).toBe(true);
   });
 
+  describe("internal hosts: the api_call rule (#1819)", () => {
+    type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
+    const LISTED = ["internal.test", "127.0.0.1"];
+    /** The real SSRF floor, every name resolving to loopback, `operatorList` as the operator's. */
+    const runnerListener = (egress: RunnerEgress, operatorList = LISTED) => {
+      const internalHost = (h: string) => operatorList.includes(h);
+      return makeListener({
+        isBlockedHostFn: undefined,
+        resolveHostFn: async () => ["127.0.0.1"],
+        egressPolicy: compileRunnerEgressPolicy(egress, internalHost),
+      });
+    };
+    const literal = (uris: string[]) => ({
+      authorizedUris: uris,
+      declaredUris: uris,
+      allowAllUris: false,
+    });
+
+    it("relays to a private address behind a listed declared literal host", async () => {
+      const echo = await startTcpEcho();
+      for (const host of ["internal.test", "127.0.0.1"]) {
+        const { handle } = await runnerListener(literal([`https://${host}:${echo.port}`]));
+        const res = await connectAndProbe(handle.address().port, `${host}:${echo.port}`, "ping");
+        expect(res.statusCode).toBe(200);
+        expect(res.echoed).toBe("ping");
+      }
+    });
+
+    it("keeps the floor for a declared literal host the operator does not list", async () => {
+      const echo = await startTcpEcho();
+      for (const host of ["internal.test", "127.0.0.1"]) {
+        const egress = literal([`https://${host}:${echo.port}`]);
+        const { handle, events } = await runnerListener(egress, []);
+        const res = await connectAndProbe(handle.address().port, `${host}:${echo.port}`);
+        expect(res.statusCode).toBe(403);
+        expect(events.some((e) => e.reason === "ssrf")).toBe(true);
+      }
+    });
+
+    it("keeps the floor for a listed host a glob, a connection or allow_all chose", async () => {
+      const echo = await startTcpEcho();
+      const port = echo.port;
+      const rendered = [`https://internal.test:${port}`];
+      const cases: RunnerEgress[] = [
+        literal([`https://*.test:${port}`]),
+        { ...literal(rendered), declaredUris: [`https://{$credential.host}:${port}`] },
+        { ...literal(rendered), declaredUris: [`https://{$variable.host}:${port}`] },
+        { ...literal([]), declaredUris: rendered, allowAllUris: true },
+      ];
+      for (const egress of cases) {
+        const { handle, events } = await runnerListener(egress);
+        const res = await connectAndProbe(handle.address().port, `internal.test:${port}`);
+        expect(res.statusCode).toBe(403);
+        expect(events.some((e) => e.reason === "ssrf")).toBe(true);
+      }
+    });
+
+    it("still enforces the allowlist on an exempt host (another port)", async () => {
+      const echo = await startTcpEcho();
+      const { handle, events } = await runnerListener(literal(["https://internal.test/**"]));
+      const res = await connectAndProbe(handle.address().port, `internal.test:${echo.port}`);
+      expect(res.statusCode).toBe(403);
+      expect(events.some((e) => e.reason === "not-authorized")).toBe(true);
+    });
+  });
+
   describe("first tunnel bytes (SNI vetting)", () => {
     const tlsListener = (echoPort: number, extra: Parameters<typeof makeListener>[0] = {}) =>
       makeListener({
         egressPolicy: {
           allowsAuthority: (h, p) => h === "allowed.example.com" && p === echoPort,
+          skipsSsrfFloor: () => false,
         },
         resolveHostFn: async () => ["127.0.0.1"],
         ...extra,

@@ -52,6 +52,7 @@ import {
   isBlockedHost,
   resolveAndCheckHost,
   socketPeer,
+  ssrfFloorFor,
   PREAMBLE_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
@@ -222,9 +223,10 @@ export function createTransparentEgressListener(
           return;
         }
         const target = `${targetHost}:${upstreamPort}`;
+        const ssrfFloor = ssrfFloorFor(policy, targetHost, isBlockedHostFn);
 
         // SSRF floor, literal layer — identical to the CONNECT path.
-        if (isBlockedHostFn(targetHost)) {
+        if (ssrfFloor(targetHost)) {
           emit({ kind: "tunnel-refused", target, reason: "ssrf" });
           clientSocket.destroy();
           return;
@@ -242,7 +244,7 @@ export function createTransparentEgressListener(
         // own TLS handshake carries the original SNI to the real upstream.
         const check = await resolveAndCheckHost(targetHost, {
           resolve: resolveHostFn,
-          isBlockedHostFn,
+          isBlockedHostFn: ssrfFloor,
         });
         if (clientSocket.destroyed) return; // client gave up during resolution
         if (check.blocked) {

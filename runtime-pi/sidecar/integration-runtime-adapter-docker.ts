@@ -18,10 +18,10 @@ import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   startTransparentEgressPlane,
@@ -728,7 +728,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
    */
   let transparentEgress: TransparentEgressPlane | null = null;
   let peers: RunnerPeers | null = null;
-  const transparentPolicies = new Map<string, EgressPolicy>();
+  const transparentPolicies = new Map<string, RunnerEgressPolicy>();
 
   return {
     id: "docker",

@@ -18,7 +18,8 @@ import {
   type TransparentListenerHandle,
 } from "../integration-transparent-listener.ts";
 import type { EgressListenerEvent } from "../integration-egress-listener.ts";
-import type { Peer } from "../helpers.ts";
+import { isBlockedHost, type AuthorityPolicy, type Peer } from "../helpers.ts";
+import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { buildClientHello } from "./helpers/tls-client-hello.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
@@ -49,8 +50,8 @@ async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
   return { port, received };
 }
 
-type PeerPolicy = { allowsAuthority(host: string, port: number): boolean };
-const allowAll: PeerPolicy = { allowsAuthority: () => true };
+type PeerPolicy = AuthorityPolicy;
+const allowAll: PeerPolicy = { allowsAuthority: () => true, skipsSsrfFloor: () => false };
 
 async function makeListener(
   opts: {
@@ -223,7 +224,10 @@ describe("transparent egress listener — TLS SNI path", () => {
     const resolved: string[] = [];
     const listener = await makeListener({
       upstreamPort: upstream.port,
-      policyForPeer: async () => ({ allowsAuthority: (host) => host === "allowed.test.local" }),
+      policyForPeer: async () => ({
+        allowsAuthority: (host) => host === "allowed.test.local",
+        skipsSsrfFloor: () => false,
+      }),
       resolveHostFn: async (host) => {
         resolved.push(host);
         return ["127.0.0.1"];
@@ -252,6 +256,7 @@ describe("transparent egress listener — TLS SNI path", () => {
           seen.push([host, port]);
           return port === 443;
         },
+        skipsSsrfFloor: () => false,
       }),
       onEvent: (e) => events.push(e),
     });
@@ -403,5 +408,74 @@ describe("transparent egress listener — plain HTTP path", () => {
     expect(received.length).toBe(0);
     expect(events[0]?.kind).toBe("tunnel-refused");
     expect(events[0]?.reason).toBe("no-host-header");
+  });
+});
+
+describe("transparent egress listener — internal hosts: the api_call rule (#1819)", () => {
+  type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
+  const literal = (uris: string[]) => ({
+    authorizedUris: uris,
+    declaredUris: uris,
+    allowAllUris: false,
+  });
+  /** The real SSRF floor, every name resolving to loopback, `internal.test` operator-listed. */
+  async function runnerListener(upstreamPort: number, egress: RunnerEgress, listed = true) {
+    const events: EgressListenerEvent[] = [];
+    const internalHost = (h: string) => listed && h === "internal.test";
+    const listener = await makeListener({
+      upstreamPort,
+      isBlockedHostFn: isBlockedHost,
+      policyForPeer: async () => compileRunnerEgressPolicy(egress, internalHost),
+      onEvent: (e) => events.push(e),
+    });
+    return { port: listener.address().port, events };
+  }
+  const httpTo = (host: string) => Buffer.from(`GET / HTTP/1.1\r\nHost: ${host}\r\n\r\n`, "latin1");
+
+  it("splices to a private address behind a listed declared literal host (SNI and Host)", async () => {
+    const upstream = await startTcpEcho();
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    for (const preamble of [buildClientHello("internal.test"), httpTo("internal.test")]) {
+      const { port, events } = await runnerListener(upstream.port, egress);
+      const { received } = await driveClient(port, [preamble], preamble.length);
+      expect(received.equals(preamble)).toBe(true);
+      expect(events[0]?.kind).toBe("tunnel-opened");
+    }
+  });
+
+  it("keeps the floor for a declared literal host the operator does not list", async () => {
+    const upstream = await startTcpEcho();
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    const { port, events } = await runnerListener(upstream.port, egress, false);
+    const { closed } = await driveClient(port, [buildClientHello("internal.test")], 1);
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("ssrf");
+    expect(upstream.received.length).toBe(0);
+  });
+
+  it("keeps the floor for a listed host a glob, a connection or allow_all chose", async () => {
+    const upstream = await startTcpEcho();
+    const rendered = [`https://internal.test:${upstream.port}`];
+    const cases: RunnerEgress[] = [
+      literal([`https://*.test:${upstream.port}`]),
+      { ...literal(rendered), declaredUris: [`https://{$credential.host}:${upstream.port}`] },
+      { ...literal([]), declaredUris: rendered, allowAllUris: true },
+    ];
+    for (const egress of cases) {
+      const { port, events } = await runnerListener(upstream.port, egress);
+      const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
+      expect(closed).toBe(true);
+      expect(events[0]?.reason).toBe("ssrf");
+    }
+    expect(upstream.received.length).toBe(0);
+  });
+
+  it("still enforces the allowlist on an exempt host (another port)", async () => {
+    const upstream = await startTcpEcho();
+    const egress = literal(["https://internal.test/**"]);
+    const { port, events } = await runnerListener(upstream.port, egress);
+    const { closed } = await driveClient(port, [buildClientHello("internal.test")], 1);
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("not-authorized");
   });
 });

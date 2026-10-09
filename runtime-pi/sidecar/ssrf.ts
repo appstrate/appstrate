@@ -2,7 +2,8 @@
 
 /**
  * Sidecar egress policy on top of `@appstrate/core/ssrf`: the
- * operator-trusted-host allowlist and the allowlist-aware URL check.
+ * operator-trusted-host allowlist, the allowlist-aware URL check and the
+ * local runner's compiled egress policy.
  *
  * The base primitives (`isBlockedHost`, `isBlockedUrl`,
  * `resolveAndCheckHost`, `HostResolver`) are NOT re-exported from here.
@@ -14,6 +15,10 @@
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
+import { skipsSsrfFloor } from "@appstrate/afps-runtime/resolvers";
+import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 
 /**
  * Operator-trusted internal egress hosts, forwarded by the platform as
@@ -24,15 +29,15 @@ import { isBlockedUrl } from "@appstrate/core/ssrf";
  * platform-side checks and then fails opaquely here at run time. Empty / unset
  * ⇒ nothing is exempt (the secure default).
  *
- * Scope is deliberate: this allowlist relaxes egress ONLY for operator-
- * configured upstreams — the LLM baseUrl gate (`/llm/*`) and the remote-MCP
- * client boot (`integrations-boot.ts`) — and, for an `api_call`, for a host
- * the integration's manifest also names literally (`credential-proxy.ts`): the
- * manifest alone never opens the operator's network. It is intentionally NOT
- * consulted by the MITM / transparent / egress listeners, whose targets are
- * agent- or manifest-chosen rather than operator-trusted; relaxing the
- * blocklist there would let an agent-supplied URL reach an internal host the
- * operator never vouched for.
+ * Scope: it relaxes egress for operator-configured upstreams — the LLM
+ * baseUrl gate (`/llm/*`) and the remote-MCP client boot
+ * (`integrations-boot.ts`) — and, for an `api_call` (`credential-proxy.ts`) or
+ * a local runner's egress listeners (MITM, CONNECT, transparent:
+ * {@link compileRunnerEgressPolicy}), only for a host the integration's
+ * declared `authorized_uris` also names literally, never under
+ * `allow_all_uris` (`skipsSsrfFloor`). Neither side alone opens the operator's
+ * network: a manifest cannot name an internal host the operator did not list,
+ * and a host a glob or a connection value chose is never exempt.
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
   (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
@@ -52,4 +57,15 @@ export function isOperatorTrustedEgressHost(host: string): boolean {
  */
 export function isBlockedEgressUrl(url: string): boolean {
   return isBlockedUrl(url, isOperatorTrustedEgressHost);
+}
+
+/** A local runner's egress policy (#1458) with the `api_call` internal-host rule (#1819). */
+export function compileRunnerEgressPolicy(
+  egress: NonNullable<IntegrationSpawnSpec["egress"]>,
+  internalHost: (host: string) => boolean = isOperatorTrustedEgressHost,
+): RunnerEgressPolicy {
+  return {
+    ...compileEgressPolicy(egress),
+    skipsSsrfFloor: (host) => skipsSsrfFloor(host, { ...egress, internalHost }),
+  };
 }

@@ -23,11 +23,16 @@ import {
 } from "../integration-runtime-adapter.ts";
 import type { Peer } from "../helpers.ts";
 import { runnerKeyOf, type PeerAttribution } from "../runner-peers.ts";
+import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 
 const ADAPTER_ID = `egress-wiring-${Math.random().toString(36).slice(2, 8)}`;
 const INTEGRATION_ID = "@tractr/egress";
 const SERVER_ID = "@tractr/egress-server";
-const EGRESS = { authorizedUris: ["https://api.allowed.test/**"], allowAllUris: false };
+const EGRESS = {
+  authorizedUris: ["https://api.allowed.test/**"],
+  declaredUris: ["https://api.allowed.test/**"],
+  allowAllUris: false,
+};
 const CONNECTION = { id: "conn-web", label: "web", accountId: null };
 /** The runner key of {@link spec}'s own runner — its connection, not its integration. */
 const OWN_RUNNER = runnerKeyOf({ integrationId: INTEGRATION_ID, connection: CONNECTION });
@@ -259,5 +264,22 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
     } finally {
       await result.shutdown();
     }
+  });
+
+  it("hands the adapter a policy whose SSRF exemption reads the DECLARED list (#1819)", async () => {
+    // `intranet.corp` is on the test operator list (test/setup/preload.ts).
+    expect(isOperatorTrustedEgressHost("intranet.corp")).toBe(true);
+    const rendered = ["https://intranet.corp/**"];
+    const declaredAs = async (declaredUris: string[]) => {
+      const egress = { ...EGRESS, authorizedUris: rendered, declaredUris };
+      const result = await boot(spec({ egress }), []);
+      try {
+        return spawnedWith.at(-1)!.egress!.policy.skipsSsrfFloor("intranet.corp");
+      } finally {
+        await result.shutdown();
+      }
+    };
+    expect(await declaredAs(rendered)).toBe(true);
+    expect(await declaredAs(["https://{$credential.host}/**"])).toBe(false);
   });
 });

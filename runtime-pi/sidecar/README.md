@@ -134,6 +134,8 @@ The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-m
 
 The CLI's local resolver and the platform credential proxy call the same `fetchApiCall`, so an AFPS package behaves the same on the three paths. They differ only in who the operator is: `EGRESS_ALLOW_INTERNAL_HOSTS` for the sidecar and the platform proxy; the caller, whose own machine and network it is, for `appstrate run --integrations=local`, which therefore exempts every host a declared entry names literally.
 
+A local runner's egress listeners (CONNECT, MITM, transparent plane) apply the same rule (`skipsSsrfFloor`, #1819) to the host they dial: it skips the SSRF floor only when the auth's DECLARED `authorized_uris` names it literally (`IntegrationSpawnSpec.egress.declaredUris`), `EGRESS_ALLOW_INTERNAL_HOSTS` lists it, and `allow_all_uris` is off. The runner's allowlist check still applies. Never list a loopback name (`localhost`, `127.0.0.1`) outside tests: an `api_call` or a runner whose manifest names it would reach the sidecar's own ports.
+
 ## Redirect handling
 
 `{ns}__api_call` follows 30x redirects manually (`redirect: "manual"`) so `Set-Cookie` from intermediate hops is captured, each into the connection's jar bucket for the hop's own origin (Bun's native `redirect: "follow"` only exposes the terminal hop's cookies — see #473). Each hop's `Cookie` header is composed by name as sibling-origin < injected credential < own-origin cookies (`docs/architecture/SIDECAR.md`, "Sticky-cookie jar scoping"). Three defence-in-depth rules apply to every hop:

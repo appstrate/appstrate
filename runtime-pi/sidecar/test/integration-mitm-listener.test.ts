@@ -31,7 +31,7 @@ import {
 } from "@appstrate/connect";
 import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
-import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
+import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,
@@ -74,9 +74,15 @@ const stubResolveHost = async () => ["203.0.113.10"];
 
 /** Allow-all egress gates for tests about something else; the #1458 describe overrides them. */
 const permissiveEgress = {
-  egressPolicy: { allowsAuthority: () => true, allowsUrl: () => true },
+  egressPolicy: { allowsAuthority: () => true, allowsUrl: () => true, skipsSsrfFloor: () => false },
   isPeerAllowed: async () => true,
 };
+
+/** The runner policy over `authorizedUris` (declared as rendered), no host operator-listed. */
+function runnerPolicy(authorizedUris: string[]) {
+  const egress = { authorizedUris, declaredUris: authorizedUris, allowAllUris: false };
+  return compileRunnerEgressPolicy(egress, () => false);
+}
 
 async function makeCaBundle() {
   const workDir = path.join(tmpdir(), `afps-mitm-ca-${randomUUID()}`);
@@ -1481,6 +1487,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
           return host === "api.test.local";
         },
         allowsUrl: () => true,
+        skipsSsrfFloor: () => false,
       },
       resolveHostFn: async (host) => {
         resolved.push(host);
@@ -1520,6 +1527,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
         egressPolicy: {
           allowsAuthority: () => true,
           allowsUrl: (url) => url.startsWith("https://api.test.local/allowed/"),
+          skipsSsrfFloor: () => false,
         },
       });
       try {
@@ -1556,10 +1564,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
     "refuses a CONNECT to a port the pattern does not grant instead of forwarding to 443 (#1588)",
     async () => {
       const { listener, caCertPem, minter, events, calls } = await setup({
-        egressPolicy: compileEgressPolicy({
-          authorizedUris: ["https://api.test.local/**"],
-          allowAllUris: false,
-        }),
+        egressPolicy: runnerPolicy(["https://api.test.local/**"]),
       });
       try {
         await expect(
@@ -1592,7 +1597,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
     async () => {
       const authorizedUris = ["https://api.test.local:8443/**", "https://api.test.local/**"];
       const { listener, caCertPem, calls } = await setup({
-        egressPolicy: compileEgressPolicy({ authorizedUris, allowAllUris: false }),
+        egressPolicy: runnerPolicy(authorizedUris),
         credentials: {
           current: () => payload("v", "oauth2", { access_token: "t" }, authorizedUris),
           deliveryPlans: () => ({ v: plan("Authorization", "t") }),
@@ -1622,6 +1627,57 @@ describe("MITM listener — egress allowlist (#1458)", () => {
           "api.test.local",
         ]);
         expect(headers.map((h) => h.get("Authorization"))).toEqual(["Bearer t", "Bearer t"]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  /** `internal.test`: declared literally, resolves to a private address, `listed` or not. */
+  async function internalSetup(listed: boolean) {
+    const uris = ["https://internal.test/**"];
+    const egress = { authorizedUris: uris, declaredUris: uris, allowAllUris: false };
+    const ctx = await setup({
+      egressPolicy: compileRunnerEgressPolicy(egress, (h) => listed && h === "internal.test"),
+      credentials: {
+        current: () => payload("v", "oauth2", { access_token: "t" }, uris),
+        deliveryPlans: () => ({ v: plan("Authorization", "t") }),
+      },
+      resolveHostFn: async () => ["10.0.0.5"],
+    });
+    const request = () =>
+      drivenFetch({
+        listenerPort: ctx.listener.address().port,
+        sni: "internal.test",
+        caCertPem: ctx.caCertPem,
+        method: "GET",
+        path: "/items",
+        headers: {},
+      });
+    return { ...ctx, request };
+  }
+
+  runIfOpenssl(
+    "forwards to a private SNI host the manifest names and the operator lists (#1819)",
+    async () => {
+      const { listener, calls, request } = await internalSetup(true);
+      try {
+        expect((await request()).status).toBe(200);
+        expect(calls.map((c) => c.url)).toEqual(["https://internal.test/items"]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "keeps the SSRF floor for that SNI host when the operator does not list it",
+    async () => {
+      const { listener, events, calls, request } = await internalSetup(false);
+      try {
+        await expect(request()).rejects.toThrow();
+        expect(events.some((e) => e.kind === "tls-error" && /rebind/i.test(e.error))).toBe(true);
+        expect(calls.length).toBe(0);
       } finally {
         await listener.close();
       }

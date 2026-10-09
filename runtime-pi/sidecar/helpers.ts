@@ -377,7 +377,22 @@ export interface Peer extends Endpoint {
 export type PeerCheck = (peer: Peer) => Promise<boolean>;
 
 /** TCP-level half of the egress policy — all a blind tunnel can check. */
-export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority">;
+export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority"> & {
+  /** Whether `host` skips the SSRF floor: the `api_call` internal-host rule (#1819). */
+  skipsSsrfFloor(host: string): boolean;
+};
+
+/** A local runner's compiled egress policy (`compileRunnerEgressPolicy`). */
+export type RunnerEgressPolicy = EgressPolicy & AuthorityPolicy;
+
+/** The SSRF predicate a runner listener applies to `host`: none when its policy exempts it. */
+export function ssrfFloorFor(
+  policy: AuthorityPolicy,
+  host: string,
+  isBlockedHostFn: (host: string) => boolean,
+): (host: string) => boolean {
+  return policy.skipsSsrfFloor(host) ? () => false : isBlockedHostFn;
+}
 
 /** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */
 function unwrapIpv4Mapped(address: string | undefined): string | undefined {

@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
+  (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
+  manifest declares them, beside the rendered list. The sidecar's runner
+  egress listeners let a host skip the SSRF floor only when this list names it
+  literally and `EGRESS_ALLOW_INTERNAL_HOSTS` lists it, the `api_call` rule. (#1819)
 - **Requires `@afps-spec/schema` `^0.9.0`** (was `^0.8.0`), which declares
   `integrations_configuration.<id>.required` as a boolean (afps-spec#28): a
   manifest whose `required` is not a boolean fails validation. (#1830)

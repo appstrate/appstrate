@@ -35,7 +35,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
-import { isOperatorTrustedEgressHost } from "./ssrf.ts";
+import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -50,10 +50,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
 import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
-import {
-  compileEgressPolicy,
-  matchesAuthorizedUriSpec,
-} from "@appstrate/afps-shared/authorized-uris";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
@@ -851,7 +848,9 @@ async function spawnAndConnectLocalIntegration(params: {
   //   - neither          → null: the runner has no egress route.
   // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
   let egressCtx: RuntimeEgressContext | null = null;
-  const policy = compileEgressPolicy(spec.egress ?? { authorizedUris: [], allowAllUris: false });
+  const policy = compileRunnerEgressPolicy(
+    spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
+  );
   const attribute = adapter.peerAttribution();
   const isPeerAllowed: PeerCheck = async (peer) => (await attribute(peer)) === runnerKeyOf(spec);
   // The MITM listener is mounted only when this integration wants MITM, a CA

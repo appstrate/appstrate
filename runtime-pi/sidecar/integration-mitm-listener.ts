@@ -72,10 +72,12 @@ import {
   peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
+  ssrfFloorFor,
   API_CALL_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
+  type RunnerEgressPolicy,
 } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
@@ -192,7 +194,7 @@ interface CreateMitmListenerOptions {
   /** Telemetry sink — non-fatal events surface here. */
   onEvent?: (event: MitmListenerEvent) => void;
   /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
-  egressPolicy: EgressPolicy;
+  egressPolicy: RunnerEgressPolicy;
   /** Only the owning runner may connect (#1458). */
   isPeerAllowed: PeerCheck;
 }
@@ -257,6 +259,7 @@ export function createIntegrationMitmListener(
       followRedirects: false,
       fetchImpl: options.fetch,
       resolve: options.resolveHostFn,
+      allowHost: (h) => options.egressPolicy.skipsSsrfFloor(h),
     });
   const emit = options.onEvent ?? (() => {});
 
@@ -535,8 +538,10 @@ async function handleInboundConnection(
   // host network + cloud metadata — so this must run BEFORE any cert mint.
   // Mirrors the credential-proxy SSRF guard.
   //
-  // Literal layer first (cheap, no DNS) …
-  if (isBlockedHost(sniHost)) {
+  // Literal layer first (cheap, no DNS) … Skipped with the rebind layer for a
+  // host the policy exempts (#1819).
+  const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, isBlockedHost);
+  if (ssrfFloor(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
     rawSocket.destroy();
     return;
@@ -552,7 +557,10 @@ async function handleInboundConnection(
   // record points inside must not get a minted leaf either. Fail closed on
   // resolution failure. This check gates the leaf only: each upstream request
   // resolves again and connects to the address it validated (`guardedFetch`).
-  const sniCheck = await resolveAndCheckHost(sniHost, { resolve: resolveHostFn });
+  const sniCheck = await resolveAndCheckHost(sniHost, {
+    resolve: resolveHostFn,
+    isBlockedHostFn: ssrfFloor,
+  });
   if (sniCheck.blocked) {
     const why =
       sniCheck.reason === "resolution-failed"

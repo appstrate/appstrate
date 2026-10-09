@@ -82,6 +82,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A local integration runner reaches an internal host the operator lists
+  in `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819), under the rule an `api_call`
+  already follows: the auth's declared `authorized_uris` must name that host
+  literally, and `allow_all_uris` must be off. The sidecar's CONNECT, MITM and
+  transparent listeners used to refuse every private, loopback or link-local
+  address whatever the list said. A host taken from a connection value (the
+  `@appstrate/ssh` host included) or matched by a wildcard stays refused, and
+  the runner's allowlist still bounds host and port. Never list a loopback
+  name (`localhost`, `127.0.0.1`) outside tests: it opens the sidecar's own
+  ports to the integrations that name it.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the

@@ -247,7 +247,11 @@ export function runnerEgressFor(
 ): IntegrationSpawnSpec["egress"] {
   const allowAllUris = auth.allow_all_uris === true;
   if ((auth.authorized_uris?.length ?? 0) === 0 && !allowAllUris) return undefined;
-  return { authorizedUris: [...authorizedUris], allowAllUris };
+  return {
+    authorizedUris: [...authorizedUris],
+    declaredUris: [...(auth.authorized_uris ?? [])],
+    allowAllUris,
+  };
 }
 
 /**

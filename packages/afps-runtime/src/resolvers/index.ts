@@ -102,6 +102,7 @@ export {
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
   redactCredentialHost,
+  skipsSsrfFloor,
 } from "./api-call-engine.ts";
 
 // The failure codes every `api_call` path reports, and what maps onto them.

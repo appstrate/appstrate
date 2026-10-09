@@ -32,9 +32,8 @@ import { dirname, join } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
-import type { Endpoint, Peer } from "./helpers.ts";
+import type { Endpoint, Peer, RunnerEgressPolicy } from "./helpers.ts";
 import { logger } from "./logger.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
@@ -422,7 +421,7 @@ export function createProcessIntegrationRuntimeAdapter({
   const runnersByUid = new Map<number, string>();
   let allocatedUids = 0;
   /** {@link runnerKeyOf} → policy the transparent plane serves that runner. */
-  const transparentPolicies = new Map<string, EgressPolicy>();
+  const transparentPolicies = new Map<string, RunnerEgressPolicy>();
   let plane: Promise<TransparentEgressPlane | null> | null = null;
   /** Set by `shutdown()`: a plane started after it would have no one to close it. */
   let shutDown = false;

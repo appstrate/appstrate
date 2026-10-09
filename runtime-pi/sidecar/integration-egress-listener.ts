@@ -12,8 +12,9 @@
  * that opens its TLS. This listener is that way out:
  *
  *   - terminates the `CONNECT host:port` preamble,
- *   - applies the SSRF floor and the egress allowlist at CONNECT, then to the
- *     ClientHello's SNI (a CDN front routes on SNI, not on the CONNECT target),
+ *   - applies the SSRF floor (unless the policy exempts the host, #1819) and
+ *     the egress allowlist at CONNECT, then the allowlist to the ClientHello's
+ *     SNI (a CDN front routes on SNI, not on the CONNECT target),
  *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
  *     cert mint, NO header injection).
  *
@@ -34,6 +35,7 @@ import {
   peerAddress,
   peerAdmitted,
   resolveAndCheckHost,
+  ssrfFloorFor,
   PREAMBLE_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
@@ -173,9 +175,10 @@ export function createIntegrationEgressListener(
         }
         const { host: targetHost, port } = parsed;
         const lowerHost = targetHost.toLowerCase();
+        const ssrfFloor = ssrfFloorFor(egressPolicy, lowerHost, isBlockedHostFn);
 
         // SSRF floor, literal layer — before any DNS round-trip.
-        if (isBlockedHostFn(lowerHost)) return refuse(target, "ssrf");
+        if (ssrfFloor(lowerHost)) return refuse(target, "ssrf");
 
         // Hard egress allowlist — before any DNS lookup of the name.
         if (!egressPolicy.allowsAuthority(lowerHost, port)) return refuse(target, "not-authorized");
@@ -184,7 +187,7 @@ export function createIntegrationEgressListener(
         // IP (safe: the client's own handshake carries SNI/Host for the name).
         const check = await resolveAndCheckHost(lowerHost, {
           resolve: resolveHostFn,
-          isBlockedHostFn,
+          isBlockedHostFn: ssrfFloor,
         });
         if (clientSocket.destroyed) return; // client gave up during resolution
         if (check.blocked) {

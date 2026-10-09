@@ -20,9 +20,9 @@ import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
 import type { WorkspaceHandle } from "@appstrate/core/platform-types";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import type { PeerAttribution } from "./runner-peers.ts";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 
 /**
  * Per-run network + CA delivery context returned by
@@ -69,7 +69,7 @@ export interface RuntimeEgressContext {
    */
   readonly caCertHostPath: string | null;
   /** The runner's compiled egress policy, enforced by its listener. */
-  readonly policy: EgressPolicy;
+  readonly policy: RunnerEgressPolicy;
 }
 
 export interface SpawnIntegrationOptions {
