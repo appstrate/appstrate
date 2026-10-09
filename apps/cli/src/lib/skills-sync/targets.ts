@@ -92,8 +92,8 @@ function noticeHook(): string {
 /**
  * Only public connection coordinates belong in a plugin, never CLI credentials.
  * The active space travels as `X-Space-Id` independently of which spaces
- * supply the installed skills; the server validates it against the org
- * and falls back to the default space only when the header is absent.
+ * supply the installed skills; the server validates it against the org.
+ * Without the header a connection reaches every space of the caller instead.
  */
 export function pluginFixedFiles(connection?: {
   instance: string;

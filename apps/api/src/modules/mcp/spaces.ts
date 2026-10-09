@@ -101,28 +101,26 @@ export async function listReachableSpaces(
  * The space a JSON-RPC body names: a `tools/call`'s `space_id`, or, for a
  * `resources/read` of an `appfile://` URI, the space holding that file — a
  * file row belongs to one space, so the URI names it, and the `resource_link`
- * a run returns is read without any other argument. A batch is answered with
- * its first; each call of it is then checked against the space actually
- * entered (`assertSpaceArgument`), so a mismatch is refused.
+ * a run returns is read without any other argument. Only the first message of
+ * a batch is read (MCP 2025-06-18 has no batches): a later `tools/call` naming
+ * another space is refused by `assertSpaceArgument`, a later read of another
+ * space's file answers "not found".
  */
 export async function requestedSpaceId(
   message: unknown,
   orgId: string,
 ): Promise<string | undefined> {
-  const messages = Array.isArray(message) ? message : [message];
-  for (const m of messages) {
-    if (typeof m !== "object" || m === null) continue;
-    const { method, params } = m as { method?: unknown; params?: Record<string, unknown> };
-    if (typeof params !== "object" || params === null) continue;
-    if (method === "tools/call") {
-      const args = params.arguments as { space_id?: unknown } | undefined;
-      if (typeof args?.space_id === "string") return args.space_id;
-    }
-    if (method === "resources/read" && typeof params.uri === "string") {
-      const fileId = parseFileUri(params.uri);
-      const spaceId = fileId ? await fileSpaceId(orgId, fileId) : null;
-      if (spaceId) return spaceId;
-    }
+  const first: unknown = Array.isArray(message) ? message[0] : message;
+  if (typeof first !== "object" || first === null) return undefined;
+  const { method, params } = first as { method?: unknown; params?: Record<string, unknown> };
+  if (typeof params !== "object" || params === null) return undefined;
+  if (method === "tools/call") {
+    const args = params.arguments as { space_id?: unknown } | undefined;
+    return typeof args?.space_id === "string" ? args.space_id : undefined;
+  }
+  if (method === "resources/read" && typeof params.uri === "string") {
+    const fileId = parseFileUri(params.uri);
+    return (fileId && (await fileSpaceId(orgId, fileId))) || undefined;
   }
   return undefined;
 }
