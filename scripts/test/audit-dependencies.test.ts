@@ -10,9 +10,10 @@
  * down and the parser threw somewhere the assertion did not look.
  *
  * The fixture below is a verbatim excerpt of the real payload measured on
- * 2026-09-07 (`bun audit --json`, bun 1.3.11), trimmed to four advisories and
+ * 2026-09-07 (`bun audit --json`), trimmed to four advisories and
  * with the field names left exactly as the wire carries them —
- * `vulnerable_versions` snake_case included. Re-typing the shape by hand is how
+ * `vulnerable_versions` snake_case included; `bun audit` v1.4.2 emits the
+ * same seven fields. Re-typing the shape by hand is how
  * a parser test ends up asserting against the schema its author imagined; this
  * one asserts against the schema the tool emits.
  *

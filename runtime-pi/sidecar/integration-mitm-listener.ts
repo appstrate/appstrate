@@ -629,7 +629,10 @@ export async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Pr
     };
     rawSocket.on("data", onData);
     rawSocket.on("error", reject);
-    rawSocket.once("close", () => reject(new Error("socket closed before SNI")));
+    // A FIN ends the preamble as surely as a close: no SNI will follow.
+    for (const event of ["end", "close"]) {
+      rawSocket.once(event, () => reject(new Error("socket closed before SNI")));
+    }
   });
 }
 

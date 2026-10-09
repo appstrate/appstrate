@@ -104,7 +104,7 @@ independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
 `bun install`, the knip version (5.88.1 on both sides at the time; a 6.x
 range today), the presence of a `.env`,
 the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
-the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
-1.3.14, identical output). CI was green throughout with the same config, and
+the bun version (1.3.11 local vs 1.3.14, the `packageManager` pin at the time —
+tested at 1.3.14, identical output). CI was green throughout with the same config, and
 that divergence is still unexplained; it stopped mattering once the config was
 made correct rather than merely quiet on one machine.

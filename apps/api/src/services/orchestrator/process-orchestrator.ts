@@ -7,15 +7,15 @@
  * ⚠️ No container isolation: agents can access the local filesystem and network.
  *    Use only with trusted agent code.
  *
- * Stdout workaround (Bun ≤1.3.9): `Bun.spawn({ stdout: "pipe" })` returns a
- * ReadableStream that signals EOF prematurely when the event loop services
- * concurrent I/O (e.g. incoming HTTP requests while an agent run is in-flight).
- * The subprocess keeps running but the platform sees an empty stream → 0 tokens
- * → false "could not reach the LLM API" failure. Reproducible by opening any
- * page while a run is active. Agent stdout is therefore redirected to a file via
- * `Bun.file()` and tailed with a sequential read handle. Docker mode is unaffected
- * (logs are read via the Docker HTTP API, not a Bun pipe).
- * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
+ * Agent stdout is redirected to a file via `Bun.file()` and tailed with a
+ * sequential read handle, not read from `Bun.spawn({ stdout: "pipe" })`: a
+ * piped stream was seen to signal EOF while the agent kept running whenever
+ * the event loop served concurrent HTTP traffic (opening any page during a
+ * run), so the platform read an empty stream → 0 tokens → a false "could not
+ * reach the LLM API" failure. A spawned writer under concurrent `Bun.serve`
+ * load does not reproduce it on Linux, but the original trigger was never
+ * isolated, so the file stays. Docker mode is unaffected (logs are read via
+ * the Docker HTTP API, not a Bun pipe).
  */
 
 import { mkdir, rm, readdir, stat } from "node:fs/promises";

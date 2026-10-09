@@ -228,8 +228,10 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     },
 
     async downloadFile(bucket, path) {
-      // Keep our own timer across SDK header completion: Bun 1.3.14 can drop
-      // an AbortSignal.timeout deadline when the SDK removes its listener.
+      // Our own timer, not AbortSignal.timeout: on Bun 1.3.13-1.3.14 (inside
+      // this package's `engines` range) removing a listener from a timeout
+      // signal cancels its deadline, and the SDK removes its listener once the
+      // headers arrive — the body read below would then run unbounded.
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(new DOMException("S3 download timed out", "TimeoutError")),

@@ -411,8 +411,9 @@ async function openUdpCounter(aliasIp: string, fail: Fail): Promise<UdpCounter> 
     "}",
     "",
   ].join("\n");
-  // A host-side sink bound on the destination: Bun (1.3.14) crashes at process
-  // exit when a UDP socket's datagram draws an ICMP port-unreachable.
+  // A host-side sink bound on the destination: with no listener there, the
+  // control datagram draws an ICMP port-unreachable, which Bun raises on the
+  // sending socket as an unhandled ECONNREFUSED and the smoke exits 1.
   const sink = await Bun.udpSocket({ hostname: aliasIp, port: UDP_PORT }).catch((err: unknown) =>
     fail(`could not bind the UDP sink on ${aliasIp}:${UDP_PORT}: ${String(err)}`),
   );

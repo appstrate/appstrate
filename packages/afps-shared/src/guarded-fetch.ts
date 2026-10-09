@@ -188,7 +188,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * keep SNI + certificate identity on the logical hostname while the TCP
  * connection goes to the pinned IP — without it, pinning an https URL would
  * fail certificate validation, so on other runtimes we fall back to a
- * name-based connect. Verified against Bun 1.3.x: `tls.serverName` drives
+ * name-based connect. Verified on Bun 1.3.14 and 1.4.2: `tls.serverName` drives
  * both the emitted SNI and the identity check (a mismatching serverName
  * fails with ERR_TLS_CERT_ALTNAME_INVALID).
  */
