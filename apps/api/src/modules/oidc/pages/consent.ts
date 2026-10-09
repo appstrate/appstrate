@@ -113,7 +113,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
       <span class="client">${props.clientName}</span> souhaite accéder à votre compte
       ${props.branding.name}.
     </p>
-    <p>Cette space aura accès à :</p>
+    <p>Accès demandé :</p>
     <ul class="scopes">
       ${scopeItems}
     </ul>

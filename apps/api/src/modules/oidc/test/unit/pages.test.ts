@@ -122,6 +122,18 @@ describe("renderConsentPage", () => {
     expect(out).toContain("Ajouter des connexions en votre nom");
   });
 
+  it("introduces the scope list without naming the client a space", () => {
+    const out = renderConsentPage({
+      ...DEFAULT_PROPS,
+      clientName: "Acme",
+      scopes: ["openid"],
+      clientLevel: "space",
+      action: "/x",
+    }).value;
+    expect(out).toContain("Accès demandé :");
+    expect(out).not.toContain("Cette space");
+  });
+
   // An `instance` token carries `actor_type: "user"`: the scope claim grants
   // nothing on its own (`scopesToPermissions` returns empty) and the pipeline
   // writes no `scopeCeiling`, so the request runs on the user's live org role.

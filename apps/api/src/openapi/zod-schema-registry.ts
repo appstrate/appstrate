@@ -752,6 +752,8 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // params are validated per tool, not by one body schema.
   "POST /api/mcp/o/{org}":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /api/mcp/o/{org}/s/{space}":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
 
   // ─── Module-owned surfaces with no single comparable body ───────────────
   //

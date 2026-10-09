@@ -53,16 +53,19 @@ import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `@better-auth/core/oauth2` here.
 import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
-import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mcp-transport";
+import {
+  createMcpServer,
+  parseMcpPost,
+  serveStatelessPost,
+  type McpPost,
+} from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
-import { assertSpaceId } from "../../lib/ids.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
-import { applySpacePermissions, enterSpaceById } from "../../middleware/space-context.ts";
-import { defaultSpaceForOrg } from "../../lib/space-lookup.ts";
+import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
 import { logger } from "../../lib/logger.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
@@ -83,14 +86,28 @@ import {
   type McpObserver,
   type McpSurface,
 } from "./tools.ts";
-import { buildOperationIndex, operationIdGranted } from "./catalog.ts";
+import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
+import {
+  listReachableSpaces,
+  pinnedSpaceIds,
+  requestedSpaceId,
+  NO_FALLBACK_HINT,
+  type McpSpace,
+  type OrgWideSpaces,
+} from "./spaces.ts";
+import { toSpaceRoleWire } from "../../lib/space-role.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
 const MCP_PREFIX = "/api/mcp/o";
 /** The per-org POST endpoint, parameterised on the org id. */
 const MCP_PATH = `${MCP_PREFIX}/:org`;
+/**
+ * The endpoint pinned to one space — the only client-side pin. Same resource
+ * and token: `deriveOrgResourceUri` ignores sub-paths.
+ */
+const MCP_SPACE_PATH = `${MCP_PATH}/s/:space`;
 /**
  * RFC 9728 §3.1 path-insertion well-known for the per-org resource: the
  * metadata URL is built by inserting the well-known segment BEFORE the
@@ -99,6 +116,7 @@ const MCP_PATH = `${MCP_PREFIX}/:org`;
  */
 const PRM_PATH_PREFIX = "/.well-known/oauth-protected-resource";
 const PRM_PATH = `${PRM_PATH_PREFIX}${MCP_PATH}`;
+const PRM_SPACE_PATH = `${PRM_PATH_PREFIX}${MCP_SPACE_PATH}`;
 /** Scopes this resource accepts — advertised in PRM + the 401/403 challenge. */
 const MCP_SCOPES = ["mcp:read", "mcp:invoke"] as const;
 
@@ -164,13 +182,16 @@ export function buildServerInstructions(
   ceiling: ReadonlySet<string> | undefined,
   surface: McpSurface,
   contextInjected = false,
+  orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
   const { invokes, runs, composes: inline, authors, importsPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
-  // unless the gate it sits under already implies that grant.
+  // unless the gate it sits under already implies that grant (org-wide: in any space).
   const granted = (operationId: string): boolean =>
-    operationIdGranted(operationId, permissions, ceiling);
+    orgSpaces
+      ? orgSpaces.reachable.some((s) => operationIdGranted(operationId, s.permissions, ceiling))
+      : operationIdGranted(operationId, permissions, ceiling);
   const listsIntegrations = invokes && granted("listIntegrations");
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
@@ -275,7 +296,7 @@ export function buildServerInstructions(
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
-This MCP server is scoped to ONE organization — the one this endpoint serves — and every operation runs against it plus its default space; you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id). Within the org, operations use the default space unless an operation takes an explicit space id.
+${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
@@ -293,8 +314,15 @@ ${heavyListBullet}${concurrencyBullet}${
   }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed in your caller context / get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
-${buildOperationIndex(permissions, ceiling)}`;
+${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOperationIndex(permissions, ceiling)}`;
 }
+
+const pinnedSpaceContext =
+  "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
+
+const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
+- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request; when it is ambiguous, ask.
+- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}`;
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -305,31 +333,20 @@ function forwardAuthHeaders(src: Headers): Headers {
   return out;
 }
 
-/**
- * Resolve the org+space scope for the MCP session so a tool can call a space-scoped
- * service directly (the file resource provider). Mirrors `requireSpaceContext`
- * for this org-pinned surface: a strategy-pinned space (API key) wins; an
- * `X-Space-Id` header (validated to belong to the org) is honoured next;
- * otherwise it falls back to the org's default space — the documented MCP
- * default the in-process sub-dispatch also lands on. This keeps the direct
- * service call in lockstep with what a dispatched REST route would resolve.
- */
-async function enterMcpSpace(c: Context<AppEnv>, orgId: string): Promise<void> {
-  const pinned = c.get("spaceId");
-  const headerSpace = c.req.header("X-Space-Id");
-  if (pinned && headerSpace && headerSpace !== pinned) {
-    throw forbidden("X-Space-Id does not match authenticated space");
-  }
-  const explicit = pinned ?? headerSpace;
-  if (explicit) return enterSpaceById(c, explicit, orgId);
-  const active = await defaultSpaceForOrg(orgId);
-  if (!active) throw invalidRequest("No space available for this organization.");
-  // Default-space fallback: the id comes straight off the `spaces` row and
-  // never passes through `validateSpaceInOrg`, so the shape check happens
-  // here. Same reason as the twin fallback in `requireSpaceContext` — an
-  // un-migrated `spaces` table would otherwise slip in unnoticed.
-  assertSpaceId(active.id);
-  await applySpacePermissions(c, active);
+/** Set by the space-entry middleware: the parsed body and, org-wide, the spaces. */
+type McpEnv = AppEnv & { Variables: { mcpPost?: McpPost | null; mcpOrgSpaces?: OrgWideSpaces } };
+
+/** A tool or act is offered when one reachable space grants it; the guard decides each call. */
+function unionSurface(spaces: readonly McpSpace[]): McpSurface {
+  const any = (key: keyof McpSurface) => spaces.some((s) => s.surface[key]);
+  return {
+    invokes: any("invokes"),
+    runs: any("runs"),
+    composes: any("composes"),
+    authors: any("authors"),
+    listsFiles: any("listsFiles"),
+    importsPackages: any("importsPackages"),
+  };
 }
 
 /**
@@ -343,7 +360,7 @@ export interface McpRouterDeps {
 
 export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   const recordAudit = deps.recordAudit ?? recordAuditFromContext;
-  const app = new Hono<AppEnv>();
+  const app = new Hono<McpEnv>();
 
   // Register the per-org protected-resource FAMILY (RFC 8707 audience binding).
   // The concrete resources are dynamic (one URI per org, orgs created at
@@ -392,7 +409,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // identifier it started from; advertising the bare origin here made strict
   // clients (the claude.ai connector) reject discovery on issuer mismatch and
   // fail the whole OAuth handshake. Point at the real issuer.
-  app.get(PRM_PATH, (c: Context<AppEnv>) => {
+  const describeResource = (c: Context<AppEnv>) => {
     const org = c.req.param("org");
     // The route only matches with an `:org` segment present, but Hono types the
     // param as optional — guard so the resource URI is never built from a
@@ -406,7 +423,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       bearer_methods_supported: ["header"],
       resource_documentation: `${appBase}/api/docs`,
     });
-  });
+  };
+  app.get(PRM_PATH, describeResource);
+  app.get(PRM_SPACE_PATH, describeResource);
 
   // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
   // scope) the generic responder attaches this so a spec-compliant client
@@ -444,7 +463,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // in the global pipeline, so the identity is already resolved here and an
   // audience-mismatched token was already rejected. Applied to the per-org
   // POST path.
-  app.use(MCP_PATH, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+  for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
+    app.use(path, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
+  }
 
   // `mcp` is a SPACE-level resource, and `/api/mcp` is not in
   // `SPACE_SCOPED_PREFIXES` — this endpoint pins an org, not a space. So it
@@ -456,15 +477,64 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // The org resolved by the pipeline is the one used, never the `:org` path
   // param: the handler's own guard is what rejects a mismatch, and resolving
   // the caller's own space here leaves that answer unchanged.
-  app.use(MCP_PATH, async (c, next) => {
+  const enterSpace = async (c: Context<McpEnv>, next: () => Promise<void>) => {
+    // A live REST header: ignoring it would silently widen a connection meant
+    // to be confined, so it is refused, as an undeclared tool argument is.
+    if (c.req.header("X-Space-Id") !== undefined) {
+      throw invalidRequest(
+        "X-Space-Id is not read by the MCP endpoint: pin the connection to a space with its " +
+          "URL, /api/mcp/o/<org>/s/<space>, or use the organization's URL to reach every space.",
+        "X-Space-Id",
+      );
+    }
     const orgId = c.get("orgId");
     if (!orgId) return next();
-    await enterMcpSpace(c, orgId);
+    // Hono caches the body: the handler serves this same parse.
+    const post = parseMcpPost(await c.req.arrayBuffer());
+    c.set("mcpPost", post);
+    const pinned = pinnedSpaceIds(c);
+    if (pinned.length > 0) {
+      if (new Set(pinned).size > 1) {
+        throw forbidden("The space in the URL is not the credential's space");
+      }
+      await enterSpaceById(c, pinned[0]!, orgId);
+      return next();
+    }
+    // Org-wide: enter the space the call names; a request naming none
+    // (initialize, tools/list) enters any reachable one to pass the guard.
+    const ceiling = c.get("scopeCeiling");
+    const actor = getActor(c);
+    const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
+      ...space,
+      surface: deriveMcpSurface(space.permissions, ceiling, actor),
+    }));
+    const requested = await requestedSpaceId(post?.payload, orgId);
+    const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
+    if (!chosen) {
+      throw forbidden("You hold no role with MCP access in any space of this organization.");
+    }
+    await enterSpaceById(c, chosen.id, orgId);
+    // The admission's read is the one the guards apply: a role changed since
+    // the listing must not leave the tools a wider surface than the routes.
+    const permissions = c.get("permissions")!;
+    const current = {
+      ...chosen,
+      role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
+      permissions,
+      surface: deriveMcpSurface(permissions, ceiling, actor),
+    };
+    c.set("mcpOrgSpaces", {
+      reachable: reachable.map((s) => (s.id === current.id ? current : s)),
+      current,
+    });
     return next();
-  });
-  app.use(MCP_PATH, requireModulePermission("mcp", "read"));
+  };
+  for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
+    app.use(path, enterSpace);
+    app.use(path, requireModulePermission("mcp", "read"));
+  }
 
-  app.post(MCP_PATH, async (c) => {
+  const serveMcp = async (c: Context<McpEnv>) => {
     // Org guard. By here the global pipeline has resolved the caller's org into
     // `c.get("orgId")`: for a Bearer caller it was pinned from the token's
     // per-org audience (and the audience check already rejected a token for a
@@ -493,15 +563,18 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // A delegated credential's scopes; ceiling guards refuse what they omit.
     const ceiling = c.get("scopeCeiling");
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
+    const orgSpaces = c.get("mcpOrgSpaces");
+    // Set by the space-entry middleware above, which runs on this exact path
+    // and cannot have been skipped: the org guard just proved `orgId` is set,
+    // and that is the middleware's only early return.
+    const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
+    // Dispatched calls re-enter the space this request entered.
+    authHeaders.set("x-space-id", scope.spaceId);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
     const actor = getActor(c);
-    // Set by the space-entry middleware above, which runs on this exact path
-    // and cannot have been skipped: the org guard just proved `orgId` is set,
-    // and that is the middleware's only early return.
-    const scope: SpaceScope = { orgId: org, spaceId: c.get("space")!.id };
 
     // Audit + telemetry sink. The tool layer emits plain data; here we decide
     // what to do with it: structured telemetry for every tool call, and a
@@ -531,6 +604,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         outcome: event.outcome,
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,
+        spaceId: scope.spaceId,
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
         // `void`: deliberately off the response path — the rationale, and what
@@ -545,6 +619,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
               path: event.path ?? null,
               status: event.status ?? null,
               outcome: event.outcome,
+              spaceId: scope.spaceId,
             },
           }),
         );
@@ -571,8 +646,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       contextInjected,
       actor,
       scope,
+      orgSpaces,
     };
-    const surface = deriveMcpSurface(permissions, ceiling, actor);
+    const surface = orgSpaces
+      ? unionSurface(orgSpaces.reachable)
+      : deriveMcpSurface(permissions, ceiling, actor);
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
@@ -582,13 +660,20 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
       {
-        instructions: buildServerInstructions(permissions, ceiling, surface, contextInjected),
+        instructions: buildServerInstructions(
+          permissions,
+          ceiling,
+          surface,
+          contextInjected,
+          orgSpaces,
+        ),
         resources,
       },
     );
     const raw = c.req.raw;
-    const body = await raw.arrayBuffer();
-    const post = parseMcpPost(body);
+    const body = await c.req.arrayBuffer();
+    // `null`: the SDK reads the bytes itself and answers its own parse error.
+    const post = c.get("mcpPost") ?? null;
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: !post?.requestsProgress,
@@ -606,7 +691,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // Any audit insert the tool layer triggered is already tracked (see
     // `observe` above) and flushed at shutdown, not here.
     return serveStatelessPost(server, transport, forwarded, post);
-  });
+  };
+  app.post(MCP_PATH, serveMcp);
+  app.post(MCP_SPACE_PATH, serveMcp);
 
   // The stateless transport serves no standalone server→client SSE stream
   // (GET) and has no session to terminate (DELETE), so POST is the only
@@ -614,9 +701,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // than letting the SDK open a dangling GET SSE stream that never receives a
   // message. Auth still runs first (global pipeline), so an unauthenticated
   // request of any verb is rejected with 401 before reaching here.
-  app.all(MCP_PATH, () => {
+  const notAllowed = () => {
     throw methodNotAllowed(["POST"]);
-  });
+  };
+  app.all(MCP_PATH, notAllowed);
+  app.all(MCP_SPACE_PATH, notAllowed);
 
   return app;
 }
