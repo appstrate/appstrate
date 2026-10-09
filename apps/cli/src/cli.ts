@@ -845,9 +845,9 @@ program
   )
   .option(
     "--batch <file>",
-    'Send every request of a JSON Lines file (- = stdin) from this one process, --parallel at a time. Each line: {"id"?, "method"?, "path", "headers"?, "body"?}. Writes one JSON line per response, in input order: {"id", "status", "headers", "body", "body_encoding"} or {"id", "error"}. Use --retry to wait out 429s.',
+    'Send every request of a JSON Lines file (- = stdin) from this one process, --parallel-max at a time. Each line, as in the OpenAI / Anthropic batch files: {"custom_id"?, "method"?, "url", "headers"?, "body"?} (an object body is sent as JSON). Writes one JSON line per request, in input order, as each completes: {"custom_id", "response": {"status_code", "headers", "body", "body_encoding"}} or {"custom_id", "error": {"code", "message"}}. Use --retry to wait out 429s; --max-time bounds the whole batch.',
   )
-  .option("--parallel <n>", "Requests in flight at once with --batch (default 5).", (v) => {
+  .option("--parallel-max <n>", "Requests in flight at once with --batch (default 5).", (v) => {
     const n = parseInt(v, 10);
     if (!Number.isFinite(n) || n < 1) {
       throw new InvalidArgumentError(`expected a positive integer, got "${v}"`);
@@ -942,7 +942,7 @@ program
       maxTime:
         typeof opts.maxTime === "number" && !Number.isNaN(opts.maxTime) ? opts.maxTime : undefined,
       batch: typeof opts.batch === "string" ? opts.batch : undefined,
-      parallel: typeof opts.parallel === "number" ? opts.parallel : undefined,
+      parallelMax: typeof opts.parallelMax === "number" ? opts.parallelMax : undefined,
     });
   });
 

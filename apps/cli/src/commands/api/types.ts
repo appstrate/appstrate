@@ -143,12 +143,12 @@ export interface ApiCommandOptions {
   failWithBody?: boolean;
   /**
    * `--batch <file>`: send every request of a JSON Lines file (`-` = stdin) from this one
-   * process, over kept-alive connections, and write one JSON line per response. `path`
+   * process, over kept-alive connections, and write one JSON line per request. `path`
    * is unused. See `api/batch.ts`.
    */
   batch?: string;
-  /** `--parallel <n>`: requests in flight at once in `--batch` mode (default 5). */
-  parallel?: number;
+  /** `--parallel-max <n>` (curl's name): requests in flight at once in `--batch` mode (default 5). */
+  parallelMax?: number;
 }
 
 /**

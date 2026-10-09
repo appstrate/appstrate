@@ -54,6 +54,7 @@ import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
 import { buildHeaders } from "./api/headers.ts";
 import { pickMethod } from "./api/method.ts";
 import { executeWithRetry } from "./api/retry.ts";
+import { skipTlsVerification } from "./api/tls.ts";
 import { consumeResponseStream, fileChunkSink, streamChunkSink } from "./api/stream.ts";
 import { DEFAULT_IO, type ApiCommandIO, type ApiCommandOptions } from "./api/types.ts";
 import { HostMismatchError, buildUrl } from "./api/url.ts";
@@ -293,8 +294,7 @@ export async function apiCommand(
   }
 
   // 7. TLS skip (process-wide; restored in finally).
-  const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  if (opts.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  const restoreTls = opts.insecure ? skipTlsVerification() : undefined;
 
   // Single source of cleanup — `--max-time` spans fetch() AND the
   // body-stream read loop, so we can't clear the timeout inside a
@@ -444,7 +444,7 @@ export async function apiCommand(
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (connectTimeoutHandle) clearTimeout(connectTimeoutHandle);
-    if (opts.insecure) restoreTls(prevTlsReject);
+    restoreTls?.();
   }
 }
 
@@ -456,11 +456,6 @@ function formatStatusLine(res: Response): string {
   // the runtime gave us — don't lie about HTTP/1.1 vs HTTP/2).
   const text = res.statusText || "";
   return `HTTP/1.1 ${res.status} ${text}\r\n`;
-}
-
-function restoreTls(prev: string | undefined): void {
-  if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
 }
 
 function errorMessage(err: unknown): string {
