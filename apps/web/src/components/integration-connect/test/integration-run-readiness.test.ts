@@ -5,12 +5,17 @@
  * (`source` + `error_code`, the resolver's vocabulary) the picker and the
  * agent's integrations block share. This is where the
  * mapping from the resolver's codes to what the UI shows is pinned — and
- * `unboundReason`, why a run starts without a declared integration.
+ * `unboundReason`, why a run starts without a declared integration, and
+ * `requiredNoneReason`, who chose none for one the agent requires.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { describeResolution, unboundReason } from "../integration-run-readiness";
+import {
+  describeResolution,
+  requiredNoneReason,
+  unboundReason,
+} from "../integration-run-readiness";
 
 function candidate(): IntegrationAgentResolution["candidates"][number] {
   return {
@@ -299,6 +304,50 @@ describe("unboundReason", () => {
   it("is null for a non-blocking error: an inert integration's verdict is no unbound state", () => {
     expect(
       unboundReason(entry(false, { ...empty, error_code: "must_choose_connection" })),
+    ).toBeNull();
+  });
+});
+
+describe("requiredNoneReason", () => {
+  const refused = {
+    source: null,
+    error_code: "required_integration_unbound" as const,
+    resolved_connection_ids: [],
+  };
+
+  it("names an admin's pin to none over the member's", () => {
+    expect(
+      requiredNoneReason(
+        resolution({
+          ...refused,
+          admin_pinned_connection_ids: [],
+          member_pinned_connection_ids: [],
+        }),
+      ),
+    ).toBe("admin_none");
+    expect(requiredNoneReason(resolution({ ...refused, member_pinned_connection_ids: [] }))).toBe(
+      "member_none",
+    );
+  });
+
+  it("still says none was chosen when no pin tells who", () => {
+    expect(requiredNoneReason(resolution(refused))).toBe("none");
+  });
+
+  it("is null for any other verdict, a pin to none included", () => {
+    expect(requiredNoneReason(resolution({}))).toBeNull();
+    expect(
+      requiredNoneReason(
+        resolution({
+          ...refused,
+          error_code: null,
+          warning_code: "integration_unbound",
+          member_pinned_connection_ids: [],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      requiredNoneReason(resolution({ ...refused, error_code: "must_choose_connection" })),
     ).toBeNull();
   });
 });

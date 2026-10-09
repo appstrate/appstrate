@@ -35,18 +35,29 @@ function causeOf(w: LaunchWarning): WarningCause {
   return "other";
 }
 
+/** Each warned integration, once, in the server's order, with its first item's cause. */
+function causesOf(warnings: readonly LaunchWarning[]): Map<string, WarningCause> {
+  const causes = new Map<string, WarningCause>();
+  for (const w of warnings) {
+    if (!w.field.startsWith("integrations.")) continue;
+    const id = integrationIdOfField(w.field);
+    if (!causes.has(id)) causes.set(id, causeOf(w));
+  }
+  return causes;
+}
+
+/** Whether {@link launchWarningsToast} has anything to say. */
+export function hasLaunchWarnings(warnings: readonly LaunchWarning[]): boolean {
+  return causesOf(warnings).size > 0;
+}
+
 /** The one toast a launch's warnings make, or `null` when there is nothing to say. */
 export function launchWarningsToast(input: {
   kind: LaunchTarget["kind"];
   warnings: readonly LaunchWarning[];
   nameOf: (integrationId: string) => string;
 }): { message: string; description: string; connectable: boolean } | null {
-  const causes = new Map<string, WarningCause>();
-  for (const w of input.warnings) {
-    if (!w.field.startsWith("integrations.")) continue;
-    const id = integrationIdOfField(w.field);
-    if (!causes.has(id)) causes.set(id, causeOf(w));
-  }
+  const causes = causesOf(input.warnings);
   if (causes.size === 0) return null;
   const count = causes.size;
   const distinct = new Set(causes.values());

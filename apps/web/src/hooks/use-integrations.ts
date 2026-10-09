@@ -138,15 +138,33 @@ export function useIntegrations() {
   );
 }
 
-/** Display name from the cached {@link useIntegrations} list (never fetched), else the id. */
-export function useCachedIntegrationName(): (integrationId: string) => string {
+type IntegrationNameOf = (integrationId: string) => string;
+
+/**
+ * Display names from the {@link useIntegrations} list: the cached one, else fetched once through
+ * the same query when readable. The id stands in for any name the list cannot give.
+ */
+export async function loadIntegrationNames(
+  qc: QueryClient,
+  scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
+): Promise<IntegrationNameOf> {
+  const options = $api.queryOptions("get", "/api/integrations", {
+    params: { header: scope.header },
+  });
+  const envelope = scope.enabled
+    ? await qc.ensureQueryData(options).catch(() => undefined)
+    : qc.getQueryData<{ data: IntegrationSummaryWire[] }>(options.queryKey);
+  // Spec-pinned (see IntegrationSummaryWire): only `manifest` is narrowed.
+  const list = envelope?.data as IntegrationSummaryWire[] | undefined;
+  return (integrationId) =>
+    list?.find((i) => i.id === integrationId)?.manifest.display_name ?? integrationId;
+}
+
+/** {@link loadIntegrationNames} in the current org/space scope. */
+export function useIntegrationNames(): () => Promise<IntegrationNameOf> {
   const qc = useQueryClient();
-  const { header } = useIntegrationsReadScope();
-  const { queryKey } = $api.queryOptions("get", "/api/integrations", { params: { header } });
-  return (integrationId) => {
-    const list = qc.getQueryData<{ data: IntegrationSummaryWire[] }>(queryKey)?.data;
-    return list?.find((i) => i.id === integrationId)?.manifest.display_name ?? integrationId;
-  };
+  const scope = useIntegrationsReadScope();
+  return () => loadIntegrationNames(qc, scope);
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {

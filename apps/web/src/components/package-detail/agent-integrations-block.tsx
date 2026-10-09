@@ -21,9 +21,12 @@ import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
+  requiredNoneReason,
+  REQUIRED_NONE_LABEL_KEYS,
   unboundReason,
   UNBOUND_LABEL_KEYS,
 } from "../integration-connect/integration-run-readiness";
+import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -187,6 +190,7 @@ function ManagedIntegrationCard({
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
   const unbound = entry ? unboundReason(entry) : null;
+  const requiredNone = resolution ? requiredNoneReason(resolution) : null;
 
   // The verdict can know it is off when the list did not; an `inactive` verdict is a warning,
   // so the run starts without it.
@@ -200,18 +204,15 @@ function ManagedIntegrationCard({
     <CardShell
       title={displayName}
       subtitle={packageId}
-      extraSubtitle={unbound ? t(UNBOUND_LABEL_KEYS[unbound]) : reuseInfo}
-      badge={
-        entry?.required ? (
-          <Badge
-            variant="secondary"
-            className="text-[0.6rem]"
-            data-testid={`integration-required-${packageId}`}
-          >
-            {t("detail.integrationRequiredBadge")}
-          </Badge>
-        ) : null
+      extraSubtitle={
+        requiredNone
+          ? t(REQUIRED_NONE_LABEL_KEYS[requiredNone])
+          : unbound
+            ? t(UNBOUND_LABEL_KEYS[unbound])
+            : reuseInfo
       }
+      extraSubtitleAlert={requiredNone !== null}
+      badge={entry?.required ? <RequiredBadge packageId={packageId} /> : null}
     >
       <IntegrationConnectionPicker
         integrationId={packageId}
@@ -244,7 +245,11 @@ function InactiveIntegrationCard({
   const canActivate = maySetPackageActive(spaceGrant, "integration", true);
 
   return (
-    <CardShell title={displayName} subtitle={packageId}>
+    <CardShell
+      title={displayName}
+      subtitle={packageId}
+      badge={required ? <RequiredBadge packageId={packageId} /> : null}
+    >
       <span className="flex items-center gap-3">
         <span
           className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-right text-xs`}
@@ -278,6 +283,19 @@ function InactiveIntegrationCard({
   );
 }
 
+function RequiredBadge({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <Badge
+      variant="secondary"
+      className="text-[0.6rem]"
+      data-testid={`integration-required-${packageId}`}
+    >
+      {t("detail.integrationRequiredBadge")}
+    </Badge>
+  );
+}
+
 function buildReuseInfo(
   connections: IntegrationCandidate[],
   agentCount: number,
@@ -298,6 +316,7 @@ function CardShell({
   badge,
   subtitle,
   extraSubtitle,
+  extraSubtitleAlert = false,
   children,
 }: {
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
@@ -307,6 +326,8 @@ function CardShell({
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
   extraSubtitle?: string | null;
+  /** The second line explains a refused run, in the picker's warning tone. */
+  extraSubtitleAlert?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -323,7 +344,10 @@ function CardShell({
             <span className="truncate font-mono">{subtitle}</span>
           </div>
           {extraSubtitle && (
-            <div className="text-muted-foreground/80 mt-0.5 truncate text-[0.65rem]">
+            <div
+              className={`${extraSubtitleAlert ? AMBER_TEXT : "text-muted-foreground/80"} mt-0.5 truncate text-[0.65rem]`}
+              title={extraSubtitle}
+            >
               {extraSubtitle}
             </div>
           )}

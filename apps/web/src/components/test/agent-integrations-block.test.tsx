@@ -2,7 +2,8 @@
 
 /**
  * An agent's integration card against its readiness entry: a "Requise" badge
- * for an integration the agent requires, and — for one the run starts without —
+ * for an integration the agent requires (active or not), why a stored none
+ * blocks the launch of a required one, and — for one the run starts without —
  * why: switched off in the space, a pin to none (whose), connections on another
  * auth method, only other members' shared connections, or nothing usable. Switched off reads as blocking only
  * for a required integration.
@@ -17,6 +18,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { AgentIntegrationsBlock } = await import("../package-detail/agent-integrations-block.tsx");
 const { $api } = await import("../../api/client.ts");
+const { AMBER_TEXT } = await import("../integration-connect/connection-picker-states.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 
@@ -132,6 +134,30 @@ describe("AgentIntegrationsBlock — required", () => {
     expect(blocked).not.toContain(label("integrationUnbound"));
     expect(renderCard(unbound())).not.toContain(`integration-required-${GMAIL}`);
   });
+
+  it("badges a required integration switched off in the space, too", () => {
+    const html = renderCard(unbound(), { active: false, required: true, blocking: true });
+    expect(html).toContain(`integration-activate-${GMAIL}`);
+    expect(html).toContain(`integration-required-${GMAIL}`);
+    expect(renderCard(unbound(), { active: false })).not.toContain(`integration-required-${GMAIL}`);
+  });
+
+  it("explains a stored none on a required integration: the launch is blocked, and whose choice", () => {
+    const refused = { error_code: "required_integration_unbound" as const, warning_code: null };
+    const required = { required: true, blocking: true };
+    const admin = renderCard(unbound({ ...refused, admin_pinned_connection_ids: [] }), required);
+    expect(admin).toContain(label("integrationRequiredNoneAdmin"));
+    // The subtitle itself takes the picker's warning tone.
+    expect(admin).toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(admin).not.toContain(label("integrationUnboundAdminNone"));
+    expect(admin).toContain(`member-picker-${GMAIL}`);
+
+    const member = renderCard(unbound({ ...refused, member_pinned_connection_ids: [] }), required);
+    expect(member).toContain(label("integrationRequiredNoneMember"));
+    expect(member).toContain(`${AMBER_TEXT} mt-0.5`);
+    expect(member).not.toContain(label("integrationUnboundMemberNone"));
+    expect(member).toContain(`member-picker-${GMAIL}`);
+  });
 });
 
 describe("AgentIntegrationsBlock — why the run starts without it", () => {
@@ -170,6 +196,7 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
     );
     expect(html).toContain(label("integrationUnboundAdminNone"));
     expect(html).not.toContain(label("integrationUnbound"));
+    expect(html).not.toContain(`${AMBER_TEXT} mt-0.5`);
   });
 
   it("the member's own pin to none", () => {

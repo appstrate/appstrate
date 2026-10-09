@@ -96,3 +96,27 @@ export const UNBOUND_LABEL_KEYS: Record<UnboundReason, string> = {
   shared_only: "detail.integrationUnboundSharedOnly",
   not_connected: "detail.integrationUnbound",
 };
+
+type RequiredNoneReason = "admin_none" | "member_none" | "none";
+
+/**
+ * Who chose no connection for an integration the agent requires — which refuses the run —
+ * else `null`. An admin pin outranks the member's.
+ */
+export function requiredNoneReason(
+  resolution: Pick<
+    IntegrationAgentResolution,
+    "error_code" | "admin_pinned_connection_ids" | "member_pinned_connection_ids"
+  >,
+): RequiredNoneReason | null {
+  if (resolution.error_code !== "required_integration_unbound") return null;
+  if (resolution.admin_pinned_connection_ids?.length === 0) return "admin_none";
+  if (resolution.member_pinned_connection_ids?.length === 0) return "member_none";
+  return "none";
+}
+
+export const REQUIRED_NONE_LABEL_KEYS: Record<RequiredNoneReason, string> = {
+  admin_none: "detail.integrationRequiredNoneAdmin",
+  member_none: "detail.integrationRequiredNoneMember",
+  none: "detail.integrationRequiredNone",
+};

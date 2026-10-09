@@ -8,7 +8,12 @@
 
 import { afterAll, describe, expect, it } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
-import { isViewersLaunch, launchWarningsToast, type LaunchWarning } from "../launch-warnings.ts";
+import {
+  hasLaunchWarnings,
+  isViewersLaunch,
+  launchWarningsToast,
+  type LaunchWarning,
+} from "../launch-warnings.ts";
 
 await i18nReady;
 afterAll(async () => {
@@ -103,6 +108,16 @@ describe("launchWarningsToast — why", () => {
     expect(toast?.connectable).toBe(true);
   });
 
+  it("an api_key integration not connected offers to connect, like an oauth2 one", async () => {
+    await i18n.changeLanguage("fr");
+    // The server names the auth key for any type; only oauth2 also carries a connect_url.
+    const toast = describeOf([warning("@acme/gmail", { auth_key: "primary" })]);
+    expect(toast?.description).toBe(
+      i18n.t("agents:launchWarnings.cause.notConnected", { count: 1 }),
+    );
+    expect(toast?.connectable).toBe(true);
+  });
+
   it("says a connection on another auth method is no 'not connected', and offers to connect", async () => {
     await i18n.changeLanguage("fr");
     const toast = describeOf([
@@ -145,6 +160,14 @@ describe("launchWarningsToast — why", () => {
     expect(toast?.description).toBe("L'agent est informé qu'elles sont indisponibles.");
     // Control: one of them a connection would still bring back.
     expect(toast?.connectable).toBe(true);
+  });
+});
+
+describe("hasLaunchWarnings", () => {
+  it("is true exactly when the toast has something to say", () => {
+    expect(hasLaunchWarnings([])).toBe(false);
+    expect(hasLaunchWarnings([warning("x", { field: "input.prompt" })])).toBe(false);
+    expect(hasLaunchWarnings([warning("@acme/gmail")])).toBe(true);
   });
 });
 
