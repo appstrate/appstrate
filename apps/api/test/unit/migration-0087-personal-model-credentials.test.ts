@@ -98,7 +98,7 @@ describe("0087 — personal model credentials", () => {
     ).toBe("23502");
   });
 
-  it("gives credentials an optional owner, indexed by org and owner", async () => {
+  it("gives credentials an optional owner, indexed by owner", async () => {
     const column = await pg.query<{ data_type: string; is_nullable: string }>(
       `SELECT data_type, is_nullable FROM information_schema.columns
         WHERE table_name = 'model_provider_credentials' AND column_name = 'owner_user_id'`,

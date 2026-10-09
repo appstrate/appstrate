@@ -52,6 +52,7 @@ import { toLaunchOverrides } from "../services/integration-connection-resolver.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
@@ -395,6 +396,7 @@ export function createRunsRouter() {
           agent: effectiveAgent,
           orgId,
           actor,
+          payerUserId: requestPayerUserId(c),
           // `parseRequestInput` collapses an effectively-empty input to
           // `undefined`; map that to NULL so an input-less run persists
           // `runs.input` as SQL NULL (one representation across all origins).
@@ -820,6 +822,7 @@ export function createRunsRouter() {
           orgId,
           spaceId,
           actor,
+          payerUserId: requestPayerUserId(c),
           runId,
           preflight: effectivePreflight,
           parsed,

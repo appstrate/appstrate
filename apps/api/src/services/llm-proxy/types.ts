@@ -11,29 +11,13 @@
 
 /**
  * Principal that minted the proxy call — mirrors credential-proxy. A `run` is a
- * platform run's own sidecar, authenticated by its run token; `payerUserId` is
- * the user whose personal model credentials may serve it (see `runPayerUserId`).
+ * platform run's own sidecar, authenticated by its run token; its model is the
+ * one the run launched with, served by the credential frozen at launch.
  */
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }
   | { kind: "jwt_user"; userId: string; orgId: string }
-  | { kind: "run"; orgId: string; payerUserId: string | null };
-
-/**
- * The user whose personal model credentials may serve a proxy call: a cookie or
- * OIDC user session is its own payer; an API key carries none, so its calls spend
- * the organization's credentials only; a run pays through its payer.
- */
-export function payerOf(principal: LlmProxyPrincipal): string | null {
-  switch (principal.kind) {
-    case "api_key":
-      return null;
-    case "jwt_user":
-      return principal.userId;
-    case "run":
-      return principal.payerUserId;
-  }
-}
+  | { kind: "run"; orgId: string };
 
 /**
  * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API

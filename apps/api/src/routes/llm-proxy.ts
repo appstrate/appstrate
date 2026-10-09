@@ -67,7 +67,7 @@ import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { proxyStatusMarker } from "../lib/proxy-status.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
-import { runPayerOf } from "../services/model-providers/credential-chain.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
 import {
@@ -139,9 +139,10 @@ export function createRunLlmProxyRouter() {
         throw forbidden("This run's inference is not served by the platform LLM proxy");
       }
       const orgId = run.orgId;
-      const payerUserId = runPayerOf(run);
       return proxyAndLog(c, apiShape, limits, {
-        principal: { kind: "run", orgId, payerUserId },
+        principal: { kind: "run", orgId },
+        payerUserId: null,
+        pinned: { credentialId: run.modelCredentialId },
         runId,
         chatSessionId: null,
         presetId: run.modelId,
@@ -216,6 +217,7 @@ async function handleProxy(
 
   return proxyAndLog(c, apiShape, limits, {
     principal,
+    payerUserId: requestPayerUserId(c),
     runId,
     chatSessionId,
     beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
@@ -225,7 +227,7 @@ async function handleProxy(
 /** The caller-specific half of a proxy call; the rest is shared by both entries. */
 type ProxyCaller = Pick<
   Parameters<typeof proxyLlmCall>[0],
-  "principal" | "runId" | "chatSessionId" | "presetId" | "beforeUpstream"
+  "principal" | "payerUserId" | "pinned" | "runId" | "chatSessionId" | "presetId" | "beforeUpstream"
 >;
 
 /**

@@ -218,4 +218,45 @@ describe("run payer — personal model credentials", () => {
       await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
     }
   });
+
+  // ── the other doors ───────────────────────────────────────
+
+  it("lists a model as billed to the caller's own key, and to the org for an API key", async () => {
+    await seedBoundDefault();
+    const member = await memberContext(ctx, "member", "builder");
+    await seedPersonalKey(member.user.id, "member-key");
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: member.user.id,
+      scopes: ["models:read"],
+    });
+    const [model] = await db
+      .select({ id: orgModels.id })
+      .from(orgModels)
+      .where(eq(orgModels.orgId, ctx.orgId));
+    const orgModelId = model!.id;
+
+    const billedTo = async (headers: Record<string, string>) => {
+      const res = await app.request("/api/models", { headers });
+      expect(res.status).toBe(200);
+      const { data } = (await res.json()) as { data: { id: string; billed_to: string | null }[] };
+      return data.find((m) => m.id === orgModelId)?.billed_to;
+    };
+
+    expect(await billedTo(authHeaders(member))).toBe("user");
+    expect(await billedTo({ Authorization: `Bearer ${key.rawKey}` })).toBe("org");
+  });
+
+  it("refuses to discover another member's personal credential as absent", async () => {
+    const member = await memberContext(ctx, "member", "builder");
+    const personalId = await seedPersonalKey(member.user.id, "member-key");
+
+    const res = await app.request("/api/model-provider-credentials/discover", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentialId: personalId }),
+    });
+    expect(res.status).toBe(404);
+  });
 });

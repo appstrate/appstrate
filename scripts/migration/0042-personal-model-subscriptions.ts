@@ -8,14 +8,16 @@
  *     bun scripts/migration/0042-personal-model-subscriptions.ts [--apply]
  *
  * A subscription (an `oauth` model credential) serves only the member who connected it, so the
- * rows written before drizzle `0087` are re-homed: a subscription with a creator
- * (`created_by`) becomes theirs (`owner_user_id`); one with no creator is an orphan, deleted with
- * its pairings. Organization models bound to any subscription are unbound (`credential_id` NULL,
- * `provider_id` kept), so each member now brings their own credential for them. Subscriptions are
- * recognised by decrypting the blob (`kind === "oauth"`), never through the provider registry: the
- * subscription modules are absent in production. A blob that does not decrypt is reported and left
- * as it is. Run after the deploy, app up, `pg_dump` first. Refuses an empty `DATABASE_URL`. One
- * transaction per organization; dry run by default (each rolled back), `--apply` commits. Idempotent.
+ * rows written before drizzle `0087` are re-homed: a subscription whose creator (`created_by`) is
+ * still a member of its organization (`org_members`) becomes theirs (`owner_user_id`); one with no
+ * creator, or whose creator has left the organization, is an orphan, deleted with its pairings.
+ * Organization models bound to any subscription are unbound (`credential_id` NULL, `provider_id`
+ * kept), so each member now brings their own credential for them. Subscriptions are recognised by
+ * decrypting the blob (`kind === "oauth"`), never through the provider registry: the subscription
+ * modules are absent in production. A blob that does not decrypt is reported and left as it is.
+ * Run after the deploy, app up, `pg_dump` first, and while no run is active. Refuses an empty
+ * `DATABASE_URL`. One transaction per organization; dry run by default (each rolled back), `--apply`
+ * commits. Idempotent.
  */
 
 import { parseArgs } from "node:util";
@@ -23,6 +25,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   modelProviderCredentials as c,
   modelProviderPairings,
+  organizationMembers,
   orgModels,
   runs,
   user,
@@ -119,8 +122,20 @@ export async function runPersonalModelSubscriptions(options: {
         await tx.execute("SET LOCAL statement_timeout = '300s'");
         // Re-read under row locks: a subscription another writer re-homed since the scan is left alone.
         const live = await tx
-          .select({ id: c.id, label: c.label, createdBy: c.createdBy })
+          .select({
+            id: c.id,
+            label: c.label,
+            createdBy: c.createdBy,
+            creatorIsMember: organizationMembers.userId,
+          })
           .from(c)
+          .leftJoin(
+            organizationMembers,
+            and(
+              eq(organizationMembers.orgId, c.orgId),
+              eq(organizationMembers.userId, c.createdBy),
+            ),
+          )
           .where(
             and(
               eq(c.orgId, orgId),
@@ -131,9 +146,9 @@ export async function runPersonalModelSubscriptions(options: {
               ),
             ),
           )
-          .for("update");
-        const owned = live.filter((r) => r.createdBy !== null);
-        const orphans = live.filter((r) => r.createdBy === null);
+          .for("update", { of: c });
+        const owned = live.filter((r) => r.creatorIsMember !== null);
+        const orphans = live.filter((r) => r.creatorIsMember === null);
         const liveIds = live.map((r) => r.id);
         const orphanIds = orphans.map((r) => r.id);
 

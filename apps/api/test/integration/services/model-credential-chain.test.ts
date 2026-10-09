@@ -4,7 +4,9 @@
  * Who pays for a model. A member's own credential serves a model it applies to,
  * first; then the org binding; an unbound model (`credential_id` NULL) with no
  * credential for the caller resolves unbound and cannot be spent. Pins the chain
- * in `loadModel`, the write-side invariants, and the `billed_to` listing.
+ * in `loadModel`, the LLM proxy's subscription-free chain, the run's pinned
+ * credential in `loadPinnedModel`, the write-side invariants, and the `billed_to`
+ * listing.
  */
 
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
@@ -17,21 +19,24 @@ import {
   createOrgModel,
   listOrgModels,
   loadModel,
+  loadPinnedModel,
   requireBoundModel,
   resolveModel,
   setDefaultModel,
 } from "../../../src/services/org-models.ts";
-import {
-  applicableCredentialIds,
-  runPayerOf,
-} from "../../../src/services/model-providers/credential-chain.ts";
+import { applicableCredentialIds } from "../../../src/services/model-providers/credential-chain.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
-import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import {
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
+} from "../../helpers/seed.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 getTestApp(); // boots the model and provider registries
 
@@ -56,14 +61,17 @@ describe("applicableCredentialIds", () => {
       ),
     ).toEqual(["older", "newer"]);
   });
-});
 
-describe("runPayerOf", () => {
-  it("pays with the run's user, never with an end-user or an API key", () => {
-    expect(runPayerOf({ userId: "usr_1", endUserId: null, apiKeyId: null })).toBe("usr_1");
-    expect(runPayerOf({ userId: "usr_1", endUserId: null, apiKeyId: "key_1" })).toBeNull();
-    expect(runPayerOf({ userId: null, endUserId: "eu_1", apiKeyId: null })).toBeNull();
-    expect(runPayerOf({ userId: null, endUserId: null, apiKeyId: null })).toBeNull();
+  it("drops the subscriptions when asked to, and only then", () => {
+    const credentials = [
+      { id: "subscription", providerId: TEST_OAUTH_PROVIDER_ID, createdAt: new Date("2026-01-01") },
+      { id: "key", providerId: "openai", createdAt: new Date("2026-02-01") },
+    ];
+    const target = { providerId: "openai", modelId: TEST_OAUTH_MODEL_ID };
+    expect(applicableCredentialIds(credentials, target)).toEqual(["subscription", "key"]);
+    expect(applicableCredentialIds(credentials, target, { excludeSubscriptions: true })).toEqual([
+      "key",
+    ]);
   });
 });
 
@@ -88,13 +96,23 @@ describe("model resolution — a member's own credential first", () => {
     });
   }
 
-  async function personalAnthropicKey(userId: string, apiKey: string) {
+  async function orgOpenAiKey() {
+    return seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "Org OpenAI",
+      providerId: "openai",
+      apiShape: "openai-responses",
+      apiKey: "sk-org",
+    });
+  }
+
+  async function personalKey(userId: string, providerId: string, apiKey: string) {
     const [row] = await db
       .insert(modelProviderCredentials)
       .values({
         orgId: ctx.orgId,
         label: `Personal ${apiKey}`,
-        providerId: "anthropic",
+        providerId,
         credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
         ownerUserId: userId,
       })
@@ -103,6 +121,9 @@ describe("model resolution — a member's own credential first", () => {
     clearResolvedModelCache();
     return row!;
   }
+
+  const personalAnthropicKey = (userId: string, apiKey: string) =>
+    personalKey(userId, "anthropic", apiKey);
 
   it("serves an org anthropic model with the owner's personal key, and the org key to anyone else", async () => {
     const org = await orgAnthropicKey();
@@ -339,5 +360,87 @@ describe("model resolution — a member's own credential first", () => {
     expect(billedTo(forBob, unbound)).toBeNull();
 
     expect(billedTo(await listOrgModels(ctx.orgId, null), bound.id)).toBe("org");
+  });
+
+  it("the LLM proxy's chain skips a personal subscription and serves the org key", async () => {
+    const org = await orgOpenAiKey();
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "openai",
+      modelId: TEST_OAUTH_MODEL_ID,
+      label: "GPT",
+    });
+    const subscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Alice's subscription",
+      ownerUserId: ctx.user.id,
+    });
+    clearResolvedModelCache();
+
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
+      credentialId: subscription.id,
+    });
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id, { viaProxy: true })).toMatchObject({
+      credentialSource: "org",
+      credentialId: org.id,
+      apiKey: "sk-org",
+    });
+  });
+
+  it("a pinned personal credential keeps serving its run after the payer adds a subscription", async () => {
+    const org = await orgOpenAiKey();
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "openai",
+      modelId: TEST_OAUTH_MODEL_ID,
+      label: "GPT",
+    });
+    const mine = await personalKey(ctx.user.id, "openai", "sk-alice");
+    const subscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Alice's subscription",
+      ownerUserId: ctx.user.id,
+    });
+    clearResolvedModelCache();
+
+    // The chain now prefers the subscription; the run launched before it keeps its pin.
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
+      credentialId: subscription.id,
+    });
+    expect(await loadPinnedModel(ctx.orgId, model.id, mine.id)).toMatchObject({
+      credentialSource: "org",
+      credentialId: mine.id,
+      apiKey: "sk-alice",
+    });
+  });
+
+  it("a personal credential whose key is not in the keyring is skipped for the org key", async () => {
+    const org = await orgAnthropicKey();
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "anthropic",
+      modelId: ANTHROPIC_A,
+      label: "Claude",
+    });
+    const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
+    // Sealed under a key id this process does not hold.
+    const [version, , payload] = mine.credentialsEncrypted.split(":");
+    await db
+      .update(modelProviderCredentials)
+      .set({ credentialsEncrypted: `${version}:unknown-kid:${payload}` })
+      .where(eq(modelProviderCredentials.id, mine.id));
+    clearResolvedModelCache();
+
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
+      credentialSource: "org",
+      credentialId: org.id,
+      apiKey: "sk-org",
+    });
+    expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("org");
   });
 });

@@ -21,7 +21,6 @@ import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { resolveModel } from "./org-models.ts";
-import { runPayerUserId } from "./model-providers/credential-chain.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -88,6 +87,11 @@ interface RunPipelineParams {
   agent: LoadedPackage;
   orgId: string;
   actor: Actor | null;
+  /**
+   * Whose personal model credentials may serve the run, or `null` for none (a
+   * schedule, an API key, a delegate): the door's `requestPayerUserId(c)`.
+   */
+  payerUserId: string | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   /**
@@ -371,6 +375,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     scheduleId,
     spaceId,
     apiKeyId,
+    payerUserId,
   } = params;
   // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
   // loads with its earlier `resolveRunPreflight` call) or create one scoped
@@ -395,7 +400,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
   // model component costs nothing. An unbound model (`credentialSource` null)
   // is refused downstream by `requireBoundModel`.
-  const payerUserId = runPayerUserId({ actor, apiKeyId });
   const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null, payerUserId);
   const credentialSourceForGate = gateModel?.credentialSource ?? null;
 

@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Migration `0042` against the test database: a subscription with a creator becomes theirs, an
- * orphan (no creator) and its pairings are deleted, every organization model bound to a
- * subscription is unbound, an API-key credential is left alone; a dry run writes nothing; a re-run
- * is a no-op; the report names the members who ran on a subscription they do not own; a blob that
- * does not decrypt is reported and kept.
+ * Migration `0042` against the test database: a subscription whose creator is still a member
+ * becomes theirs; an orphan (no creator, or a creator who has left the organization) and its
+ * pairings are deleted; every organization model bound to a subscription is unbound; an API-key
+ * credential is left alone; a dry run writes nothing; a re-run is a no-op; the report names the
+ * members who ran on a subscription they do not own; a blob that does not decrypt is reported and
+ * kept.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, modelProviderPairings, orgModels } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  modelProviderPairings,
+  organizationMembers,
+  orgModels,
+} from "@appstrate/db/schema";
 import { runPersonalModelSubscriptions } from "../migration/0042-personal-model-subscriptions.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import {
@@ -152,6 +158,37 @@ describe("0042 — model subscriptions become personal", () => {
     expect((await modelOf(orphanModel.id)).credentialId).toBeNull();
     expect((await modelOf(keyModel.id)).credentialId).toBe(apiKey.id);
     expect(await rowOf(apiKey.id)).toEqual(apiKeyBefore!);
+  });
+
+  it("a subscription whose creator has left the organization is an orphan: deleted with its pairings", async () => {
+    const leaver = await createTestUser();
+    await addOrgMember(ctx.orgId, leaver.id, "member");
+    const subscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: leaver.id,
+    });
+    const pairing = await seedPairing(subscription.id);
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: subscription.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-leaver",
+    });
+    await db
+      .delete(organizationMembers)
+      .where(
+        and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, leaver.id)),
+      );
+
+    const result = await run(true);
+
+    expect(result.orgs[0]!.owned).toEqual([]);
+    expect(result.orgs[0]!.orphans.map((r) => r.id)).toEqual([subscription.id]);
+    expect(await rowOf(subscription.id)).toBeUndefined();
+    expect(await pairingExists(pairing)).toBe(false);
+    expect((await modelOf(model.id)).credentialId).toBeNull();
+    expect((await modelOf(model.id)).providerId).toBe(SUBSCRIPTION_PROVIDER);
   });
 
   it("a re-run is a no-op", async () => {

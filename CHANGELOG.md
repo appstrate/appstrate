@@ -139,22 +139,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `set -a && . ./.env && set +a && bun scripts/migration/0042-personal-model-subscriptions.ts`;
   2. read its report per organization, then run it with `--apply`.
 
+  Apply while no run is active: a run pinned to a subscription its launcher
+  did not create is refused by the sidecar token door (403) once that
+  subscription becomes personal. Until 0042 is applied, existing
+  organization-owned subscriptions keep serving every member as before.
+
   It makes every existing subscription (an `oauth` model credential,
   recognised by its decrypted blob, never by the provider registry) personal
-  to its creator, deletes the orphans (no creator) with their pairings, and
-  unbinds the organization models bound to a subscription, so each member
-  brings their own credential for them. It lists the members who ran on a
-  subscription they did not own. One transaction per organization; a second
-  run changes nothing. Production never enables a subscription module, so the
-  report should show zero subscriptions there; any it shows is a decision to
-  take before `--apply`.
+  to its creator when that creator is still a member of the organization.
+  It deletes the orphans (no creator, or a creator who has left the
+  organization) with their pairings, and unbinds the organization models
+  bound to a subscription, so each member brings their own credential for
+  them. It lists the members who ran on a subscription they did not own. One
+  transaction per organization; a second run changes nothing. Production
+  never enables a subscription module, so the report should show zero
+  subscriptions there; any it shows is a decision to take before `--apply`.
 
 ### Changed
 
 - **BREAKING (API): a model is paid by its payer's own credential first**
   (#1875). A call is served by the payer's personal credential when one
   applies (a subscription, or an API key on a fixed endpoint), else by the
-  model's organization credential. The chain is in
+  model's organization credential. Only a user principal pays (session, CLI,
+  MCP instance token, chat loopback): an API key, a third-party OAuth token,
+  an end user and a schedule spend organization credentials only. The LLM
+  proxy never serves a subscription, and a run's proxy calls serve the
+  credential frozen at launch. The chain is in
   `docs/architecture/MODEL_ALIASES.md`, "Who pays".
   - The model DTO's `credentialId` is nullable (`null`: each member brings
     their own credential). It adds `credential_label` (the organization
@@ -174,8 +184,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     own credential, and a payer without one gets
     `409 model_credential_required`. An aliased model never takes a personal
     credential.
-  - The sidecar's token door refuses a subscription to any run its owner did
-    not pay for (403).
+  - The sidecar's token door serves a subscription only to a platform run
+    launched by its owner with no API key; any other run is refused (403).
+    A schedule never spends a personal credential.
   - `llm_usage.credential_id` records the credential that served each call
     (proxy, runner and chat rows).
 - **BREAKING (modules): the chat platform services take the session user**

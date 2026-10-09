@@ -618,6 +618,8 @@ export async function triggerScheduledRun(
         agent,
         orgId,
         actor,
+        // A schedule never spends a personal credential: organization credentials only.
+        payerUserId: null,
         input: resolvedInput,
         modelId: finalModelId,
         generationConfig: packageSettings.generationConfig,

@@ -206,12 +206,17 @@ billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 The model is resolved first, by the cascade, which is actor-free. Then the
 payer decides which credential serves the call (`loadModel`,
 `services/org-models.ts`; the chain in `services/model-providers/credential-chain.ts`).
-The payer is the user whose personal credentials may serve the call, or nobody:
+The payer is the user whose personal credentials may serve the call, or nobody.
+Only a user principal pays: `requestPayerUserId(c)` (`services/model-providers/credential-chain.ts`)
+returns the caller's id when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), and
+`null` otherwise. Each door computes it once per request and passes it on: the run pipeline takes
+`payerUserId` as a required parameter and never derives it.
 
-- a session, CLI, MCP or chat call, or a delegated OAuth token: that user;
-- a schedule: the schedule's user;
-- a run: `runs.user_id`, unless `runs.api_key_id` is set;
-- an API key, an end-user token or an OIDC end-user token: nobody.
+- a session, CLI, MCP instance token or chat loopback: that user;
+- an API key, a third-party OAuth token, an end user or an OIDC end-user token: nobody;
+- a schedule: nobody, whoever wrote it and whoever is named as its actor. A schedule spends
+  organization credentials only;
+- a run: the payer its launch door computed, by the same rule.
 
 For a payer, the call is served by, in order:
 
@@ -231,12 +236,16 @@ in the listing and in `assertExplicitModelExists`. `billed_to` on
 `GET /api/models` tells the caller who pays: `user`, `org`, or `null` when
 neither applies.
 
-The LLM proxy re-resolves the chain on every call with the run's payer, so a
-credential removed during a run stops serving its next call. The sidecar's token
-door (`/internal/oauth-token/{credentialId}`) gives a subscription's token only
-to a run whose payer owns it, and refuses an API-key run, which pays for
-nothing. `llm_usage.credential_id` records the credential that served each
-call.
+The public LLM proxy (`/api/llm-proxy`) never serves a subscription: its chain
+runs with `viaProxy`, which skips oauth2 credentials, so a call falls to the
+caller's other personal credential or to the organization binding. A run's
+inference through the LLM proxy serves the credential frozen at launch
+(`runs.model_credential_id`) and is not re-resolved during the run: a credential
+the payer adds mid-run changes nothing, and one removed mid-run stops serving
+that run's calls. The sidecar's token door (`/internal/oauth-token/{credentialId}`)
+gives a subscription's token only to a platform run pinned to that credential,
+launched by its owner with no API key (`runs.api_key_id` NULL); any other run is
+refused. `llm_usage.credential_id` records the credential that served each call.
 
 ## Error surfaces: synthesize, never scrub
 

@@ -18,7 +18,7 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
-import { loadModel, requireBoundModel, type BoundModel } from "../org-models.ts";
+import { loadModel, loadPinnedModel, requireBoundModel, type BoundModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
@@ -36,7 +36,7 @@ import {
   parseProxyRequest,
 } from "./helpers.ts";
 import { DEFAULT_MAX_REQUEST_BYTES, forwardMeteredResponse, usageFrameBound } from "./metering.ts";
-import { payerOf, type LlmProxyAdapter, type LlmProxyPrincipal } from "./types.ts";
+import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { checkEgressUrl, egressGuardedFetch } from "../../lib/egress-host-guard.ts";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
@@ -50,6 +50,16 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
+  /**
+   * The public route's payer (`requestPayerUserId(c)`): whose personal credentials
+   * may serve the call, a subscription excluded. Unused when `pinned` is set.
+   */
+  payerUserId: string | null;
+  /**
+   * A run's own inference: its preset is served by the credential frozen at launch
+   * (`runs.model_credential_id`, null for an organization key), never by a chain.
+   */
+  pinned?: { credentialId: string | null };
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -159,7 +169,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
 
   const request = parseProxyRequest(inputs.rawBody);
   const presetId = inputs.presetId ?? request.presetId;
-  const resolved = await resolvePresetForOrg(presetId, inputs.principal, inputs.adapter.apiShape);
+  const resolved = await resolvePresetForOrg(presetId, inputs, inputs.adapter.apiShape);
 
   // No fingerprint forging: an OAuth-subscription provider has no path through
   // this generic gateway (a bare bearer won't satisfy a subscription upstream).
@@ -399,12 +409,15 @@ function unreachableUpstream(presetId: string, code: UpstreamFailureCode): ApiEr
 
 async function resolvePresetForOrg(
   presetId: string,
-  principal: LlmProxyPrincipal,
+  inputs: ProxyCallInputs,
   expectedApi: string,
 ): Promise<BoundModel> {
+  const orgId = inputs.principal.orgId;
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
-    loaded = await loadModel(principal.orgId, presetId, payerOf(principal));
+    loaded = inputs.pinned
+      ? await loadPinnedModel(orgId, presetId, inputs.pinned.credentialId)
+      : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
     // and keeps its status; anything else reads as "not enabled", cause kept.

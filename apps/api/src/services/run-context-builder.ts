@@ -89,7 +89,7 @@ export async function buildRunContext(params: {
   orgId: string;
   spaceId: string;
   actor: Actor | null;
-  /** Whose personal model credentials may serve the run — see `runPayerUserId`. */
+  /** Whose personal model credentials may serve the run — see `requestPayerUserId`. */
   payerUserId: string | null;
   input?: Record<string, unknown>;
   files?: FileReference[];

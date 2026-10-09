@@ -34,6 +34,7 @@ import { loadInferenceCredentials, loadCredentialMetadata } from "./model-provid
 import {
   applicableCredentialIds,
   listPersonalCredentials,
+  servesModel,
   type PersonalCredential,
 } from "./model-providers/credential-chain.ts";
 import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
@@ -298,26 +299,33 @@ async function describeRowBinding(
   };
 }
 
-/** Whether a credential serves inference now; a key missing from the keyring reads as unusable, not as a 503. */
-async function isServingCredential(orgId: string, credentialId: string): Promise<boolean> {
+/**
+ * A personal credential's inference material. A blob whose key this process lacks
+ * reads as not serving (logged), so the chain falls through to the next credential
+ * or the org binding instead of answering a 503.
+ */
+async function loadPersonalInference(orgId: string, credentialId: string) {
   try {
-    return (await loadInferenceCredentials(orgId, credentialId)) !== null;
+    return await loadInferenceCredentials(orgId, credentialId);
   } catch (err) {
-    if (err instanceof EncryptionKeyUnavailableError) return false;
-    throw err;
+    if (!(err instanceof EncryptionKeyUnavailableError)) throw err;
+    logger.warn("Personal model credential skipped: its encryption key is not in the keyring", {
+      credentialId,
+    });
+    return null;
   }
 }
 
 /** Whose credential serves a model for the caller: its own when one applies (as resolution picks it), else the org's binding. */
 async function billedTo(
-  orgId: string,
+  isServing: (credentialId: string) => Promise<boolean>,
   personal: readonly PersonalCredential[],
   target: { providerId: string; modelId: string; aliased: boolean },
   orgUsable: boolean,
 ): Promise<"user" | "org" | null> {
   if (!target.aliased) {
     for (const credentialId of applicableCredentialIds(personal, target)) {
-      if (await isServingCredential(orgId, credentialId)) return "user";
+      if (await isServing(credentialId)) return "user";
     }
   }
   return orgUsable ? "org" : null;
@@ -350,13 +358,23 @@ export async function listOrgModels(
   const renderableRows = rows.filter((r) => bindings.has(r.id));
 
   const personal = payerUserId ? await listPersonalCredentials(orgId, payerUserId) : [];
+  // A personal credential is read once per call, however many models it applies to.
+  const servingNow = new Map<string, Promise<boolean>>();
+  const isServing = (credentialId: string): Promise<boolean> => {
+    let served = servingNow.get(credentialId);
+    if (!served) {
+      served = loadPersonalInference(orgId, credentialId).then((creds) => creds !== null);
+      servingNow.set(credentialId, served);
+    }
+    return served;
+  };
   const billing = new Map<string, "user" | "org" | null>();
   await Promise.all([
     ...Array.from(system, async ([id, def]) => {
       billing.set(
         id,
         await billedTo(
-          orgId,
+          isServing,
           personal,
           { providerId: def.providerId, modelId: def.modelId, aliased: def.aliased === true },
           true,
@@ -368,7 +386,7 @@ export async function listOrgModels(
       billing.set(
         r.id,
         await billedTo(
-          orgId,
+          isServing,
           personal,
           { providerId: binding.providerId, modelId: r.modelId, aliased: r.aliased },
           binding.usable,
@@ -1269,11 +1287,13 @@ async function resolvePersonalModel(
   orgId: string,
   head: ModelHead & { providerId: string },
   payerUserId: string | null,
+  excludeSubscriptions: boolean,
 ): Promise<ResolvedModel | null> {
   if (!payerUserId || head.aliased) return null;
   const credentials = await listPersonalCredentials(orgId, payerUserId);
-  for (const credentialId of applicableCredentialIds(credentials, head)) {
-    const creds = await loadInferenceCredentials(orgId, credentialId);
+  const applicable = applicableCredentialIds(credentials, head, { excludeSubscriptions });
+  for (const credentialId of applicable) {
+    const creds = await loadPersonalInference(orgId, credentialId);
     if (creds) return buildResolvedModel(head, { ...creds, credentialId });
   }
   return null;
@@ -1281,27 +1301,73 @@ async function resolvePersonalModel(
 
 /**
  * Resolve a model for `payerUserId` (the user whose personal credentials may serve
- * it, or `null`: no personal credential applies). `null` when the model is missing or disabled.
+ * it, or `null`: no personal credential applies). `viaProxy` is the LLM proxy's
+ * chain: subscriptions are skipped, so the org binding serves it. `null` when the
+ * model is missing or disabled.
  */
 export async function loadModel(
   orgId: string,
   modelDbId: string,
   payerUserId: string | null,
+  options?: { viaProxy?: boolean },
 ): Promise<ResolvedModel | null> {
+  const excludeSubscriptions = options?.viaProxy === true;
+  const slot = `${payerUserId ?? ""}${excludeSubscriptions ? ":proxy" : ""}`;
   const systemDef = getSystemModels().get(modelDbId);
   if (systemDef) {
     return resolveModelCached(
       orgId,
       modelDbId,
-      payerUserId,
+      slot,
       async () =>
-        (await resolvePersonalModel(orgId, systemDef, payerUserId)) ??
+        (await resolvePersonalModel(orgId, systemDef, payerUserId, excludeSubscriptions)) ??
         buildSystemResolvedModel(systemDef),
     );
   }
-  return resolveModelCached(orgId, modelDbId, payerUserId, () =>
-    resolveDbModel(orgId, modelDbId, payerUserId),
+  return resolveModelCached(orgId, modelDbId, slot, () =>
+    resolveDbModel(orgId, modelDbId, payerUserId, excludeSubscriptions),
   );
+}
+
+/**
+ * The model a run was launched on, served by the credential frozen at launch
+ * (`runs.model_credential_id`): no chain and no payer check, since that choice was
+ * made then. `credentialId` null is the unpinned run, resolved as {@link loadModel}
+ * with no payer. `null` when the model is missing or disabled, or the pinned
+ * credential no longer serves it.
+ */
+export async function loadPinnedModel(
+  orgId: string,
+  modelDbId: string,
+  credentialId: string | null,
+): Promise<ResolvedModel | null> {
+  if (credentialId === null) return loadModel(orgId, modelDbId, null);
+  return resolveModelCached(orgId, modelDbId, `pin:${credentialId}`, () =>
+    resolvePinnedModel(orgId, modelDbId, credentialId),
+  );
+}
+
+async function resolvePinnedModel(
+  orgId: string,
+  modelDbId: string,
+  credentialId: string,
+): Promise<ResolvedModel | null> {
+  const systemDef = getSystemModels().get(modelDbId);
+  const row = systemDef ?? (await loadOrgModelHead(orgId, modelDbId));
+  if (!row || row.enabled === false) return null;
+  const binding = await loadCredentialBinding(orgId, credentialId);
+  if (!binding) return null;
+
+  if (binding.ownerUserId === null) {
+    // An organization credential serves only the model bound to it.
+    if (systemDef || row.credentialId !== credentialId) return null;
+    const creds = await loadInferenceCredentials(orgId, credentialId);
+    return creds ? buildResolvedModel(row, { ...creds, credentialId }) : null;
+  }
+  // A personal credential serves a non-aliased model it applies to.
+  if (row.aliased || !servesModel(binding.providerId, row)) return null;
+  const creds = await loadPersonalInference(orgId, credentialId);
+  return creds ? buildResolvedModel(row, { ...creds, credentialId }) : null;
 }
 
 /** Read one org row by id. A `modelDbId` that is not a valid UUID (e.g. `gpt-5.5`) is "not found", not a 500. */
@@ -1338,6 +1404,7 @@ async function resolveDbModel(
   orgId: string,
   modelDbId: string,
   payerUserId: string | null,
+  excludeSubscriptions: boolean,
 ): Promise<ResolvedModel | null> {
   const row = await loadOrgModelHead(orgId, modelDbId);
   if (!row || !row.enabled) return null;
@@ -1354,7 +1421,7 @@ async function resolveDbModel(
     );
   }
 
-  const personal = await resolvePersonalModel(orgId, row, payerUserId);
+  const personal = await resolvePersonalModel(orgId, row, payerUserId, excludeSubscriptions);
   if (personal) return personal;
 
   const { credentialId } = row;

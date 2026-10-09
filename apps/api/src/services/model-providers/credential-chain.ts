@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Context } from "hono";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
-import type { Actor } from "@appstrate/connect";
-import { actorFromIds } from "../../lib/actor.ts";
+import type { AppEnv } from "../../types/index.ts";
+import { isUserPrincipal } from "../../lib/principal.ts";
 import { lookupCatalogModel } from "../model-catalog.ts";
 import { personalModelCredentialsAllowed } from "./credentials.ts";
 import { getModelProvider } from "./registry.ts";
@@ -14,8 +15,13 @@ function familyOf(providerId: string): string {
   return getModelProvider(providerId)?.catalogProviderId ?? providerId;
 }
 
+/** A subscription (oauth2) credential: always personal, never served by the LLM proxy. */
+function isSubscription(providerId: string): boolean {
+  return getModelProvider(providerId)?.authMode === "oauth2";
+}
+
 /** Whether a personal credential of `credentialProviderId` may serve the model `target`. */
-function servesModel(
+export function servesModel(
   credentialProviderId: string,
   target: { providerId: string; modelId: string },
 ): boolean {
@@ -61,16 +67,21 @@ export async function listPersonalCredentials(
 
 /**
  * The ids of the `credentials` that may serve `target`, best first (subscriptions
- * before API keys, then oldest). Pure: no read, no policy.
+ * before API keys, then oldest). Pure: no read, no policy. `excludeSubscriptions`
+ * drops the subscriptions (the LLM proxy never serves one).
  */
 export function applicableCredentialIds(
   credentials: readonly PersonalCredential[],
   target: { providerId: string; modelId: string },
+  options: { excludeSubscriptions?: boolean } = {},
 ): string[] {
-  const rank = (providerId: string): number =>
-    getModelProvider(providerId)?.authMode === "oauth2" ? 0 : 1;
+  const rank = (providerId: string): number => (isSubscription(providerId) ? 0 : 1);
   return credentials
-    .filter((credential) => servesModel(credential.providerId, target))
+    .filter(
+      (credential) =>
+        !(options.excludeSubscriptions && isSubscription(credential.providerId)) &&
+        servesModel(credential.providerId, target),
+    )
     .sort(
       (a, b) =>
         rank(a.providerId) - rank(b.providerId) || a.createdAt.getTime() - b.createdAt.getTime(),
@@ -79,21 +90,10 @@ export function applicableCredentialIds(
 }
 
 /**
- * The user whose personal credentials may serve a run: its user actor, unless an
- * API key launched it (an API key spends no member's credential).
+ * The user whose personal credentials may serve a call of this request: the caller
+ * when it is the platform user itself (see `isUserPrincipal`), never a delegate
+ * (API key, third-party OAuth token) or an end user.
  */
-export function runPayerUserId(run: {
-  actor: Actor | null;
-  apiKeyId?: string | null;
-}): string | null {
-  return run.actor?.type === "user" && !run.apiKeyId ? run.actor.id : null;
-}
-
-/** {@link runPayerUserId} of a run row: the same derivation wherever a run's payer is read. */
-export function runPayerOf(run: {
-  userId: string | null;
-  endUserId: string | null;
-  apiKeyId: string | null;
-}): string | null {
-  return runPayerUserId({ actor: actorFromIds(run.userId, run.endUserId), apiKeyId: run.apiKeyId });
+export function requestPayerUserId(c: Context<AppEnv>): string | null {
+  return isUserPrincipal(c) ? c.get("user").id : null;
 }

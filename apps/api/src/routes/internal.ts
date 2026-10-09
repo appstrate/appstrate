@@ -52,7 +52,6 @@ import {
   internalError,
 } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
-import { runPayerOf } from "../services/model-providers/credential-chain.ts";
 import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
@@ -857,7 +856,7 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *      credentials.
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
  *   3. Holder: a personal credential (`owner_user_id` set) serves only its
- *      owner's runs — the run's payer. Subscriptions are personal by rule.
+ *      owner's runs, never one an API key triggered. Subscriptions are personal by rule.
  *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
@@ -878,7 +877,6 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
-  const payerUserId = runPayerOf(run);
   let row: { orgId: string; ownerUserId: string | null } | undefined;
   try {
     [row] = await db
@@ -907,7 +905,9 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (row.orgId !== run.orgId) {
     throw forbidden(`Credential ${credentialId} not in run org`);
   }
-  if (row.ownerUserId !== null && row.ownerUserId !== payerUserId) {
+  // A personal credential serves only its owner's run, and never one an API key
+  // triggered (an API key pays nothing, see `requestPayerUserId`).
+  if (row.ownerUserId !== null && (row.ownerUserId !== run.userId || run.apiKeyId !== null)) {
     throw forbidden(`Credential ${credentialId} is another member's`);
   }
 }

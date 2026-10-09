@@ -33,24 +33,21 @@ const TTL_MS = 30_000;
 const cache = createCache<ResolvedModel | null>({
   name: "resolved-model",
   ttlMs: TTL_MS,
-  max: 500,
+  max: 2000,
 });
 
-const keyOf = (orgId: string, modelDbId: string, payerUserId: string | null): string =>
-  `${orgId}:${modelDbId}:${payerUserId ?? ""}`;
-
 /**
- * Resolve one model as `payerUserId` is served it (`null`: no payer, so no
- * personal credential applies). `null` (unknown / disabled model, dead
- * credential) is answered but never stored.
+ * Resolve one model under `slot`: the payer's chain (`payerUserId`, `""` for none,
+ * `:proxy` suffixed on the LLM proxy's chain) or a pinned credential (`pin:<id>`).
+ * `null` (unknown / disabled model, dead credential) is answered but never stored.
  */
 export function resolveModelCached(
   orgId: string,
   modelDbId: string,
-  payerUserId: string | null,
+  slot: string,
   loader: () => Promise<ResolvedModel | null>,
 ): Promise<ResolvedModel | null> {
-  return cache.get(keyOf(orgId, modelDbId, payerUserId), loader, {
+  return cache.get(`${orgId}:${modelDbId}:${slot}`, loader, {
     store: (value) => value !== null,
   });
 }

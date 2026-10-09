@@ -154,7 +154,7 @@ function assertEnumerableProvider(cfg: ModelProviderDefinition, param: string): 
 
 /** Resolve the `POST /discover` body into the endpoint to enumerate. */
 async function resolveDiscoverTarget(
-  orgId: string,
+  caller: ModelCredentialCaller,
   body: z.infer<typeof discoverSchema>,
 ): Promise<DiscoverTarget> {
   const inline =
@@ -172,7 +172,11 @@ async function resolveDiscoverTarget(
     if (isSystemModelProviderCredential(body.credentialId)) {
       throw systemEntityForbidden("model provider credential", body.credentialId);
     }
-    const creds = await loadInferenceCredentials(orgId, body.credentialId);
+    // Another member's personal credential reads as absent, as on the test probes.
+    if (!(await canSeeCredential(caller, body.credentialId))) {
+      throw notFound("Model provider credential not found");
+    }
+    const creds = await loadInferenceCredentials(caller.orgId, body.credentialId);
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
     if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credentialId");
@@ -433,9 +437,9 @@ export function createModelProviderCredentialsRouter() {
     rateLimit(6),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
-      const orgId = c.get("orgId");
+      const caller = callerOf(c);
       const body = await readJsonBody(c, discoverSchema);
-      const target = await resolveDiscoverTarget(orgId, body);
+      const target = await resolveDiscoverTarget(caller, body);
       const listing = await listServedModels(target);
       // The probe spends a key on an operator-supplied URL, so it leaves the
       // same trail the create/update/delete routes do — the endpoint reached
