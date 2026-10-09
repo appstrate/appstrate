@@ -252,7 +252,7 @@ function InactiveIntegrationCard({
     >
       <span className="flex items-center gap-3">
         <span
-          className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-right text-xs`}
+          className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-xs sm:text-right`}
           data-testid={`integration-inactive-${packageId}`}
         >
           {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.inactive)}
@@ -331,7 +331,7 @@ function CardShell({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="border-border bg-card flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <div className="flex min-w-0 items-center gap-2">
         <Puzzle className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">
@@ -345,8 +345,7 @@ function CardShell({
           </div>
           {extraSubtitle && (
             <div
-              className={`${extraSubtitleAlert ? AMBER_TEXT : "text-muted-foreground/80"} mt-0.5 truncate text-[0.65rem]`}
-              title={extraSubtitle}
+              className={`${extraSubtitleAlert ? AMBER_TEXT : "text-muted-foreground/80"} mt-0.5 text-[0.65rem] break-words`}
             >
               {extraSubtitle}
             </div>
