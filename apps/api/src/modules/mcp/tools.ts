@@ -84,6 +84,7 @@ import {
   grantedIn,
   spaceRef,
   NO_FALLBACK_HINT,
+  type McpSpace,
   type OrgWideSpaces,
 } from "./spaces.ts";
 
@@ -329,7 +330,7 @@ function describePayload(
   return {
     // Org-wide: `granted` answers for this space; `granted_in` for the others.
     ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
-    ...grantedIn(ctx.orgSpaces, (p) => operationGranted(op, p, ctx.ceiling)),
+    ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
     operation_id: op.operationId,
     method: op.method,
     path: op.pathTemplate,
@@ -446,14 +447,14 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
-        ...grantedIn(ctx.orgSpaces, (p) => operationGranted(op, p, ctx.ceiling)),
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
         ...deniedCeiling(op, ctx),
-        ...grantedIn(ctx.orgSpaces, (p) => operationGranted(op, p, ctx.ceiling)),
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       best_match: bestMatch,
     });
@@ -879,7 +880,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         ? {
             required_permissions: op.requirement.requirements,
             ...deniedCeiling(op, ctx),
-            ...grantedIn(ctx.orgSpaces, (p) => operationGranted(op, p, ctx.ceiling)),
+            ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
             hint:
               (ctx.ceiling === undefined
                 ? "Your role does not hold this permission"
@@ -1581,8 +1582,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
-    // org-pinned MCP token reach a space-scoped route, and lets requireSpaceContext
-    // fall back to the org default space when no X-Space-Id is forwarded.
+    // org-pinned MCP token reach a space-scoped route, in the space it entered.
     headers.set(...internalDispatchHeader());
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
@@ -1613,7 +1613,10 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * What one request's caller is offered: the tools `buildMcpTools` declares AND
  * the acts `buildServerInstructions` teaches, each read off the guards of the
  * route it dispatches to (or, for `import_package_file`, stands in for). A
- * withheld act is ABSENT from both — never declared then refused.
+ * withheld act is ABSENT from both — never declared then refused. An org-wide
+ * connection is offered the UNION of its spaces' surfaces: an act some space
+ * withholds is declared with the spaces that grant it, and refused in the
+ * others (`withSpaceArgument`).
  */
 export interface McpSurface {
   /** `invoke_operation`; the transport already required `mcp:read`. */
@@ -1704,18 +1707,20 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
   const { orgSpaces } = ctx;
-  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, ctx, orgSpaces)) : tools).map(
+  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map(
     refuseUndeclaredArguments,
   );
 }
 
 /**
- * The org-wide tools that act in a space, each with the act its own surface
- * flag stands for (`null`: none), re-checked in the space named since the
- * declared surface is the union of all of them. A tool absent from this table
- * acts in no space and takes no `space_id`.
+ * What each tool needs in the space an org-wide call names. `false`: it acts
+ * in no space and takes no `space_id`. `null`: it acts in one, the route guard
+ * alone deciding. A surface key: the act its own surface flag stands for,
+ * re-checked in that space since the declared surface is the union of them
+ * all. Exhaustive, so a new tool cannot silently act in whichever space the
+ * request happened to enter.
  */
-const SPACE_TOOLS: Partial<Record<McpToolName, keyof McpSurface | null>> = {
+const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   search_operations: null,
   describe_operation: null,
   invoke_operation: "invokes",
@@ -1726,22 +1731,22 @@ const SPACE_TOOLS: Partial<Record<McpToolName, keyof McpSurface | null>> = {
   validate_package_file: null,
   import_package_file: "importsPackages",
   get_me: null,
+  get_runtime_capabilities: false,
 };
 
 /** Declare `space_id` on a space-acting tool and check it before the handler runs. */
 function withSpaceArgument(
   tool: AppstrateToolDefinition,
-  ctx: McpToolContext,
   spaces: OrgWideSpaces,
 ): AppstrateToolDefinition {
-  const act = SPACE_TOOLS[tool.descriptor.name as McpToolName];
-  if (act === undefined) return tool;
-  const schema = tool.descriptor.inputSchema;
-  const actIn = (p: ReadonlySet<string>) =>
-    !act || deriveMcpSurface(p, ctx.ceiling, ctx.actor)[act];
+  const act = SPACE_ACTS[tool.descriptor.name as McpToolName];
+  if (act === false) return tool;
+  const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
+    need === null || space.surface[need];
   // Declared because SOME space grants it: name those spaces when not all do,
   // the rule of the index brackets and of `granted_in`.
-  const { granted_in } = grantedIn(spaces, actIn);
+  const { granted_in } = grantedIn(spaces, holds(act));
+  const schema = tool.descriptor.inputSchema;
   const descriptor: Tool = {
     ...tool.descriptor,
     description: granted_in
@@ -1765,13 +1770,15 @@ function withSpaceArgument(
     descriptor,
     handler: async (args, extra) => {
       assertSpaceArgument(spaces, args.space_id);
-      const current = spaces.current;
-      if (!actIn(current.permissions)) {
+      // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
+      const need = act === "runs" && args.kind === "inline" ? "composes" : act;
+      const { current } = spaces;
+      if (!holds(need)(current)) {
         return jsonResult(
           {
-            error: `Your role in ${current.name} does not allow ${tool.descriptor.name}.`,
+            error: `Your role in ${current.name} does not allow ${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}.`,
             space: spaceRef(current),
-            granted_in,
+            granted_in: grantedIn(spaces, holds(need)).granted_in,
             hint: NO_FALLBACK_HINT,
           },
           true,
@@ -1779,8 +1786,7 @@ function withSpaceArgument(
       }
       // Consumed here: the request already entered that space. A handler that
       // validates its own arguments (`run_and_wait`) must not see it.
-      const rest = { ...args };
-      delete rest.space_id;
+      const { space_id: _entered, ...rest } = args;
       return tool.handler(rest, extra);
     },
   };

@@ -2065,7 +2065,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -6627,6 +6627,11 @@ export interface components {
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
             /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
             warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @description The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space. */
+            space?: {
+                id: string;
+                name: string;
+            };
             /** @constant */
             done: false;
         };
@@ -6641,6 +6646,11 @@ export interface components {
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
             /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
             warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @description The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space. */
+            space?: {
+                id: string;
+                name: string;
+            };
             /** @constant */
             done: true;
             /** @description The run's output payload. Absent when `truncated` replaces it. */

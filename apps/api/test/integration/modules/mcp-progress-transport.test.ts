@@ -10,7 +10,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, orgOnlyHeaders, type TestContext } from "../../helpers/auth.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, mcpPath, sseMessages, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import {
@@ -92,7 +92,8 @@ afterAll(() => {
 beforeEach(async () => {
   await truncateAll();
   ctx = await createTestContext();
-  headers = orgOnlyHeaders(ctx);
+  // Pinned: this suite is about the transport, not the space a call names.
+  headers = authHeaders(ctx);
 });
 
 // Launched runs are fire-and-forget: let them land before the next truncate.

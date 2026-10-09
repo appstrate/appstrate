@@ -133,12 +133,12 @@ describe("the enterSpaceContext seam on /api/chat", () => {
     );
   });
 
-  it("still lands the trusted in-process dispatch on the org default space", async () => {
-    // The one caller that physically cannot carry a header. Its exemption is
-    // what the 400 above must NOT have taken away.
+  it("gives the trusted in-process dispatch no default space either", async () => {
+    // Every in-process re-entry forwards the space it entered; the marker
+    // vouches for the caller, it never picks a space for it.
     const res = await app.request("/api/chat/sessions", {
       headers: { ...orgOnlyHeaders(ctx), ...Object.fromEntries([internalDispatchHeader()]) },
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
   });
 });

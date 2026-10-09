@@ -82,6 +82,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (MCP): a connection without `X-Space-Id` reaches every space the
+  caller holds a role in, and each call names its space** (#1825). Every tool
+  that acts in a space requires a `space_id` argument, reads and writes alike;
+  a call without it is a `-32602` listing the caller's spaces and roles. A
+  tool or operation allowed in only some spaces says which (`Available in: …`,
+  `createAgent [gestion]` in the operation index, `granted_in`), a refusal
+  forbids redoing the action in another space, and `get_me` lists the spaces.
+  A connection pinned by `X-Space-Id`, an API key or an end-user token is
+  unchanged. A caller who reaches no space is refused with a `403` instead of
+  landing on the default space, and no request lands on the default space by
+  omission any more: the in-process re-entry fallback is gone.
+
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the

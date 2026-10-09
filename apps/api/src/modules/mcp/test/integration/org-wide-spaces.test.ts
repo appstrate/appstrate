@@ -220,6 +220,29 @@ describe("mcp org-wide connection", () => {
     expect(listed!.granted_in).toBeUndefined();
   });
 
+  it("re-checks kind:inline as its own act: an operator runs agents, not inline runs", async () => {
+    const res = payload(
+      await call("run_and_wait", {
+        kind: "inline",
+        prompt: "noop",
+        space_id: defaultSpaceId,
+      }),
+    );
+    expect(res.isError).toBe(true);
+    expect(res.data.error as string).toContain('kind:"inline"');
+    expect(res.data.granted_in).toEqual(["Gestion"]);
+  });
+
+  it("refuses a caller who reaches no space, rather than landing on the default one", async () => {
+    const owner = await createTestContext();
+    const guest = await memberContext(owner, "guest");
+    const { status } = await rpc(
+      { Cookie: guest.cookie, "X-Org-Id": owner.orgId },
+      { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+    );
+    expect(status).toBe(403);
+  });
+
   it("is the same schema for a caller who reaches a single space", async () => {
     const owner = await createTestContext();
     const solo = await memberContext(owner, "member");

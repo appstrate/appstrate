@@ -31,6 +31,7 @@ import {
   personaMemberships,
 } from "../../lib/view-as.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import type { McpSurface } from "./tools.ts";
 
 /** A space this connection may act in, with the caller's permissions there. */
 export interface McpSpace {
@@ -39,6 +40,8 @@ export interface McpSpace {
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
   permissions: ReadonlySet<string>;
+  /** The acts the caller holds there (`deriveMcpSurface` over `permissions`). */
+  surface: McpSurface;
 }
 
 /** The spaces of an org-wide connection, and the one this request entered. */
@@ -47,16 +50,12 @@ export interface OrgWideSpaces {
   current: McpSpace;
 }
 
-/** Pinned: a strategy fixed the space, the client sent one, or the principal is an end-user (one space, RBAC spec §3.6) or holds no org role. */
+/**
+ * Pinned: a strategy fixed the space (API key, end-user token) or the client
+ * sent `X-Space-Id`. Every other connection is org-wide.
+ */
 export function isPinnedConnection(c: Context<AppEnv>): boolean {
-  // Fails closed: a principal without an org role, whatever its kind, stays on
-  // the single-space path rather than being listed spaces it has no role for.
-  return Boolean(
-    c.get("spaceId") ||
-    c.req.header("X-Space-Id") ||
-    c.get("principalKind") === "end_user" ||
-    !callerOrgRole(c),
-  );
+  return Boolean(c.get("spaceId") || c.req.header("X-Space-Id"));
 }
 
 /**
@@ -65,10 +64,17 @@ export function isPinnedConnection(c: Context<AppEnv>): boolean {
  * overlay included; spaces visible without a role are left out — the MCP acts,
  * it does not browse.
  */
-export async function listReachableSpaces(c: Context<AppEnv>, orgId: string): Promise<McpSpace[]> {
+export async function listReachableSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+  surfaceOf: (permissions: ReadonlySet<string>) => McpSurface,
+): Promise<McpSpace[]> {
+  // Fails closed: a principal without an org role reaches no space this way.
+  const orgRole = callerOrgRole(c, orgId);
+  if (!orgRole) return [];
   const entries = await listSpacesForPrincipal(
     orgId,
-    callerOrgRole(c, orgId),
+    orgRole,
     c.get("user").id,
     callerPersonalOwnerId(c, orgId),
     personaMemberships(personaFor(c, orgId)),
@@ -83,6 +89,7 @@ export async function listReachableSpaces(c: Context<AppEnv>, orgId: string): Pr
       name: space.name,
       role: toSpaceRoleWire(role)!.name,
       permissions,
+      surface: surfaceOf(permissions),
     });
   }
   return out;
@@ -127,10 +134,10 @@ export function describeSpace(space: McpSpace): string {
  */
 export function grantedIn(
   spaces: OrgWideSpaces | undefined,
-  granted: (permissions: ReadonlySet<string>) => boolean,
+  granted: (space: McpSpace) => boolean,
 ): { granted_in?: string[] } {
   if (!spaces) return {};
-  const names = spaces.reachable.filter((s) => granted(s.permissions)).map((s) => s.name);
+  const names = spaces.reachable.filter(granted).map((s) => s.name);
   return names.length === spaces.reachable.length ? {} : { granted_in: names };
 }
 
