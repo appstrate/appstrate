@@ -54,8 +54,11 @@ import {
   computeRunSpend,
   readLastEmittedOutput,
   runAgentIdentity,
-  readIntegrationsUnbound,
 } from "./state/runs.ts";
+import {
+  runIntegrationsUnboundSchema,
+  type RunIntegrationUnbound,
+} from "@appstrate/core/integration";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -172,13 +175,9 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   // onRunStatusChange event params) — silently skipping finalization
   // side-effects for a deleted-agent run. `runAgentIdentity` owns the recovery
   // (and the sentinel); see `state/runs.ts`.
-  const { agentScope, agentName, integrationsUnbound, ...rest } = row;
+  const { agentScope, agentName, ...rest } = row;
   const packageId = runAgentIdentity({ ...rest, agentScope, agentName });
-  return {
-    ...rest,
-    packageId,
-    integrationsUnbound: readIntegrationsUnbound(integrationsUnbound),
-  } as RunSinkContext;
+  return { ...rest, packageId } as RunSinkContext;
 }
 
 // `assertSinkOpen` and `verifyRunSignatureHeaders` live in
@@ -1151,6 +1150,7 @@ async function persistEventAndAdvance(
   // row-insert time (run-creation.ts) — that fired before the DB
   // transition and never again when it actually happened.
   if (firstEvent && run.runOrigin === "remote") {
+    const integrationsUnbound = parseSinkIntegrationsUnbound(run);
     void emitEvent("onRunStatusChange", {
       orgId: run.orgId,
       runId: run.id,
@@ -1159,11 +1159,22 @@ async function persistEventAndAdvance(
       status: "started",
       packageEphemeral: isInlineShadowPackageId(run.packageId),
       ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
-      ...(run.integrationsUnbound ? { integrationsUnbound: run.integrationsUnbound } : {}),
+      ...(integrationsUnbound ? { integrationsUnbound } : {}),
     });
   }
 
   return "claimed";
+}
+
+/** The run's recorded `integrations_unbound`; a drifted row is logged and omitted, never thrown. */
+function parseSinkIntegrationsUnbound(run: RunSinkContext): RunIntegrationUnbound[] | null {
+  if (run.integrationsUnbound === null || run.integrationsUnbound === undefined) return null;
+  const parsed = runIntegrationsUnboundSchema.safeParse(run.integrationsUnbound);
+  if (parsed.success) return parsed.data;
+  logger.warn("run.started: runs.integrations_unbound does not parse; emitted without it", {
+    runId: run.id,
+  });
+  return null;
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {

@@ -32,6 +32,9 @@ const NONE_CHOSEN_BY_KEYS = {
   member_pin: "noneChosenBy.memberPin",
 } as const satisfies Record<NoneChoosingSource, string>;
 
+/** Every layer that can choose `[]`. */
+export const NONE_CHOOSING_SOURCES = Object.keys(NONE_CHOSEN_BY_KEYS) as NoneChoosingSource[];
+
 const choosesNone = (source: ConnectionResolutionSource): source is NoneChoosingSource =>
   source in NONE_CHOSEN_BY_KEYS;
 

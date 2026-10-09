@@ -72,35 +72,24 @@ describe("attachFinalizeTracker", () => {
     server.shutdown();
   });
 
-  it("reports false before any finalize call", () => {
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
-    const wasFinalized = attach(sink);
-    expect(wasFinalized()).toBe(false);
+  const newSink = (url = server.url) =>
+    new HttpSink({ url, finalizeUrl: `${url}/finalize`, runSecret: RUN_SECRET });
+
+  it("reports no finalize before any call", () => {
+    expect(attach(newSink())()).toBeNull();
   });
 
-  it("flips to true after the patched sink finalises", async () => {
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
-    const wasFinalized = attach(sink);
-
-    expect(wasFinalized()).toBe(false);
-    await sink.finalize(failedResult());
-    expect(wasFinalized()).toBe(true);
+  it("hands back the runner's finalize while it is still in flight", async () => {
+    const sink = newSink();
+    const finalizeOf = attach(sink);
+    const sent = sink.finalize(failedResult());
+    expect(finalizeOf()).toBe(sent);
+    await sent;
+    expect(finalizeOf()).toBe(sent);
   });
 
   it("forwards the finalize POST to the underlying sink (HTTP request reaches finalizeUrl)", async () => {
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
+    const sink = newSink();
     attach(sink);
 
     const result: TerminalRunResult = {
@@ -118,61 +107,55 @@ describe("attachFinalizeTracker", () => {
     expect(body.error?.message).toContain("cancelled by user");
   });
 
-  it("stays true on repeated finalize calls (each call still posts, flag stays true)", async () => {
-    // Belt-and-suspenders behaviour: the tracker does not enforce
-    // single-call semantics — that's the platform's job (server CAS on
-    // `sink_closed_at IS NULL`). The tracker only records "has finalize
-    // been observed at least once". Double-finalize from the runner
-    // would be a runner bug, not something the tracker needs to mask.
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
-    const wasFinalized = attach(sink);
+  it("keeps the first finalize on repeated calls (each call still posts)", async () => {
+    // The tracker does not enforce single-call semantics — that's the
+    // platform's job (server CAS on `sink_closed_at IS NULL`).
+    const sink = newSink();
+    const finalizeOf = attach(sink);
+    const first = sink.finalize(failedResult());
+    await first;
     await sink.finalize(failedResult());
-    expect(wasFinalized()).toBe(true);
-    await sink.finalize(failedResult());
-    expect(wasFinalized()).toBe(true);
+    expect(finalizeOf()).toBe(first);
     expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(2);
   });
 
-  it("finalizeWithin: aborts a finalize the platform never answers, at the cap", async () => {
+  it("finalizeWithin: lets an in-flight finalize that answers within the budget land", async () => {
+    const slow = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        await Bun.sleep(100);
+        return new Response("ok");
+      },
+    });
+    try {
+      const sink = newSink(`http://localhost:${slow.port}/events`);
+      const finalizeOf = attach(sink);
+      void sink.finalize(failedResult());
+      await expect(finalizeWithin(sink, finalizeOf()!, 2_000)).resolves.toBeUndefined();
+    } finally {
+      slow.stop(true);
+    }
+  });
+
+  it("finalizeWithin: aborts an in-flight finalize the platform never answers, at the cap", async () => {
     // Without the cap, an unreachable platform would let HttpSink retry for
     // tens of seconds, and its pending fetch would keep the process alive.
     const silent = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
     try {
-      const sink = new HttpSink({
-        url: `http://localhost:${silent.port}/events`,
-        runSecret: RUN_SECRET,
-      });
+      const sink = newSink(`http://localhost:${silent.port}/events`);
+      const finalizeOf = attach(sink);
+      sink.finalize(failedResult()).catch(() => {});
       const start = Date.now();
-      await expect(finalizeWithin(sink, failedResult(), 50)).rejects.toThrow(
-        /timed out after 50ms/,
-      );
+      await expect(finalizeWithin(sink, finalizeOf()!, 50)).rejects.toThrow(/timed out after 50ms/);
       expect(Date.now() - start).toBeLessThan(500);
     } finally {
       silent.stop(true);
     }
   });
 
-  it("finalizeWithin: resolves when the platform answers in time", async () => {
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
-    await expect(finalizeWithin(sink, failedResult(), 5_000)).resolves.toBeUndefined();
-    expect(server.received.filter((r) => r.url === "/events/finalize")).toHaveLength(1);
-  });
-
   it("does not interfere with regular event POSTs (handle still works)", async () => {
-    const sink = new HttpSink({
-      url: server.url,
-      finalizeUrl: server.finalizeUrl,
-      runSecret: RUN_SECRET,
-    });
-    const wasFinalized = attach(sink);
+    const sink = newSink();
+    const finalizeOf = attach(sink);
 
     await sink.handle({
       type: "appstrate.progress",
@@ -180,7 +163,7 @@ describe("attachFinalizeTracker", () => {
       runId: "run_track_test",
       message: "still running",
     });
-    expect(wasFinalized()).toBe(false);
+    expect(finalizeOf()).toBeNull();
     const eventPosts = server.received.filter((r) => r.url === "/events");
     expect(eventPosts).toHaveLength(1);
   });

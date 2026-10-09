@@ -79,7 +79,7 @@ import {
   type StdoutBridgeHandle,
 } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
-import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
 import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
 import { parseRunTarget } from "./run/package-spec.ts";
@@ -446,7 +446,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // (integration extension build, runtime-ready emit, …) bypasses
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
-  const wasHttpSinkFinalized = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
+  const runnerFinalize = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
   const composite: EventSink = reportSession
     ? new CompositeSink([consoleSink, reportSession.httpSink])
     : consoleSink;
@@ -487,23 +487,28 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // watchdog wait into an instant transition. Best-effort — if it
       // fails, the watchdog still backs us up.
       //
+      // A finalize the runner already started (still in flight on a signal)
+      // carries the real outcome: it gets the same budget instead.
+      //
       // Bounded by `SAFETY_NET_FINALIZE_TIMEOUT_MS`: under the coordinator's own 10-s
       // ceiling, with headroom for the filesystem teardown that follows.
-      if (reportSession && wasHttpSinkFinalized && !wasHttpSinkFinalized()) {
+      if (reportSession && runnerFinalize) {
         const aborted = shutdownSignal.aborted;
-        const result: TerminalRunResult = {
-          ...emptyRunResult(),
-          status: aborted ? "cancelled" : "failed",
-          error: {
-            message: aborted
-              ? "Runner cancelled by user (CLI received signal)."
-              : "Runner exited before completion (CLI bootstrap or teardown error).",
-          },
-        };
-        await finalizeWithin(reportSession.httpSink, result, SAFETY_NET_FINALIZE_TIMEOUT_MS).catch(
+        const pending =
+          runnerFinalize() ??
+          reportSession.httpSink.finalize({
+            ...emptyRunResult(),
+            status: aborted ? "cancelled" : "failed",
+            error: {
+              message: aborted
+                ? "Runner cancelled by user (CLI received signal)."
+                : "Runner exited before completion (CLI bootstrap or teardown error).",
+            },
+          });
+        await finalizeWithin(reportSession.httpSink, pending, SAFETY_NET_FINALIZE_TIMEOUT_MS).catch(
           (err) => {
             if (!opts.json) {
-              process.stderr.write(`warn: finalize on cancel failed: ${getErrorMessage(err)}\n`);
+              process.stderr.write(`warn: finalize failed: ${getErrorMessage(err)}\n`);
             }
           },
         );
@@ -723,17 +728,18 @@ async function runCommandRemote(
  * Patch an HttpSink's `finalize` in place so the caller can tell
  * whether it has already been invoked (by the runner, mid-run). The
  * CLI uses this to avoid double-finalizing from its `finally` safety
- * net. Returns a getter for the flag — callers keep using the original
- * sink reference.
+ * net. Returns a getter for the first finalize's promise (null until one
+ * starts) — callers keep using the original sink reference.
  */
-function attachFinalizeTracker(sink: HttpSink): () => boolean {
-  let finalized = false;
+function attachFinalizeTracker(sink: HttpSink): () => Promise<void> | null {
+  let first: Promise<void> | null = null;
   const original = sink.finalize.bind(sink);
-  sink.finalize = async (result) => {
-    finalized = true;
-    await original(result);
+  sink.finalize = (result) => {
+    const sent = original(result);
+    first ??= sent;
+    return sent;
   };
-  return () => finalized;
+  return () => first;
 }
 
 /**
@@ -744,12 +750,13 @@ function attachFinalizeTracker(sink: HttpSink): () => boolean {
 const SAFETY_NET_FINALIZE_TIMEOUT_MS = 5_000;
 
 /**
- * Finalize through `sink`, aborting it once `timeoutMs` has passed: the
- * request and its retries are cancelled, so nothing is left running.
+ * Wait for `pending`, a finalize through `sink`, aborting the sink once
+ * `timeoutMs` has passed: the request and its retries are cancelled, so
+ * nothing is left running.
  */
 async function finalizeWithin(
   sink: HttpSink,
-  result: TerminalRunResult,
+  pending: Promise<void>,
   timeoutMs: number,
 ): Promise<void> {
   const timer = setTimeout(
@@ -757,7 +764,7 @@ async function finalizeWithin(
     timeoutMs,
   );
   try {
-    await sink.finalize(result);
+    await pending;
   } finally {
     clearTimeout(timer);
   }
@@ -1230,16 +1237,16 @@ export async function _buildResolverInputsForTesting(
  * the cancel-path safety net (detect runner cancellation immediately
  * rather than waiting for the heartbeat watchdog).
  */
-export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => boolean {
+export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => Promise<void> | null {
   return attachFinalizeTracker(sink);
 }
 
 export function _finalizeWithinForTesting(
   sink: HttpSink,
-  result: TerminalRunResult,
+  pending: Promise<void>,
   timeoutMs: number,
 ): Promise<void> {
-  return finalizeWithin(sink, result, timeoutMs);
+  return finalizeWithin(sink, pending, timeoutMs);
 }
 
 /** Pi loop knobs from the user's shell, strictly parsed like the container's. */

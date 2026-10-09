@@ -124,10 +124,10 @@ describe("--report local run — integrations bound to none", () => {
     );
   });
 
-  it("withholds an integration on a code this CLI does not know, naming the code", () => {
+  it("withholds an integration on a code this CLI does not know, as unbound", () => {
     expect(
       unavailableIntegrations([{ field: `integrations.${GMAIL}`, code: "newer_code" }]),
-    ).toEqual([{ id: GMAIL, reason: "newer_code" }]);
+    ).toEqual([{ id: GMAIL, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound }]);
   });
 
   it("tells the agent which integrations it runs without", () => {

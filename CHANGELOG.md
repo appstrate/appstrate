@@ -98,7 +98,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     own launcher);
   - `must_choose_connection` when only connections other members share
     serve (`candidate_connections`);
-  - `auth_key_mismatch`: the item (`409` or warning) carries `auth_key` and
+  - `auth_key_mismatch`: when the agent's `auth_key` is a declared auth that
+    serves its selection, the item (`409` or warning) carries `auth_key` and
     `required_scopes` and, when connect offers are requested, a
     `connect_url` to connect the agent's required auth;
   - `integration_not_active` when the integration is switched off in the

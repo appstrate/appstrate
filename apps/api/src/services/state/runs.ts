@@ -361,7 +361,7 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
 }
 
 /** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
-export function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
+function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
   return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
 }
 

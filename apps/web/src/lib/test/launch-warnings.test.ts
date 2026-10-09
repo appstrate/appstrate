@@ -13,6 +13,7 @@ import {
   hasLaunchWarnings,
   isViewersLaunch,
   launchWarningsToast,
+  NONE_CHOOSING_SOURCES,
   type LaunchWarning,
 } from "../launch-warnings.ts";
 
@@ -165,9 +166,7 @@ describe("launchWarningsToast — why", () => {
       "Aucune connexion n'est choisie pour elle (choix pour ce run) ; l'agent en est informé.",
     );
     expect(toast?.connectable).toBe(false);
-    const bySource = (
-      ["admin_pin", "run_override", "schedule_override", "member_pin"] as const
-    ).map(
+    const bySource = NONE_CHOOSING_SOURCES.map(
       (source) =>
         describeOf([warning("@acme/gmail", { code: "integration_unbound", source })])?.description,
     );

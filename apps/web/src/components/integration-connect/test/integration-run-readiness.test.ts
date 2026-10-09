@@ -14,6 +14,7 @@ import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration
 import type { components } from "../../../api/schema";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { describeResolution, requiredNoneLabel, unboundLabel } from "../integration-run-readiness";
+import { NONE_CHOOSING_SOURCES } from "../../../lib/launch-warnings";
 
 type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
 type Warning = NonNullable<IntegrationAgentResolution["warning"]>;
@@ -256,8 +257,8 @@ describe("unboundLabel", () => {
     expect(unboundLabel(warning("integration_unbound", { source: "admin_pin" }))).toBe(
       "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
     );
-    const phrases = (["admin_pin", "run_override", "schedule_override", "member_pin"] as const).map(
-      (source) => unboundLabel(warning("integration_unbound", { source })),
+    const phrases = NONE_CHOOSING_SOURCES.map((source) =>
+      unboundLabel(warning("integration_unbound", { source })),
     );
     expect(new Set(phrases).size).toBe(phrases.length);
     for (const phrase of phrases) expect(phrase).not.toContain("noneChosenBy.");

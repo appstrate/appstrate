@@ -2195,6 +2195,22 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     expect(statuses[0]).toBe("started");
   });
 
+  it("ingests events and emits run.started without the field when integrations_unbound drifted", async () => {
+    const { started } = await captureStartedEvents();
+    const runId = await seedPendingRemoteRun({
+      integrationsUnbound: [{ integrationId: "@acme/slack", code: "retired_code" }] as never,
+    });
+
+    // The sink context is the auth path: a drifted row must not fail it.
+    await firstEvent(runId);
+
+    const [event] = await waitForStarted(started, 1);
+    expect(event).toBeDefined();
+    expect(event).not.toHaveProperty("integrationsUnbound");
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("running");
+  });
+
   it("omits integrationsUnbound when the run recorded none", async () => {
     const { started } = await captureStartedEvents();
     const runId = await seedPendingRemoteRun();
