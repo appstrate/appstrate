@@ -13,6 +13,25 @@ const scheduleConnectionNotChosen = {
   content: connectionConflictContent,
 };
 
+/** A schedule write's success body: the schedule, plus what its fires would start without. */
+const scheduleWriteSchema = {
+  allOf: [
+    { $ref: "#/components/schemas/Schedule" },
+    {
+      type: "object",
+      required: ["warnings"],
+      properties: {
+        warnings: {
+          type: ["array", "null"],
+          description:
+            "Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing.",
+          items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
+        },
+      },
+    },
+  ],
+};
+
 export const schedulesPaths = {
   "/api/schedules": {
     get: {
@@ -113,7 +132,7 @@ export const schedulesPaths = {
                   description: "Cron expression (e.g. '0 9 * * 1-5')",
                 },
                 timezone: { type: "string", default: "UTC" },
-                input: { type: "object" },
+                input: { type: "object", additionalProperties: true },
                 generation_config_override: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -172,16 +191,11 @@ export const schedulesPaths = {
       responses: {
         "201": {
           description:
-            "Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings).",
+            "Schedule created, plus `warnings`: the integrations its fires would start without.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/Schedule" },
-                  { $ref: "#/components/schemas/LaunchWarnings" },
-                ],
-              },
+              schema: scheduleWriteSchema,
               example: {
                 id: "sched_cm1abc456def789",
                 packageId: "@acme/email-sorter",
@@ -324,7 +338,7 @@ export const schedulesPaths = {
                 cron_expression: { type: "string" },
                 timezone: { type: "string" },
                 enabled: { type: "boolean" },
-                input: { type: "object" },
+                input: { type: "object", additionalProperties: true },
                 generation_config_override: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -378,16 +392,11 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description:
-            "Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled.",
+            "Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/Schedule" },
-                  { $ref: "#/components/schemas/LaunchWarnings" },
-                ],
-              },
+              schema: scheduleWriteSchema,
             },
           },
         },

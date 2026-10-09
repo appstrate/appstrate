@@ -5848,7 +5848,7 @@ export interface components {
             updatedAt: string;
         };
         LaunchWarnings: {
-            /** @description Declared, non-required integrations the run starts without. Always present; always empty on a schedule written for another member. A `required` integration in the same state is a 409 instead. */
+            /** @description Declared, non-required integrations the run starts without. Always present. A `required` integration in the same state is a 409 instead. */
             warnings: components["schemas"]["ConnectionResolutionWarning"][];
         };
         /** @description Packages of a single type visible to the org. Each entry carries its `placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there (`via`) and whether that space runs it (`state`). */
@@ -8673,7 +8673,9 @@ export interface operations {
                     cron_expression: string;
                     /** @default UTC */
                     timezone?: string;
-                    input?: Record<string, never>;
+                    input?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"];
                     /** @description Override the persisted model on every run triggered by this schedule. */
@@ -8699,7 +8701,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings). */
+            /** @description Schedule created, plus `warnings`: the integrations its fires would start without. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -23234,7 +23236,9 @@ export interface operations {
                     cron_expression?: string;
                     timezone?: string;
                     enabled?: boolean;
-                    input?: Record<string, never>;
+                    input?: {
+                        [key: string]: unknown;
+                    };
                     /** @description Temperature/reasoning overrides for scheduled runs. Pass null to clear. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"] | null;
                     model_id_override?: string | null;
@@ -23258,7 +23262,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled. */
+            /** @description Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

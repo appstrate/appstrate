@@ -110,13 +110,22 @@ function sameSet(a: readonly string[], b: readonly string[] | undefined): boolea
   return b !== undefined && a.length === b.length && a.every((id) => b.includes(id));
 }
 
+/** Whether two override maps bind the same sets; `null` and `{}` both bind nothing. */
+export function sameConnectionOverrides(
+  a: ConnectionOverrides | null,
+  b: ConnectionOverrides | null,
+): boolean {
+  const ids = Object.keys(a ?? {});
+  return ids.length === Object.keys(b ?? {}).length && ids.every((id) => sameSet(a![id]!, b?.[id]));
+}
+
 /**
  * Refuse arming a schedule whose fire would fail on its own connection choice: an unattended run
  * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
  * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
  * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
- * ({@link scheduleWriteFor}). Returns the fire's warnings — none to a caller writing for another
- * member, who must not learn how many connections the actor holds.
+ * ({@link scheduleWriteFor}). Returns the fire's warnings, or `null` to a caller writing for
+ * another member, who must not learn how many connections the actor holds.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -130,7 +139,7 @@ export async function assertScheduleConnectionsChosen(params: {
   /** The overrides this write stores — already judged by {@link assertScheduleOverridesReachable}. */
   connectionOverrides: ConnectionOverrides | null;
   dependencyOverrides: Record<string, string> | null;
-}): Promise<ResolutionFieldError[]> {
+}): Promise<ResolutionFieldError[] | null> {
   const manifestCache = await seedPinnedIntegrationManifests(params);
   const { resolutionErrors, warnings } = await collectAgentReadiness({
     agent: params.agent,
@@ -142,7 +151,7 @@ export async function assertScheduleConnectionsChosen(params: {
   });
   const writeFor = scheduleWriteFor(params.caller, params.actor);
   const unchosen = resolutionErrors.filter(isScheduleOwned);
-  if (unchosen.length === 0) return writeFor === "member" ? [] : warnings;
+  if (unchosen.length === 0) return writeFor === "member" ? null : warnings;
   switch (writeFor) {
     case "self":
       throw missingIntegrationConnection(unchosen.map(translateResolutionError));

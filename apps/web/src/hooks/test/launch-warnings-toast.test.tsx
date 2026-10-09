@@ -2,10 +2,10 @@
 
 /**
  * The three writes that start runs — a launch, a schedule create, a schedule
- * update — each toast the `warnings` of their success body once (an update only
- * when it can change what the fires bind), naming each integration by the
- * display name the integration list holds: the cached list, else the list
- * fetched once through the same query — the id when it cannot be read.
+ * update — each toast the `warnings` of their success body once (`null`, a
+ * schedule write that judged nothing, says nothing), naming each integration
+ * by the display name the integration list holds: the cached list, else the
+ * list fetched once through the same query — the id when it cannot be read.
  *
  * No DOM: a probe captures each hook's mutation during a static render, the
  * typed client's verb is stubbed, and the mutation is driven by hand.
@@ -23,9 +23,6 @@ const { loadIntegrationNames } = await import("../use-integrations.ts");
 const { render } = await import("../../test/render.tsx");
 const { useRunLauncher } = await import("../use-mutations.ts");
 const { useCreateSchedule, useUpdateSchedule } = await import("../use-schedules.ts");
-const { scheduleKeys } = await import("../../lib/query-keys.ts");
-const { orgStore } = await import("../../stores/org-store.ts");
-const { spaceStore } = await import("../../stores/space-store.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
@@ -143,53 +140,29 @@ describe("launch warnings, wired", () => {
   });
 });
 
-describe("schedule update warnings — only when the write can change the fires", () => {
-  const STORED = {
-    ...SCHEDULE,
-    enabled: true,
-    version_override: null,
-    connection_overrides: { "@acme/gmail": ["conn_1"] },
-  };
-
-  beforeEach(() => {
-    stubs.push(
-      spyOn(client, "PATCH").mockResolvedValue({ data: { ...SCHEDULE, warnings: WARNINGS } }),
-    );
-  });
-
-  async function update(body: Record<string, unknown>, stored: object | null = STORED) {
-    const qc = cachedClient();
-    if (stored) {
-      const key = scheduleKeys.detail(orgStore.getState().id, spaceStore.getState().id, "sch_1");
-      qc.setQueryData(key, stored);
+describe("schedule writes — the toast follows the server's verdict", () => {
+  async function write(verb: "POST" | "PATCH", warnings: unknown[] | null): Promise<number> {
+    stubs.push(spyOn(client, verb).mockResolvedValue({ data: { ...SCHEDULE, warnings } }));
+    if (verb === "POST") {
+      const create = capture(() => useCreateSchedule(AGENT), cachedClient());
+      await create.mutateAsync({ cron_expression: "0 9 * * *" });
+    } else {
+      const update = capture(() => useUpdateSchedule(), cachedClient());
+      await update.mutateAsync({ id: "sch_1", name: "Renamed" });
     }
-    const mutation = capture(() => useUpdateSchedule(), qc);
-    await mutation.mutateAsync({ id: "sch_1", ...body });
     await Bun.sleep(0);
     return warned.mock.calls.length;
   }
 
-  it("a rename, a pause, or a save echoing the stored picks says nothing again", async () => {
-    expect(await update({ name: "Renamed" })).toBe(0);
-    expect(await update({ enabled: false })).toBe(0);
-    expect(
-      await update({
-        name: "Renamed",
-        enabled: true,
-        connection_overrides: { "@acme/gmail": ["conn_1"] },
-      }),
-    ).toBe(0);
+  it("says nothing on `null` (nothing judged, or withheld) nor on `[]`", async () => {
+    expect(await write("PATCH", null)).toBe(0);
+    expect(await write("PATCH", [])).toBe(0);
+    expect(await write("POST", null)).toBe(0);
+    expect(await write("POST", [])).toBe(0);
   });
 
-  it("changed picks, a switch-on, an actor or a version change toast", async () => {
-    expect(await update({ connection_overrides: { "@acme/gmail": [] } })).toBe(1);
-    expect(await update({ enabled: true }, { ...STORED, enabled: false })).toBe(2);
-    expect(await update({ actor: { userId: "usr_alice" } })).toBe(3);
-    expect(await update({ version_override: "1.2.0" })).toBe(4);
-  });
-
-  it("toasts when the schedule as it stood is not cached", async () => {
-    expect(await update({ name: "Renamed" }, null)).toBe(1);
+  it("toasts the items of any write the server judged, whatever its body", async () => {
+    expect(await write("PATCH", WARNINGS)).toBe(1);
   });
 });
 

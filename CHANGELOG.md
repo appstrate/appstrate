@@ -98,14 +98,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unavailable, under-scoped or on an auth serving none of the selected tools.
   The `run.connection_missing` webhook still fires for blocking refusals only.
 
-- **BREAKING (API): success responses gain `warnings`** (#1830), always
-  present, possibly empty: `POST /api/agents/{scope}/{name}/run` (201),
+- **BREAKING (API): success responses gain `warnings`** (#1830, #1850),
+  always present, possibly empty: `POST /api/agents/{scope}/{name}/run` (201),
   `POST /api/runs/inline` (201), `POST /api/runs/inline/validate` (200, now
   `{ valid: true, warnings }`), `POST /api/runs/remote` (201), schedule
-  create (201) and update (200). A schedule written for another member always
-  answers `warnings: []`: the caller cannot act on that member's connections
-  and must not learn which ones they hold; its errors keep the shared-only
-  filtering. The MCP and chat `run_and_wait` results carry the launch's
+  create (201) and update (200), where `warnings` is nullable: `null` when the
+  write judged nothing to report (the schedule is disabled, the update moves
+  nothing a fire resolves with — actor, `connection_overrides`,
+  `version_override`, `dependency_overrides`, switching it on — or the actor
+  is another member, whose connections the caller must not learn of), `[]`
+  when it was judged and the fires lack nothing. A schedule written for
+  another member keeps the shared-only filtering on its errors. The MCP and chat `run_and_wait` results carry the launch's
   `warnings` when there are some.
 - **BREAKING (API): connection sets accept `[]`, "use none"** (#1830): admin
   pins, member pins, run and schedule `connection_overrides`, and MCP
@@ -271,6 +274,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run by another member, agent pins, the connection picker. Unticking the
   last connection clears the choice; only the explicit "No connection" box
   records "no connection".
+- **The dashboard shows a schedule's "will start without" toast only when the
+  server reports `warnings`** (#1850), with no client-side guess.
 - **Every `appstrate` command ends through one handler** (#1858): it sets the
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.

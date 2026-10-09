@@ -31,13 +31,32 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
   );
 }
 
-interface ScheduleOverridePayload {
-  model_id_override?: string | null;
-  generation_config_override?: ModelGenerationSettings | null;
-  proxy_id_override?: string | null;
-  version_override?: string | null;
-  connection_overrides?: Record<string, string[]> | null;
+/** The override half of a schedule create: an empty override is omitted, never `null`. */
+export interface ScheduleCreateOverrides {
+  model_id_override?: string;
+  generation_config_override?: ModelGenerationSettings;
+  proxy_id_override?: string;
+  version_override?: string;
+  connection_overrides?: Record<string, string[]>;
   actor?: ActorValue;
+}
+
+/** The override half of a schedule edit: `null` clears an override, an absent key keeps it. */
+export interface ScheduleEditOverrides {
+  model_id_override: string | null;
+  generation_config_override: ModelGenerationSettings | null;
+  proxy_id_override: string | null;
+  version_override?: string | null;
+  connection_overrides: Record<string, string[]> | null;
+  actor?: ActorValue;
+}
+
+interface ScheduleOverrideArgs {
+  overrides: RunOverridesValue;
+  versionOverride: string | undefined;
+  versionOverrideChanged: boolean;
+  actor: ActorValue | undefined;
+  currentActor: ActorValue | undefined;
 }
 
 /**
@@ -45,14 +64,15 @@ interface ScheduleOverridePayload {
  * override, `null` for a cleared one (an absent key leaves the row untouched), except
  * `version_override` and the actor, sent only when they changed.
  */
-export function scheduleOverridePayload(args: {
-  isEdit: boolean;
-  overrides: RunOverridesValue;
-  versionOverride: string | undefined;
-  versionOverrideChanged: boolean;
-  actor: ActorValue | undefined;
-  currentActor: ActorValue | undefined;
-}): ScheduleOverridePayload {
+export function scheduleOverridePayload(
+  args: ScheduleOverrideArgs & { isEdit: true },
+): ScheduleEditOverrides;
+export function scheduleOverridePayload(
+  args: ScheduleOverrideArgs & { isEdit: false },
+): ScheduleCreateOverrides;
+export function scheduleOverridePayload(
+  args: ScheduleOverrideArgs & { isEdit: boolean },
+): ScheduleEditOverrides | ScheduleCreateOverrides {
   const { overrides, versionOverride, actor } = args;
   if (args.isEdit) {
     return {
@@ -76,50 +96,4 @@ export function scheduleOverridePayload(args: {
       : {}),
     ...(actor ? { actor } : {}),
   };
-}
-
-/** The stored fields of a schedule that decide which connections its fires bind. */
-interface ScheduleFireState {
-  enabled: boolean;
-  userId: string | null;
-  endUserId: string | null;
-  version_override: string | null;
-  connection_overrides: Record<string, string[]> | null;
-}
-
-/** Order-insensitive identity of a connection-overrides map; `null` and `{}` are the same. */
-function overridesKey(overrides: Record<string, string[]> | null | undefined): string {
-  return JSON.stringify(
-    Object.entries(overrides ?? {})
-      .map(([id, set]) => [id, [...set].sort()] as const)
-      .sort(([a], [b]) => a.localeCompare(b)),
-  );
-}
-
-/**
- * Whether an update can change what the fires start without (picks, actor, frozen version, or a
- * switch-on), so its `warnings` are news. An unknown prior state counts.
- */
-export function scheduleUpdateMayChangeFires(
-  body: {
-    enabled?: boolean;
-    version_override?: string | null;
-    connection_overrides?: Record<string, string[]> | null;
-    actor?: ActorValue;
-  },
-  previous: ScheduleFireState | undefined,
-): boolean {
-  if (!previous) return true;
-  return (
-    (body.connection_overrides !== undefined &&
-      overridesKey(body.connection_overrides) !== overridesKey(previous.connection_overrides)) ||
-    (body.enabled === true && !previous.enabled) ||
-    (body.actor !== undefined &&
-      !sameActor(body.actor, {
-        ...(previous.userId ? { userId: previous.userId } : {}),
-        ...(previous.endUserId ? { endUserId: previous.endUserId } : {}),
-      })) ||
-    (body.version_override !== undefined &&
-      (body.version_override ?? null) !== (previous.version_override ?? null))
-  );
 }

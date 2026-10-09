@@ -330,7 +330,7 @@ export const schemas = {
       },
     ],
   },
-  // `allOf`-merged into every launch and schedule-write success body.
+  // `allOf`-merged into every launch success body.
   LaunchWarnings: {
     type: "object",
     required: ["warnings"],
@@ -338,10 +338,62 @@ export const schemas = {
       warnings: {
         type: "array",
         description:
-          "Declared, non-required integrations the run starts without. Always present; always empty on a schedule written for another member. A `required` integration in the same state is a 409 instead.",
+          "Declared, non-required integrations the run starts without. Always present. A `required` integration in the same state is a 409 instead.",
         items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
       },
     },
+  },
+  // The `structuredContent` of the MCP `run_and_wait` tool, and its declared `outputSchema`.
+  RunAndWaitResult: {
+    type: "object",
+    description: `The \`run_and_wait\` MCP tool's result. \`done\` is its only discriminant: \`true\` once the run reached a terminal status, \`false\` when the wait ended first — the run is still going, and the payload carries no outcome. ${RUN_AND_WAIT_RESUME_INSTRUCTION}`,
+    oneOf: [
+      { $ref: "#/components/schemas/RunAndWaitPending" },
+      { $ref: "#/components/schemas/RunAndWaitTerminal" },
+    ],
+  },
+  RunAndWaitPending: {
+    type: "object",
+    required: RUN_AND_WAIT_REQUIRED,
+    properties: { ...RUN_AND_WAIT_COMMON_PROPERTIES, done: { type: "boolean", const: false } },
+    additionalProperties: false,
+  },
+  RunAndWaitTerminal: {
+    type: "object",
+    required: RUN_AND_WAIT_REQUIRED,
+    properties: {
+      ...RUN_AND_WAIT_COMMON_PROPERTIES,
+      done: { type: "boolean", const: true },
+      result: {
+        description: "The run's output payload. Absent when `truncated` replaces it.",
+      },
+      error: { type: "string", description: "The run's own failure; never a wait outcome." },
+      files: {
+        type: "array",
+        description: "Files the run published; absent when it published none.",
+        items: {
+          type: "object",
+          required: ["id", "uri", "name", "mime", "size"],
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            uri: { type: "string", description: "`appfile://` URI." },
+            name: { type: "string" },
+            mime: { type: "string" },
+            size: { type: "integer", minimum: 0 },
+          },
+        },
+      },
+      truncated: {
+        type: "boolean",
+        const: true,
+        description: `\`result\` was over ${RUN_RESULT_INLINE_MAX_BYTES} bytes of JSON: \`result_head\` holds its prefix, \`getRun\` the whole of it.`,
+      },
+      result_size_bytes: { type: "integer", minimum: 0 },
+      result_head: { type: "string" },
+      message: { type: "string", description: "How to read a truncated result." },
+    },
+    additionalProperties: false,
   },
   ModelGenerationSettings: {
     type: "object",

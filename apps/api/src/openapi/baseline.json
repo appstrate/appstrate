@@ -4911,7 +4911,8 @@
                     "default": "UTC"
                   },
                   "input": {
-                    "type": "object"
+                    "type": "object",
+                    "additionalProperties": true
                   },
                   "generation_config_override": {
                     "$ref": "#/components/schemas/ModelGenerationSettings",
@@ -4980,7 +4981,7 @@
         },
         "responses": {
           "201": {
-            "description": "Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings).",
+            "description": "Schedule created, plus `warnings`: the integrations its fires would start without.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -4997,7 +4998,17 @@
                       "$ref": "#/components/schemas/Schedule"
                     },
                     {
-                      "$ref": "#/components/schemas/LaunchWarnings"
+                      "type": "object",
+                      "required": ["warnings"],
+                      "properties": {
+                        "warnings": {
+                          "type": ["array", "null"],
+                          "description": "Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing.",
+                          "items": {
+                            "$ref": "#/components/schemas/ConnectionResolutionWarning"
+                          }
+                        }
+                      }
                     }
                   ]
                 },
@@ -5217,7 +5228,8 @@
                     "type": "boolean"
                   },
                   "input": {
-                    "type": "object"
+                    "type": "object",
+                    "additionalProperties": true
                   },
                   "generation_config_override": {
                     "oneOf": [
@@ -5291,7 +5303,7 @@
         },
         "responses": {
           "200": {
-            "description": "Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled.",
+            "description": "Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5308,7 +5320,17 @@
                       "$ref": "#/components/schemas/Schedule"
                     },
                     {
-                      "$ref": "#/components/schemas/LaunchWarnings"
+                      "type": "object",
+                      "required": ["warnings"],
+                      "properties": {
+                        "warnings": {
+                          "type": ["array", "null"],
+                          "description": "Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing.",
+                          "items": {
+                            "$ref": "#/components/schemas/ConnectionResolutionWarning"
+                          }
+                        }
+                      }
                     }
                   ]
                 }
@@ -28865,7 +28887,7 @@
         "properties": {
           "warnings": {
             "type": "array",
-            "description": "Declared, non-required integrations the run starts without. Always present; always empty on a schedule written for another member. A `required` integration in the same state is a 409 instead.",
+            "description": "Declared, non-required integrations the run starts without. Always present. A `required` integration in the same state is a 409 instead.",
             "items": {
               "$ref": "#/components/schemas/ConnectionResolutionWarning"
             }
