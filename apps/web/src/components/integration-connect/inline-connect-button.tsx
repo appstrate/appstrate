@@ -13,7 +13,7 @@ import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
- * Agent-driven inline connect/reconnect trigger.
+ * The integration page's connect and reconnect trigger.
  *
  * Every auth type (oauth2 / api_key / basic / mtls / custom) goes through the
  * unified hosted connect portal (issue #769): one `openPopup` call mints a
@@ -28,9 +28,9 @@ import { useIntegrationDetail } from "../../hooks/use-integrations";
  * keyed on `auth.type` (`oauth2` → "OAuth", `api_key` → "Clé API", …) —
  * no per-integration label boilerplate, generic across the catalog.
  *
- * Used by:
- *   - AgentIntegrationsBlock (Connexions tab status cards)
- *   - MissingConnectionsModal (409 recovery surface)
+ * Used by the integration detail page: the per-auth "+ Ajouter" (ConnectAuthBlock)
+ * and the per-row reconnect (ConnectionsTable). It requests no scopes: a connect
+ * gets the auth's `default_scopes`, a reconnect re-consents what the row holds.
  *
  * On success the integration's React Query keys are invalidated by the
  * underlying mutation hooks; the consuming card/row re-renders with
@@ -45,19 +45,10 @@ interface InlineConnectButtonProps {
    */
   authKey: string;
   /**
-   * Scopes inferred from the agent's `tools[]` selection. Forwarded
-   * verbatim to the OAuth kickoff so the consent prompt asks for the
-   * minimum the agent needs. The backend requests `defaults ∪ these ∪
-   * what the target connection already granted` — it does NOT walk
-   * the org's agents, so omitting this (e.g. the integration page's "+
-   * Add account") connects with the manifest defaults only.
-   */
-  scopes?: string[];
-  /**
    * `connect` — first connection (no row yet).
    * `reconnect` — connection exists but `needsReconnection=true`; user
-   *   re-runs the full OAuth dance, the upstream row is preserved
-   *   (upsert keyed by `(integration, authKey, accountId, app, owner)`).
+   *   re-runs the full OAuth dance and the row named by `connectionId` is
+   *   updated in place.
    */
   intent: "connect" | "reconnect";
   size?: "sm" | "default";
@@ -95,7 +86,6 @@ interface InlineConnectButtonProps {
 export function InlineConnectButton({
   packageId,
   authKey: defaultAuthKey,
-  scopes,
   intent,
   size = "sm",
   label,
@@ -131,7 +121,6 @@ export function InlineConnectButton({
     void openPopup({
       packageId,
       authKey: key,
-      ...(scopes ? { scopes } : {}),
       ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
       ...(connectionId ? { connectionId } : {}),
     }).then(() => onConnected?.());

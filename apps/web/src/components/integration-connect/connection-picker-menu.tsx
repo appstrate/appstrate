@@ -101,6 +101,7 @@ export function PickerMenu({
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
   } = picker;
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
@@ -234,15 +235,18 @@ export function PickerMenu({
                     ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                 </span>
                 {fit === "missing" ? (
-                  <span className={`truncate text-[0.65rem] ${AMBER_TEXT}`} title={missing}>
+                  <span
+                    className={`truncate text-[0.65rem] ${AMBER_TEXT}`}
+                    title={c.missing_scopes.join(" ")}
+                  >
                     {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
                   </span>
-                ) : summary.text ? (
+                ) : summary ? (
                   <span
                     className="text-muted-foreground truncate text-[0.65rem]"
                     title={summary.title}
                   >
-                    {summary.text}
+                    {summary.text ?? t("settings:integration.connection.defaultPermissions")}
                   </span>
                 ) : null}
                 {fit === "broader" && (
@@ -262,7 +266,7 @@ export function PickerMenu({
                     // click doesn't also toggle the dead row.
                     e.preventDefault();
                     e.stopPropagation();
-                    void triggerConnect(c.auth_key, { connectionId: c.id });
+                    void renewConnection(c);
                   }}
                   data-testid={`member-pick-renew-${c.id}`}
                   aria-label={t("detail.integrationMemberPicker.renew")}

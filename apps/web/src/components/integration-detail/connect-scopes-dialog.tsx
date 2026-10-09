@@ -15,15 +15,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { $api } from "../../api/client";
 import { Modal } from "../modal";
 import {
   useAgentsConsumingIntegration,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
-import { useOrgScope } from "../../hooks/use-org-scope";
+import { packageDetailQueryOptions } from "../../hooks/use-packages";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { usePermissions } from "../../hooks/use-permissions";
-import { splitPackageRef } from "../../lib/package-paths";
 import { toastError } from "../../lib/mutation-error";
 import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
 import { scopeLabels } from "../integration-connect/connection-scope-fit";
@@ -34,6 +34,30 @@ interface ScopeTarget {
   authKey: string;
   manifest: IntegrationManifestView;
   choice: ScopeChoice;
+}
+
+/** Tests pass an `openPopup`: the real one needs a browser. */
+export interface ConnectWithScopesDeps {
+  openPopup?: ReturnType<typeof useHostedConnectPopup>["openPopup"];
+}
+
+/** Starts the hosted connect with the ticked scopes in catalog order; none for the baseline. */
+export function useConnectWithScopes(
+  target: ScopeTarget & { forceAccountSelect: boolean },
+  deps: ConnectWithScopesDeps = {},
+) {
+  const hosted = useHostedConnectPopup();
+  const openPopup = deps.openPopup ?? hosted.openPopup;
+  const connect = (ticked: readonly string[]) => {
+    const scopes = requestedScopes(target.choice, ticked);
+    return openPopup({
+      packageId: target.packageId,
+      authKey: target.authKey,
+      ...(scopes.length > 0 ? { scopes } : {}),
+      ...(target.forceAccountSelect ? { forceAccountSelect: true } : {}),
+    });
+  };
+  return { connect, isPending: hosted.isPending };
 }
 
 /**
@@ -47,19 +71,9 @@ export function ConnectWithScopesButton({
 }: ScopeTarget & { label: string; forceAccountSelect: boolean }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const [open, setOpen] = useState(false);
-  const { openPopup, isPending } = useHostedConnectPopup();
+  const [agentLoading, setAgentLoading] = useState(false);
+  const { connect, isPending } = useConnectWithScopes({ ...target, forceAccountSelect });
   const formId = `connect-scopes-${target.authKey}`;
-
-  const connect = (scopes: string[]) => {
-    setOpen(false);
-    // Called from the submit click, so the popup opens inside the user gesture.
-    void openPopup({
-      packageId: target.packageId,
-      authKey: target.authKey,
-      ...(scopes.length > 0 ? { scopes } : {}),
-      ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
-    });
-  };
 
   return (
     <>
@@ -81,13 +95,28 @@ export function ConnectWithScopesButton({
             <Button variant="outline" type="button" onClick={() => setOpen(false)}>
               {t("common:btn.cancel")}
             </Button>
-            <Button type="submit" form={formId} data-testid={`${formId}-submit`}>
+            <Button
+              type="submit"
+              form={formId}
+              disabled={agentLoading}
+              data-testid={`${formId}-submit`}
+            >
               {t("agents:detail.integrationConnect")}
             </Button>
           </>
         }
       >
-        <ConnectScopesForm formId={formId} onSubmit={connect} {...target} />
+        <ConnectScopesForm
+          formId={formId}
+          agentLoading={agentLoading}
+          onAgentLoading={setAgentLoading}
+          onSubmit={(ticked) => {
+            setOpen(false);
+            // Called from the submit click, so the popup opens inside the user gesture.
+            void connect(ticked);
+          }}
+          {...target}
+        />
       </Modal>
     </>
   );
@@ -95,9 +124,16 @@ export function ConnectWithScopesButton({
 
 export function ConnectScopesForm({
   formId,
+  agentLoading,
+  onAgentLoading,
   onSubmit,
   ...target
-}: ScopeTarget & { formId: string; onSubmit: (scopes: string[]) => void }) {
+}: ScopeTarget & {
+  formId: string;
+  agentLoading: boolean;
+  onAgentLoading: (loading: boolean) => void;
+  onSubmit: (ticked: string[]) => void;
+}) {
   const { t } = useTranslation("settings");
   const [ticked, setTicked] = useState<string[]>([]);
   const { choice } = target;
@@ -114,12 +150,14 @@ export function ConnectScopesForm({
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit(requested);
+        onSubmit(ticked);
       }}
     >
       <p className="text-muted-foreground text-xs">{t("integration.auth.scopeChoice.help")}</p>
       <AgentQuickFill
         {...target}
+        loading={agentLoading}
+        onLoading={onAgentLoading}
         onScopes={(scopes) => setTicked((prev) => [...new Set([...prev, ...scopes])])}
       />
       {choice.baseline.length > 0 && (
@@ -129,24 +167,26 @@ export function ConnectScopesForm({
           })}
         </p>
       )}
-      <div className="space-y-2">
-        <Label className="text-xs">{t("integration.auth.scopeChoice.extra")}</Label>
+      <fieldset className="min-w-0 space-y-2">
+        <legend className="mb-2 text-xs font-medium">
+          {t("integration.auth.scopeChoice.extra")}
+        </legend>
         {choice.selectable.map((entry) => {
           const id = `${formId}-${entry.value}`;
           return (
-            <div key={entry.value} className="flex items-start gap-2 text-xs">
+            <div key={entry.value} className="flex items-start gap-2">
               <Checkbox
                 id={id}
                 checked={requested.includes(entry.value)}
                 onCheckedChange={() => toggle(entry.value)}
                 data-testid={id}
               />
-              <label htmlFor={id} className="min-w-0" title={entry.value}>
+              <Label htmlFor={id} className="min-w-0 text-xs font-normal" title={entry.value}>
                 {entry.label}
                 {entry.description && (
-                  <span className="text-muted-foreground block">{entry.description}</span>
+                  <span className="text-muted-foreground mt-1 block">{entry.description}</span>
                 )}
-              </label>
+              </Label>
             </div>
           );
         })}
@@ -155,7 +195,7 @@ export function ConnectScopesForm({
             {t("integration.auth.scopeChoice.defaultsOnly")}
           </p>
         )}
-      </div>
+      </fieldset>
     </form>
   );
 }
@@ -170,37 +210,35 @@ function AgentQuickFill({
   authKey,
   manifest,
   choice,
+  loading,
+  onLoading,
   onScopes,
-}: ScopeTarget & { onScopes: (scopes: string[]) => void }) {
+}: ScopeTarget & {
+  loading: boolean;
+  onLoading: (loading: boolean) => void;
+  onScopes: (scopes: string[]) => void;
+}) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const scope = useOrgScope();
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
   const { can } = usePermissions();
   const { data: agents } = useAgentsConsumingIntegration(packageId);
-  const [applied, setApplied] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
 
   if (!packageSightPermissions("agent").some(can) || !agents || agents.length === 0) return null;
 
   const apply = async (agentId: string) => {
-    const agent = agents.find((a) => a.agent_package_id === agentId);
-    if (!agent) return;
-    setLoading(true);
+    onLoading(true);
     try {
       const detail = await qc.fetchQuery(
-        $api.queryOptions("get", "/api/packages/agents/{scope}/{name}", {
-          params: { path: splitPackageRef(agentId), header: scope.header },
-        }),
+        packageDetailQueryOptions("agent", { orgId, spaceId }, agentId),
       );
       const entry = detail.dependencies.integrations.find((i) => i.id === packageId);
       onScopes(entry ? scopesForAgent(choice, { manifest, authKey, agent: entry }) : []);
-      setApplied((prev) =>
-        prev.includes(agent.display_name) ? prev : [...prev, agent.display_name],
-      );
     } catch (err) {
       toastError(err);
     } finally {
-      setLoading(false);
+      onLoading(false);
     }
   };
 
@@ -223,11 +261,6 @@ function AgentQuickFill({
           ))}
         </SelectContent>
       </Select>
-      {applied.length > 0 && (
-        <p className="text-muted-foreground text-xs">
-          {t("integration.auth.scopeChoice.forAgentApplied", { agents: applied.join(", ") })}
-        </p>
-      )}
     </div>
   );
 }

@@ -251,40 +251,31 @@ export function useConnectionPicker(
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
   /**
-   * `connectionId` renews that connection in place; without it a new one is created, taking
-   * the place of `replacing` (an under-scoped member) in the pick.
+   * A NEW connection with the agent's scopes, which takes the place of `replacing` (an
+   * under-scoped member) in the pick. Never sends a `connection_id`: the server would union the
+   * scopes into that connection, widening every agent bound to it.
    */
-  const triggerConnect = async (
-    authKey: string,
-    opts?: { connectionId?: string; replacing?: string },
-  ) => {
+  const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
     if (!auths[authKey]) return;
     // Every auth type goes through the hosted connect portal (issue #769) — the
     // popup opens the connect_url, which dispatches to the OAuth screen or the
     // hosted credential form server-side. We snapshot the accessible set first
     // so we can identify the just-created connection afterwards (the popup
     // can't return its id, and a cancelled popup adds nothing, leaving the
-    // prior resolution intact). On a renew (connectionId supplied) the backend
-    // UPDATEs in place and the snapshot diff is empty — we skip the select step.
+    // prior resolution intact).
     const before = new Set(candidates.map((c) => c.id));
-    const isRenew = !!opts?.connectionId;
-    // Forward the agent's per-tool inferred scopes so consent asks for what THIS
-    // agent needs — not just the integration's manifest defaults (the
-    // integration detail page is the surface that connects at defaults).
-    // Non-OAuth auths resolve to an empty set and connect at their fixed creds.
+    // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
+    // server always requests. Non-OAuth auths connect at their fixed credentials.
     const scopes = requiredScopesFor(authKey);
     const settled = await openPopup({
       packageId: integrationId,
       authKey,
       ...(scopes.length ? { scopes } : {}),
-      // Account picker is noise on a renew — the user is re-authorising the
-      // existing identity, not picking a new one. Force-pick stays on fresh
-      // connects so "Add another" actually offers a different account.
-      ...(isRenew ? {} : { forceAccountSelect: true }),
-      ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
+      // Force the IdP's account picker so "Add another" can offer a different account.
+      forceAccountSelect: true,
     });
     // A settled popup has refetched the readiness verdict: read it, never ask again.
-    if (!settled || isRenew) return;
+    if (!settled) return;
     let added: IntegrationCandidate | undefined;
     try {
       added = readResolution()?.candidates.find((c) => !before.has(c.id));
@@ -295,8 +286,9 @@ export function useConnectionPicker(
     if (!added) return;
     const placed = placeCreatedConnection({
       explicitIds,
-      checkedIds: checkedIds.filter((id) => id !== opts?.replacing),
+      checkedIds,
       createdId: added.id,
+      ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
     if ("persist" in placed) {
       await persist(placed.persist);
@@ -307,7 +299,11 @@ export function useConnectionPicker(
     setOpen(true);
   };
 
-  // A settled popup has already refetched the active integration queries.
+  // The two in-place writes. A settled popup has already refetched the active integration queries.
+  // Renewing re-consents what the connection holds: it sends no scopes, so it widens nothing.
+  const renewConnection = (conn: IntegrationCandidate) =>
+    openPopup({ packageId: integrationId, authKey: conn.auth_key, connectionId: conn.id });
+  // Upgrading widens it for every agent bound to it — only ever after a confirmation.
   const upgradeScopes = (conn: IntegrationCandidate) =>
     openPopup({
       packageId: integrationId,
@@ -368,6 +364,7 @@ export function useConnectionPicker(
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
     upgradeScopes,
   };
 }

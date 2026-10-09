@@ -4,13 +4,14 @@ import { expandScopesGranted, type IntegrationManifest } from "@appstrate/core/i
 
 /**
  * How a connection's grant compares with what an agent needs:
- *  - `exact`   — covers the agent and grants nothing beyond it and the auth's `default_scopes`;
- *  - `broader` — covers the agent but grants more;
- *  - `missing` — lacks some of the agent's scopes (the server's `missing_scopes`).
+ *  - `exact`    — covers the agent and grants no declared scope beyond it and `default_scopes`;
+ *  - `unjudged` — covers the agent, breadth unknown: a non-oauth2 auth or one with no catalog;
+ *  - `broader`  — covers the agent but grants more;
+ *  - `missing`  — lacks some of the agent's scopes (the server's `missing_scopes`).
  */
-export type ScopeFit = "exact" | "broader" | "missing";
+export type ScopeFit = "exact" | "unjudged" | "broader" | "missing";
 
-const FIT_RANK: Record<ScopeFit, number> = { exact: 0, broader: 1, missing: 2 };
+const FIT_RANK: Record<ScopeFit, number> = { exact: 0, unjudged: 1, broader: 2, missing: 3 };
 
 /** How many labels a summary shows before folding the rest into `+N`. */
 const SUMMARY_MAX = 2;
@@ -27,29 +28,36 @@ export function scopeLabels(
 }
 
 /**
- * A short line for a set of granted scopes: the first labels and `+N`, with every label in
- * `title`. The auth's `default_scopes` come last — every connection of that auth has them, so
- * they tell connections apart least.
+ * A short line for a granted set: what it grants beyond the auth's `default_scopes`, the first
+ * labels and `+N`. Under a catalog, scopes it does not declare (an IdP's echo) are left out.
+ * `text` is `null` when nothing is left — the caller names the defaults — and the whole set is
+ * `null` for an empty grant. `title` labels every granted scope.
  */
 export function summarizeScopes(
   manifest: IntegrationManifest | undefined,
   authKey: string,
   scopes: readonly string[],
-): { text: string; title: string } {
-  const defaults = new Set(manifest?.auths?.[authKey]?.default_scopes ?? []);
-  const ordered = [
-    ...scopes.filter((s) => !defaults.has(s)),
-    ...scopes.filter((s) => defaults.has(s)),
-  ];
-  const labels = scopeLabels(manifest, authKey, ordered);
+): { text: string | null; title: string } | null {
+  if (scopes.length === 0) return null;
+  const auth = manifest?.auths?.[authKey];
+  const defaults = new Set(auth?.default_scopes ?? []);
+  const declared = auth?.scope_catalog?.length
+    ? new Set(auth.scope_catalog.map((entry) => entry.value))
+    : null;
+  const telling = scopes.filter((s) => !defaults.has(s) && (declared?.has(s) ?? true));
+  const labels = scopeLabels(manifest, authKey, telling);
   const more = labels.length - SUMMARY_MAX;
   const shown = labels.slice(0, SUMMARY_MAX).join(" · ");
-  return { text: more > 0 ? `${shown} +${more}` : shown, title: labels.join(", ") };
+  return {
+    text: labels.length === 0 ? null : more > 0 ? `${shown} +${more}` : shown,
+    title: scopeLabels(manifest, authKey, scopes).join(", "),
+  };
 }
 
 /**
- * Where a connection stands for an agent. Coverage is the server's verdict (`missing`); breadth
- * compares the grant with `required ∪ default_scopes`, expanded through `scope_catalog[].implies`.
+ * Where a connection stands for an agent. Coverage is the server's verdict (`missing`). Breadth
+ * compares the granted scopes the auth's catalog declares with `required ∪ default_scopes`,
+ * expanded through `scope_catalog[].implies`; an undeclared scope is the IdP's echo, not a grant.
  */
 export function scopeFit(input: {
   manifest: IntegrationManifest;
@@ -59,14 +67,20 @@ export function scopeFit(input: {
   required: readonly string[];
 }): ScopeFit {
   if (input.missing.length > 0) return "missing";
-  const defaults = input.manifest.auths?.[input.authKey]?.default_scopes ?? [];
+  const auth = input.manifest.auths?.[input.authKey];
+  if (auth?.type !== "oauth2" || !auth.scope_catalog?.length) return "unjudged";
+  const declared = new Set(auth.scope_catalog.map((entry) => entry.value));
   const allowed = new Set(
-    expandScopesGranted([...input.required, ...defaults], input.manifest, input.authKey),
+    expandScopesGranted(
+      [...input.required, ...(auth.default_scopes ?? [])],
+      input.manifest,
+      input.authKey,
+    ),
   );
-  return input.granted.every((s) => allowed.has(s)) ? "exact" : "broader";
+  return input.granted.some((s) => declared.has(s) && !allowed.has(s)) ? "broader" : "exact";
 }
 
-/** `items` ordered exact → broader → missing, keeping the given order within each. */
+/** `items` ordered exact → unjudged → broader → missing, keeping the given order within each. */
 export function sortByScopeFit<T>(items: readonly T[], fitOf: (item: T) => ScopeFit): T[] {
   return [...items].sort((a, b) => FIT_RANK[fitOf(a)] - FIT_RANK[fitOf(b)]);
 }

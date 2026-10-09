@@ -30,10 +30,10 @@ import { summarizeScopes } from "../integration-connect/connection-scope-fit";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
-  useIntegrationDetail,
   useUpdateIntegrationConnection,
   type IntegrationAuthType,
   type IntegrationConnection,
+  type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import {
   useConnectionDeleteImpact,
@@ -53,12 +53,15 @@ export function ConnectionsTable({
   packageId,
   authKey,
   authType,
+  manifest,
   connections,
   canRenew,
 }: {
   packageId: string;
   authKey: string;
   authType: IntegrationAuthType;
+  /** Names the granted scopes by the auth's `scope_catalog`. */
+  manifest: IntegrationManifestView;
   connections: IntegrationConnection[];
   canRenew: boolean;
 }) {
@@ -87,6 +90,7 @@ export function ConnectionsTable({
               packageId={packageId}
               authKey={authKey}
               authType={authType}
+              manifest={manifest}
               canRenew={canRenew}
             />
           ))}
@@ -101,6 +105,7 @@ function ConnectionTableRow({
   packageId,
   authKey,
   authType,
+  manifest,
   canRenew,
 }: {
   connection: IntegrationConnection;
@@ -109,6 +114,7 @@ function ConnectionTableRow({
   authKey: string;
   /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
   authType: IntegrationAuthType;
+  manifest: IntegrationManifestView;
   /** False when no OAuth client is usable yet — admin must set one up first. */
   canRenew: boolean;
 }) {
@@ -123,8 +129,7 @@ function ConnectionTableRow({
   const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
-  const { data: detail } = useIntegrationDetail(packageId);
-  const scopes = summarizeScopes(detail?.manifest, authKey, connection.scopes_granted);
+  const scopes = summarizeScopes(manifest, authKey, connection.scopes_granted);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
@@ -303,12 +308,13 @@ function ConnectionTableRow({
 
         {/* Granted scopes */}
         <TableCell className="max-w-[16rem]">
-          {scopes.text ? (
+          {scopes ? (
+            // The labels name the grant; the raw values stay one hover away.
             <span
               className="text-muted-foreground block truncate text-[0.65rem]"
-              title={scopes.title}
+              title={connection.scopes_granted.join(" ")}
             >
-              {scopes.text}
+              {scopes.text ?? t("integration.connection.defaultPermissions")}
             </span>
           ) : (
             <span className="text-muted-foreground text-xs">—</span>

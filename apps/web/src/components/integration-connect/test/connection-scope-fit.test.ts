@@ -2,8 +2,8 @@
 
 /**
  * How the connection picker reads a connection's grant against an agent: the
- * short scope summary, the exact / broader / missing verdict that orders the
- * menu, and the order itself. A "broader" false positive teaches users to
+ * short scope summary, the fit verdict that orders the menu, and the order
+ * itself. A "broader" false positive teaches users to
  * ignore the mark; a false "exact" hides a connection that would hand an agent
  * more than it asked for.
  */
@@ -54,16 +54,33 @@ describe("scopeLabels", () => {
 });
 
 describe("summarizeScopes", () => {
-  it("lists the scopes beyond the auth's defaults first, then folds the rest into +N", () => {
-    expect(summarizeScopes(MANIFEST, "oauth", ["openid", READ, SEND, LABELS])).toEqual({
-      text: "Send · Labels +2",
-      title: "Send, Labels, Identity, Read",
+  it("shows what the grant adds to the defaults, folding the rest into +N", () => {
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", READ, SEND, LABELS, MODIFY])).toEqual({
+      text: "Send · Labels +1",
+      title: "Identity, Read, Send, Labels, Read & write",
     });
   });
 
-  it("shows a short set whole", () => {
-    expect(summarizeScopes(MANIFEST, "oauth", [READ])).toEqual({ text: "Read", title: "Read" });
-    expect(summarizeScopes(MANIFEST, "oauth", [])).toEqual({ text: "", title: "" });
+  it("leaves out what the catalog does not declare, the IdP's echo", () => {
+    expect(summarizeScopes(MANIFEST, "oauth", ["profile", READ, SEND])).toEqual({
+      text: "Send",
+      title: "profile, Read, Send",
+    });
+  });
+
+  it("has no text for a grant of the defaults alone, and nothing for an empty grant", () => {
+    expect(summarizeScopes(MANIFEST, "oauth", ["openid", READ, "email"])).toEqual({
+      text: null,
+      title: "Identity, Read, email",
+    });
+    expect(summarizeScopes(MANIFEST, "oauth", [])).toBeNull();
+  });
+
+  it("keeps every non-default scope, raw, when the auth declares no catalog", () => {
+    expect(summarizeScopes(undefined, "oauth", ["a", "b"])).toEqual({
+      text: "a · b",
+      title: "a, b",
+    });
   });
 });
 
@@ -80,8 +97,17 @@ describe("scopeFit", () => {
     expect(fit(["openid", READ], [])).toBe("exact");
   });
 
+  it("is exact for an empty grant that covers the agent", () => {
+    expect(fit([], [])).toBe("exact");
+  });
+
   it("counts what a required scope implies as asked for", () => {
     expect(fit(["openid", MODIFY, SEND], [MODIFY])).toBe("exact");
+  });
+
+  it("ignores what the catalog does not declare: the IdP's echo grants nothing", () => {
+    // Microsoft echoes `openid profile email` beside the requested scopes.
+    expect(fit(["openid", "profile", "email", READ], [READ])).toBe("exact");
   });
 
   it("is broader when the grant goes beyond the required scopes and the defaults", () => {
@@ -92,17 +118,38 @@ describe("scopeFit", () => {
     // `modify` covers `send` but also writes: more than the agent asked for.
     expect(fit(["openid", MODIFY], [SEND])).toBe("broader");
   });
+
+  it("passes no breadth judgement on a non-oauth2 auth, or an oauth2 one with no catalog", () => {
+    const manifest = {
+      auths: {
+        key: { type: "api_key" },
+        bare: { type: "oauth2", default_scopes: ["read"] },
+      },
+    } as unknown as IntegrationManifestView;
+    const judge = (authKey: string, granted: string[]) =>
+      scopeFit({ manifest, authKey, granted, missing: [], required: [] });
+    expect(judge("key", [])).toBe("unjudged");
+    expect(judge("bare", ["read", "write"])).toBe("unjudged");
+  });
 });
 
 describe("sortByScopeFit", () => {
-  it("orders exact, then broader, then missing, keeping the given order within each", () => {
+  it("orders exact, unjudged, broader, then missing, keeping the order within each", () => {
     const fits: Record<string, ScopeFit> = {
       a: "missing",
       b: "broader",
       c: "exact",
+      u: "unjudged",
       d: "broader",
       e: "exact",
     };
-    expect(sortByScopeFit(Object.keys(fits), (id) => fits[id]!)).toEqual(["c", "e", "b", "d", "a"]);
+    expect(sortByScopeFit(Object.keys(fits), (id) => fits[id]!)).toEqual([
+      "c",
+      "e",
+      "u",
+      "b",
+      "d",
+      "a",
+    ]);
   });
 });

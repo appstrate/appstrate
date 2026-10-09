@@ -39,6 +39,20 @@ describe("scopeChoiceFor", () => {
     expect(c.selectable.map((e) => e.value)).toEqual(["gmail.compose", "gmail.send"]);
   });
 
+  it("leaves out of the baseline a default that another default implies", () => {
+    const c = scopeChoiceFor({
+      ...GOOGLE,
+      default_scopes: ["email", "userinfo.email", "gmail.readonly"],
+      scope_catalog: [
+        { value: "email", label: "Adresse e-mail" },
+        { value: "userinfo.email", label: "Adresse e-mail (Google)", implies: ["email"] },
+        ...(GOOGLE.scope_catalog ?? []),
+      ],
+    });
+    expect(c?.baseline).toEqual(["userinfo.email", "gmail.readonly"]);
+    expect(c?.selectable.map((e) => e.value)).not.toContain("email");
+  });
+
   it("offers no choice for a non-oauth2 auth", () => {
     expect(scopeChoiceFor({ type: "api_key" } as unknown as IntegrationManifestAuth)).toBeNull();
     expect(scopeChoiceFor(undefined)).toBeNull();

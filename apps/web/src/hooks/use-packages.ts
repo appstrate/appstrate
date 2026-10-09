@@ -190,6 +190,27 @@ function usePackageList(type: PackageType) {
   });
 }
 
+/** {@link usePackageDetail}'s query, for an imperative `fetchQuery` that shares its cache entry. */
+export function packageDetailQueryOptions<T extends PackageType>(
+  type: T,
+  scope: { orgId: string | null; spaceId: string | null },
+  id: string,
+  version?: string,
+) {
+  return {
+    // The server's default projection and an explicit `draft` are two different
+    // answers and must never share a cache entry.
+    queryKey: packageKeys.detail(
+      PACKAGE_TYPE_ROUTE_SEGMENT[type],
+      scope.orgId,
+      scope.spaceId,
+      id,
+      version ?? null,
+    ),
+    queryFn: () => fetchPackageDetail(type, id, version),
+  };
+}
+
 function usePackageDetail<T extends PackageType>(
   type: T,
   id: string | undefined,
@@ -197,15 +218,10 @@ function usePackageDetail<T extends PackageType>(
 ) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
-  // The server's default projection and an explicit `draft` are two different
-  // answers and must never share a cache entry.
-  const version = opts?.version;
   const canSee = useCanSeePackage(type);
 
   return useQuery({
-    queryKey: packageKeys.detail(segment, orgId, spaceId, id!, version ?? null),
-    queryFn: () => fetchPackageDetail(type, id!, version),
+    ...packageDetailQueryOptions(type, { orgId, spaceId }, id!, opts?.version),
     enabled: canSee && !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
 }

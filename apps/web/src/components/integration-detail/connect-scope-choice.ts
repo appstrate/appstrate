@@ -15,6 +15,7 @@ type ScopeCatalogEntry = NonNullable<IntegrationManifestAuth["scope_catalog"]>[n
  * only the rest of the `scope_catalog` is a choice.
  */
 export interface ScopeChoice {
+  /** The defaults to show, without those another default implies (`scope_catalog[].implies`). */
   baseline: string[];
   selectable: ScopeCatalogEntry[];
 }
@@ -22,9 +23,15 @@ export interface ScopeChoice {
 /** `null` when there is nothing to choose: not oauth2, no catalog, or an all-baseline catalog. */
 export function scopeChoiceFor(auth: IntegrationManifestAuth | undefined): ScopeChoice | null {
   if (auth?.type !== "oauth2" || !auth.scope_catalog) return null;
-  const baseline = auth.default_scopes ?? [];
-  const selectable = auth.scope_catalog.filter((entry) => !baseline.includes(entry.value));
-  return selectable.length > 0 ? { baseline, selectable } : null;
+  const defaults = auth.default_scopes ?? [];
+  const selectable = auth.scope_catalog.filter((entry) => !defaults.includes(entry.value));
+  if (selectable.length === 0) return null;
+  const implied = new Set(
+    auth.scope_catalog
+      .filter((entry) => defaults.includes(entry.value))
+      .flatMap((entry) => entry.implies ?? []),
+  );
+  return { baseline: defaults.filter((scope) => !implied.has(scope)), selectable };
 }
 
 /** The selectable scopes an agent needs on `authKey`: what the agent quick-fill ticks. */

@@ -106,6 +106,7 @@ export function ConnectAuthBlock({
         authKey={status.auth_key}
         authType={status.type}
         connections={status.connections}
+        manifest={manifest}
         // Renew via OAuth needs a usable client; when none is available the
         // connect CTA is already hidden, so gate the per-row renew button the
         // same way to avoid a guaranteed 403.

@@ -106,15 +106,21 @@ export function unavailableConnectionIds(explicitIds: string[], candidateIds: st
  * Where a connection created from the picker goes. With no pick of the actor's own (or a pick of
  * none) it becomes the pick — never joined onto the cascade's fallback, which would freeze an org
  * default into a member pin. Beside an explicit pick it is only ticked: binding several
- * connections is always the actor's explicit "Valider".
+ * connections is always the actor's explicit "Valider". A connection created to replace a stored
+ * member (`replacing`) takes its place 1-for-1, which never grows the set.
  */
 export function placeCreatedConnection(input: {
   explicitIds: ConnectionSet;
   checkedIds: string[];
   createdId: string;
+  replacing?: string;
 }): { persist: string[] } | { draft: string[] } {
-  if (!input.explicitIds?.length) return { persist: [input.createdId] };
-  const { checkedIds, createdId } = input;
+  const { explicitIds, createdId, replacing } = input;
+  if (replacing && explicitIds?.includes(replacing)) {
+    return { persist: explicitIds.map((id) => (id === replacing ? createdId : id)) };
+  }
+  if (!explicitIds?.length) return { persist: [createdId] };
+  const checkedIds = input.checkedIds.filter((id) => id !== replacing);
   return {
     draft:
       checkedIds.includes(createdId) || checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION

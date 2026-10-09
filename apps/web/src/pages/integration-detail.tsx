@@ -115,7 +115,10 @@ export function IntegrationDetailPage() {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
-  const { data: pkg } = usePackageDetail("integration", packageId || undefined);
+  const { data: pkg, isLoading: pkgLoading } = usePackageDetail(
+    "integration",
+    packageId || undefined,
+  );
   // ONE pair of doors for every package family: an integration is activated in
   // a space by `POST /api/spaces/{id}/packages` and switched off by its
   // `DELETE`, exactly like an agent or a skill. The row and its settings
@@ -151,7 +154,8 @@ export function IntegrationDetailPage() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  if (isLoading) return <LoadingState />;
+  // `source` (system or local) comes from the package detail only: wait for it.
+  if (isLoading || pkgLoading) return <LoadingState />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.

@@ -21,8 +21,10 @@ import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
 import {
   invalidateIntegrationQueries,
+  type IntegrationAuthStatus,
   type IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
+import { ConfirmModal } from "../../confirm-modal.tsx";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
@@ -358,28 +360,39 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
   });
 });
 
+const NO_STATUSES: IntegrationAuthStatus[] = [];
+
 function PickerProbe({
   persistence,
   version,
   manifest = MANIFEST,
+  authStatuses = NO_STATUSES,
+  agentScopes,
+  openPopup,
   onPicker,
 }: {
   persistence: ConnectionPickerPersistence;
   version?: string;
   manifest?: IntegrationManifestView;
+  authStatuses?: IntegrationAuthStatus[];
+  agentScopes?: string[];
+  openPopup?: ConnectionPickerDeps["openPopup"];
   onPicker: (picker: ConnectionPicker | null) => void;
 }) {
   onPicker(
-    useConnectionPicker({
-      integrationId: INTEGRATION,
-      agentPackageId: AGENT,
-      manifest,
-      authStatuses: [],
-      agentTools: undefined,
-      agentScopes: undefined,
-      persistence,
-      version,
-    }),
+    useConnectionPicker(
+      {
+        integrationId: INTEGRATION,
+        agentPackageId: AGENT,
+        manifest,
+        authStatuses,
+        agentTools: undefined,
+        agentScopes,
+        persistence,
+        version,
+      },
+      openPopup ? { openPopup } : {},
+    ),
   );
   return null;
 }
@@ -393,6 +406,20 @@ function MenuProbe({
   onTree: (tree: ReactNode) => void;
 }) {
   onTree(PickerMenu({ integrationId: INTEGRATION, picker }));
+  return null;
+}
+
+/** The under-scoped warning's element tree, its hooks run by this probe. */
+function WarningProbe({
+  conn,
+  picker,
+  onTree,
+}: {
+  conn: Candidate;
+  picker: ConnectionPicker;
+  onTree: (tree: ReactNode) => void;
+}) {
+  onTree(UnderScopedWarning({ conn, picker }));
   return null;
 }
 
@@ -718,10 +745,11 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     return null;
   }
 
-  /** No override, so a created connection is written straight through `onChange`. */
+  /** Override mode, so a created connection is written straight through `onChange`. */
   async function setup(
     answers: Array<() => Promise<Readiness>>,
     popup: (qc: QueryClient) => OpenPopup,
+    stored: string[] | null = null,
   ) {
     const qc = new QueryClient();
     const mounted = await mountReadiness(qc, answers);
@@ -729,7 +757,7 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     const pickers: Array<ConnectionPicker | null> = [];
     render(
       <Probe
-        persistence={{ mode: "override", value: null, onChange: (ids) => picked.push(ids) }}
+        persistence={{ mode: "override", value: stored, onChange: (ids) => picked.push(ids) }}
         openPopup={popup(qc)}
         onPicker={(p) => pickers.push(p)}
       />,
@@ -755,6 +783,13 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     expect(picked).toEqual([[ADDED]]);
     // The mount, then the popup's refetch: reading after it asks nothing more.
     expect(mounted.asked()).toBe(2);
+    mounted.unsubscribe();
+  });
+
+  it("swaps a connection created to replace a stored member for it, written at once", async () => {
+    const { mounted, picked, picker } = await setup([before, withAdded], settles, [WEB, DB]);
+    await picker.triggerConnect("primary", { replacing: WEB });
+    expect(picked).toEqual([[ADDED, DB]]);
     mounted.unsubscribe();
   });
 
@@ -808,21 +843,46 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
       },
     },
   } as unknown as IntegrationManifestView;
+  // A usable OAuth client: the agent's auth is connectable, so a new connection is offered.
+  const CONNECTABLE: IntegrationAuthStatus[] = [
+    {
+      auth_key: "primary",
+      type: "oauth2",
+      required: true,
+      scopes: [],
+      resource: null,
+      connections: [],
+      ready: true,
+      has_oauth_client: true,
+      has_system_client: false,
+      client_auto_provisioned: false,
+    },
+  ];
   const LABELS = "44444444-4444-4444-8444-444444444444";
   const scoped = (id: string, granted: string[], missing: string[] = []): Candidate => ({
     ...candidate(id, id),
     scopes_granted: granted,
     missing_scopes: missing,
   });
+  type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
 
-  function pickerOver(candidates: Candidate[]): ConnectionPicker {
+  function pickerOver(
+    candidates: Candidate[],
+    opts: { canAdd?: boolean; agentScopes?: string[]; openPopup?: OpenPopup } = {},
+  ): ConnectionPicker {
     const qc = new QueryClient();
-    qc.setQueryData(READINESS_KEY, readiness(resolution({ candidates })));
+    qc.setQueryData(
+      READINESS_KEY,
+      readiness(resolution({ candidates, can_add_connection: opts.canAdd ?? true })),
+    );
     const pickers: Array<ConnectionPicker | null> = [];
     render(
       <PickerProbe
         persistence={{ mode: "pin" }}
         manifest={OAUTH}
+        authStatuses={CONNECTABLE}
+        agentScopes={opts.agentScopes}
+        openPopup={opts.openPopup}
         onPicker={(p) => pickers.push(p)}
       />,
       { queryClient: qc },
@@ -831,6 +891,33 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     if (!picker) throw new Error("the readiness verdict should be loaded");
     return picker;
   }
+
+  /** The warning's element tree — its modal is a portal a static render drops. */
+  function warningTree(conn: Candidate, picker: ConnectionPicker): ReactNode {
+    const trees: ReactNode[] = [];
+    render(<WarningProbe conn={conn} picker={picker} onTree={(tree) => trees.push(tree)} />);
+    return trees[0];
+  }
+
+  function confirmModalProps(node: ReactNode): Record<string, unknown> | undefined {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = confirmModalProps(child);
+        if (found) return found;
+      }
+      return undefined;
+    }
+    if (!isValidElement<Record<string, unknown>>(node)) return undefined;
+    if (node.type === ConfirmModal) return node.props;
+    return confirmModalProps(node.props.children as ReactNode);
+  }
+
+  // `integrations:connect` comes from the org store, absent here; it is granted by hand
+  // wherever the test is about something else.
+  const withConnect = (picker: ConnectionPicker): ConnectionPicker => ({
+    ...picker,
+    canConnect: true,
+  });
 
   it("lists compatible connections first, the ones granting no more than asked leading", () => {
     const picker = pickerOver([
@@ -844,13 +931,9 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
 
   it("offers a new connection with the agent's scopes first, the in-place upgrade second", () => {
     const conn = scoped(WEB, ["read"], ["send"]);
-    const picker = {
-      ...pickerOver([conn]),
-      canConnect: true,
-      canAddConnection: true,
-      authKeys: ["primary"],
-    };
-    const html = render(<UnderScopedWarning conn={conn} picker={picker} />);
+    const html = render(
+      <UnderScopedWarning conn={conn} picker={withConnect(pickerOver([conn]))} />,
+    );
     const create = html.indexOf(`member-pick-new-for-agent-${WEB}`);
     const upgrade = html.indexOf(`member-pick-upgrade-${WEB}`);
     expect(create).toBeGreaterThan(-1);
@@ -860,16 +943,63 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     );
   });
 
-  it("offers no upgrade of a connection the actor does not own", () => {
+  it("names creating a connection as a way out only when the actor may create one", () => {
     const conn = { ...scoped(WEB, ["read"], ["send"]), is_own: false };
+    const t = (key: string) =>
+      i18n.t(`agents:detail.integrationMemberPicker.${key}`, { owner: "Moi" });
+    const allowed = render(
+      <UnderScopedWarning conn={conn} picker={withConnect(pickerOver([conn]))} />,
+    );
+    expect(allowed).toContain(t("missingScopesForeignCanCreate"));
+    expect(allowed).toContain(`member-pick-new-for-agent-${WEB}`);
+    expect(allowed).not.toContain(`member-pick-upgrade-${WEB}`);
+    const blocked = render(
+      <UnderScopedWarning
+        conn={conn}
+        picker={withConnect(pickerOver([conn], { canAdd: false }))}
+      />,
+    );
+    expect(blocked).toContain(t("missingScopesForeign"));
+    expect(blocked).not.toContain(`member-pick-new-for-agent-${WEB}`);
+  });
+
+  it("opens a confirmation on 'Mettre à niveau', and upgrades only once it is confirmed", () => {
+    const conn = scoped(WEB, ["read"], ["send"]);
+    const upgraded: Candidate[] = [];
     const picker = {
-      ...pickerOver([conn]),
-      canConnect: true,
-      canAddConnection: true,
-      authKeys: ["primary"],
+      ...withConnect(pickerOver([conn])),
+      upgradeScopes: async (c: Candidate) => {
+        upgraded.push(c);
+        return true;
+      },
     };
-    const html = render(<UnderScopedWarning conn={conn} picker={picker} />);
-    expect(html).toContain(`member-pick-new-for-agent-${WEB}`);
-    expect(html).not.toContain(`member-pick-upgrade-${WEB}`);
+    const tree = warningTree(conn, picker);
+    const button = propsOf(tree, `member-pick-upgrade-${WEB}`);
+    (button?.onClick as () => void)();
+    expect(upgraded).toEqual([]);
+    const modal = confirmModalProps(tree);
+    expect(modal?.open).toBe(false);
+    (modal?.onConfirm as () => void)();
+    expect(upgraded).toEqual([conn]);
+  });
+
+  it("sends the agent's scopes only to a new connection or a confirmed upgrade, never a renew", async () => {
+    const conn = scoped(WEB, ["read"], ["send"]);
+    const opened: Array<Parameters<OpenPopup>[0]> = [];
+    const picker = pickerOver([conn], {
+      agentScopes: ["send"],
+      openPopup: async (input) => {
+        opened.push(input);
+        return false;
+      },
+    });
+    await picker.renewConnection(conn);
+    await picker.upgradeScopes(conn);
+    await picker.triggerConnect("primary");
+    expect(opened).toEqual([
+      { packageId: INTEGRATION, authKey: "primary", connectionId: WEB },
+      { packageId: INTEGRATION, authKey: "primary", scopes: ["send"], connectionId: WEB },
+      { packageId: INTEGRATION, authKey: "primary", scopes: ["send"], forceAccountSelect: true },
+    ]);
   });
 });

@@ -247,9 +247,12 @@ export function UnderScopedWarning({
         <span>
           {conn.is_own
             ? t("detail.integrationMemberPicker.missingScopesOwn")
-            : t("detail.integrationMemberPicker.missingScopesForeign", {
-                owner: ownerLabel(conn),
-              })}
+            : t(
+                canCreate
+                  ? "detail.integrationMemberPicker.missingScopesForeignCanCreate"
+                  : "detail.integrationMemberPicker.missingScopesForeign",
+                { owner: ownerLabel(conn) },
+              )}
         </span>
       </div>
       <span className="text-foreground/80 break-words" title={conn.missing_scopes.join(" ")}>
