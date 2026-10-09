@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a malformed `usage` band no longer drops the whole metric (#1846)
+
+- The stdout bridge reads an `appstrate.metric` line's `usage` with
+  afps-shared's `parseTokenUsage` before the canonical guard: malformed `tiers`
+  bands and unknown keys are dropped and the event and its counters kept,
+  instead of the whole metric being rejected. The guard itself stays strict.
+
 ### Added — the integrations a run starts without (#1830)
 
 - `PlatformPromptOptions.unavailableIntegrations` (`./bundle`):
@@ -30,8 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validated by `isTokenUsageTiers` from `@appstrate/afps-shared/token-usage`,
   the rule `tokenUsageSchema` in core also applies. A malformed band rejects
   the event like any other `usage` constraint.
-- A negative `usage` counter now rejects the event: the four counters take
-  afps-shared's `isTokenCount` (finite and non-negative), the rule core's
+- A negative or fractional `usage` counter now rejects the event: the four
+  counters take afps-shared's `isTokenCount` (a non-negative safe integer,
+  #1846), the rule core's
   `tokenUsageSchema` applies to them.
 - `TOKEN_USAGE_COUNTERS` moved to `@appstrate/afps-shared/token-usage`, where
   `TokenUsage`'s counters are typed from it; no longer exported here.

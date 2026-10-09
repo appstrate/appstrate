@@ -43,6 +43,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Migration `0084` only relaxes the `integration_pins` cardinality CHECK to
   `0..20`; it rewrites no data.
 
+- **Before the deploy, run
+  `DATABASE_URL=<platform> bun scripts/migration/0040-report-token-usage-shape.ts`**
+  (#1846), read-only. It lists the runs whose stored `token_usage` the
+  stricter `TokenUsage` component (below) refuses; expected 0.
+
 ### Changed
 
 - **BREAKING (API): a declared integration blocks a run only when the agent
@@ -191,6 +196,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Firecracker rootfs with this release: an older runner strips the
   `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
   Malformed bands are dropped (and logged); the counters are kept.
+
+- **One `token_usage` contract** (#1846). OpenAPI publishes a `TokenUsage`
+  component (integer counters, `tiers`, no other key) used by
+  `Run.token_usage` (`TokenUsage | null`) and the finalize body's `usage`. A
+  fractional counter makes the usage invalid — a `success` finalize answers
+  `400` — and unknown keys inside `usage` and malformed bands are dropped,
+  never stored. `TokenUsageTier` documents that `input_tokens_above` is
+  compared to the whole prompt while its counters stay net of cache.
 
 - **MCP `run_and_wait` without a `progressToken` returns after ~45 s**
   (#1844). Nothing keeps such a request alive, so instead of holding it up to

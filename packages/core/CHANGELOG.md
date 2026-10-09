@@ -28,17 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The documented payload becomes
   `{ id, packageId, status, done, result?, error?, warnings? }`. (#1830)
 
-- **`tokenUsageSchema`** (`@appstrate/core/token-usage`) validates the optional
-  `tiers` of a `TokenUsage` (`@appstrate/afps-shared` `TokenUsage.tiers`) with
-  afps-shared's `isTokenUsageTiers` (at most 16 bands, strict keys, a positive
-  integer `input_tokens_above` unique across bands, finite non-negative
-  counters). It previously stripped the field. Malformed bands are dropped and
-  the counters kept: the snapshot still parses. (#1552)
-
-- **`parseTokenUsage`** (`@appstrate/core/token-usage`): `tokenUsageSchema` at
-  an ingestion seam — `{ usage, tiersDropped }`, `usage` null when the snapshot
-  is malformed, `tiersDropped` set when bands the raw usage carried were
-  dropped, for the seam to log. (#1552)
+- **`parseTokenUsage`** (`@appstrate/core/token-usage`), re-exported from
+  `@appstrate/afps-shared/token-usage`, the rule's single home: the
+  `TokenUsage` rule at an ingestion seam — `{ usage, tiersDropped }`, `usage`
+  null when the snapshot is malformed, `tiersDropped` set when bands the raw
+  usage carried were dropped, for the seam to log. (#1552, #1846)
+- **`ALIAS_BACKING_API_SHAPES`** (`@appstrate/core/model-swap`): every
+  `AliasBackingApiShape`, the vendor protocols a provider can declare. (#1846)
 
 - **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
   per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model
@@ -79,15 +75,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `connect_url` may ride an `integration_unbound` warning. Documentation only:
   the type is unchanged. (#1830)
 
-- **`modelCostSchema`** (`@appstrate/core/module`) refuses a rate card whose
-  tiers break the rule its usage bands follow: `inputTokensAbove` must be an
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) validates
+  the optional `tiers` of a `TokenUsage` (`@appstrate/afps-shared`
+  `TokenUsage.tiers`) with afps-shared's `isTokenUsageTiers` (at most 16 bands,
+  strict keys, a positive integer `input_tokens_above` unique across bands,
+  non-negative integer counters). It previously stripped the field. Malformed
+  bands are dropped and the counters kept: the snapshot still parses. (#1552)
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) is a Zod
+  pipe over afps-shared's `parseTokenUsage` (`z.unknown().transform(...)`), no
+  longer a `z.object`: `.shape`, `.extend()` and `.strict()` are gone, and a
+  fractional counter now fails the parse. (#1846)
+
+- **BREAKING: `modelCostSchema`** (`@appstrate/core/module`) refuses a rate
+  card whose tiers break the rule its usage bands follow: `inputTokensAbove` must be an
   integer (was any positive number), and `tiers` holds at most
   `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
   would otherwise have every band of its usage dropped and price at the base
   rate. (#1552)
 
-- **Requires `@appstrate/afps-shared` `^0.12.1`** (was `^0.12.0`): the
-  `tiers` validation above is its `isTokenUsageTiers`. (#1552)
+- **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
+  `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`
+  is its own. (#1552, #1846)
 
 - **`waitForRunAndWaitCompletion`** (`@appstrate/core/run-and-wait-client`): the
   `error` of a `done: false` step — the wait ended before the run reached a

@@ -6480,15 +6480,8 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             error: string | null;
-            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB. */
-            token_usage: {
-                input_tokens?: number;
-                output_tokens?: number;
-                cache_creation_input_tokens?: number;
-                cache_read_input_tokens?: number;
-                /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
-                tiers?: components["schemas"]["TokenUsageTier"][];
-            } | null;
+            /** @description Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage. */
+            token_usage: components["schemas"]["TokenUsage"] | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -6868,7 +6861,16 @@ export interface components {
             /** @description Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served). */
             status?: number;
         };
-        /** @description The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. */
+        /** @description Cumulative token usage in the AFPS wire format. `input_tokens` is net of cache: a request's whole prompt is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. */
+        TokenUsage: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
+            /** @description Per price tier, the share of the counters priced at it, one band per `input_tokens_above` (thresholds are unique). Absent when no request reached a tier. */
+            tiers?: components["schemas"]["TokenUsageTier"][];
+        };
+        /** @description The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. The threshold is compared to a request's whole prompt (input + cache read + cache write) and matches a rate card tier's `inputTokensAbove`; the band's counters stay net of cache. */
         TokenUsageTier: {
             input_tokens_above: number;
             input_tokens?: number;
@@ -22586,15 +22588,8 @@ export interface operations {
                      */
                     status: "success" | "failed" | "timeout" | "cancelled";
                     durationMs?: number;
-                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). */
-                    usage?: {
-                        input_tokens?: number;
-                        output_tokens?: number;
-                        cache_creation_input_tokens?: number;
-                        cache_read_input_tokens?: number;
-                        /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept. */
-                        tiers?: components["schemas"]["TokenUsageTier"][];
-                    };
+                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). A counter that is not a non-negative integer makes the whole usage invalid, which is a 400 on a success. Unknown keys inside `usage` and malformed `tiers` bands are dropped, never stored: the counters are kept and price at the base rate. */
+                    usage?: components["schemas"]["TokenUsage"];
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;
                     /** @description Terminal summary of the container's `outputs/` sweep, written verbatim to `runs.artifacts`. `status: "partial"` iff a deliverable was lost. Validated strictly — a malformed summary yields 400. Absent from older containers (column stays null). */

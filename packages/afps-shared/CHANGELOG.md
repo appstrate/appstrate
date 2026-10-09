@@ -14,6 +14,21 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
+  `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
+  a counter fails `isTokenCount`; keys other than the four counters and `tiers`
+  are dropped; bands failing `isTokenUsageTiers` are dropped and flagged with
+  `tiersDropped`. (#1846)
+
+### Changed
+
+- **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
+  safe integer (was any finite non-negative number), the `integer` the AFPS
+  spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band
+  with a fractional counter is malformed. (#1846)
+
 ## [0.12.1] — 2026-10-09
 
 ### Added

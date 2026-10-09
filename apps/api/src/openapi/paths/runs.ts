@@ -5,7 +5,6 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { runStatusValues, terminalRunStatusValues } from "@appstrate/core/run-status";
-import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 
 const inlineDependencyAuthorization =
   " Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.";
@@ -1484,7 +1483,7 @@ const canonicalRunsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown keys are ignored.",
+                "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
               required: ["status"],
               properties: {
                 memories: { type: "array" },
@@ -1505,23 +1504,9 @@ const canonicalRunsPaths = {
                 },
                 durationMs: { type: "integer", minimum: 0 },
                 usage: {
-                  type: "object",
+                  $ref: "#/components/schemas/TokenUsage",
                   description:
-                    "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached).",
-                  properties: {
-                    input_tokens: { type: "integer", minimum: 0 },
-                    output_tokens: { type: "integer", minimum: 0 },
-                    cache_creation_input_tokens: { type: "integer", minimum: 0 },
-                    cache_read_input_tokens: { type: "integer", minimum: 0 },
-                    tiers: {
-                      type: "array",
-                      description:
-                        "Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept.",
-                      maxItems: MAX_TOKEN_USAGE_TIERS,
-                      items: { $ref: "#/components/schemas/TokenUsageTier" },
-                    },
-                  },
-                  additionalProperties: false,
+                    "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). A counter that is not a non-negative integer makes the whole usage invalid, which is a 400 on a success. Unknown keys inside `usage` and malformed `tiers` bands are dropped, never stored: the counters are kept and price at the base rate.",
                 },
                 cost: {
                   type: "number",

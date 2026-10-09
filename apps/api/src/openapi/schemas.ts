@@ -17,7 +17,7 @@ import {
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
-import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
+import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
@@ -43,6 +43,10 @@ export const SPACE_ROLE_ID_PATTERN = "^srl_";
  * reason to import anything but the catalog itself.
  */
 const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
+
+const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
+  TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
+);
 
 /**
  * The org-settings members, shared by the READ component (`OrgSettings`, below)
@@ -333,18 +337,31 @@ export const schemas = {
       cacheWrite: { type: "number" },
     },
   },
+  TokenUsage: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "Cumulative token usage in the AFPS wire format. `input_tokens` is net of cache: a request's whole prompt is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.",
+    properties: {
+      ...TOKEN_USAGE_COUNTER_PROPERTIES,
+      tiers: {
+        type: "array",
+        description:
+          "Per price tier, the share of the counters priced at it, one band per `input_tokens_above` (thresholds are unique). Absent when no request reached a tier.",
+        maxItems: MAX_TOKEN_USAGE_TIERS,
+        items: { $ref: "#/components/schemas/TokenUsageTier" },
+      },
+    },
+  },
   TokenUsageTier: {
     type: "object",
     additionalProperties: false,
     required: ["input_tokens_above"],
     description:
-      "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request.",
+      "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. The threshold is compared to a request's whole prompt (input + cache read + cache write) and matches a rate card tier's `inputTokensAbove`; the band's counters stay net of cache.",
     properties: {
       input_tokens_above: { type: "integer", minimum: 1 },
-      input_tokens: { type: "integer", minimum: 0 },
-      output_tokens: { type: "integer", minimum: 0 },
-      cache_creation_input_tokens: { type: "integer", minimum: 0 },
-      cache_read_input_tokens: { type: "integer", minimum: 0 },
+      ...TOKEN_USAGE_COUNTER_PROPERTIES,
     },
   },
   ModelGenerationCapabilities: {
@@ -1193,23 +1210,9 @@ export const schemas = {
       checkpoint: { type: ["object", "null"], additionalProperties: true },
       error: { type: ["string", "null"] },
       token_usage: {
-        type: ["object", "null"],
         description:
-          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB.",
-        properties: {
-          input_tokens: { type: "integer", minimum: 0 },
-          output_tokens: { type: "integer", minimum: 0 },
-          cache_creation_input_tokens: { type: "integer", minimum: 0 },
-          cache_read_input_tokens: { type: "integer", minimum: 0 },
-          tiers: {
-            type: "array",
-            description:
-              "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
-            maxItems: MAX_TOKEN_USAGE_TIERS,
-            items: { $ref: "#/components/schemas/TokenUsageTier" },
-          },
-        },
-        additionalProperties: false,
+          "Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage.",
+        oneOf: [{ $ref: "#/components/schemas/TokenUsage" }, { type: "null" }],
       },
       started_at: { type: ["string", "null"], format: "date-time" },
       completed_at: { type: ["string", "null"], format: "date-time" },

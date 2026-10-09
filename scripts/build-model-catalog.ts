@@ -21,8 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { isAliasBackingShape } from "@appstrate/core/model-swap";
-import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
+import { ALIAS_BACKING_API_SHAPES } from "@appstrate/core/model-swap";
 import {
   type CatalogRecord,
   parseModelCatalog,
@@ -45,7 +44,7 @@ import { piReasoningOff, piTakesReasoningOff } from "../packages/runner-pi/src/p
 import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";
-const SERVED_SHAPES: ReadonlySet<string> = new Set(MODEL_API_SHAPES.filter(isAliasBackingShape));
+const SERVED_SHAPES: ReadonlySet<string> = new Set(ALIAS_BACKING_API_SHAPES);
 
 /** A record of a Pi data file, as Pi wrote it. */
 interface SourceRecord extends Record<string, unknown> {

@@ -268,6 +268,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   ModelCostTier:
     "embedded model-cost value object; canonical runtime type lives in @appstrate/core",
+  TokenUsage:
+    "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
   TokenUsageTier:
     "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
   AgentConnectionReadiness:

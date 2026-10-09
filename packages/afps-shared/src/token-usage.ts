@@ -29,7 +29,13 @@ export interface TokenUsage extends TokenUsageCounters {
   tiers?: TokenUsageTier[];
 }
 
-/** The share of a {@link TokenUsage} priced at the tier above `input_tokens_above`. */
+/**
+ * The share of a {@link TokenUsage} priced at the tier above `input_tokens_above`.
+ *
+ * `input_tokens_above` is compared to a request's whole prompt (input + cache read + cache
+ * write), while the band's own counters stay net of cache like the usage's. It is the join key
+ * with a rate card tier's `inputTokensAbove`.
+ */
 export interface TokenUsageTier extends TokenUsageCounters {
   input_tokens_above: number;
 }
@@ -37,20 +43,23 @@ export interface TokenUsageTier extends TokenUsageCounters {
 /** Bounds what is stored verbatim from untrusted runners; a Pi card has one or two tiers. */
 export const MAX_TOKEN_USAGE_TIERS = 16;
 
-/** A {@link TokenUsage} counter the wire can carry: finite and non-negative. */
+/** A {@link TokenUsage} counter the wire can carry: a non-negative safe integer. */
 export function isTokenCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 const TIER_KEYS = new Set<string>(["input_tokens_above", ...TOKEN_USAGE_COUNTERS]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /** The {@link TokenUsage.tiers} rule: capped, strict keys, unique positive integer thresholds. */
 export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
   if (!Array.isArray(value) || value.length > MAX_TOKEN_USAGE_TIERS) return false;
   const thresholds = new Set<number>();
-  for (const entry of value) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
-    const tier = entry as Record<string, unknown>;
+  for (const tier of value) {
+    if (!isPlainObject(tier)) return false;
     if (Object.keys(tier).some((key) => !TIER_KEYS.has(key))) return false;
     const threshold = tier.input_tokens_above;
     if (typeof threshold !== "number" || !Number.isSafeInteger(threshold)) return false;
@@ -61,4 +70,29 @@ export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
     }
   }
   return true;
+}
+
+/**
+ * The one {@link TokenUsage} rule, applied at every seam that reads untrusted usage. A counter
+ * that fails {@link isTokenCount}, or a value that is not an object, makes the snapshot malformed
+ * (`usage` null). Keys outside the declared ones are dropped. Bands that fail
+ * {@link isTokenUsageTiers} are dropped alone and flagged, so the counters still price, at the
+ * base rate.
+ */
+export function parseTokenUsage(raw: unknown): {
+  usage: TokenUsage | null;
+  tiersDropped: boolean;
+} {
+  if (!isPlainObject(raw)) return { usage: null, tiersDropped: false };
+  const usage: TokenUsage = {};
+  for (const counter of TOKEN_USAGE_COUNTERS) {
+    const value = raw[counter];
+    if (value === undefined) continue;
+    if (!isTokenCount(value)) return { usage: null, tiersDropped: false };
+    usage[counter] = value;
+  }
+  if (raw.tiers === undefined) return { usage, tiersDropped: false };
+  if (!isTokenUsageTiers(raw.tiers)) return { usage, tiersDropped: true };
+  usage.tiers = raw.tiers;
+  return { usage, tiersDropped: false };
 }

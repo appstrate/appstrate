@@ -1045,17 +1045,15 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // ...but a success is only a success with valid usage: degenerate usage
   // there is the same 400 as none at all.
   it("rejects a success finalize whose usage is degenerate", async () => {
-    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+    for (const usage of [{ input_tokens: "lots" }, { input_tokens: 12.5, output_tokens: 3 }]) {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    const res = await postFinalize(runId, {
-      status: "success",
-      output: { ok: true },
-      usage: { input_tokens: "lots" },
-    });
-    expect(res.status).toBe(400);
+      const res = await postFinalize(runId, { status: "success", output: { ok: true }, usage });
+      expect({ usage, status: res.status }).toEqual({ usage, status: 400 });
 
-    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
-    expect(row?.status).toBe("running");
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("running");
+    }
   });
 
   // The metric broadcaster keeps a per-run throttle entry in module memory.
