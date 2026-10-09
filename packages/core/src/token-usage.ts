@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
+import {
+  isTokenUsageTiers,
+  type TokenUsage,
+  type TokenUsageTier,
+} from "@appstrate/afps-shared/token-usage";
 
 /**
  * Canonical token-usage shape — the definition now lives in the zero-internal-dependency leaf
@@ -21,15 +25,32 @@ export const tokenUsageSchema = z.object({
   output_tokens: z.number().nonnegative().optional(),
   cache_creation_input_tokens: z.number().nonnegative().optional(),
   cache_read_input_tokens: z.number().nonnegative().optional(),
+  // Malformed bands degrade to none rather than failing the snapshot; see `parseTokenUsage`.
+  tiers: z
+    .custom<TokenUsageTier[]>(isTokenUsageTiers, "invalid token usage tiers")
+    .optional()
+    .catch(undefined),
 });
+
+/** {@link tokenUsageSchema} at an ingestion seam, flagging the bands it silently dropped. */
+export function parseTokenUsage(raw: unknown): {
+  usage: TokenUsage | null;
+  tiersDropped: boolean;
+} {
+  const parsed = tokenUsageSchema.safeParse(raw);
+  if (!parsed.success) return { usage: null, tiersDropped: false };
+  const sent = (raw as { tiers?: unknown }).tiers !== undefined;
+  return { usage: parsed.data, tiersDropped: sent && parsed.data.tiers === undefined };
+}
 
 /**
  * In-place accumulator for {@link TokenUsage} totals.
  *
- * Adds every field of `addition` onto `total`. Optional fields default to
+ * Adds every counter of `addition` onto `total`. Optional fields default to
  * zero on both sides — `undefined` on `addition` is a no-op, and the
  * cache-creation / cache-read totals are coerced to a numeric zero on
- * `total` so subsequent reads always yield a number.
+ * `total` so subsequent reads always yield a number. Tier bands are not summed
+ * (`addRequestUsage` in `@appstrate/runner-pi/pi-model` does).
  */
 export function accumulateTokenUsage(total: TokenUsage, addition: TokenUsage): void {
   total.input_tokens = (total.input_tokens ?? 0) + (addition.input_tokens ?? 0);

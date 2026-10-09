@@ -16,6 +16,7 @@ import {
   clampPiReasoningLevel,
   piReasoningLevels,
 } from "@appstrate/runner-pi/pi-model";
+import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   MODEL_INPUT_MODALITIES,
@@ -148,6 +149,7 @@ function projectAliasedGenerationCapabilities(
           }
         : {}),
       adaptive: null,
+      // No `off`: what it sends would identify the backing, as its levels would.
       levels: reasoningSupported ? { ...levels } : {},
     },
   };
@@ -302,6 +304,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         id,
         ...metadata,
         generation: generationOf(defaults, {
+          providerId: def.providerId,
           apiShape: def.apiShape,
           reasoning: metadata.reasoning,
           aliased: def.aliased === true,
@@ -335,6 +338,7 @@ export async function listOrgModels(orgId: string): Promise<OrgModelInfo[]> {
         id: row.id,
         ...metadata,
         generation: generationOf(defaults, {
+          providerId: creds.providerId,
           apiShape: creds.apiShape,
           reasoning: metadata.reasoning,
           aliased: row.aliased,
@@ -869,8 +873,12 @@ export function resolveCatalogDefaults(
   };
 }
 
-/** What decides the controls of a model: its API, its declared reasoning, and whether it is an alias. */
+/**
+ * What decides the controls of a model: its provider and API, its declared
+ * reasoning, and whether it is an alias.
+ */
 interface GenerationSubject {
+  providerId: string;
   apiShape: string;
   reasoning: boolean | null;
   aliased: boolean;
@@ -878,16 +886,25 @@ interface GenerationSubject {
 
 /**
  * The controls of a model the catalog has no record of: the reasoning levels Pi
- * takes for the model this platform builds for it ({@link buildPiModel}).
- * Its temperature support stays unknown.
+ * takes, and what its `off` sends, for the model a run builds for it
+ * ({@link buildPiModel}). Its temperature support stays unknown.
  */
 function unrecordedGeneration({
+  providerId,
   apiShape,
   reasoning,
 }: GenerationSubject): ModelGenerationCapabilities {
-  const levels = new Set<string>(
-    piReasoningLevels(buildPiModel({ id: "", dialect: null, apiShape, baseUrl: "", reasoning })),
-  );
+  const model = buildPiModel({
+    id: "",
+    dialect: null,
+    apiShape,
+    piProvider: resolvePiProvider(providerId),
+    // Required by the builder; nothing derived here reads it.
+    baseUrl: "",
+    reasoning,
+  });
+  const levels = new Set<string>(piReasoningLevels(model));
+  const off = piReasoningOff(model);
   return {
     temperature: "unknown",
     reasoning: {
@@ -899,6 +916,7 @@ function unrecordedGeneration({
           levels.has(level) ? "supported" : "unsupported",
         ]),
       ),
+      ...(off ? { off } : {}),
     },
   };
 }
@@ -942,6 +960,7 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
     apiKey: def.apiKey,
     ...metadata,
     generation: generationOf(defaults, {
+      providerId: def.providerId,
       apiShape: def.apiShape,
       reasoning: metadata.reasoning,
       aliased: def.aliased === true,
@@ -973,6 +992,7 @@ function buildDbResolvedModel(row: DbOrgModelRow, creds: DbModelCredentials): Re
     apiKey: creds.apiKey,
     ...metadata,
     generation: generationOf(defaults, {
+      providerId: creds.providerId,
       apiShape: creds.apiShape,
       reasoning: metadata.reasoning,
       aliased: row.aliased,

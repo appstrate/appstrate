@@ -5876,7 +5876,7 @@ export interface components {
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
-        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. */
+        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card. */
         ModelCostTier: {
             inputTokensAbove: number;
             input: number;
@@ -5900,6 +5900,11 @@ export interface components {
                 levels: {
                     [key: string]: "supported" | "unsupported" | "unknown";
                 };
+                /**
+                 * @description What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason, does not take `off`, or when what it sends is not known. An alias never reports it: it would identify the backing model.
+                 * @enum {string}
+                 */
+                off?: "disables" | "unsent";
             };
         };
         /** @description Optional model sampling and reasoning controls. Omitted properties inherit the next lower-precedence layer. */
@@ -6475,15 +6480,15 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             error: string | null;
-            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB. */
-            token_usage: ({
+            /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB. */
+            token_usage: {
                 input_tokens?: number;
                 output_tokens?: number;
                 cache_creation_input_tokens?: number;
                 cache_read_input_tokens?: number;
-            } & {
-                [key: string]: unknown;
-            }) | null;
+                /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
+                tiers?: components["schemas"]["TokenUsageTier"][];
+            } | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -6862,6 +6867,14 @@ export interface components {
             message?: string;
             /** @description Upstream HTTP status when the provider answered at all — distinguishes 429 (retry later) from 404 (model not served). */
             status?: number;
+        };
+        /** @description The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. */
+        TokenUsageTier: {
+            input_tokens_above: number;
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_creation_input_tokens?: number;
+            cache_read_input_tokens?: number;
         };
         /** @description UI rendering hints for schema fields, keyed by property name. Lives at the AFPS wrapper level (outside the JSON Schema). */
         UIHintsMap: {
@@ -22514,6 +22527,8 @@ export interface operations {
                         output_tokens?: number;
                         cache_creation_input_tokens?: number;
                         cache_read_input_tokens?: number;
+                        /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept. */
+                        tiers?: components["schemas"]["TokenUsageTier"][];
                     };
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;

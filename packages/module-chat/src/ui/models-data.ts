@@ -32,7 +32,6 @@ const orgModelOptionSchema = z.object({
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
-  pi_dialect: z.unknown().optional(),
 });
 
 export interface OrgModelOption {
@@ -62,8 +61,6 @@ export interface OrgModelOption {
   /** Model-alias flag — selectable in chat without exposing the backing model. */
   aliased?: boolean;
   generation?: ModelGenerationCapabilities | null;
-  /** The Pi record's dialect; `null` when Pi keeps none (a gateway model). */
-  pi_dialect?: unknown;
 }
 
 export async function fetchModels(

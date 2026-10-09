@@ -38,8 +38,9 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
-import { DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
+import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
+import type { ModelCost } from "@appstrate/core/module";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   anthropicThinkingBudgets,
@@ -719,6 +720,7 @@ export class PiRunner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: budget.contextWindow,
+      cost: sessionModel.cost,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
       ...(this.opts.toolResultByteLimit !== undefined
         ? { toolResultByteLimit: this.opts.toolResultByteLimit }
@@ -1211,28 +1213,6 @@ interface PiUsage {
   cost?: { total?: number };
 }
 
-/**
- * Project Pi's legacy `{ input, output, cacheRead, cacheWrite }` counters onto
- * the canonical snake_case {@link TokenUsage}, so every downstream emit — and
- * the platform's server-side cost recompute — reads the same four numbers.
- *
- * Exported for `apps/api/test/unit/runner-cost-parity.test.ts`, which pins that
- * recompute against pi-ai's own `calculateCost`. The two cache buckets are
- * priced an order of magnitude apart (3.75 vs 0.30 USD/Mtok at Claude-class
- * rates), so crossing them here re-prices every platform run — and a parity
- * test carrying its own copy of this mapping would agree with itself either
- * way. NOT re-exported from `index.ts`: nothing outside this package imports
- * it, and the barrel there lists only what does.
- */
-export function toReportedUsage(usage: PiUsage): TokenUsage {
-  return {
-    input_tokens: usage.input ?? 0,
-    output_tokens: usage.output ?? 0,
-    cache_creation_input_tokens: usage.cacheWrite ?? 0,
-    cache_read_input_tokens: usage.cacheRead ?? 0,
-  };
-}
-
 interface PiTextContent {
   type: "text";
   text?: string;
@@ -1414,6 +1394,8 @@ interface SessionBridgeOptions {
   contextWindow?: number;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
+  /** The session model's rate card: its tiers band the cumulative usage. */
+  cost?: ModelCost;
   /** See {@link PiRunnerOptions.toolResultByteLimit}. */
   toolResultByteLimit?: number;
 }
@@ -1438,28 +1420,20 @@ export function installSessionBridge(
     terminalToolCompleted || terminalToolExhausted !== undefined;
   // Token usage accumulator across every paid call of the session (shared
   // zero-shape) — assistant turns AND compaction passes.
-  const totalUsage: TokenUsage = zeroTokenUsage();
+  let totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
   // Single place the unpriced decision is applied: every emit path reads through
   // this, so none can leak the placeholder zero. `undefined` omits the field.
   const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**
-   * Fold one Pi `Usage` into the run totals and report its deltas. `cost` is
-   * Pi's own (`calculateCost` against the model's rates) — never recomputed.
+   * Fold one Pi `Usage` into the run totals (tier band included) and report its
+   * deltas. `cost` is Pi's own (`calculateCost` against the model's rates) — never recomputed.
    */
   const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
-    const delta = toReportedUsage(usage);
-    const inputDelta = delta.input_tokens ?? 0;
-    const outputDelta = delta.output_tokens ?? 0;
-    totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
-    totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
-    totalUsage.cache_creation_input_tokens =
-      (totalUsage.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
-    totalUsage.cache_read_input_tokens =
-      (totalUsage.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
+    totalUsage = addRequestUsage(totalUsage, usage, options.cost);
     totalCost += usage.cost?.total ?? 0;
-    return { inputDelta, outputDelta };
+    return { inputDelta: usage.input ?? 0, outputDelta: usage.output ?? 0 };
   };
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,

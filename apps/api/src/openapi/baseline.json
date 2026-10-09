@@ -3759,8 +3759,17 @@
                       "cache_read_input_tokens": {
                         "type": "integer",
                         "minimum": 0
+                      },
+                      "tiers": {
+                        "type": "array",
+                        "description": "Per price tier, the share of the counters priced at it. Absent when no request reached a tier; malformed bands are dropped and the counters kept.",
+                        "maxItems": 16,
+                        "items": {
+                          "$ref": "#/components/schemas/TokenUsageTier"
+                        }
                       }
-                    }
+                    },
+                    "additionalProperties": false
                   },
                   "cost": {
                     "type": "number",
@@ -9526,6 +9535,7 @@
                       },
                       "tiers": {
                         "type": "array",
+                        "maxItems": 16,
                         "items": {
                           "$ref": "#/components/schemas/ModelCostTier"
                         }
@@ -10083,6 +10093,7 @@
                       },
                       "tiers": {
                         "type": "array",
+                        "maxItems": 16,
                         "items": {
                           "$ref": "#/components/schemas/ModelCostTier"
                         }
@@ -28562,10 +28573,11 @@
       "ModelCostTier": {
         "type": "object",
         "required": ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
-        "description": "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+        "description": "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card.",
         "properties": {
           "inputTokensAbove": {
-            "type": "number"
+            "type": "integer",
+            "minimum": 1
           },
           "input": {
             "type": "number"
@@ -28578,6 +28590,34 @@
           },
           "cacheWrite": {
             "type": "number"
+          }
+        }
+      },
+      "TokenUsageTier": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input_tokens_above"],
+        "description": "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request.",
+        "properties": {
+          "input_tokens_above": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cache_creation_input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cache_read_input_tokens": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -28617,6 +28657,11 @@
                 "propertyNames": {
                   "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
                 }
+              },
+              "off": {
+                "type": "string",
+                "enum": ["disables", "unsent"],
+                "description": "What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason, does not take `off`, or when what it sends is not known. An alias never reports it: it would identify the backing model."
               }
             }
           }
@@ -29673,7 +29718,7 @@
           },
           "token_usage": {
             "type": ["object", "null"],
-            "description": "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
+            "description": "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB.",
             "properties": {
               "input_tokens": {
                 "type": "integer",
@@ -29690,9 +29735,17 @@
               "cache_read_input_tokens": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "tiers": {
+                "type": "array",
+                "description": "Per price tier, the share of the counters priced at it. Absent when no request reached a tier.",
+                "maxItems": 16,
+                "items": {
+                  "$ref": "#/components/schemas/TokenUsageTier"
+                }
               }
             },
-            "additionalProperties": true
+            "additionalProperties": false
           },
           "started_at": {
             "type": ["string", "null"],
@@ -30586,6 +30639,7 @@
               },
               "tiers": {
                 "type": "array",
+                "maxItems": 16,
                 "items": {
                   "$ref": "#/components/schemas/ModelCostTier"
                 }

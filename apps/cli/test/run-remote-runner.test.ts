@@ -513,6 +513,11 @@ describe("runRemote — happy path", () => {
   });
 
   it("emits canonical RunEvents on stdout in --json mode (parity with local)", async () => {
+    const USAGE = {
+      input_tokens: 150_000,
+      output_tokens: 20,
+      tiers: [{ input_tokens_above: 100_000, input_tokens: 140_000, output_tokens: 10 }],
+    };
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(
       {
@@ -548,7 +553,7 @@ describe("runRemote — happy path", () => {
           body: recordSummary({
             id: "run_5",
             status: "success",
-            token_usage: { input_tokens: 10, output_tokens: 20 },
+            token_usage: USAGE,
             result: { output: { greeting: "hi" } },
           }),
         },
@@ -575,12 +580,14 @@ describe("runRemote — happy path", () => {
 
     // Sanity-check the metric shape — usage + cost flow through.
     const metric = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.metric");
-    expect(metric.usage).toEqual({ input_tokens: 10, output_tokens: 20 });
+    expect(metric.usage).toEqual(USAGE);
     expect(metric.cost).toBe(0.0123);
     // Stamped with the run's own `completed_at`, not the CLI's clock.
     expect(metric.timestamp).toBe(Date.parse("2026-04-29T10:00:42Z"));
     const finalized = lines.map((l) => JSON.parse(l)).find((e) => e.type === "appstrate.finalize");
     expect(finalized.result.output).toEqual({ greeting: "hi" });
+    // The tier bands survive, so the result prices as the platform did.
+    expect(finalized.result.usage).toEqual(USAGE);
   });
 });
 
