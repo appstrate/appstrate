@@ -212,6 +212,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps going: continue with `getRun` (`query: { wait: true }`), never with a
   second `run_and_wait`.
 
+- **An internal error during an integration credential refresh is no longer
+  reported as a transient upstream failure** (#1847). A database fault or an
+  incoherent OAuth client configuration makes the sidecar refresh endpoint
+  answer `500`, and the credential proxy logs it as an error while relaying
+  the upstream `401`.
+
 ### Fixed
 
 - **Saving an agent in the editor no longer drops the
@@ -241,6 +247,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and the Pi dialect, and called `off` an explicit disable on models where Pi
   sends no reasoning parameter (e.g. `opencode-go/kimi-k2.7-code`,
   `mistral/magistral-medium-latest`).
+
+- **A rejected credential on a connection already flagged for reconnection
+  ends the run's credential refresh with `410`** (#1847), the run marked
+  degraded, instead of `502` in a loop, and no longer spends (on rotating
+  identity providers, burns) the stored refresh token. A proactive refresh of
+  such a connection keeps serving the stored token.
+- **A transient refresh failure that pushes the failure streak past
+  `INTEGRATION_REFRESH_MAX_FAILURES`** (token expired past the grace window)
+  now answers `410` at once instead of one more `502` (#1847).
+- **The platform credential proxy (`/api/credential-proxy/proxy`) no longer
+  refreshes, or counts a rejection against, a credential replaced during the
+  call** (#1847): a refresh by a peer, a reconnect or an API-key rotation. It
+  replays the call once with the connection's current credential.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

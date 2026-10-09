@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.5 — live integration credentials resolver for the sidecar's MITM
- * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
- * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
+ * Live integration credentials resolver for the sidecar's MITM `MitmCredentialSource`. Backs both
+ * `GET /internal/integration-credentials/{scope}/{name}` (a read) and `POST .../refresh` (after an
+ * upstream 401).
  *
  * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
- *   2. If forced OR within the lead window, call
- *      {@link refreshConnectionCredential} and translate its outcome: a dead
- *      credential (already flagged needsReconnection) bubbles a structured
- *      410, a retryable failure a 502.
+ *   2. Ask {@link refreshConnectionCredential} and translate its outcome: a dead
+ *      credential (flagged needsReconnection) bubbles a structured 410, a
+ *      retryable failure a 502.
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -28,14 +27,13 @@ import {
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
 import { logger } from "../lib/logger.ts";
 import { decryptStoredCredential } from "../lib/stored-credential.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
-import { refreshConnectionCredential } from "./integration-token-refresh.ts";
+import { refreshConnectionCredential, type RefreshTrigger } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
@@ -57,16 +55,6 @@ interface MutableCredentialsWire {
   credentialRevision?: string;
 }
 
-interface ResolveLiveCredentialsOptions {
-  /** When true, refresh OAuth tokens regardless of remaining lifetime. */
-  forceRefresh?: boolean;
-  /**
-   * The `credential_revision` the caller holds. A forced refresh from a caller holding a
-   * superseded credential is a plain read: its 401 says nothing about the current one.
-   */
-  heldRevision?: string;
-}
-
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
  * listener" and boot uncredentialed — so every unproducible credential throws.
@@ -78,10 +66,11 @@ interface ResolveLiveCredentialsOptions {
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
  *     be valid under another version, so it is NOT flagged.
- *   - 410: the credential is dead and the connection has been flagged
- *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
- *     auth whose forced refreshes reached the failure threshold, or stored
- *     credentials that cannot be decrypted. The sidecar propagates it as a
+ *   - 410: the credential is dead and the connection is flagged
+ *     `needsReconnection` — a rejected credential of a connection already
+ *     flagged, refresh token revoked upstream, transient refresh failures past
+ *     the threshold, an unrefreshable auth whose rejections reached it, or
+ *     stored credentials that cannot be decrypted. The sidecar propagates it as a
  *     401 to the integration so the LLM sees a clean "please re-connect"
  *     surface, and stops retrying.
  *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
@@ -105,14 +94,14 @@ export async function resolveLiveIntegrationCredentials(
     connectionId: string;
     connectionSource: string;
     /**
-     * Snapshot from `runs.resolved_integration_versions` (#686). When present,
+     * Snapshot from `runs.resolved_integration_versions`. When present,
      * `[integrationId]` pins the manifest VERSION this resolver reads — so the
      * delivery/auth plan a mid-run MITM refresh injects matches the version the
      * spawn resolver used at kickoff. Absent (legacy / soft-resolved) → draft.
      */
     resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null;
   },
-  options: ResolveLiveCredentialsOptions = {},
+  trigger: RefreshTrigger = { kind: "expiring" },
 ): Promise<IntegrationCredentialsWire> {
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
@@ -192,10 +181,6 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
-  const forceRefresh =
-    options.forceRefresh === true &&
-    (options.heldRevision === undefined || options.heldRevision === connection.credentialRevision);
-
   // Terminally unusable, and already flagged by whoever concluded it: surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
   const throwTerminal = (reason: string, detail?: string): never => {
@@ -204,7 +189,7 @@ export async function resolveLiveIntegrationCredentials(
       integrationId,
       authKey,
       connectionId: connection.id,
-      forced: forceRefresh,
+      trigger: trigger.kind,
       reason,
       detail,
     });
@@ -233,49 +218,45 @@ export async function resolveLiveIntegrationCredentials(
   let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
   let credentialRevision: string | null = connection.credentialRevision;
 
-  // A forced refresh follows an upstream 401 on the credential this connection holds; a
-  // proactive one runs ahead of expiry, with the stored token presumed good.
-  if (forceRefresh || isWithinLeadWindow(connection.expiresAt)) {
-    const outcome = await refreshConnectionCredential({
-      connection,
-      integrationId,
-      manifest,
-      authDef,
-      scope: { orgId: context.orgId, spaceId: context.spaceId },
-      actor: context.actor,
-      force: forceRefresh,
-    });
-    switch (outcome.status) {
-      case "dead":
-        return throwTerminal(outcome.reason, outcome.detail);
-      case "retry":
-        // The cached credential may still be usable: 502 lets the sidecar's
-        // `refreshOnUnauthorized` cooldown back off without poisoning the row.
-        logger.warn("Integration credential not refreshed — retry later", {
-          runId: context.runId,
-          integrationId,
-          authKey,
-          connectionId: connection.id,
-          reason: outcome.reason,
-          detail: outcome.detail,
-        });
-        throw badGateway(`Integration '${integrationId}' auth '${authKey}' ${outcome.reason}`);
-      case "kept":
-        logger.debug("Integration proactive refresh skipped — serving the stored credential", {
-          runId: context.runId,
-          integrationId,
-          authKey,
-          connectionId: connection.id,
-          reason: outcome.reason,
-          detail: outcome.detail,
-        });
-        break;
-      case "refreshed":
-        fields = outcome.fields;
-        credentialRevision = await readCredentialRevision(connection.id);
-        expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
-        break;
-    }
+  const outcome = await refreshConnectionCredential({
+    connection,
+    integrationId,
+    manifest,
+    authDef,
+    scope: { orgId: context.orgId, spaceId: context.spaceId },
+    actor: context.actor,
+    trigger,
+  });
+  switch (outcome.status) {
+    case "dead":
+      return throwTerminal(outcome.reason, outcome.detail);
+    case "retry":
+      // The cached credential may still be usable: 502 lets the sidecar's
+      // `refreshOnUnauthorized` cooldown back off without poisoning the row.
+      logger.warn("Integration credential not refreshed — retry later", {
+        runId: context.runId,
+        integrationId,
+        authKey,
+        connectionId: connection.id,
+        reason: outcome.reason,
+        detail: outcome.detail,
+      });
+      throw badGateway(`Integration '${integrationId}' auth '${authKey}' ${outcome.reason}`);
+    case "kept":
+      logger.debug("Integration credential not refreshed — serving the stored one", {
+        runId: context.runId,
+        integrationId,
+        authKey,
+        connectionId: connection.id,
+        reason: outcome.reason,
+        detail: outcome.detail,
+      });
+      break;
+    case "refreshed":
+      fields = outcome.fields;
+      credentialRevision = await readCredentialRevision(connection.id);
+      expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
+      break;
   }
 
   const http = authDef.delivery?.http;
@@ -320,7 +301,7 @@ async function loadIntegrationManifest(
   integrationId: string,
   frozenVersion: ResolvedIntegrationVersion | null,
 ): Promise<IntegrationManifest> {
-  // Read AT the version frozen for this run (#686) so the delivery/auth plan
+  // Read AT the version frozen for this run so the delivery/auth plan
   // matches the spawn. No frozen entry → draft (legacy / soft-resolved).
   const res = await readIntegrationManifestForRun(integrationId, frozenVersion);
   if (res.ok) return res.manifest;
@@ -344,7 +325,7 @@ async function loadIntegrationManifest(
 }
 
 /**
- * Printable label for the integration manifest version this run reads (#686):
+ * Printable label for the integration manifest version this run reads:
  * the semver frozen at kickoff, or the snapshot's `source` (`draft`/`system`,
  * which carry no semver), or `"draft"` when nothing was frozen at all (legacy /
  * soft-resolved runs). Used in the error messages that report a
@@ -358,11 +339,6 @@ function pinnedManifestVersionLabel(
   const entry = context.resolvedIntegrationVersions?.[integrationId] ?? null;
   if (!entry) return "draft";
   return entry.version ?? entry.source;
-}
-
-function isWithinLeadWindow(expiresAt: Date | null): boolean {
-  if (!expiresAt) return false;
-  return expiresAt.getTime() - Date.now() < OAUTH_REFRESH_LEAD_MS;
 }
 
 /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E1 — credential-proxy integration resolver
+ * Credential-proxy integration resolver
  * (`resolveIntegrationProxyCredentials` / `forceRefreshIntegrationProxyCredentials`).
  *
  * Backs the external-runner `POST /api/credential-proxy/proxy` endpoint.
@@ -381,7 +381,7 @@ describe("credential-proxy integration-resolver", () => {
     // Not-refreshed, like the other terminal shape: the caller (inside
     // `catch {}` either way) relays the upstream 401, and the persisted flag
     // is what makes the failure legible.
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -399,7 +399,7 @@ describe("credential-proxy integration-resolver", () => {
     // refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -435,7 +435,7 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     // `null` alone no longer discriminates transient from terminal: both
     // shapes return it since `IntegrationCredentialRevokedError` was removed,
     // so the PERSISTED flag is the only thing left that tells them apart. The
@@ -467,10 +467,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -497,10 +497,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -530,7 +530,7 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
 
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
@@ -598,8 +598,8 @@ describe("credential-proxy integration-resolver", () => {
       });
       token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read send" });
 
-      const refreshed = await forceRefreshIntegrationProxyCredentials(input());
-      expect(JSON.stringify(refreshed!.payload)).toContain("narrowed-access");
+      const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
+      expect(JSON.stringify(refreshed)).toContain("narrowed-access");
       expect(await flaggedConnection(connId)).toBe(true);
     });
 
@@ -611,8 +611,8 @@ describe("credential-proxy integration-resolver", () => {
       });
       token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read" });
 
-      const refreshed = await forceRefreshIntegrationProxyCredentials(input());
-      expect(JSON.stringify(refreshed!.payload)).toContain("narrowed-access");
+      const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
+      expect(JSON.stringify(refreshed)).toContain("narrowed-access");
       expect(await flaggedConnection(connId)).toBe(false);
     });
   });
@@ -628,7 +628,7 @@ describe("credential-proxy integration-resolver", () => {
     );
     // Refresh path: A's force-refresh returns null (no accessible connection),
     // never touches/returns B's row.
-    const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id));
+    const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id), null);
     expect(refreshed).toBeNull();
   });
 
