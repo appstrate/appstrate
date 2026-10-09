@@ -138,18 +138,21 @@ async function setup(
 }
 
 /** Kick the OAuth flow off and return the authorize URL the SPA would open. */
-async function beginConnect(ctx: TestContext): Promise<string> {
+async function beginConnect(
+  ctx: TestContext,
+  body: { connection_id?: string; scopes?: string[] } = {},
+): Promise<string> {
   const res = await app.request(
     `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
     {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(body),
     },
   );
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { auth_url: string };
-  return body.auth_url;
+  const json = (await res.json()) as { auth_url: string };
+  return json.auth_url;
 }
 
 /**
@@ -344,6 +347,56 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
     ]);
     expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
+  });
+
+  // #1871: scopes added in place reach every agent bound to the connection.
+  it("audits the scopes a reconnect adds, before and after", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+
+    // The control: a reconnect that changes no scope records none.
+    await consentAndCallback(await beginConnect(ctx, { connection_id: connection!.id }));
+    await consentAndCallback(
+      await beginConnect(ctx, { connection_id: connection!.id, scopes: ["files.write"] }),
+    );
+
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(rows.map((r) => r.id)).toEqual([connection!.id]);
+    expect([...rows[0]!.scopesGranted].sort()).toEqual(["files.read", "files.write"]);
+
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id));
+    expect(trail.map((r) => r.action).sort()).toEqual([
+      "integration.connection.created",
+      "integration.connection.reconnected",
+      "integration.connection.reconnected",
+      "integration.connection.scopes_updated",
+    ]);
+    const scopesUpdated = trail.find((r) => r.action === "integration.connection.scopes_updated");
+    expect([scopesUpdated!.actorType, scopesUpdated!.actorId, scopesUpdated!.spaceId]).toEqual([
+      "user",
+      ctx.user.id,
+      ctx.defaultSpaceId,
+    ]);
+    expect(scopesUpdated!.before).toEqual({ scopesGranted: ["files.read"] });
+    expect(scopesUpdated!.after).toEqual({ scopesGranted: ["files.read", "files.write"] });
   });
 
   it("keeps the client secret out of the stored state and resolves an org client at callback", async () => {

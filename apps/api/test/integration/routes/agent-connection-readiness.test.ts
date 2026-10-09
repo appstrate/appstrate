@@ -472,7 +472,6 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
   const GOOGLE_GRANT = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose",
     "openid",
   ];
 
@@ -571,8 +570,8 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
   });
 
   it("still blocks when a real non-email scope is missing (discriminating control)", async () => {
-    const compose = "https://www.googleapis.com/auth/gmail.compose";
-    await seedWildcardGmailAgent(GOOGLE_GRANT.filter((s) => s !== compose));
+    const readonly = "https://www.googleapis.com/auth/gmail.readonly";
+    await seedWildcardGmailAgent(GOOGLE_GRANT.filter((s) => s !== readonly));
 
     const body = await readiness();
     expect(body.blocks_run).toBe(true);
@@ -580,7 +579,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
       { code: string; missing_scopes?: string[] } | undefined;
     expect(err?.code).toBe("insufficient_scopes");
     // Only the genuinely absent scope — `email` must not ride along.
-    expect(err?.missing_scopes).toEqual([compose]);
+    expect(err?.missing_scopes).toEqual([readonly]);
 
     expect((await launch()).status).toBe(409);
   });

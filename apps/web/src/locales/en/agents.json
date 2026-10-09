@@ -481,7 +481,7 @@
   "error.connectionLabelTaken": "Another connection of this integration already has this name: the agent addresses each connection by name, pick another one.",
   "error.connectionPinned": "A connection involved is named by an admin pin or the space default: remove it from there first.",
   "error.connectionOwnerWithoutAccess": "This connection's owner no longer has access to the space, so it cannot be shared.",
-  "error.endUserConnectionNotShareable": "An end user's connection cannot be shared with the organization.",
+  "error.endUserConnectionNotShareable": "An end user's connection cannot be shared with the space.",
   "error.pinnedConnectionUnavailable": "A pinned or default connection is no longer reachable (deleted or unshared): pick another one, or ask an admin to fix the pin or the space default.",
   "error.overrideConnectionUnavailable": "The chosen connection is no longer reachable (deleted or unshared): pick another one.",
   "error.needsReconnection": "The connection must be reconnected by its owner before it can be used.",

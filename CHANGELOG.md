@@ -82,6 +82,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Google integrations request `userinfo.email` by default** (#1871):
+  `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
+  `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
+  `default_scopes` next to `email`, the form Google grants in its place, so a
+  connection no longer reads as granting more than its baseline.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the
@@ -470,6 +475,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent or keep a call open with repeated values. With progress,
   `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
   the call's total duration.
+- **A Gmail connection no longer gets write access by default** (#1871).
+  `@appstrate/gmail` 1.1.7 drops `gmail.send` and `@appstrate/gmail-mcp` 2.3.6
+  drops `gmail.compose` from `default_scopes`, which every connection of the
+  auth requests: a connection made for a read-only agent is read-only. An agent
+  that sends or drafts declares that scope and gets it. Existing connections
+  keep what they were granted, and a reconnect keeps it too.
+- **An `insufficient_scopes` item no longer carries a `connect_url`** (#1871).
+  The link upgraded the existing connection in place, which widens every agent
+  that uses it. MCP clients are pointed at a new connection with the item's
+  `required_scopes` instead. The OpenAPI descriptions of the connect kickoffs,
+  `connection_id`, pins and space defaults state the same rule, and a
+  reconnect that changes a connection's granted scopes records
+  `integration.connection.scopes_updated` in the audit log, with the scopes
+  before and after.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

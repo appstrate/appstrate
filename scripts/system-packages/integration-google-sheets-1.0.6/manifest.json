@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/gmail",
-  "version": "1.1.6",
+  "name": "@appstrate/google-sheets",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Gmail (API)",
-  "description": "Email service by Google",
-  "keywords": ["email", "productivity"],
+  "display_name": "Google Sheets (API)",
+  "description": "Online spreadsheet editor",
+  "keywords": ["productivity", "spreadsheets"],
   "license": "Apache-2.0",
-  "icon": "logos:google-gmail",
+  "icon": "simple-icons:googlesheets",
   "source": {
     "kind": "none"
   },
@@ -32,21 +32,17 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-      "token_endpoint": "https://oauth2.googleapis.com/token",
-      "callback_url_hint": "Champ « Authorized redirect URIs » de l'ID client OAuth — enregistrer exactement : {{callback_url}}",
-      "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",
       "default_scopes": [
         "openid",
         "email",
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.send"
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/spreadsheets.readonly"
       ],
-      "token_endpoint_auth_method": "client_secret_post",
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
       },
+      "token_endpoint_auth_method": "client_secret_post",
       "identity_claims": {
         "account_id": "$.email",
         "sub": "$.sub",
@@ -70,43 +66,19 @@
           "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/gmail.readonly",
+          "value": "https://www.googleapis.com/auth/spreadsheets.readonly",
           "label": "Read-only access"
         },
         {
-          "value": "https://www.googleapis.com/auth/gmail.send",
-          "label": "Send messages"
+          "value": "https://www.googleapis.com/auth/spreadsheets",
+          "label": "Full spreadsheet access"
         },
         {
-          "value": "https://www.googleapis.com/auth/gmail.compose",
-          "label": "Compose & send drafts"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/gmail.modify",
-          "label": "Read & write (no delete)"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/gmail.labels",
-          "label": "Manage labels"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/gmail.metadata",
-          "label": "Read metadata only"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/gmail.insert",
-          "label": "Insert messages"
-        },
-        {
-          "value": "https://www.googleapis.com/auth/gmail.settings.basic",
-          "label": "Manage basic settings"
-        },
-        {
-          "value": "https://mail.google.com/",
-          "label": "Full mailbox access"
+          "value": "https://www.googleapis.com/auth/drive.file",
+          "label": "Per-file access (recommended)"
         }
       ],
-      "authorized_uris": ["https://gmail.googleapis.com/**", "https://www.googleapis.com/gmail/**"],
+      "authorized_uris": ["https://sheets.googleapis.com/**"],
       "delivery": {
         "http": {
           "in": "header",

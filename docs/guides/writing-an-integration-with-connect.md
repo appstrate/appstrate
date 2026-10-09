@@ -304,6 +304,26 @@ The agent-install scope union is computed from `default_scopes ∪ per-agent sco
 ∪ tools_policy[t].required_scopes` over the agent's selected tools. The platform's
 incremental-consent flow re-requests the union when an installed agent grows.
 
+### Least privilege with connections
+
+An integration (Gmail, GitHub, …) is the generic connector. A **connection**
+is one consent to it: one account, with its own granted scopes. An integration
+holds as many connections as you need.
+
+- Every connection of an auth gets its `default_scopes`: the identity, refresh
+  and least-capability baseline. The scopes you request widen it.
+- Manifest authors: keep `default_scopes` to identity, refresh and the
+  least-privileged capability, because every connection requests it. Declare
+  write scopes in `scope_catalog` and let the agents that need them ask.
+- An agent declares what it needs, through the tools it selects or
+  `integrations_configuration.<id>.scopes`. Pick a connection whose granted
+  scopes cover them, or create one with exactly those scopes.
+- Upgrading a connection widens every agent that uses it. To give one agent
+  more rights, create a new connection for it instead of upgrading a shared
+  one.
+- Never duplicate an integration to vary its scopes: create another connection
+  of the same integration.
+
 ---
 
 ## 2. Paste-the-bag (`api_key` / `basic` / `mtls` / bare `custom`)

@@ -1569,6 +1569,8 @@ export interface paths {
          * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
          *
          *     A credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).
+         *
+         *     Passing `connection_id` renews that connection in place, for every agent that uses it; to give one agent a different credential, create a new connection instead. Do not duplicate an integration to change its credential or scopes; create another connection.
          */
         post: operations["importIntegrationConnection"];
         delete?: never;
@@ -1589,6 +1591,8 @@ export interface paths {
         /**
          * Headless OAuth2 PKCE start — returns an authorize URL (programmatic)
          * @description Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.
+         *
+         *     Scopes: omitting `scopes` requests the auth's `default_scopes`; `default_scopes` is always requested, and `scopes` widens it. Passing `connection_id` reconnects that connection in place: added scopes then apply to every agent that uses it. To give one agent more rights without widening the others, start a NEW connection (no `connection_id`) with the required scopes. Do not duplicate an integration to change its scopes; create another connection.
          */
         post: operations["initiateIntegrationOAuth"];
         delete?: never;
@@ -1609,6 +1613,8 @@ export interface paths {
         /**
          * Mint a hosted Connect portal session (interactive, auth-type-agnostic)
          * @description Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).
+         *
+         *     Scopes: omitting `scopes` requests the auth's `default_scopes`; `default_scopes` is always requested, and `scopes` widens it. Passing `connection_id` reconnects that connection in place: added scopes then apply to every agent that uses it. To give one agent more rights without widening the others, start a NEW connection (no `connection_id`) with the required scopes. Do not duplicate an integration to change its scopes; create another connection.
          */
         post: operations["initiateIntegrationConnect"];
         delete?: never;
@@ -1666,7 +1672,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
+         * @description Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -1692,7 +1698,7 @@ export interface paths {
         head?: never;
         /**
          * Update an integration connection's label and/or shared_with_org flag
-         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Unsharing a shared connection disables, in the same transaction, every enabled schedule of another actor than its owner whose `connection_overrides` name it (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`.
+         * @description The connection owner or a holder of `integrations:configure` may edit it. Sharing (`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; unsharing is open to both, so a governor can withdraw a colleague's shared credentials. Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection. A member pin does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick again. Unsharing a shared connection disables, in the same transaction, every enabled schedule of another actor than its owner whose `connection_overrides` name it (`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is unique per (space, integration), compared verbatim: renaming to one another connection holds is refused with 409 `connection_label_taken`. Scopes are not edited here: for an agent that needs more scopes, create a new connection with them rather than reconnecting a shared one, which widens every agent that uses it.
          */
         patch: operations["updateIntegrationConnectionMetadata"];
         trace?: never;
@@ -1725,17 +1731,17 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get the org-wide default connection for this integration
+         * Get the space default connection for this integration
          * @description The cross-agent governance baseline: one default connection set per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Either way the set binds whole: a member that is no longer reachable fails the run with `pinned_connection_unavailable` rather than falling through. Returns 204 when unset.
          */
         get: operations["getIntegrationOrgDefault"];
         /**
-         * Set the org-wide default connection for this integration (admin)
-         * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one.
+         * Set the space default connection for this integration (admin)
+         * @description Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one. Every consuming agent gets the default's scopes: give an agent that needs more its own connection (a pin) rather than upgrading a default one.
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
-        /** Remove the org-wide default connection (admin) */
+        /** Remove the space default connection (admin) */
         delete: operations["deleteIntegrationOrgDefault"];
         options?: never;
         head?: never;
@@ -1811,7 +1817,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Pin a set of admin-shared connections to an agent for all members (admin) */
+        /**
+         * Pin a set of admin-shared connections to an agent for all members (admin)
+         * @description Pin connections whose `scopes_granted` cover what the agent needs; when none does, create a new connection with those scopes rather than upgrading one other agents use.
+         */
         put: operations["upsertIntegrationPin"];
         post?: never;
         /** Remove an admin pin (admin) */
@@ -2106,7 +2115,7 @@ export interface paths {
         get?: never;
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin one whose `scopes_granted` covers what the agent needs, rather than upgrading one other agents use.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
@@ -6393,9 +6402,9 @@ export interface components {
                 /** @description True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected. */
                 needs_reconnection: boolean;
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id` so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
-            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt. */
+            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`. Upgrading this connection instead widens every agent that uses it. */
             missing_scopes?: string[];
             /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error). */
             owned_by_actor?: boolean;
@@ -6414,7 +6423,7 @@ export interface components {
             source?: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
             /**
@@ -12967,7 +12976,7 @@ export interface operations {
                     };
                     /**
                      * Format: uuid
-                     * @description Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.
+                     * @description Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -13098,12 +13107,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
+                    /** @description OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
+                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -13156,12 +13165,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
+                    /** @description OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.
+                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`.
                      */
                     connection_id?: string;
                 };

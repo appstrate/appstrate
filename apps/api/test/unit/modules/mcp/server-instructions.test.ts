@@ -79,7 +79,32 @@ describe("MCP server instructions — connect bullet", () => {
     const bullet = connectBullet(false);
     expect(bullet).toContain("initiateIntegrationConnect");
     expect(bullet).toMatch(/scopes: <[^>]*required_scopes/);
-    expect(bullet).toMatch(/connection_id: <[^>]*connection_id/);
+    expect(bullet).toMatch(
+      /connection_id: <[^>]*connection_id, for a needs_reconnection item only/,
+    );
+  });
+
+  // #1871: an in-place upgrade widens every agent bound to the connection.
+  it("answers `insufficient_scopes` with a NEW connection, not an in-place upgrade", () => {
+    for (const contextInjected of [false, true]) {
+      const bullet = connectBullet(contextInjected);
+      expect(bullet).toMatch(/An `insufficient_scopes` item carries no `connect_url`/);
+      expect(bullet).toMatch(/start a NEW connection[^.]*WITHOUT `connection_id`/);
+      expect(bullet).toMatch(/only when the user explicitly chooses it/);
+    }
+    // Without the connect grant the user does it on the agent's page.
+    const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
+    expect(cannotConnect).toMatch(
+      /An `insufficient_scopes` item carries no `connect_url`: tell the user[^.]*on the agent's page/,
+    );
+  });
+
+  it("names the member pin as the way to settle the choice once a new connection exists", () => {
+    const exception = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- The exception —"));
+    expect(exception).toContain("After a new connection was created for an agent");
+    expect(exception).toContain("`upsertMyIntegrationPin`");
   });
 
   it("differs between the two client kinds on delivery only", () => {

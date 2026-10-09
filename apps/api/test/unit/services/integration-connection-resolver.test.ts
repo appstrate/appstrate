@@ -1504,9 +1504,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
     expect(err.missingScopes).toEqual(["user"]);
     // …and the snake_case projection the 409 envelope carries. `owned_by_actor`
-    // is what the connect-offer mint gates on: a scope upgrade re-consents THIS
-    // row, so minting for a foreign owner would re-consent someone else's
-    // account.
+    // tells the caller whether upgrading THIS row is theirs to choose.
     expect(translateResolutionError(err)).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "insufficient_scopes",
@@ -1699,8 +1697,8 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       connection_id: c.id,
       auth_key: "oauth",
       required_scopes: ["repo", "admin:repo", "user"],
-      // Same gate as insufficient_scopes: repairing the row in place is the
-      // owner's to do, and the connect-offer mint reads this field.
+      // Repairing the row in place is the owner's to do, and the connect-offer
+      // mint reads this field.
       owned_by_actor: true,
     });
   });

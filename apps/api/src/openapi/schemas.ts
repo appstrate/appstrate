@@ -221,13 +221,13 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id` so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
+          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`. Upgrading this connection instead widens every agent that uses it.",
       },
       owned_by_actor: {
         type: "boolean",
@@ -264,7 +264,7 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",

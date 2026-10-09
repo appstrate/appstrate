@@ -63,8 +63,8 @@ describe("toPiToolResult (run_and_wait payloads)", () => {
           },
           {
             field: "integrations.@appstrate/clickup",
-            code: "insufficient_scopes",
-            message: "missing scopes",
+            code: "needs_reconnection",
+            message: "needs reconnection",
             auth_key: "primary",
             connection_id: "conn-9",
             owned_by_actor: true,

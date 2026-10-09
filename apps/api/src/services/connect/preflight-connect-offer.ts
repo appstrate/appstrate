@@ -31,7 +31,7 @@
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
 import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
-import { CONNECT_FLOW_CODES, partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -52,28 +52,18 @@ export interface ConnectOfferTarget {
 const FIELD_PREFIX = "integrations.";
 
 /**
- * The codes whose remedy is a fresh consent on a connection that already
- * exists — a scope upgrade, or a dead credential re-granted. Both re-consent
- * the SAME row (`connection_id` rides the claims), never a duplicate.
- */
-const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
-
-const CONNECT_FLOW: ReadonlySet<string> = new Set(CONNECT_FLOW_CODES);
-
-/**
  * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * A {@link CONNECT_FLOW_CODES} item qualifies outright as a fresh connect (no `connection_id`) —
- * `not_connected`, or `auth_key_mismatch` on the dep's own auth — except the
- * two {@link IN_PLACE_CODES}, which qualify only on a connection the actor OWNS
- * and only with an id to re-consent: a foreign-owned row is somebody else's
- * account, and minting against it would let the caller re-consent a
- * colleague's credential.
+ * `not_connected`, or `auth_key_mismatch` on the dep's own auth, qualifies as a fresh
+ * connect (no `connection_id`). `needs_reconnection`
+ * qualifies only on a connection the actor OWNS and only with an id to re-consent
+ * in place: a foreign-owned row is somebody else's account, and minting against
+ * it would let the caller re-consent a colleague's credential.
  *
- * Everything else is refused: `must_choose_connection` is a choice, not a
- * missing connection, and `auth_key_serves_no_selected_tool` needs the user to
- * change the agent, not to connect.
+ * Everything else is refused: `insufficient_scopes` and `must_choose_connection`
+ * need a choice, and `auth_key_serves_no_selected_tool` needs the user to change
+ * the agent, not to connect.
  */
 export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget | null {
   if (!e.field.startsWith(FIELD_PREFIX)) return null;
@@ -81,11 +71,18 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
   if (!integrationId || !e.auth_key) return null;
   const scopes = e.required_scopes ?? [];
 
-  if (!CONNECT_FLOW.has(e.code)) return null;
-  if (!IN_PLACE_CODES.has(e.code)) return { integrationId, authKey: e.auth_key, scopes };
-  return e.owned_by_actor === true && e.connection_id
-    ? { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id }
-    : null;
+  switch (e.code) {
+    case "not_connected":
+    case "auth_key_mismatch":
+      return { integrationId, authKey: e.auth_key, scopes };
+    case "needs_reconnection":
+      return e.owned_by_actor === true && e.connection_id
+        ? { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id }
+        : null;
+    // insufficient_scopes: upgrading in place widens every bound agent, a new one stays unbound.
+    default:
+      return null;
+  }
 }
 
 /**

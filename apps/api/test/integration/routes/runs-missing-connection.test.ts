@@ -1093,8 +1093,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `needs_reconnection` is minted under the same rule as an under-scoped
-    // connection: the remedy re-consents THAT row, so it is the owner's to run.
+    // `needs_reconnection` re-consents THAT row in place, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
       async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
@@ -1162,14 +1161,13 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `insufficient_scopes` is the third code a connect flow can clear, and its
-    // remedy is an upgrade of an EXISTING row — so the same ownership rule as
-    // `needs_reconnection` decides it, through the same route.
+    // #1871: `insufficient_scopes` gets no link. An upgrade in place widens every
+    // agent bound to the row; a fresh connection leaves the binding on it.
     describe("insufficient_scopes", () => {
       /**
        * A LIVE oauth2 connection granted `base` only — short of the
        * `search.read` the agent's `search` selection requires — owned by
-       * `userId` and optionally shared with the org.
+       * `userId` and optionally shared with the space.
        */
       async function seedUnderScopedConnection(
         userId: string,
@@ -1195,30 +1193,22 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         return row!.id;
       }
 
-      it("mints a connect_url upgrading the caller's own under-scoped connection", async () => {
+      it("mints nothing on the caller's own under-scoped connection", async () => {
         await seedOauthIntegration();
         const connectionId = await seedUnderScopedConnection(ctx.user.id);
         const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
 
         expect(err.code).toBe("insufficient_scopes");
         expect(err.owned_by_actor).toBe(true);
+        expect(err.connection_id).toBe(connectionId);
         expect(err.missing_scopes).toEqual(["search.read"]);
-        expect(err.connect_url).toStartWith("http");
-        // The claims widen the SAME row — without `connection_id` the callback
-        // INSERTs a second account and the narrow one is still what resolves.
-        const token = new URL(err.connect_url!).searchParams.get("token");
-        expect(readConnectToken(token!)).toMatchObject({
-          package_id: OAUTH_INTEGRATION,
-          auth_key: "primary",
-          connection_id: connectionId,
-          scopes: ["search.read"],
-        });
+        // The relay fields stay, for a caller that starts a new connection itself.
+        expect(err.required_scopes).toEqual(["search.read"]);
+        expect(err.connect_url).toBeUndefined();
+        expect(err.expiresAt).toBeUndefined();
       });
 
       it("mints nothing when the under-scoped connection is a colleague's shared row", async () => {
-        // Discriminating control for the case above: same code, same header,
-        // same permissions — only the owner differs. Minting here would let the
-        // caller re-consent (and widen) somebody else's account.
         await seedOauthIntegration();
         const colleague = await createTestUser();
         await addOrgMember(ctx.orgId, colleague.id, "member");

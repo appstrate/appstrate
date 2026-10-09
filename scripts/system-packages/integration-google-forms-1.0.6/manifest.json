@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-contacts",
-  "version": "1.0.5",
+  "name": "@appstrate/google-forms",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Google Contacts (API)",
-  "description": "Contact management service by Google",
-  "keywords": ["contacts", "productivity"],
+  "display_name": "Google Forms (API)",
+  "description": "Form creation and response collection by Google",
+  "keywords": ["forms", "productivity"],
   "license": "Apache-2.0",
-  "icon": "logos:google",
+  "icon": "simple-icons:googleforms",
   "source": {
     "kind": "none"
   },
@@ -32,7 +32,13 @@
     "primary": {
       "type": "oauth2",
       "issuer": "https://accounts.google.com",
-      "default_scopes": ["openid", "email", "https://www.googleapis.com/auth/contacts.readonly"],
+      "default_scopes": [
+        "openid",
+        "email",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/forms.body.readonly",
+        "https://www.googleapis.com/auth/forms.responses.readonly"
+      ],
       "authorization_params": {
         "access_type": "offline",
         "prompt": "consent"
@@ -61,27 +67,27 @@
           "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/contacts.readonly",
-          "label": "Read contacts"
+          "value": "https://www.googleapis.com/auth/forms.body.readonly",
+          "label": "Read form structure"
         },
         {
-          "value": "https://www.googleapis.com/auth/contacts",
-          "label": "Read and write contacts"
+          "value": "https://www.googleapis.com/auth/forms.body",
+          "label": "Read and edit form structure"
         },
         {
-          "value": "https://www.googleapis.com/auth/contacts.other.readonly",
-          "label": "Read 'Other contacts' (auto-suggested)"
+          "value": "https://www.googleapis.com/auth/forms.responses.readonly",
+          "label": "Read form responses"
         },
         {
-          "value": "https://www.googleapis.com/auth/directory.readonly",
-          "label": "Read organization directory (Google Workspace)"
+          "value": "https://www.googleapis.com/auth/drive.readonly",
+          "label": "Read Google Drive (list forms)"
         },
         {
-          "value": "https://www.googleapis.com/auth/userinfo.profile",
-          "label": "Read user profile info"
+          "value": "https://www.googleapis.com/auth/drive",
+          "label": "Full Google Drive access"
         }
       ],
-      "authorized_uris": ["https://people.googleapis.com/**"],
+      "authorized_uris": ["https://forms.googleapis.com/**"],
       "delivery": {
         "http": {
           "in": "header",
