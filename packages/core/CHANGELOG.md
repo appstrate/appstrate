@@ -136,8 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **BREAKING: `RUN_GET_WAIT_MAX_SECONDS`** (`@appstrate/core/run-and-wait-client`):
-  the wait poll no longer caps its own request; the server clamps. (#1851)
+- **`RUN_GET_WAIT_MAX_SECONDS`** (`@appstrate/core/run-and-wait-client`) —
+  BREAKING. The wait poll no longer caps its own request; the server clamps.
+  (#1851)
 
 ## [15.0.0] — 2026-10-08
 

@@ -278,7 +278,13 @@ describe("GET /mcp", () => {
 });
 
 describe("/mcp — progress relay over SSE, end to end", () => {
-  it("delivers an upstream's progress to an agent client that asked for it", async () => {
+  it("delivers an upstream's progress to an agent client that asked for it, throttled", async () => {
+    // The relay's one-second windows, ended by hand from inside the upstream.
+    const windows: Array<() => void> = [];
+    const endWindows = async () => {
+      await Bun.sleep(0);
+      for (const end of windows.splice(0)) end();
+    };
     // Upstream integration: reports progress under whatever token it receives.
     const upstream = await createInProcessPair([
       {
@@ -286,18 +292,31 @@ describe("/mcp — progress relay over SSE, end to end", () => {
         handler: async (_args, extra) => {
           const progressToken = extra._meta?.progressToken;
           if (progressToken !== undefined) {
-            for (const progress of [1, 2]) {
-              await extra.sendNotification({
+            const report = (progress: number) =>
+              extra.sendNotification({
                 method: "notifications/progress",
                 params: { progressToken, progress, message: `step ${progress}` },
               });
-            }
+            await report(1);
+            await report(2);
+            await report(3);
+            await endWindows();
+            // Still inside the window when the call answers: never relayed.
+            await report(4);
+            await Bun.sleep(0);
           }
           return { content: [{ type: "text", text: "done" }] };
         },
       },
     ]);
-    const host = new McpHost();
+    const host = new McpHost({
+      progressTimers: {
+        setTimeout: (fn) => windows.push(fn),
+        clearTimeout: () => {
+          windows.length = 0;
+        },
+      },
+    });
     await host.register({
       connection: { label: "work", accountId: null },
       namespace: "up",
@@ -322,10 +341,12 @@ describe("/mcp — progress relay over SSE, end to end", () => {
         { onProgress: (p) => received.push(p) },
       );
       expect(result.content).toEqual([{ type: "text", text: "done" }]);
+      // The first at once, the latest of the window when it ends.
       expect(received).toEqual([
         { progress: 1, message: "step 1" },
-        { progress: 2, message: "step 2" },
+        { progress: 3, message: "step 3" },
       ]);
+      expect(windows).toEqual([]);
     } finally {
       await agent.close();
       await upstream.close();
