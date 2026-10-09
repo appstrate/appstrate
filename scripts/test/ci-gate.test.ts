@@ -10,8 +10,7 @@ const SHA = "a1b2c3";
 
 let stubDir: string;
 
-// A `gh` on PATH answering the two calls the script makes from fixtures, and
-// logging every call so the test sees which endpoints were asked.
+// A `gh` on PATH applying the script's `--jq` to fixtures, logging each call.
 beforeAll(async () => {
   stubDir = await mkdtemp(join(tmpdir(), "ci-gate-"));
   await writeFile(
@@ -19,9 +18,10 @@ beforeAll(async () => {
     `#!/usr/bin/env bash
 echo "$*" >> "$GH_LOG"
 [ -n "\${GH_FAIL:-}" ] && exit 1
+[ "$3" = --jq ] || exit 1
 case "$2" in
-  */actions/workflows/*/runs\\?*) printf '%s' "$RUNS_JSON" ;;
-  */actions/runs/*) printf '%s' "$RUN_JSON" ;;
+  */actions/workflows/*/runs\\?*) jq -r "$4" <<<"$RUNS_JSON" ;;
+  */actions/runs/*) jq -r "$4" <<<"$RUN_JSON" ;;
   *) exit 1 ;;
 esac
 `,
@@ -56,7 +56,8 @@ async function gate(
       GH_FAIL: opts.ghFails ? "1" : "",
       GITHUB_REPOSITORY: "o/r",
       GITHUB_RUN_ID: "1007",
-      RUN_JSON: JSON.stringify({ workflow_id: 42, head_sha: SHA, run_number: 7 }),
+      GITHUB_RUN_NUMBER: "7",
+      RUN_JSON: JSON.stringify({ workflow_id: 42, head_sha: SHA }),
       RUNS_JSON: JSON.stringify({ workflow_runs: runs }),
     },
     stdout: "pipe",
@@ -87,7 +88,7 @@ describe("ci-gate.sh", () => {
     expect(out.code).toBe(0);
     expect(out.stdout).toContain("::notice::");
     expect(out.stdout).toContain("https://github.com/o/r/actions/runs/1009");
-    expect(out.calls).toEqual([
+    expect(out.calls.map((call) => call.split(" --jq ")[0])).toEqual([
       "api repos/o/r/actions/runs/1007",
       `api repos/o/r/actions/workflows/42/runs?head_sha=${SHA}&per_page=100`,
     ]);

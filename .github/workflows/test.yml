@@ -187,9 +187,8 @@ jobs:
 
   # The required status check. A matrix job reports one check per slice, named
   # after the slice, so the check the branch ruleset requires is this one: it
-  # passes only when every slice did. `always()` keeps it reporting on a
-  # cancelled run; `scripts/ci-gate.sh` passes it there only when a newer run
-  # of this workflow on the same commit owns the verdict.
+  # passes only when every slice did, or when a newer run on the same commit
+  # superseded this one (`scripts/ci-gate.sh`).
   unit-gate:
     name: Unit tests
     if: always()
@@ -306,8 +305,8 @@ jobs:
   # The required status check, as for the unit slices. The integration slices
   # are skipped on a PR without the `integration` label, and a skipped required
   # check reads as passed — so the gate accepts `skipped`, and only that, on
-  # top of `success`. A failed or cancelled slice fails it, a superseded run
-  # aside (see `unit-gate`).
+  # top of `success`. A failed or cancelled slice fails it (superseded run:
+  # see `unit-gate`).
   integration-gate:
     name: Integration tests
     if: always()
