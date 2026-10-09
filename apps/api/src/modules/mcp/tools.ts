@@ -81,6 +81,7 @@ import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 import {
   assertSpaceArgument,
+  describeSpace,
   grantedIn,
   spaceRef,
   NO_FALLBACK_HINT,
@@ -1734,6 +1735,22 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   get_runtime_capabilities: false,
 };
 
+/**
+ * The `space_id` argument, carrying the caller's spaces itself: clients truncate
+ * server instructions (Claude Code keeps ~2 KB), so the schema is the one place
+ * a model is sure to find which ids exist and what they are called.
+ */
+function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
+  return {
+    type: "string",
+    enum: spaces.reachable.map((s) => s.id),
+    description:
+      `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
+      "Take it from the user's request; when the request names no space and several could serve, " +
+      "ask the user which one instead of choosing. There is no default space.",
+  };
+}
+
 /** Declare `space_id` on a space-acting tool and check it before the handler runs. */
 function withSpaceArgument(
   tool: AppstrateToolDefinition,
@@ -1749,20 +1766,13 @@ function withSpaceArgument(
   const schema = tool.descriptor.inputSchema;
   const descriptor: Tool = {
     ...tool.descriptor,
+    // Leading: clients cap long descriptions, and this is the part that varies.
     description: granted_in
-      ? `${tool.descriptor.description} Available in: ${granted_in.join(", ")}.`
+      ? `Available in: ${granted_in.join(", ")}. ${tool.descriptor.description}`
       : tool.descriptor.description,
     inputSchema: {
       ...schema,
-      properties: {
-        ...schema.properties,
-        space_id: {
-          type: "string",
-          description:
-            "The space (`spc_…`) this call acts in, as the server instructions list them. " +
-            "Always required: there is no default space.",
-        },
-      },
+      properties: { ...schema.properties, space_id: spaceIdProperty(spaces) },
       required: [...(schema.required ?? []), "space_id"],
     },
   };

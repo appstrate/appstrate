@@ -72,6 +72,16 @@ entered. `get_runtime_capabilities` alone acts in none.
   direct-service tools (`read_skill`, the file resource provider, the package
   file tools) need no change. A request naming no space (`initialize`,
   `tools/list`) enters a reachable one only to pass the `mcp:read` guard.
+- **The schema carries the spaces.** `space_id` is an `enum` of the reachable
+  ids, its description naming each space and the caller's role there. The
+  server instructions state the rules but not the list: clients truncate them
+  (Claude Code keeps about 2 KB, and the list sat past it), and in the trial a
+  model without the list either gave up or sent a space NAME. A tool granted
+  in only some spaces says so at the START of its description, for the same
+  reason.
+- **`resources/read`** carries no arguments: an `appfile://` URI names its
+  file, and a file belongs to one space, so the router enters that space
+  (`fileSpaceId`). The read then runs under that space's ACL like any other.
 - **Validation:** an id outside the reachable list is a `-32602` naming the
   reachable spaces. The argument is never trusted as such: the router admits
   the space with the caller's membership, as for the header.
@@ -114,7 +124,7 @@ same rule once.
 
 - **Tools:** a tool is declared when its act holds in at least one space. This
   is safe because of the rule #1493 set: the surface informs, the guard
-  decides. A tool granted in only some spaces ends its description with
+  decides. A tool granted in only some spaces opens its description with
   `Available in: team, gestion.`.
 - **Operation index:** one grouping, by tag. An operation granted in only some
   spaces names them after its id (`createAgent [gestion]`); one granted

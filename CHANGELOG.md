@@ -84,8 +84,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **BREAKING (MCP): a connection without `X-Space-Id` reaches every space the
   caller holds a role in, and each call names its space** (#1825). Every tool
-  that acts in a space requires a `space_id` argument, reads and writes alike;
-  a call without it is a `-32602` listing the caller's spaces and roles. A
+  that acts in a space requires a `space_id` argument, reads and writes alike,
+  whose schema lists the caller's spaces and roles; a call without it is a
+  `-32602` listing them too. A `resources/read` of an `appfile://` link reads
+  the file in its own space. A
   tool or operation allowed in only some spaces says which (`Available in: …`,
   `createAgent [gestion]` in the operation index, `granted_in`), a refusal
   forbids redoing the action in another space, and `get_me` lists the spaces.

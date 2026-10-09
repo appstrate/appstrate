@@ -98,9 +98,11 @@ What happens under the hood:
 > the same time.
 >
 > Within an org, one connection reaches **every space you hold a role in**.
-> The server instructions list them (name, `spc_…` id, your role there), and
-> every tool that acts in a space requires a `space_id` argument, reads and
-> writes alike: there is no default space. A tool or an operation your roles
+> Every tool that acts in a space requires a `space_id` argument, reads and
+> writes alike: there is no default space. The argument's schema lists your
+> spaces (name, `spc_…` id, your role there), since clients may truncate the
+> server instructions. A `resources/read` of an `appfile://` link needs no
+> argument: the file's own space is used. A tool or an operation your roles
 > allow in only some spaces names them (`Available in: …` on the tool,
 > `createAgent [gestion]` in the operation index, `granted_in` in results). A
 > refusal in one space is final: it carries `granted_in` and asks the model to

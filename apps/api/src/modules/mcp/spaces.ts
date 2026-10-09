@@ -23,6 +23,8 @@ import type { Context } from "hono";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppEnv } from "../../types/index.ts";
 import { listSpacesForPrincipal } from "../../services/spaces.ts";
+import { fileSpaceId } from "../../services/files.ts";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -96,20 +98,31 @@ export async function listReachableSpaces(
 }
 
 /**
- * The `space_id` a JSON-RPC body's `tools/call` names, if any. A batch naming
- * several is answered with the first; each call of it is then checked against
- * the space actually entered (`withSpaceArgument`), so a mismatch is refused.
+ * The space a JSON-RPC body names: a `tools/call`'s `space_id`, or, for a
+ * `resources/read` of an `appfile://` URI, the space holding that file — a
+ * file row belongs to one space, so the URI names it, and the `resource_link`
+ * a run returns is read without any other argument. A batch is answered with
+ * its first; each call of it is then checked against the space actually
+ * entered (`assertSpaceArgument`), so a mismatch is refused.
  */
-export function requestedSpaceId(message: unknown): string | undefined {
+export async function requestedSpaceId(
+  message: unknown,
+  orgId: string,
+): Promise<string | undefined> {
   const messages = Array.isArray(message) ? message : [message];
   for (const m of messages) {
     if (typeof m !== "object" || m === null) continue;
-    const { method, params } = m as { method?: unknown; params?: unknown };
-    if (method !== "tools/call" || typeof params !== "object" || params === null) continue;
-    const args = (params as { arguments?: unknown }).arguments;
-    if (typeof args !== "object" || args === null) continue;
-    const spaceId = (args as { space_id?: unknown }).space_id;
-    if (typeof spaceId === "string") return spaceId;
+    const { method, params } = m as { method?: unknown; params?: Record<string, unknown> };
+    if (typeof params !== "object" || params === null) continue;
+    if (method === "tools/call") {
+      const args = params.arguments as { space_id?: unknown } | undefined;
+      if (typeof args?.space_id === "string") return args.space_id;
+    }
+    if (method === "resources/read" && typeof params.uri === "string") {
+      const fileId = parseFileUri(params.uri);
+      const spaceId = fileId ? await fileSpaceId(orgId, fileId) : null;
+      if (spaceId) return spaceId;
+    }
   }
   return undefined;
 }

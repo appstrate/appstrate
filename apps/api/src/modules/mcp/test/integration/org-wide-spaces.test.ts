@@ -58,7 +58,7 @@ describe("mcp org-wide connection", () => {
     return envelope;
   };
 
-  it("lists the reachable spaces in get_me and in the instructions", async () => {
+  it("lists the reachable spaces in get_me, the rules in the instructions", async () => {
     const me = payload(await call("get_me", { space_id: gestion.id }));
     const spaces = me.data.spaces as Array<{ id: string; role: string }>;
     const byId = new Map(spaces.map((s) => [s.id, s]));
@@ -78,7 +78,6 @@ describe("mcp org-wide connection", () => {
       },
     });
     const instructions = envelope.result?.instructions as string;
-    expect(instructions).toContain(gestion.id);
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain("createAgent [Gestion]");
@@ -104,11 +103,18 @@ describe("mcp org-wide connection", () => {
     expect(spaceArg("get_me")).toBe(true);
     expect(spaceArg("get_runtime_capabilities")).toBe(false);
 
+    // The schema carries the spaces: clients truncate server instructions.
+    const spaceId = tools.find((t) => t.name === "invoke_operation")!.inputSchema.properties!
+      .space_id as { enum: string[]; description: string };
+    expect(spaceId.enum.sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
+    expect(spaceId.description).toContain("Gestion (`" + gestion.id + "`, role admin)");
+
     // A tool some spaces grant names them; one every space grants names none.
     const described = (name: string) =>
       (tools.find((t) => t.name === name) as { description?: string } | undefined)?.description;
     const invoke = described("invoke_operation")!;
-    expect(invoke).toContain("Available in:");
+    // Leading, so a client capping long descriptions keeps it.
+    expect(invoke.startsWith("Available in:")).toBe(true);
     expect(invoke).toContain("Gestion");
     expect(invoke).not.toContain("Lecture");
     expect(described("read_skill")).not.toContain("Available in:");
