@@ -169,8 +169,7 @@ async function requireRunnerIsolation(
         `sidecar's environment — platform API key, run token, proxy credentials, every ` +
         `connected integration's decrypted tokens — straight out of /proc; on a shared uid ` +
         `the egress listeners could not tell it from another runner. Remedies: run under ` +
-        `RUN_ADAPTER=docker, where each integration runner gets its own container (if ` +
-        `INTEGRATION_RUNTIME_ADAPTER=process is set there, unset it); ` +
+        `RUN_ADAPTER=docker, where each integration runner gets its own container; ` +
         `or under RUN_ADAPTER=firecracker, whose guest supervisor provides both. Integrations ` +
         `whose source.kind is "remote" or "none" spawn nothing and are unaffected.`,
     );

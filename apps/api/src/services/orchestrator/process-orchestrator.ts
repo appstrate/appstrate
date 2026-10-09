@@ -269,19 +269,6 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private sidecarPorts = new Map<string, SidecarPorts>();
   private pendingSpecs = new Map<string, PendingSpec>();
 
-  constructor() {
-    // Operator feedback only: the sidecar is pinned to `process` below, so docker runners never
-    // spawn here (they would need a per-run network). Raw env: unset is not the schema's default.
-    if (process.env.INTEGRATION_RUNTIME_ADAPTER === "docker") {
-      throw new Error(
-        "INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process: " +
-          "Docker integration runners need the per-run network only a containerized sidecar provides. " +
-          "Set RUN_ADAPTER=docker or RUN_ADAPTER=firecracker to run local integrations, " +
-          "or unset INTEGRATION_RUNTIME_ADAPTER.",
-      );
-    }
-  }
-
   async initialize(): Promise<void> {
     await mkdir(dataDir, { recursive: true });
     logger.warn(

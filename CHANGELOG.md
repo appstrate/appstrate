@@ -80,14 +80,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
-- **Before the deploy, on `RUN_ADAPTER=process`, remove
-  `INTEGRATION_RUNTIME_ADAPTER=docker`, or move the instance to
-  `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`** (#1819). The platform
-  now refuses to boot with that combination: the docker runners it spawned
-  had no per-run network, so proxy-aware clients had no egress and the
-  others had unfiltered egress. Removing the variable alone leaves every
-  `source.kind: "local"` integration (e.g. `@appstrate/github-git`) refused
-  at spawn: only `docker` and `firecracker` run them.
+- **Remove `INTEGRATION_RUNTIME_ADAPTER` from the environment** (#1819). It
+  is retired and now ignored: each orchestrator pins its sidecar's runtime.
+  Local integrations run under `RUN_ADAPTER=docker` or `firecracker`; under
+  `RUN_ADAPTER=process` they are refused at spawn, as before.
 
 - **Before the deploy, review `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). Every
   listed host that is not loopback becomes reachable by the local
@@ -123,9 +119,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   path; a host from a connection value or a wildcard is never exempt; the
   runner's allowlist still applies. An `api_call` keeps its per-host rule. The rule:
   `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
-- **BREAKING (operators): `RUN_ADAPTER=process` with
-  `INTEGRATION_RUNTIME_ADAPTER=docker` is refused at boot** (#1819); see
-  Operators.
+- **BREAKING (operators): `INTEGRATION_RUNTIME_ADAPTER` is retired and
+  ignored** (#1819); see Operators.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the

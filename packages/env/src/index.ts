@@ -532,9 +532,6 @@ export const envSchema = z
     // error listing the registered backends.
     RUN_ADAPTER: z.string().default("process"),
 
-    // Forwarded by the Docker orchestrator only (the process one refuses "docker").
-    INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
-
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),
