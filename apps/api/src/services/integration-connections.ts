@@ -880,22 +880,23 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 }
 
 /**
- * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any (`null`
- * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
- * the DCR find-or-create.
+ * Load the org's auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any
+ * (`null` issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find
+ * half of the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
   issuer: string | null,
+  executor: DbOrTx = db,
 ): Promise<IntegrationOAuthClientWithSecret | null> {
-  const [row] = await db
+  const [row] = await executor
     .select()
     .from(integrationOauthClients)
     .where(
       and(
-        tierAuthFilter(scope, packageId, authKey),
+        tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
         eq(integrationOauthClients.autoProvisioned, true),
         issuer === null
           ? isNull(integrationOauthClients.issuer)
@@ -1019,8 +1020,8 @@ export function encodeClientAuthForStorage(input: {
  * decryption. The `ioc_public_iff_no_secret` CHECK enforces that biconditional.
  *
  * `opts.autoProvisioned` marks a DCR/CIMD machine client (internal — the admin
- * route never sets it; a remote-MCP auth keeps exactly one, enforced by
- * `idx_ioc_one_auto`).
+ * route never sets it). It lives at the org tier only: one per (org, auth, issuer), enforced by
+ * `idx_ioc_one_auto`.
  */
 export async function createIntegrationOAuthClient(
   owner: ClientOwner,
@@ -1035,8 +1036,13 @@ export async function createIntegrationOAuthClient(
   },
   opts: { autoProvisioned?: boolean; issuer?: string | null } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
-  if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const autoProvisioned = opts.autoProvisioned ?? false;
+  if (isSpaceOwner(owner)) {
+    if (autoProvisioned) {
+      throw new Error("createIntegrationOAuthClient: an auto-provisioned client is org-tier only");
+    }
+    await assertSpaceInScope(owner);
+  }
   const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
@@ -1118,7 +1124,7 @@ export async function updateIntegrationOAuthClient(
   // (it would point the DCR find-or-create at hand-entered credentials).
   if (existing.autoProvisioned) {
     throw invalidRequest(
-      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
+      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1187,7 +1193,8 @@ export async function updateIntegrationOAuthClient(
 
 /**
  * Move a space client to its org tier; same id, so pinned connections keep refreshing. The
- * members' connections it minted widen with it ({@link widenConnectionsToOrgScope}).
+ * members' connections it minted widen with it ({@link widenConnectionsToOrgScope}). A legacy
+ * space auto client (DCR/CIMD) moves too, unless the org already holds one for its issuer (409).
  */
 export async function promoteIntegrationOAuthClient(
   scope: SpaceScope,
@@ -1219,13 +1226,19 @@ function moveClientToOrg(
     if (!existing) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
-    if (existing.autoProvisioned) {
-      throw invalidRequest(
-        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot leave its space.`,
+    if (
+      existing.autoProvisioned &&
+      (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
+    ) {
+      throw conflict(
+        "auto_client_exists_at_org",
+        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
+    // An auto client of a server chosen per connection is picked by its issuer, never the default.
     const isDefault =
       mayDefault &&
+      !(existing.autoProvisioned && existing.issuer !== null) &&
       !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
     const [row] = await tx
       .update(integrationOauthClients)
@@ -1319,8 +1332,8 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
- * and are never served by a system or org entry. Throws the operator-facing error when
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) use the org's machine client
+ * and are never served by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
  * which client is the default is an admin action (`setDefaultIntegrationClient`,
@@ -1642,14 +1655,13 @@ export async function setDefaultIntegrationClient(
  * the caller falls back to the manifest's declared values.
  */
 export interface ResolvedOAuthConnect {
-  /**
-   * The space's custom (BYO-app) clients for this auth — N for an oauth2-classic
-   * auth, 0..1 for an auto-provisioned (DCR/CIMD) auth. Empty when none is
-   * registered and dynamic registration is either not opted-in or unavailable —
-   * the caller then falls back to the org and system clients.
-   */
+  /** The space's own custom (BYO-app) clients — none for an auto-provisioned auth. */
   spaceClients: IntegrationOAuthClientWithSecret[];
-  /** The org's clients the space inherits — empty for an auto-provisioned auth. */
+  /**
+   * The org's clients the space inherits — N for an oauth2-classic auth, 0..1 for an
+   * auto-provisioned (DCR/CIMD) auth: the org's one machine client of the server, shared by every
+   * space so its connections serve the whole org. Empty when none could be provisioned.
+   */
   orgClients: IntegrationOAuthClientWithSecret[];
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
@@ -1787,7 +1799,7 @@ export async function ensureIntegrationOAuthClient(
     return { spaceClients: space, orgClients: org };
   }
 
-  // Auto-provisioned path: there is exactly one machine client (DCR/CIMD).
+  // Auto-provisioned path: the org holds exactly one machine client (DCR/CIMD) per server.
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
@@ -1840,8 +1852,8 @@ export async function ensureIntegrationOAuthClient(
   // on internal hosts. The token endpoint is fetched server-side at exchange,
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
-    spaceClients: existing ? [existing] : [],
-    orgClients: [],
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
       ? { authorizationEndpoint: endpoints.authorizationEndpoint }
@@ -1853,7 +1865,7 @@ export async function ensureIntegrationOAuthClient(
   // Client already registered — nothing to mint; just return discovered config.
   if (existing) return resolved;
 
-  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     redirectUri,
@@ -1966,8 +1978,8 @@ async function ensurePerConnectionOAuthClient(
   const issuer = endpoints.issuer;
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   const resolved: ResolvedOAuthConnect = {
-    spaceClients: existing ? [existing] : [],
-    orgClients: [],
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
     issuer,
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
@@ -1975,7 +1987,7 @@ async function ensurePerConnectionOAuthClient(
   };
   if (existing) return resolved;
   await pruneUnusedPerConnectionClients(scope, packageId, authKey);
-  return registerAutoProvisionedClient(scope, packageId, authKey, auth, {
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     redirectUri: integrationCallbackUrlFor(issuer),
@@ -1985,17 +1997,18 @@ async function ensurePerConnectionOAuthClient(
 }
 
 /**
- * Delete the per-connection-server clients of this auth that minted no connection: whoever opens a
- * connect flow chooses the server. One younger than an OAuth state may still await its callback.
+ * Delete the org's per-connection-server clients of this auth that minted no connection: whoever
+ * opens a connect flow chooses the server. One younger than an OAuth state may still await its
+ * callback.
  */
 async function pruneUnusedPerConnectionClients(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
 ): Promise<void> {
   await db.delete(integrationOauthClients).where(
     and(
-      tierAuthFilter(scope, packageId, authKey),
+      tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
       eq(integrationOauthClients.autoProvisioned, true),
       isNotNull(integrationOauthClients.issuer),
       lt(integrationOauthClients.createdAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
@@ -2010,11 +2023,11 @@ async function pruneUnusedPerConnectionClients(
 }
 
 /**
- * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer` (`null` =
+ * Register a public client (RFC 7591) as the org's auto-provisioned client of `issuer` (`null` =
  * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
  */
 async function registerAutoProvisionedClient(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
   auth: AfpsManifestAuth,
@@ -2070,10 +2083,10 @@ async function registerAutoProvisionedClient(
     };
   }
 
-  // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (space, package, authKey, issuer).
-  const racedClient = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
-  if (racedClient) return { ...resolved, spaceClients: [racedClient] };
+  // Narrow the concurrency window: re-check in case a parallel Connect, from any
+  // space of the org, just registered a client for the same (package, authKey, issuer).
+  const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
+  if (racedClient) return { ...resolved, orgClients: [racedClient] };
 
   const host = (() => {
     try {
@@ -2086,9 +2099,9 @@ async function registerAutoProvisionedClient(
   // Limitation: the registered client is persisted once and reused for every
   // subsequent connect. If the authorization server later revokes or expires it
   // (RFC 7591 §3.2 `client_secret_expires_at`, or operator-side deletion),
-  // connect/refresh will fail with an `invalid_client` error and an admin must
-  // delete the stored client (DELETE /oauth-clients/:clientId) to trigger
-  // re-registration. There is no automatic re-registration on `invalid_client`.
+  // connect/refresh will fail with an `invalid_client` error and an org admin must
+  // delete the stored client (DELETE /api/org-integrations/.../oauth-clients/:clientId)
+  // to trigger re-registration. There is no automatic re-registration on `invalid_client`.
   try {
     const dcrAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
     // MCP-spec refresh: register for the `refresh_token` grant only when the AS
@@ -2163,7 +2176,7 @@ async function registerAutoProvisionedClient(
     let client: IntegrationOAuthClientWithSecret;
     try {
       client = await createIntegrationOAuthClient(
-        scope,
+        org,
         packageId,
         authKey,
         {
@@ -2180,26 +2193,22 @@ async function registerAutoProvisionedClient(
         { autoProvisioned: true, issuer },
       );
     } catch (insertErr) {
-      // Concurrent auto-DCR: a parallel Connect for the same (space, package,
+      // Concurrent auto-DCR: a parallel Connect for the same (org, package,
       // authKey, issuer) registered its client between our `racedClient` re-check above
       // and this insert. The partial unique `idx_ioc_one_auto` rejects the
       // second auto-provisioned row (Postgres 23505) — catch it and re-select
       // the winner instead of surfacing a 500. Our own upstream registration is
       // abandoned (harmless: an unused DCR client), the connection proceeds on
       // the winning client.
-      if (
-        insertErr instanceof Error &&
-        "code" in insertErr &&
-        (insertErr as { code: string }).code === "23505"
-      ) {
-        const winner = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
+      if (isUniqueViolation(insertErr)) {
+        const winner = await getAutoProvisionedClient(org, packageId, authKey, issuer);
         if (winner) {
           logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
             packageId,
             authKey,
             clientId: winner.client_id,
           });
-          return { ...resolved, spaceClients: [winner] };
+          return { ...resolved, orgClients: [winner] };
         }
       }
       throw insertErr;
@@ -2210,7 +2219,7 @@ async function registerAutoProvisionedClient(
       clientId: registration.clientId,
       ...(issuer ? { issuer } : {}),
     });
-    return { ...resolved, spaceClients: [client] };
+    return { ...resolved, orgClients: [client] };
   } catch (err) {
     if (err instanceof DynamicClientRegistrationError) {
       logger.warn("auto-DCR: dynamic client registration failed", {

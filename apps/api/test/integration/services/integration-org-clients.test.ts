@@ -440,15 +440,24 @@ describe("org-level integration OAuth clients", () => {
           }),
         ).rejects.toMatchObject({ status: 400 });
       }
-      // The DCR path itself still registers its space client.
+      // The DCR path itself registers its client at the org tier, never at a space's.
       const dcr = await createIntegrationOAuthClient(
-        spaceA,
+        org,
         REMOTE,
         "oauth",
         { clientId: "dcr", clientSecret: "", tokenEndpointAuthMethod: "none" },
         { autoProvisioned: true },
       );
-      expect(dcr).toMatchObject({ spaceId: spaceA.spaceId, autoProvisioned: true });
+      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: true });
+      await expect(
+        createIntegrationOAuthClient(
+          spaceA,
+          REMOTE,
+          "oauth",
+          { clientId: "dcr-space", clientSecret: "", tokenEndpointAuthMethod: "none" },
+          { autoProvisioned: true },
+        ),
+      ).rejects.toThrow(/org-tier only/);
     });
 
     it("rejects an integration of another org", async () => {
@@ -624,7 +633,38 @@ describe("org-level integration OAuth clients", () => {
       }
     });
 
-    it("400s an auto-provisioned client", async () => {
+    it("moves a legacy space auto-provisioned client and widens its connections", async () => {
+      const id = await seedClient({
+        spaceId: spaceA.spaceId,
+        clientId: "dcr",
+        isDefault: true,
+        autoProvisioned: true,
+      });
+      const conn = await seedConnection({
+        spaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: id,
+      });
+      expect(await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).toMatchObject({
+        id,
+        spaceId: null,
+        autoProvisioned: true,
+        isDefault: true,
+      });
+      const [row] = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, conn));
+      expect(row).toMatchObject({ spaceId: null, originSpaceId: spaceA.spaceId, clientRef: id });
+    });
+
+    it("409s a legacy space auto-provisioned client when the org already holds one", async () => {
+      const orgAuto = await seedClient({
+        spaceId: null,
+        clientId: "dcr-org",
+        isDefault: true,
+        autoProvisioned: true,
+      });
       const id = await seedClient({
         spaceId: spaceA.spaceId,
         clientId: "dcr",
@@ -632,8 +672,15 @@ describe("org-level integration OAuth clients", () => {
         autoProvisioned: true,
       });
       await expect(promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).rejects.toMatchObject({
-        status: 400,
+        status: 409,
+        code: "auto_client_exists_at_org",
       });
+      const rows = await db
+        .select({ id: integrationOauthClients.id, spaceId: integrationOauthClients.spaceId })
+        .from(integrationOauthClients);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === id)?.spaceId).toBe(spaceA.spaceId);
+      expect(rows.find((r) => r.id === orgAuto)?.spaceId).toBeNull();
     });
   });
 

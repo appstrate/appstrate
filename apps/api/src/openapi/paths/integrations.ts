@@ -930,8 +930,9 @@ export const integrationsPaths = {
         "Moves one of this space's custom clients to the org level (`spaceId: " +
         "null`), inherited by every space of the org. It keeps its id and secret, " +
         "so the connections it minted keep working; it becomes the org default " +
-        "when the org has none. Auto-provisioned (DCR/CIMD) clients stay per " +
-        "space (400). Requires both `integrations:configure` and " +
+        "when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, " +
+        "unless the org already holds the auto-provisioned client of the same authorization " +
+        "server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and " +
         "`org-integrations:configure`, which are never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -948,6 +949,16 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`auto_client_exists_at_org`: the client is auto-provisioned and the org already holds the auto-provisioned client of its authorization server",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
