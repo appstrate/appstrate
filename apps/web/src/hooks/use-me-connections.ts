@@ -82,10 +82,12 @@ export function useUpdateMeIntegrationConnection() {
       return data;
     },
     onSuccess: (_data, { body }) => {
-      void invalidateIntegrationQueries(qc);
       // Unsharing disables other people's schedules naming the connection.
       if (body.shared_space_ids) invalidateSchedules(qc);
       toast.success(i18n.t("settings:integration.connection.updated"));
+      // Returned: the mutation stays pending until the list refetch lands, so the
+      // share editor never re-enables on a stale `shared_space_ids` (next pick would drop one).
+      return invalidateIntegrationQueries(qc);
     },
   });
 }

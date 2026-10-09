@@ -649,10 +649,11 @@ export function useUpdateIntegrationConnection() {
     },
     onSuccess: (_data, vars) => {
       toast.success(t("integration.connection.updated"));
-      // A label shows on every picker and readiness view, not just the connection list.
-      void invalidateIntegrationQueries(qc);
       // Unsharing disables other people's schedules naming the connection.
       if (vars.body.shared_space_ids) invalidateSchedules(qc);
+      // A label shows on every picker and readiness view, not just the connection list.
+      // Returned so the share editor stays disabled until the refetched sharing lands.
+      return invalidateIntegrationQueries(qc);
     },
   });
 }

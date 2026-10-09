@@ -413,6 +413,8 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
   afterAll(() => forge.stop());
   beforeEach(async () => {
     await truncateAll();
+    // The connect rate limits are keyed per IP, shared with every file of the process.
+    await flushRedis();
     forge.registrations.length = 0;
     forge.tokenRequests.length = 0;
     forge.advertise.clear();
