@@ -56,6 +56,12 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
+      # scripts/test/ssh-mcp.test.ts runs an unprivileged sshd on the loopback
+      # and fails on CI without one; the runner image ships the ssh client only.
+      # Which slice holds that file is decided at run time, so every slice installs it.
+      - name: Install sshd
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server
+
       # Every `bun test` in this workflow names its per-test timeout: bunfig has no
       # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
       # 15 s itself; the CLI workspace's `test` script passes 10 s (below), so

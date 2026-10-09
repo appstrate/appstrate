@@ -365,6 +365,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   found in `/tmp/.pi/` or `/tmp/pi-chat/`. A run now sees only the skills its
   bundle provides, the platform's prompt and its own tools; a chat turn, only
   its prompt and tools.
+- **`@appstrate/ssh-mcp` 1.0.2 no longer opens an SSH connection per tool
+  call** (#1802). The ssh and sftp calls of a run are channels on one SSH
+  ControlMaster, kept up to 5 minutes after the last call and closed when the
+  server ends: calls less than 5 minutes apart authenticate once, so a target
+  behind `ufw limit 22/tcp`, fail2ban or a tight `MaxStartups` no longer bans
+  the runner's egress IP after a handful of calls.
+- **`ssh_exec` stops a command that outlives `timeout_seconds` on the target**
+  (#1799): its process group (the command alone under a wrapping forced
+  command) gets SIGTERM, then SIGKILL 5 s later, and the
+  result carries `remote_pid` and `remote_process` (`terminated`,
+  `already_exited`, `still_running` or `unknown`). The command used to run on
+  after the call returned.
+- **`ssh_read`, `ssh_write_file` and `ssh_edit_file` accept `~` and `~/…`**
+  (#1798), from the account's home directory; `~user` is refused.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
