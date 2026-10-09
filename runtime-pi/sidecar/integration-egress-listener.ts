@@ -15,9 +15,8 @@
  *     CONNECT, then to the ClientHello's SNI (a CDN front routes on SNI, not on
  *     the CONNECT target), then raw TCP is blind-relayed both directions (NO TLS
  *     termination, NO per-SNI cert mint, NO header injection);
- *   - absolute-form `http://` requests, each vetted the same way (#1819) and
- *     forwarded path and query verbatim on a connection of its own: the
- *     cleartext carries no credential the sidecar injected.
+ *   - absolute-form `http://` requests, vetted the same way and forwarded
+ *     verbatim on a connection of their own (no injected credential).
  *
  * It deliberately mirrors the MITM listener's {@link MitmListenerHandle}
  * surface (`ready` / `address` / `proxyUrl` / `close`) so `integrations-boot`
@@ -101,10 +100,7 @@ interface HttpTarget {
   path: string;
 }
 
-/**
- * An absolute-form `http://` request target: `undefined` for any other form, `null` when its
- * authority is malformed, carries userinfo or a bad port, or reads differently to the URL parser.
- */
+/** `undefined` for a non-`http://` target, `null` for a malformed, userinfo or ambiguous one. */
 function httpTarget(raw: string): HttpTarget | null | undefined {
   if (!/^http:\/\//i.test(raw)) return undefined;
   const rest = raw.slice("http://".length);
@@ -260,9 +256,8 @@ export function createIntegrationEgressListener(
     const upstream = netConnectWithTimeout(port, vetted.address, () => {
       destroyBothWhenIdle(clientSocket, upstream);
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      // Upstream receives nothing until the client's first bytes are vetted; its own flow at
-      // once (server-first banners: SMTP, IMAP, MySQL…). Only a tunnel silent on BOTH sides
-      // dies at the preamble deadline.
+      // Upstream gets nothing until the client's first bytes are vetted; its bytes flow at once
+      // (SMTP, IMAP banners…). Only a tunnel silent on BOTH sides dies at the deadline.
       upstream.pipe(clientSocket);
       const preamble = setTimeout(() => {
         refused(target, "preamble-timeout");

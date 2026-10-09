@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar egress policy over `@appstrate/core/ssrf`: the operator's trusted internal hosts and
- * a local runner's compiled egress policy.
+ * Sidecar egress policy over `@appstrate/core/ssrf`: operator-trusted hosts, runner policy.
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
@@ -15,9 +14,8 @@ import { isLoopbackHost } from "@appstrate/afps-shared/ssrf";
 import type { RunnerEgressPolicy } from "./helpers.ts";
 
 /**
- * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated), forwarded by the platform; empty exempts
- * nothing. Operator-configured upstreams (LLM baseUrl, remote-MCP boot) skip the floor on them;
- * an `api_call` or a runner only on one the declared `authorized_uris` names literally.
+ * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated); empty exempts nothing. Who may skip the floor
+ * on these hosts: docs/architecture/SIDECAR.md.
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
   (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
@@ -36,9 +34,8 @@ export function isBlockedEgressUrl(url: string): boolean {
 }
 
 /**
- * A local runner's egress policy (#1458): it skips the SSRF floor only for a (host, port) a
- * declared entry names literally and the operator lists, never under `allow_all_uris`, never for
- * a loopback host (#1819). A runner gets raw TCP: no templated host or port may open one.
+ * A local runner's egress policy (rule: docs/architecture/SIDECAR.md). A runner gets raw TCP,
+ * so no templated host or port may skip the floor.
  */
 export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,

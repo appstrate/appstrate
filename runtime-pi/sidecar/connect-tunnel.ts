@@ -5,11 +5,9 @@
  *
  * Both the agent's shared {@link createForwardProxy} (port 8081) and the
  * per-connection plain egress listener ({@link createIntegrationEgressListener},
- * issue #543) terminate the same `CONNECT host:port` preamble and relay
- * absolute-form `http://` requests. This module holds the mechanical parts they
- * share so there is ONE implementation of target parsing, connect-with-timeout,
- * relay and `http://` forwarding — the SSRF policy and any upstream-proxy
- * chaining stay in each caller (they differ).
+ * issue #543) terminate `CONNECT host:port` and relay absolute-form `http://`
+ * requests. This module is the ONE implementation of the mechanical parts they
+ * share; the SSRF policy and any upstream-proxy chaining stay in each caller.
  */
 
 import { request as httpRequest } from "node:http";
@@ -118,10 +116,7 @@ export function withoutHopByHop(
   );
 }
 
-/**
- * Stream `req` upstream as `options` says and the answer back on `res`, both without hop-by-hop
- * headers; a failure, or an upstream switching protocols, answers 502.
- */
+/** Relay `req` upstream and the answer back, minus hop-by-hop headers; failure or 101 → 502. */
 export function forwardHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,

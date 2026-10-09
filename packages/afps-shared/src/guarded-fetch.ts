@@ -123,10 +123,7 @@ export interface GuardedFetchOptions {
    * applies — so a trusted host that open-redirects cannot forward the secret.
    */
   allowHost?: (host: string) => boolean;
-  /**
-   * Replaces the host blocklist (`isBlockedHost` by default) on both the literal and the
-   * resolved-address layer of each hop; resolution and the address pin are kept.
-   */
+  /** Replaces `isBlockedHost` on each hop's literal and resolved-address checks; pinning stays. */
   blockedHost?: (host: string) => boolean;
   /**
    * Set to `false` to disable connecting to the DNS-validated address and

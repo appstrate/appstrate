@@ -34,9 +34,8 @@ export function isBlockedHost(hostname: string): boolean {
 }
 
 /**
- * Whether `hostname`, in any form {@link isBlockedHost} parses, is this machine: `localhost`,
- * `*.localhost`, 0.0.0.0/8, 127.0.0.0/8, `::`, `::1`, or an IPv6 address embedding one of those
- * IPv4s. An unparseable hostname counts as loopback (fail closed).
+ * Whether `hostname`, in any form {@link isBlockedHost} parses, is this machine; an unparseable
+ * hostname counts as loopback (fail closed).
  */
 export function isLoopbackHost(hostname: string): boolean {
   return classifyHost(hostname) === "loopback";

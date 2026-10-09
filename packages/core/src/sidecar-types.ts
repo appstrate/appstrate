@@ -422,8 +422,7 @@ export interface IntegrationSpawnSpec {
    * Local runner egress policy (#1458), enforced by the one listener (MITM or
    * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
    * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
-   * `declaredUris` is the auth's list as the manifest declares it: only a host
-   * it names literally can skip the SSRF floor (#1819).
+   * `declaredUris`: the manifest's own list; only a host it names literally skips the floor.
    */
   egress?: { authorizedUris: string[]; declaredUris: string[]; allowAllUris: boolean };
   /**

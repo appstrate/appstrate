@@ -542,8 +542,7 @@ async function handleInboundConnection(
   // host network + cloud metadata — so this must run BEFORE any cert mint.
   // Mirrors the credential-proxy SSRF guard.
   //
-  // Literal layer first (cheap, no DNS) … For a target the policy exempts, both
-  // layers refuse only a loopback host (#1819).
+  // Literal layer first (cheap, no DNS) … an exempt target fails both layers only if loopback.
   const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, result.port, isBlockedHost);
   if (ssrfFloor(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });

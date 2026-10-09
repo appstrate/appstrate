@@ -255,8 +255,7 @@ async function provisionSshKeyPair(
     throw invalidRequest("`port` must be a number between 1 and 65535");
   }
 
-  // The RUNNER's egress floor, on literals only: nothing here resolves this host. A host
-  // rendered from a connection value never skips it, whatever EGRESS_ALLOW_INTERNAL_HOSTS says.
+  // The RUNNER's floor, on literals only; a host from a connection value never skips it.
   if (isBlockedHost(host)) {
     throw invalidRequest(
       "runs cannot reach this host: it is a private, loopback or link-local address, " +

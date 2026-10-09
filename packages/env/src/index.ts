@@ -532,8 +532,7 @@ export const envSchema = z
     // error listing the registered backends.
     RUN_ADAPTER: z.string().default("process"),
 
-    // Forwarded by the Docker orchestrator only. The process orchestrator
-    // refuses "docker" at boot from the raw env, where unset is not this default.
+    // Forwarded by the Docker orchestrator only (the process one refuses "docker").
     INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
 
     // Docker images (override for GHCR / custom registries)
