@@ -296,10 +296,7 @@ export function OrgSettingsGeneralPage() {
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
         <h3 className="text-sm font-semibold">{t("orgSettings.mcpTitle")}</h3>
         <p className="text-muted-foreground mt-1 mb-3 text-sm">{t("orgSettings.mcpDesc")}</p>
-        <McpClientConnect
-          serverName={`appstrate-${currentOrg.slug}`}
-          url={`${window.location.origin}/api/mcp/o/${currentOrg.id}`}
-        />
+        <McpClientConnect orgId={currentOrg.id} orgSlug={currentOrg.slug} />
       </div>
 
       <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">

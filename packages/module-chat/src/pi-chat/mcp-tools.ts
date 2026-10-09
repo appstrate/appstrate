@@ -145,10 +145,12 @@ export interface PiTurnBudget {
 }
 
 interface BuildPlatformMcpToolsOptions {
-  /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
+  /** Platform MCP endpoint, pinned to the space (`/api/mcp/o/:org/s/:space?context=injected`). */
   url: string;
-  /** Auth + scoping headers (short-lived MCP loopback bearer + org/space ids). */
+  /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
+  /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
+  spaceId: string;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
   writeChunk: (chunk: UIMessageChunk) => void;
   /** Cancellation for tool calls + the run_and_wait poll loop. */
@@ -282,7 +284,7 @@ export async function buildPlatformMcpTools(
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
-          headers: opts.headers,
+          headers: { ...opts.headers, "x-space-id": opts.spaceId },
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,

@@ -223,8 +223,9 @@ try {
     // Streamable HTTP transport. This server runs stateless (no
     // server-initiated SSE stream), so GET only ever returns 405 — a 2xx
     // would be a lie. Documenting the 405 behaviour is still useful for
-    // clients. Scoped to GET /api/mcp/o/{org} only.
+    // clients. Scoped to GET /api/mcp/o/{org} and its space-pinned form.
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}/get/responses",
+    "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}~1s~1{space}/get/responses",
     // GET /api/integrations/connect/start is the public entry the hosted
     // connect URL points at. It is a dispatcher, not a resource: a valid token
     // 302s to the provider OAuth screen or the hosted form, and every failure
@@ -1850,6 +1851,9 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "PUT /api/mcp/o/{org}",
   "PATCH /api/mcp/o/{org}",
   "DELETE /api/mcp/o/{org}",
+  "PUT /api/mcp/o/{org}/s/{space}",
+  "PATCH /api/mcp/o/{org}/s/{space}",
+  "DELETE /api/mcp/o/{org}/s/{space}",
 ]);
 
 const orphans = [...codeEndpoints]
@@ -2258,6 +2262,8 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   // The MCP SDK transport's own refusals: a JSON-RPC 2.0 error envelope, not an `ApiError`.
   "POST /api/mcp/o/{org} 406": "application/json",
   "POST /api/mcp/o/{org} 415": "application/json",
+  "POST /api/mcp/o/{org}/s/{space} 406": "application/json",
+  "POST /api/mcp/o/{org}/s/{space} 415": "application/json",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
   // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.

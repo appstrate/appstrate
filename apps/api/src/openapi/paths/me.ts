@@ -565,8 +565,7 @@ export const mePaths = {
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
         "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
         "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
-        "is refused — else the one `X-Space-Id` names; with neither the request is a 400, " +
-        "except through the MCP server, which falls back to the org's default space.",
+        "is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

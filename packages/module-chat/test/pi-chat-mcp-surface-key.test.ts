@@ -51,7 +51,7 @@ interface Caller {
 
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
 async function handshake(caller: Caller, permissions: readonly string[]) {
-  const url = platformMcpUrl(ORIGIN, caller.ctx.orgId);
+  const url = platformMcpUrl(ORIGIN, caller.ctx.orgId, caller.spaceId);
   const token = mintMcpLoopbackToken({
     userId: caller.ctx.user.id,
     email: caller.ctx.user.email,
@@ -67,8 +67,8 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     headers: {
       Authorization: `Bearer ${token}`,
       "x-org-id": caller.ctx.orgId,
-      "x-space-id": caller.spaceId,
     },
+    spaceId: caller.spaceId,
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },

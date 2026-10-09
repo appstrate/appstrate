@@ -157,6 +157,14 @@ const RUN_AND_WAIT_COMMON_PROPERTIES = {
     description: "The launch's `warnings` (see LaunchWarnings); `[]` when none.",
     items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
   },
+  space: {
+    type: "object",
+    description:
+      "The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space.",
+    required: ["id", "name"],
+    additionalProperties: false,
+    properties: { id: { type: "string" }, name: { type: "string" } },
+  },
 };
 
 /**

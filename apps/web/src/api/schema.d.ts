@@ -67,6 +67,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth 2.0 Protected Resource Metadata (RFC 9728)
+         * @description The space-pinned endpoint's metadata: the organization's document, `resource` included (a path prefix of the endpoint URL, which MCP clients accept). Public discovery document advertising the authorization server that protects the per-organization MCP endpoint, so spec-compliant MCP clients can complete an OAuth flow without manual configuration. The advertised `resource` is the per-org URI `<APP_URL>/api/mcp/o/{org}`, which tokens are audience-bound to (RFC 8707).
+         */
+        get: operations["mcpProtectedResourceMetadataInSpace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/.well-known/openid-configuration": {
         parameters: {
             query?: never;
@@ -1970,9 +1990,33 @@ export interface paths {
         put?: never;
         /**
          * Per-organization MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `read_skill`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route) and `import_package_file` — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, plus launch and wait for agent runs, with the caller's own credentials and confined to the organization in the path. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Requires the `mcp:read` permission (and `mcp:invoke` to call operations).
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `read_skill`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route) and `import_package_file` — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, plus launch and wait for agent runs, with the caller's own credentials and confined to the organization in the path. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations).
          */
         post: operations["mcpStreamableHttpPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp/o/{org}/s/{space}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-organization MCP Streamable HTTP (GET)
+         * @description The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one client-side space pin, usable by any client. Every call acts in `{space}`, tools take no `space_id`, and a space-bound credential naming another space is a 403. Same token as the organization's endpoint. The GET channel of the per-organization MCP Streamable HTTP transport. This server runs in stateless mode (no standalone server-initiated SSE stream), so GET returns 405; clients POST JSON-RPC messages instead. Requires the `mcp:read` permission.
+         */
+        get: operations["mcpStreamableHttpGetInSpace"];
+        put?: never;
+        /**
+         * Per-organization MCP Streamable HTTP endpoint
+         * @description The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one client-side space pin, usable by any client. Every call acts in `{space}`, tools take no `space_id`, and a space-bound credential naming another space is a 403. Same token as the organization's endpoint. Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `read_skill`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route) and `import_package_file` — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, plus launch and wait for agent runs, with the caller's own credentials and confined to the organization in the path. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations).
+         */
+        post: operations["mcpStreamableHttpPostInSpace"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2068,7 +2112,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400, except through the MCP server, which falls back to the org's default space.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -6630,6 +6674,11 @@ export interface components {
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
             /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
             warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @description The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space. */
+            space?: {
+                id: string;
+                name: string;
+            };
             /** @constant */
             done: false;
         };
@@ -6644,6 +6693,11 @@ export interface components {
             status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled" | null;
             /** @description The launch's `warnings` (see LaunchWarnings); `[]` when none. */
             warnings: components["schemas"]["ConnectionResolutionWarning"][];
+            /** @description The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space. */
+            space?: {
+                id: string;
+                name: string;
+            };
             /** @constant */
             done: true;
             /** @description The run's output payload. Absent when `truncated` replaces it. */
@@ -7448,6 +7502,39 @@ export interface operations {
             path: {
                 /** @description Organization id (uuid). Identifies the organization this MCP endpoint is bound to. */
                 org: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Protected resource metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        resource: string;
+                        authorization_servers: string[];
+                        scopes_supported?: string[];
+                        bearer_methods_supported?: string[];
+                        /** Format: uri */
+                        resource_documentation?: string;
+                    };
+                };
+            };
+        };
+    };
+    mcpProtectedResourceMetadataInSpace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization id (uuid). Identifies the organization this MCP endpoint is bound to. */
+                org: string;
+                /** @description Space id (`spc_…`) of the organization, where the caller holds a role. */
+                space: string;
             };
             cookie?: never;
         };
@@ -14837,6 +14924,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
@@ -14894,7 +14990,157 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: refused before the transport — `invalid_request` when the organization has no space to serve. */
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    mcpStreamableHttpGetInSpace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization id (uuid). Identifies the organization this MCP endpoint is bound to. */
+                org: string;
+                /** @description Space id (`spc_…`) of the organization, where the caller holds a role. */
+                space: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
+            405: {
+                headers: {
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    mcpStreamableHttpPostInSpace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization id (uuid). Identifies the organization this MCP endpoint is bound to. */
+                org: string;
+                /** @description Space id (`spc_…`) of the organization, where the caller holds a role. */
+                space: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`: its progress notifications, then its result, as SSE events; as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        result?: {
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            structuredContent?: Record<string, never>;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    } & {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: `invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; pin a space with `/api/mcp/o/{org}/s/{space}` instead. */
             400: {
                 headers: {
                     [name: string]: unknown;

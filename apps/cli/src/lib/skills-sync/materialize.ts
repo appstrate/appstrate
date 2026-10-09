@@ -181,7 +181,7 @@ const IDENTIFIER_HINT =
 
 export interface AgentLaunchView {
   packageId: string;
-  /** Frontmatter only: the MCP session is already bound to it by `X-Space-Id`. */
+  /** Frontmatter only: the MCP session is already bound to it by its URL. */
   spaceId: string;
   /** Semver, or `draft`. */
   version: string;

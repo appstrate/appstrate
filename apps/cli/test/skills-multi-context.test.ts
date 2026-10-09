@@ -176,7 +176,7 @@ describe("multi-space skill distribution regressions", () => {
       "Library-only draft reference",
     );
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
     expect((await getProfile("default"))?.spaceId).toBe("spc_active");
   });
 
@@ -305,7 +305,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
       "shared",
     ]);
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
   });
 
   // A space the org lists so a member can ASK to join it (`closed`,

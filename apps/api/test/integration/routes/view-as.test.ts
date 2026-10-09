@@ -888,9 +888,8 @@ describe("view as role", () => {
       const envelope = await expectJson<{
         result?: { isError?: boolean; content?: Array<{ text: string }> };
       }>(
-        await request(`/api/mcp/o/${owner.orgId}`, {
+        await request(`/api/mcp/o/${owner.orgId}/s/${owner.defaultSpaceId}`, {
           view,
-          space: owner.defaultSpaceId,
           headers: { Accept: "application/json, text/event-stream" },
           body: {
             jsonrpc: "2.0",
@@ -929,9 +928,8 @@ describe("view as role", () => {
     // the tools it is shown; `operator` — same session, same endpoint — is.
     const toolNames = async (view?: string): Promise<string[]> => {
       const envelope = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
-        await request(`/api/mcp/o/${owner.orgId}`, {
+        await request(`/api/mcp/o/${owner.orgId}/s/${owner.defaultSpaceId}`, {
           view,
-          space: owner.defaultSpaceId,
           headers: { Accept: "application/json, text/event-stream" },
           body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
         }),
@@ -948,16 +946,15 @@ describe("view as role", () => {
   });
 
   it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
-    // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
+    // Two spaces, one persona. The URL's space is what the MCP endpoint enters, so
     // a persona whose space half points elsewhere previews nothing here — and
     // the advertised surface must say so exactly as the REST route does.
     const here = await space("Here", "closed");
     const elsewhere = await space("Elsewhere", "closed");
 
     const tools = (view: string) =>
-      request(`/api/mcp/o/${owner.orgId}`, {
+      request(`/api/mcp/o/${owner.orgId}/s/${here.id}`, {
         view,
-        space: here.id,
         headers: { Accept: "application/json, text/event-stream" },
         body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
       });

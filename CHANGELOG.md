@@ -115,6 +115,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (MCP): a connection reaches every space the caller holds a role
+  in, and each call names its space; a space is pinned by the URL, never by
+  `X-Space-Id`** (#1825). Every tool that acts in a space requires a
+  `space_id` argument, reads and writes alike; without it the call is a
+  `-32602` listing the caller's spaces. To confine a connection to one space,
+  use `/api/mcp/o/<org>/s/<space>` (same OAuth token): the endpoint answers a
+  request carrying `X-Space-Id` with a `400` naming that URL. API keys and
+  end-user tokens stay pinned to their own space. A caller who reaches no space
+  is a `403`; no request lands on the default space any more. The CLI's Claude
+  Code plugin now pins by URL, so its first sync after the upgrade asks for the
+  plugin's OAuth login once. Details: `docs/guides/connecting-mcp-clients.md`.
+
 - **The repository requires Bun 1.4.2 or later** (#1878): `packageManager`
   moves to `bun@1.4.2` and the root `engines.bun` to `>=1.4.2`, which the root
   test preload enforces. CI reads the version from `packageManager` (setup-bun
@@ -448,6 +460,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **The OAuth consent and device-activation pages introduce the scope list
+  with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover
+  of the application → space rename (#1825).
+
 - **Runner egress tunnels relay a half-close, and the http relay cancels an
   abandoned upstream request** (#1878). On the egress CONNECT listener, the
   transparent plane and the agent's forward proxy, a client's FIN reaches the
@@ -591,6 +607,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   does not know yet** (#1848).
 
 ### Security
+
+- **A self-registered OAuth client no longer names the platform's pages and
+  emails** (#1825). An `instance`-level client took its own `name` as the
+  brand of the login, consent and account pages and as the sender name of the
+  account emails; a client registered through DCR or CIMD chooses that name
+  itself, so it could present the platform as whatever it claimed to be. Only
+  an operator-declared client (`OIDC_INSTANCE_CLIENTS`) names the brand now; a
+  self-registered one gets the platform's.
 
 - **A run never loads Pi extensions from its agent directory** (#1820). In
   process mode that directory is `/tmp/pi-agent`, under the world-writable

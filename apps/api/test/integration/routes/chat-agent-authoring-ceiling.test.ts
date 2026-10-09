@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext } from "../../helpers/auth.ts";
-import { mcpRpc } from "../../helpers/mcp.ts";
+import { mcpRpc, inSpace } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 // By path, as `view-as.test.ts` does: the minting secret is process-local to
 // that file, and this is the module instance the chat module registered its
@@ -94,7 +94,8 @@ describe("a chat turn with agent authoring switched off", () => {
 
   it("gets a `run_and_wait` that offers existing agents only", async () => {
     const runAndWait = async (authoring: boolean) => {
-      const { status, envelope } = await rpc(bearer(authoring), {
+      const { "X-Space-Id": spaceId, ...sent } = bearer(authoring);
+      const { status, envelope } = await rpc(inSpace(sent, spaceId!), {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/list",

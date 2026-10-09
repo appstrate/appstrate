@@ -95,9 +95,30 @@ What happens under the hood:
 > client needs **no** `X-Org-Id` header and there is no org-switch tool. To use
 > several organizations, add one MCP server entry per org (each runs its own
 > OAuth flow and gets its own org-bound token); the entries can be connected at
-> the same time. Within an org, calls run against that org's **default
-> space**. A client that needs a different space sends an
-> `X-Space-Id` header (it must belong to the org).
+> the same time.
+>
+> Within an org, one connection reaches **every space you hold a role in**.
+> Every tool that acts in a space requires a `space_id` argument, reads and
+> writes alike: there is no default space. The argument's schema lists your
+> spaces (name, `spc_…` id, your role there), since clients may truncate the
+> server instructions. A `resources/read` of an `appfile://` link needs no
+> argument: the file's own space is used. A tool or an operation your roles
+> allow in only some spaces names them (`Available in: …` on the tool,
+> `createAgent [gestion]` in the operation index, `granted_in` in results). A
+> refusal in one space is final: it carries `granted_in` and asks the model to
+> report it rather than redo the action in another space.
+>
+> To confine a client to one space, use the space's URL,
+> `/api/mcp/o/<org>/s/<spc_…>`. It must name a space of the org where you hold
+> a role: the connection is then pinned, `space_id` is not declared, and every
+> call enters that space. An operation whose path names another space
+> (`updateSpace`, member management) still reaches it when your role there
+> allows it, exactly as over REST. The URL needs no other setup — it is the same OAuth
+> resource and token as the organization's endpoint — and any client can use
+> it, a header-less one (a claude.ai connector) included. Settings → General →
+> "MCP connection" builds both URLs. The MCP endpoint reads no `X-Space-Id`: a
+> request carrying one is a `400` naming the URL form. An API key is always
+> pinned to its own space, and a URL naming another one is a `403`.
 
 ### Self-hosting requirements for Path B
 

@@ -154,6 +154,10 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
   { route: "GET /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "POST /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "ALL /api/mcp/o/:org", why: "405 `Allow: POST` for every verb the POST route leaves" },
+  {
+    route: "ALL /api/mcp/o/:org/s/:space",
+    why: "405 `Allow: POST` for every verb the POST route leaves",
+  },
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 

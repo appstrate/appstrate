@@ -91,6 +91,8 @@ export interface PiChatInput {
   platformMcp: {
     url: string;
     headers: Record<string, string>;
+    /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
+    spaceId: string;
     fetch?: typeof fetch;
     surfaceKey?: string;
   };
