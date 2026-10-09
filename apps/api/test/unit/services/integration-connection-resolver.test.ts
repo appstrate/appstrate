@@ -1524,7 +1524,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     });
   });
 
-  it("not_connected falls back to the integration's SINGLE oauth2 auth when nothing is pinned", () => {
+  it("not_connected falls back to the integration's single serving auth when nothing is pinned", () => {
     const result = resolveConnections({
       requirements: [requiredReq(scopedManifest(), ["t1"], [])],
       accessibleConnections: [],
@@ -1589,7 +1589,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.requiredScopes).toBeUndefined();
   });
 
-  it("not_connected on an api_key-only integration emits neither field", () => {
+  it("not_connected on an api_key-only integration names that auth, with no scopes", () => {
     const result = resolveConnections({
       requirements: [requiredReq(apiKeyOnlyManifest(), ["t1"], [])],
       accessibleConnections: [],
@@ -1598,8 +1598,68 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     });
     const err = result.errors[0]!;
     expect(err.code).toBe("not_connected");
-    expect(err.authKey).toBeUndefined();
+    expect(err.authKey).toBe("pat");
     expect(err.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(err);
+    expect(field).toMatchObject({ code: "not_connected", auth_key: "pat" });
+    expect(field).not.toHaveProperty("required_scopes");
+  });
+
+  it("integration_unbound on an api_key-only integration carries the same connect target", () => {
+    const result = resolveConnections({
+      requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.resolved).toEqual({ [INTEG]: [] });
+    const warning = result.warnings[0]!;
+    expect(warning).toMatchObject({ code: "integration_unbound", authKey: "pat" });
+    expect(warning.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(warning);
+    expect(field).toMatchObject({ code: "integration_unbound", auth_key: "pat" });
+    expect(field).not.toHaveProperty("required_scopes");
+  });
+
+  it("an api_key-only integration bound to none by a pin names no connect target", () => {
+    const result = resolveConnections({
+      requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
+      accessibleConnections: [],
+      pins: [memberPin([])],
+    });
+    expect(result.warnings).toEqual([
+      {
+        integrationId: INTEG,
+        code: "integration_unbound",
+        message: expect.stringContaining("is bound to no connection by your pin"),
+      },
+    ]);
+  });
+
+  it("names no connect target when two non-oauth2 auths serve and the dep pins none", () => {
+    const m = apiKeyOnlyManifest() as unknown as { auths: Record<string, unknown> };
+    m.auths.basic = { ...structuredClone(m.auths.pat as object), type: "basic" };
+    for (const required of [true, false]) {
+      const result = resolveConnections({
+        requirements: [{ ...req(m as unknown as IntegrationManifest, ["t1"], []), required }],
+        accessibleConnections: [],
+        pins: [],
+      });
+      const [item] = required ? result.errors : result.warnings;
+      expect(item!.code).toBe(required ? "not_connected" : "integration_unbound");
+      expect(item!.authKey).toBeUndefined();
+      expect(translateResolutionError(item!)).not.toHaveProperty("auth_key");
+    }
+  });
+
+  it("among several serving auths, targets the single oauth2 one — the one a link can connect", () => {
+    // oauth2Manifest declares `oauth` (oauth2) and `pat` (api_key), both serving.
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest())],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.errors[0]).toMatchObject({ code: "not_connected", authKey: "oauth" });
   });
 
   it("needs_reconnection carries the dead connection's auth_key and the full required set", () => {
@@ -1974,7 +2034,7 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     );
   });
 
-  it("names no connect target when the lone serving auth is not oauth2", () => {
+  it("targets the lone serving auth whatever its type, and the mint stays a pure decision", () => {
     const result = resolveConnections({
       requirements: [{ ...selecting(serverlessManifest(), ["api_call__pat"]), required: true }],
       accessibleConnections: [],
@@ -1983,7 +2043,14 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     });
     const err = result.errors[0]!;
     expect(err.code).toBe("not_connected");
-    expect(err.authKey).toBeUndefined();
+    expect(err.authKey).toBe("pat");
+    expect(err.requiredScopes).toBeUndefined();
+    // `attachConnectOffers` is what refuses a link for a non-oauth2 auth.
+    expect(connectOfferTarget(translateResolutionError(err))).toEqual({
+      integrationId: INTEG,
+      authKey: "pat",
+      scopes: [],
+    });
   });
 
   // The agent's own `auth_key` serving no selected tool is its configuration, answered before

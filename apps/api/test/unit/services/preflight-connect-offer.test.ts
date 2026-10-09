@@ -330,19 +330,24 @@ describe("attachConnectOffers", () => {
   it("leaves the item alone when the auth is not oauth2, or the manifest is gone", async () => {
     const others = manifestCache({
       "@offers/keyed": authManifest("api_key"),
+      "@offers/basic": authManifest("basic"),
+      "@offers/custom": authManifest("custom"),
       "@offers/gone": "missing",
     });
-    for (const id of ["@offers/keyed", "@offers/gone"]) {
-      const errors = [notConnected(id)];
-      expect(
-        await attachConnectOffers({
-          errors,
-          scope: SCOPE,
-          actor: ACTOR,
-          policy: CONNECT,
-          manifestCache: others,
-        }),
-      ).toEqual(errors);
+    for (const id of ["@offers/keyed", "@offers/basic", "@offers/custom", "@offers/gone"]) {
+      for (const code of ["not_connected", "integration_unbound"]) {
+        const errors = [{ ...notConnected(id), code }];
+        expect(
+          await attachConnectOffers({
+            errors,
+            scope: SCOPE,
+            actor: ACTOR,
+            policy: CONNECT,
+            manifestCache: others,
+          }),
+          `${id} ${code}`,
+        ).toEqual(errors);
+      }
     }
   });
 

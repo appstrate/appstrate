@@ -551,17 +551,19 @@ function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
 
 /**
  * The auth a fresh connect flow must target: the dep's declared `auth_key`, else the single
- * serving `oauth2` auth; `null` when that is ambiguous, and the user chooses.
+ * serving auth of any type, else the single serving `oauth2` one (the only type a connect link
+ * is minted for); `null` when that is ambiguous, and the user chooses.
  */
 function connectTargetAuthKey(args: ResolveOneArgs): string | null {
   if (args.auth.requiredAuthKey !== undefined) {
     const key = declaredAuthKey(args.manifest, args.auth.requiredAuthKey);
     return key !== null && servesAuth(args, key) ? key : null;
   }
-  const oauthKeys = Object.entries(args.manifest.auths ?? {})
-    .filter(([key, auth]) => auth.type === "oauth2" && servesAuth(args, key))
-    .map(([key]) => key);
-  return oauthKeys.length === 1 ? oauthKeys[0]! : null;
+  const serving = Object.entries(args.manifest.auths ?? {}).filter(([key]) =>
+    servesAuth(args, key),
+  );
+  const pick = serving.length === 1 ? serving : serving.filter(([, a]) => a.type === "oauth2");
+  return pick.length === 1 ? pick[0]![0] : null;
 }
 
 /** `key` while the manifest still declares it, else `null`: a dropped auth is no connect target. */

@@ -248,21 +248,27 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       await seedIntegration(INTEGRATION);
       await seedDefaultModel();
 
-      const res = await post("/api/runs/inline", {
-        manifest: inlineManifest([INTEGRATION]),
-        prompt: "do the thing",
+      const res = await app.request("/api/runs/inline", {
+        method: "POST",
+        headers: {
+          ...authHeaders(ctx),
+          "Content-Type": "application/json",
+          [RUN_CONNECT_OFFERS_HEADER]: "1",
+        },
+        body: JSON.stringify({ manifest: inlineManifest([INTEGRATION]), prompt: "do the thing" }),
       });
 
       expect(res.status).toBe(201);
       const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
       expect(created.warnings).toHaveLength(1);
+      // The lone api_key auth is the connect target, as on `not_connected`…
       expect(created.warnings[0]).toMatchObject({
         field: `integrations.${INTEGRATION}`,
         code: "integration_unbound",
+        auth_key: "primary",
       });
-      // An api_key auth with no dep `auth_key` is no connect target, as on `not_connected`.
-      expect(created.warnings[0]!.auth_key).toBeUndefined();
-      // No offer without the opt-in header.
+      expect(created.warnings[0]!.required_scopes).toBeUndefined();
+      // …but no link is minted for a non-oauth2 auth, even opted in.
       expect(created.warnings[0]!.connect_url).toBeUndefined();
       const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
