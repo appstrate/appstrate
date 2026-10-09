@@ -479,8 +479,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // param: the handler's own guard is what rejects a mismatch, and resolving
   // the caller's own space here leaves that answer unchanged.
   const enterSpace = async (c: Context<McpEnv>, next: () => Promise<void>) => {
-    // The URL is the only client-side pin: one mechanism, readable in any
-    // client's configuration, and the one a header-less client can use.
+    // The URL is the only client-side pin. `X-Space-Id` is a live platform
+    // header (REST reads it), so ignoring it here would silently widen a
+    // connection its client meant to confine: refused, as an undeclared tool
+    // argument is.
     if (c.req.header("X-Space-Id") !== undefined) {
       throw invalidRequest(
         "X-Space-Id is not read by the MCP endpoint: pin the connection to a space with its " +
