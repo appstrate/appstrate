@@ -129,6 +129,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       actor: { type: "user", id: ctx.user.id },
       canConnect: true,
       canConfigureIntegrations: true,
+      wholeReach: true,
       version: "draft",
     });
     return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;

@@ -54,9 +54,6 @@ import {
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
 import type { IntegrationConnection, IntegrationOAuthClient } from "@appstrate/shared-types";
-import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
-import { and, eq } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -86,6 +83,7 @@ import type { AuditPayload } from "@appstrate/core/module";
 import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
+  assertConnectionBelongsToActor,
   assertIsIntegration,
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
@@ -134,7 +132,6 @@ import {
   upsertIntegrationPin,
   type ConnectionViewer,
 } from "../services/integration-pins-service.ts";
-import { ownRowInSpace } from "../services/connection-reach.ts";
 import {
   getOrgDefault,
   upsertOrgDefault,
@@ -530,31 +527,6 @@ async function assertConnectionCreationAllowed(
   }
 }
 
-/**
- * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
- * connect flows honor an arbitrary connection id to renew a credential in
- * place, so before that id is trusted we must confirm it is a connection the
- * caller actually owns and that THIS space reaches. Without this a caller could
- * pass another actor's (or another space's) connection id and overwrite its
- * credentials through the single-writer persist path. A miss surfaces as a
- * plain 404 so cross-scope existence is never disclosed. Ownership, not
- * usability: `block_user_connections` governs use, never renewing one's own row.
- */
-async function assertConnectionBelongsToActor(
-  connectionId: string,
-  spaceId: string,
-  actor: Actor,
-): Promise<void> {
-  const [owned] = await db
-    .select({ id: integrationConnections.id })
-    .from(integrationConnections)
-    .where(and(eq(integrationConnections.id, connectionId), ownRowInSpace(spaceId, actor)))
-    .limit(1);
-  if (!owned) {
-    throw notFound("Connection not found");
-  }
-}
-
 /** The audited view of an org default. */
 function orgDefaultAudit(
   def: { connection_ids: string[]; enforce: boolean } | null,
@@ -883,7 +855,7 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const actor = getActor(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, actor);
+    const status = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
     return c.json(status);
   });
 
@@ -1336,7 +1308,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
-      const items = await listIntegrationConnections(scope, packageId, actor);
+      const items = await listIntegrationConnections(scope, packageId, actor, isUserPrincipal(c));
       return c.json(listResponse(items));
     },
   );
@@ -1365,7 +1337,7 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap (#657).
-      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
       return c.json(detail);
     },
   );
@@ -1518,19 +1490,15 @@ export function createIntegrationsRouter() {
         throw notFound(`Connection '${connectionId}' not found`);
       }
       const body = await readJsonBody(c, updateConnectionSchema);
-      // The owner, or whoever governs this space's integrations — `updateConnection` bounds what
-      // a governor may do (rename a row scoped to this space, withdraw any row from it).
       const { orgId, spaceId } = getSpaceScope(c);
-      const viewer: ConnectionViewer = {
+      const viewer = {
         actor: getActor(c),
         spaceId,
         governs: canConfigureIntegrations(c),
         // A delegated credential acts from this space only.
         boundSpaceId: isUserPrincipal(c) ? null : spaceId,
-        governsIn: async (target) =>
-          (await callerPermissionsInSpace(c, target, orgId)).has("integrations:configure"),
       };
-      return c.json(await applyConnectionUpdate(c, viewer, connectionId, body));
+      return c.json(await applyConnectionUpdate(c, orgId, viewer, connectionId, body));
     },
   );
 
@@ -1551,21 +1519,21 @@ function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
   return c.get("permissions")?.has("integrations:configure") ?? false;
 }
 
-/**
- * One connection edit for both doors — `PATCH /api/integrations/{packageId}/connections/{id}`
- * (space viewer) and `PATCH /api/me/connections/{id}` (owner, no space): applies it, drops the
- * jobs of the schedules it disabled, audits one row per share target, and echoes the connection
- * through the same serializer as the list (#657), projected for a non-owner.
- */
+/** Both connection-edit doors: apply, drop disabled schedules' jobs, audit, echo the row. */
 export async function applyConnectionUpdate(
   c: Context<AppEnv>,
-  viewer: ConnectionViewer,
+  orgId: string,
+  viewer: Omit<ConnectionViewer, "governsIn">,
   connectionId: string,
   body: z.infer<typeof updateConnectionSchema>,
 ): Promise<IntegrationConnection> {
   const { connection, isOwner, added, removed, disabledScheduleIds } = await updateConnection({
     connectionId,
-    viewer,
+    viewer: {
+      ...viewer,
+      governsIn: async (spaceId) =>
+        (await callerPermissionsInSpace(c, spaceId, orgId)).has("integrations:configure"),
+    },
     ...(body.label !== undefined ? { label: body.label } : {}),
     ...(body.shared_space_ids !== undefined ? { sharedSpaceIds: body.shared_space_ids } : {}),
   });
@@ -1593,5 +1561,8 @@ export async function applyConnectionUpdate(
       ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
     });
   }
-  return serializeIntegrationConnection(connection, { owner: isOwner, spaceId: viewer.spaceId });
+  return serializeIntegrationConnection(connection, {
+    owner: isOwner,
+    within: isOwner ? viewer.boundSpaceId : viewer.spaceId,
+  });
 }

@@ -29,7 +29,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   integrationConnections,
@@ -365,6 +365,60 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     const asOther = (await listAs(authHeaders(ctx))).find((c) => c.id === orgRow)!;
     expect(asOther.shared_space_ids).toEqual([ctx.defaultSpaceId]);
     expect(asOther.origin_space_id).toBeNull();
+  });
+
+  it("projects the owner's own row to this space for a delegated credential", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    const mine = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "mine-org",
+      shared: true,
+      originSpaceId: elsewhere.id,
+      sharedSpaceIds: [elsewhere.id, ctx.defaultSpaceId],
+    });
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:read"],
+    });
+
+    const viaKey = (await listAs({ Authorization: `Bearer ${key.rawKey}` })).find(
+      (c) => c.id === mine,
+    )!;
+    expect(viaKey).toMatchObject({ shared_space_ids: [ctx.defaultSpaceId], origin_space_id: null });
+    expect(viaKey.identity_claims).not.toBeNull();
+    const viaSession = (await listAs(authHeaders(ctx))).find((c) => c.id === mine)!;
+    expect(viaSession.origin_space_id).toBe(elsewhere.id);
+  });
+
+  it("locks the caller's own row by any space, another's by this space only", async () => {
+    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+    const mine = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "mine",
+      shared: false,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    const theirs = await seedConnection({
+      userId: other.id,
+      accountId: "theirs",
+      shared: true,
+      originSpaceId: ctx.defaultSpaceId,
+      sharedSpaceIds: [ctx.defaultSpaceId, elsewhere.id],
+    });
+    const agent = await seedPackage({ id: "@visorg/agent", orgId: ctx.orgId });
+    await db.insert(integrationPins).values({
+      spaceId: elsewhere.id,
+      packageId: agent.id,
+      integrationId: INTEGRATION,
+      userId: null,
+      connectionIds: [mine, theirs],
+    });
+
+    const lockOf = new Map((await listAs(authHeaders(ctx))).map((c) => [c.id, c.locked_by]));
+    expect(lockOf.get(mine)).toBe("admin_pin");
+    expect(lockOf.get(theirs)).toBeNull();
   });
 
   it("does not list a member's org-scoped connection shared into another space only", async () => {

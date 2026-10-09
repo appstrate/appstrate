@@ -22,11 +22,9 @@ export function connectionLockHintKey(lockedBy: "admin_pin" | "org_default" | nu
 }
 
 /**
- * The write controls a connection row offers in the current space, as the API enforces them
- * (every write needs `integrations:connect`). Sharing is the owner's consent: only the owner
- * edits the target spaces; a governor (`integrations:configure`) only withdraws a colleague's
- * row from this space. Rename is the owner's, or a governor's on a space-scoped row (it lives
- * here); an org-scoped row spans spaces, so a governor renaming it is refused (403).
+ * The write controls a row offers in the current space, as the API enforces them: the owner
+ * renames and edits shares; a governor withdraws a colleague's row here, and renames it only
+ * when space-scoped (an org-scoped row spans spaces).
  */
 export function connectionRowGrants(args: {
   isOwn: boolean;
@@ -43,10 +41,7 @@ export function connectionRowGrants(args: {
   };
 }
 
-/**
- * Whether the row is shared into `spaceId`. An owner's row lists every space it is shared
- * into; anyone else's lists only the current one, when shared here.
- */
+/** Whether the row is shared into `spaceId`. */
 export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: string | null) {
   return !!spaceId && c.shared_space_ids.includes(spaceId);
 }
@@ -55,18 +50,4 @@ export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: stri
 export function withSpaceShare(ids: string[], spaceId: string, shared: boolean): string[] {
   const rest = ids.filter((id) => id !== spaceId);
   return shared ? [...rest, spaceId] : rest;
-}
-
-/**
- * The spaces an owner may pick as share targets: those of the org they are a member of. A
- * personal space has no one to share with, so it is offered only while already a target, to be
- * removed.
- */
-export function shareTargetSpaces<S extends { id: string; access: string; personal: boolean }>(
-  spaces: readonly S[],
-  sharedSpaceIds: readonly string[],
-): S[] {
-  return spaces.filter(
-    (s) => s.access === "member" && (!s.personal || sharedSpaceIds.includes(s.id)),
-  );
 }

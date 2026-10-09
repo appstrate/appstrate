@@ -192,13 +192,13 @@ export const sharedSpaceIdsSchema = {
   type: "array",
   items: { type: "string" },
   description:
-    "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`.",
+    "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`.",
 } as const;
 
 export const originSpaceIdSchema = {
   type: ["string", "null"],
   description:
-    "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted.",
+    "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted.",
 } as const;
 
 export const integrationConnectionSchema = {
@@ -241,7 +241,7 @@ export const integrationConnectionSchema = {
     },
     locked_by: {
       ...lockedBySchema,
-      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`.`,
+      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.`,
     },
     label: {
       type: "string",
@@ -1475,11 +1475,12 @@ export const integrationsPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and an added target blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
+            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
         },
         "404": {
           $ref: "#/components/responses/NotFound",
-          description: "No connection with this id reaches this space.",
+          description:
+            "No connection with this id: of the caller and reaching this space, or scoped to or shared into it.",
         },
         "409": connectionUpdateConflicts,
       },

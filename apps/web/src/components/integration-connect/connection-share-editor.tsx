@@ -16,12 +16,12 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { useOrgSpaces } from "../../hooks/use-spaces";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { shareTargetSpaces, withSpaceShare } from "./connection-ownership";
+import { withSpaceShare } from "./connection-ownership";
 
 /**
- * The spaces a connection is shared into. The owner picks them — any space of the org they are
- * a member of for an org-scoped row, only its own space for a space-scoped one; a governor only
- * withdraws the row from the current space. Every write sends the whole replacement set.
+ * The spaces a connection is shared into: the owner picks any space of the org they reach (only
+ * its own for a space-scoped row); a governor only withdraws the current one. A refused removal
+ * answers 409 `connection_pinned`. Every write sends the whole replacement set.
  */
 export function ConnectionShareEditor({
   connectionId,
@@ -37,17 +37,17 @@ export function ConnectionShareEditor({
   onChange,
 }: {
   connectionId: string;
-  /** The connection's org, whose spaces an org-scoped row may target. */
   orgId: string | null;
   scope: "org" | "space";
   /** As read: the owner's full set, anyone else's projection of the current space. */
   sharedSpaceIds: string[];
-  /** The one space a space-scoped row lives in, its only possible target. */
+  /** The one space a space-scoped row lives in. */
   ownSpaceId: string | null;
-  /** The space the page acts in, whose share `lockHint` pins; null outside one. */
+  /** The space the page acts in; null outside one. */
   hereSpaceId: string | null;
   canEditShares: boolean;
   canUnshareHere: boolean;
+  /** Why a governor's withdrawal here is refused; the owner's edits ignore it. */
   lockHint: string | null;
   pending: boolean;
   onChange: (sharedSpaceIds: string[]) => void;
@@ -55,35 +55,29 @@ export function ConnectionShareEditor({
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const { data: spaces } = useOrgSpaces(canEditShares && scope === "org" ? orgId : null);
-  const lockedHere = (id: string | null) => !!lockHint && !!id && id === hereSpaceId;
 
   if (canEditShares && scope === "space") {
-    const checked = !!ownSpaceId && sharedSpaceIds.includes(ownSpaceId);
-    const locked = checked && lockedHere(ownSpaceId);
     return (
-      <DisabledReasonTooltip reason={locked ? lockHint : null}>
-        <label
-          className="flex items-center gap-1.5 text-xs"
-          title={locked ? undefined : t("integration.connection.share.thisSpaceHelp")}
-        >
-          <input
-            type="checkbox"
-            checked={checked}
-            disabled={pending || !ownSpaceId || locked}
-            onChange={(e) => {
-              if (ownSpaceId)
-                onChange(withSpaceShare(sharedSpaceIds, ownSpaceId, e.target.checked));
-            }}
-            data-testid={`share-toggle-${connectionId}`}
-          />
-          {t("integration.connection.share.thisSpace")}
-        </label>
-      </DisabledReasonTooltip>
+      <label
+        className="flex items-center gap-1.5 text-xs"
+        title={t("integration.connection.share.thisSpaceHelp")}
+      >
+        <input
+          type="checkbox"
+          checked={!!ownSpaceId && sharedSpaceIds.includes(ownSpaceId)}
+          disabled={pending || !ownSpaceId}
+          onChange={(e) => {
+            if (ownSpaceId) onChange(withSpaceShare(sharedSpaceIds, ownSpaceId, e.target.checked));
+          }}
+          data-testid={`share-toggle-${connectionId}`}
+        />
+        {t("integration.connection.share.thisSpace")}
+      </label>
     );
   }
 
   if (canEditShares) {
-    const targets = shareTargetSpaces(spaces ?? [], sharedSpaceIds);
+    const targets = (spaces ?? []).filter((s) => s.access === "member");
     const names = targets.filter((s) => sharedSpaceIds.includes(s.id)).map((s) => s.name);
     return (
       <Popover open={open} onOpenChange={setOpen}>
@@ -116,7 +110,7 @@ export function ConnectionShareEditor({
                     <CommandItem
                       key={space.id}
                       value={`${space.name} ${space.id}`}
-                      disabled={pending || (selected && lockedHere(space.id))}
+                      disabled={pending}
                       onSelect={() => onChange(withSpaceShare(sharedSpaceIds, space.id, !selected))}
                       data-testid={`share-target-${connectionId}-${space.id}`}
                     >

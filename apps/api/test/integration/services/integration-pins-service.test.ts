@@ -681,7 +681,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!, b!] },
         });
 
-        const { disabledScheduleIds } = await deleteOwnConnection(owner(), b!, authority());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), b!, authority()))!;
 
         expect(disabledScheduleIds).toEqual([colleague.id]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, colleague.id));
@@ -710,7 +710,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!] },
         });
 
-        const { disabledScheduleIds } = await deleteOwnConnection(owner(), a!, authority());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), a!, authority()))!;
 
         expect(disabledScheduleIds).toEqual([foreign.id]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, foreign.id));
@@ -733,7 +733,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!] },
         });
 
-        const { disabledScheduleIds } = await deleteOwnConnection(owner(), a!, authority());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), a!, authority()))!;
 
         expect(disabledScheduleIds).toEqual([]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, paused.id));
@@ -834,9 +834,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         const schedule = await scheduleWith({ [INTEGRATION]: [a!, b!] });
         const stranger = { type: "user" as const, id: ctx.user.id };
 
-        await expect(deleteOwnConnection(stranger, b!, authority())).rejects.toMatchObject({
-          status: 404,
-        });
+        expect(await deleteOwnConnection(stranger, b!, authority())).toBeNull();
 
         expect(await memberPinSet(memberId)).toEqual([a!, b!]);
         expect(await overridesOf(schedule)).toEqual({ [INTEGRATION]: [a!, b!] });
@@ -1144,8 +1142,34 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect([...update.added].sort()).toEqual([other, scope.spaceId].sort());
       // Only a blocked target is asked about.
       expect(asked).toEqual([other]);
-      // A share it already holds there is kept by a sharer who does not govern it.
-      expect((await ownerEdit(id, [other])).removed).toEqual([scope.spaceId]);
+      // Keeping a share there does not: only an addition is judged.
+      const kept = await ownerEdit(id, [other]);
+      expect(kept.added).toEqual([]);
+      expect(kept.removed).toEqual([scope.spaceId]);
+    });
+
+    it("a governor withdraws a share its space's own OAuth client hides", async () => {
+      const id = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [scope.spaceId],
+      });
+      await db.insert(integrationOauthClients).values({
+        orgId: ctx.orgId,
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        authKey: "google",
+        clientId: "byo-app",
+        clientSecretEncrypted: "x",
+      });
+      const update = await updateConnection({
+        connectionId: id,
+        viewer: viewer(ctx.user.id, true),
+        sharedSpaceIds: [],
+      });
+      expect(update.removed).toEqual([scope.spaceId]);
+      expect(await sharesOf(id)).toEqual([]);
     });
 
     it("refuses a target the row does not serve: one with its own OAuth client, unless made there (400)", async () => {

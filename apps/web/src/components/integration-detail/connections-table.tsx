@@ -141,8 +141,7 @@ function ConnectionTableRow({
     canConnect,
     canConfigure: can("integrations:configure"),
   });
-  // An admin pin or the space default names the row: unsharing and deleting it
-  // are refused (409 `connection_pinned`) until it is removed from there.
+  // A pin or default names the row (in any space, for its owner): delete answers 409.
   const lockKey = connectionLockHintKey(connection.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
   const startEdit = () => {

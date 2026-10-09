@@ -18,7 +18,7 @@
  *     `identityClaims` JSONB and `accountId` discriminator.
  *
  *   - A connection belongs to an organization and takes the scope of the
- *     OAuth client that minted it (#1870): `spaceId` NULL is org scope
+ *     OAuth client that minted it: `spaceId` NULL is org scope
  *     (system or org client, or no client), a space id is that space only
  *     (a space's own client, or an end-user's connection). The owner is
  *     either a dashboard user (`userId`) or a headless end-user
@@ -123,10 +123,11 @@ export const integrationConnections = pgTable(
     // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = 1 + the highest
-    // "Connexion <n>" of the owner's rows in the same scope and integration),
-    // suffixed " (n)" when taken. User-editable, never empty, unique per owner
-    // (`idx_integration_conn_owner_label`, #1622); the resolver disambiguates a
-    // bound set holding two owners' equal labels.
+    // "Connexion <n>" of the owner in the same scope and integration), suffixed
+    // " (n)" when taken. Stable for the row's lifetime; user-editable. The UI
+    // shows it verbatim — a single source of truth, no render-time fallback
+    // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
+    // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
     // Owner-set opt-in: the spaces where any actor may bind this connection by
     // an explicit pick (member pin, launch override, admin pin, org default);
@@ -273,9 +274,9 @@ export const integrationOauthClients = pgTable(
     // Provenance: `true` for a client minted automatically via DCR/CIMD at
     // connect time (remote MCP public client), `false` for an admin-registered
     // (BYO-app) client. Multi-custom registration is an oauth2-classic feature;
-    // an auto-provisioned auth keeps exactly ONE machine client per tier, enforced
-    // by the partial unique `idx_ioc_one_auto` (DCR find-or-create idempotence).
-    // New ones are minted at org tier; space-tier ones predate #1870.
+    // an auto-provisioned auth keeps ONE machine client per tier, enforced by the
+    // partial unique `idx_ioc_one_auto`, which preserves DCR find-or-create
+    // idempotence now that the global UNIQUE is gone.
     autoProvisioned: boolean("auto_provisioned").notNull().default(false),
     // Server chosen per connection an auto-provisioned client is bound to (AFPS §7.3); NULL = fixed.
     issuer: text("issuer"),
@@ -291,8 +292,9 @@ export const integrationOauthClients = pgTable(
       .on(table.orgId, table.integrationId, table.authKey)
       .where(sql`${table.isDefault} AND ${table.spaceId} IS NULL`),
     // At most one auto-provisioned (DCR/CIMD) client per (org, tier, integration,
-    // auth, issuer); classic custom clients stay free to be N. `coalesce` stands in
-    // for NULLS NOT DISTINCT (drizzle cannot express it); `ioc_issuer_is_auto` keeps `''` out.
+    // auth, issuer) — replaces the old global UNIQUE for the find-or-create path
+    // while leaving classic custom clients free to be N. `coalesce` stands in for
+    // NULLS NOT DISTINCT (drizzle cannot express it); `ioc_issuer_is_auto` keeps `''` out.
     uniqueIndex("idx_ioc_one_auto")
       .on(
         table.orgId,

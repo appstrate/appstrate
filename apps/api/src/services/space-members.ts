@@ -375,14 +375,10 @@ export async function deleteSpaceMembershipsInOrg(
 }
 
 /**
- * Withdraw every share (connection, target space) in `scope` whose user owner no longer reaches
- * the target — in the SAME transaction as the access loss — and disable other actors' schedules
- * of that target naming the connection (`connection_unshared`); `scope.spaceId` is the target.
- * Shares elsewhere stay. No `assertConnectionsUnpinned`: a pin or default naming one fails loudly
- * at resolution (`pinned_connection_unavailable`). Every access-loss path unshares here, locking
- * the rows in id order, so two of them sharing rows (an org exit and a space close) wait on each
- * other instead of deadlocking. The caller removes the disabled schedules' jobs once committed;
- * one that writes schedules next names them in `alsoLockSchedules`, locked in the same statement.
+ * Withdraw, in the access loss's transaction, every share in `scope` (`spaceId`: the target) whose
+ * owner no longer reaches the target, disabling other actors' schedules of it naming the row. Rows
+ * locked in id order, so two access losses wait instead of deadlocking; no pin check (a pin fails
+ * loudly at resolution). `alsoLockSchedules`: schedules the caller writes next, locked with them.
  */
 export async function unshareConnectionsOfOwnersWithoutAccess(
   tx: Tx,
@@ -416,7 +412,6 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
           .where(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]))
           .orderBy(asc(c.id))
           .for("update");
-  const shares: ConnectionShare[] = [];
   const lostShares: { id: string; owner: Actor; inSpaceId: string }[] = [];
   for (const row of locked) {
     // Re-read under the lock: a concurrent unshare may have withdrawn some already.
@@ -435,7 +430,6 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       .where(eq(c.id, row.id));
     const owner = actorFromIds(row.userId, row.endUserId)!;
     for (const spaceId of gone) {
-      shares.push({ connectionId: row.id, spaceId });
       lostShares.push({ id: row.id, owner, inSpaceId: spaceId });
     }
   }
@@ -446,14 +440,13 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
     alsoLockSchedules,
   );
   return {
-    connectionIds: [...new Set(shares.map((share) => share.connectionId))],
-    shares,
+    connectionIds: [...new Set(lostShares.map((share) => share.id))],
     disabledScheduleIds,
   };
 }
 
 /** A connection and one space it is shared into. */
-export interface ConnectionShare {
+interface ConnectionShare {
   connectionId: string;
   spaceId: string;
 }
@@ -462,13 +455,12 @@ export interface ConnectionShare {
 export interface ConnectionsUnshared {
   /** The connections that lost at least one share. */
   connectionIds: string[];
-  shares: ConnectionShare[];
   disabledScheduleIds: string[];
 }
 
 /** {@link unshareConnectionsOfOwnersWithoutAccess} when nothing loses access, fresh each call. */
 export function nothingUnshared(): ConnectionsUnshared {
-  return { connectionIds: [], shares: [], disabledScheduleIds: [] };
+  return { connectionIds: [], disabledScheduleIds: [] };
 }
 
 /** 400 `invalid_share_target` on `shared_space_ids`. */
@@ -483,13 +475,9 @@ export function invalidShareTarget(detail: string): ApiError {
 }
 
 /**
- * The one gate of a share into `targets`, called in the sharing transaction before the write.
- * 409 `end_user_connection_not_shareable` for an end user's connection (see the
- * `integration_connections_end_user_not_shared` CHECK). 400 `invalid_share_target` for a target
- * that is not (or no longer) a space of the connection's org. 409 `connection_owner_without_access`
- * when the owning member does not reach a target — the share-side twin of
- * {@link unshareConnectionsOfOwnersWithoutAccess}. Locks the owner's membership, then the targets
- * in id order.
+ * The gate of a share into `targets`, in the sharing transaction: 409 for an end user's row or an
+ * owner not reaching a target ({@link unshareConnectionsOfOwnersWithoutAccess}'s twin), 400 for a
+ * target outside the row's org. Locks the owner's membership, then the targets in id order.
  */
 export async function assertConnectionShareable(
   tx: Tx,

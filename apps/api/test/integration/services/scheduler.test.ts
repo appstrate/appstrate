@@ -1069,11 +1069,11 @@ describeRequiresRedis("scheduler service", () => {
 
       // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
       // of the schedules it disabled.
-      const { disabledScheduleIds } = await deleteOwnConnection(actor, gone!, {
+      const { disabledScheduleIds } = (await deleteOwnConnection(actor, gone!, {
         kind: "bound",
         orgId,
         spaceId: defaultSpaceId,
-      });
+      }))!;
       expect(disabledScheduleIds).toEqual([]);
       await removeScheduleJobs(disabledScheduleIds);
 
@@ -1115,11 +1115,11 @@ describeRequiresRedis("scheduler service", () => {
         connectionOverrides: { [integrationId]: [row!.id] },
       });
 
-      const { disabledScheduleIds } = await deleteOwnConnection(actor, row!.id, {
+      const { disabledScheduleIds } = (await deleteOwnConnection(actor, row!.id, {
         kind: "bound",
         orgId,
         spaceId: defaultSpaceId,
-      });
+      }))!;
       expect(disabledScheduleIds).toEqual([schedule.id]);
       await removeScheduleJobs(disabledScheduleIds);
 
@@ -1452,10 +1452,10 @@ describe("schedule disabled_reason", () => {
       .set({ enabled: false, nextRunAt: null })
       .where(eq(schedules.id, created.id));
 
-    const { disabledScheduleIds } = await deleteOwnConnection(actor, gone!.id, {
+    const { disabledScheduleIds } = (await deleteOwnConnection(actor, gone!.id, {
       kind: "bound",
       ...scope,
-    });
+    }))!;
 
     expect(disabledScheduleIds).toEqual([]);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));

@@ -48,14 +48,16 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   listMeConnections,
-  meConnectionAuthorityFilter,
-  type MeConnectionAuthority,
   getConnectionDeleteImpact,
   noConnectionDeleteImpact,
 } from "../services/me-connections.ts";
+import {
+  meConnectionAuthorityFilter,
+  type MeConnectionAuthority,
+} from "../services/connection-reach.ts";
 import { actorFilter, getActor, type Actor } from "../lib/actor.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { callerOrgRole, callerPermissionsInSpace, resolveListingViewAs } from "../lib/view-as.ts";
+import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
@@ -340,11 +342,7 @@ router.delete(
   },
 );
 
-/**
- * The org of one of the caller's connections inside the credential's binding, or `null` —
- * unknown, not the caller's, or outside a bound credential's org (and space). `/me/*` skips
- * org/space context, so the row is addressed by id and the org re-derived from it.
- */
+/** The org of the caller's connection within the credential's binding; `/me/*` has no org context. */
 async function ownConnectionOrg(
   actor: Actor,
   connectionId: string,
@@ -364,14 +362,7 @@ async function ownConnectionOrg(
   return row?.orgId ?? null;
 }
 
-/**
- * `PATCH /api/me/connections/:connectionId` — the owner renames a connection and/or sets the
- * WHOLE set of spaces it is shared into, wherever it lives: an org-scoped connection belongs to
- * no space, so no `X-Space-Id` could address it. Same edit, same service, same audits as
- * `PATCH /api/integrations/{packageId}/connections/{connectionId}`; capped like the pin writes.
- * A credential bound to a space shares into or withdraws that space only, and renames only a
- * connection scoped to it.
- */
+/** `PATCH /api/me/connections/:connectionId` — the owner's edit, wherever the row lives. */
 router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
   const connectionId = c.req.param("connectionId")!;
   if (!z.uuid().safeParse(connectionId).success) {
@@ -387,10 +378,8 @@ router.patch("/connections/:connectionId", requireCeiling("integrations", "conne
     spaceId: null,
     governs: false,
     boundSpaceId: authority.kind === "bound" ? (authority.spaceId ?? null) : null,
-    governsIn: async (spaceId: string) =>
-      (await callerPermissionsInSpace(c, spaceId, orgId)).has("integrations:configure"),
   };
-  return c.json(await applyConnectionUpdate(c, viewer, connectionId, body));
+  return c.json(await applyConnectionUpdate(c, orgId, viewer, connectionId, body));
 });
 
 /**
@@ -407,11 +396,7 @@ router.patch("/connections/:connectionId", requireCeiling("integrations", "conne
  * there they switch the agent's pick with `PUT /api/me/integration-pins/{agent}/integrations/{integration}`,
  * which stops one agent using a connection without destroying it.
  *
- * A connection the caller does not own, or outside a bound credential's binding (a leaked key
- * must not destroy the creator's credentials in other orgs/spaces), answers the same 204 as one
- * that never existed: same end state, nothing disclosed to a caller probing ids. A credential
- * bound to a space deletes only a connection scoped to it: one serving the whole organization
- * is 403.
+ * A row outside a bound credential's binding answers 204 like an unknown one.
  */
 router.delete(
   "/connections/:connectionId",
@@ -425,10 +410,9 @@ router.delete(
     if (!z.uuid().safeParse(connectionId).success) {
       return c.body(null, 204);
     }
-    const orgId = await ownConnectionOrg(actor, connectionId, authority);
-    if (!orgId) return c.body(null, 204);
-
-    const { disabledScheduleIds } = await deleteOwnConnection(actor, connectionId, authority);
+    const deleted = await deleteOwnConnection(actor, connectionId, authority);
+    if (!deleted) return c.body(null, 204);
+    const { orgId, disabledScheduleIds } = deleted;
     await removeScheduleJobs(disabledScheduleIds);
     // A cookie session carries no org context on /me/*: the audit names the connection's org.
     await recordAuditFromContext(c, {

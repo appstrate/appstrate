@@ -134,7 +134,7 @@ function ConnectionRow({
   updating: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  // An admin pin or the space default names it: unshare and delete answer 409 until removed there.
+  // A pin or default names it: delete answers 409 until removed there.
   const lockKey = connectionLockHintKey(conn.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
 
@@ -221,7 +221,6 @@ function ConnectionRow({
           ))}
         </div>
 
-        {/* Share targets: the lock names no space here, a refused removal answers 409 */}
         <div className="flex flex-wrap items-center gap-2">
           <ConnectionShareEditor
             connectionId={conn.connection_id}

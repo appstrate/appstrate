@@ -78,18 +78,10 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label: string;
-  /**
-   * `org` when minted by a system, org-tier or API-key auth: usable in every space of the org
-   * that has no manual space client for the auth (its origin space always). `space` when minted
-   * by a space-tier OAuth client or owned by an end-user: lives in that one space.
-   */
   scope: ConnectionScope;
-  /**
-   * Spaces whose members may use the connection. The owner sees the full set; anyone else sees
-   * `[currentSpaceId]` when it is shared into the current space, else `[]`.
-   */
+  /** Spaces whose members may use it: all for the owner's own session, else the current one only. */
   shared_space_ids: string[];
-  /** The space it was connected from (org scope only); `null` for a space-scoped row or a non-owner. */
+  /** The space an org-scoped row was connected from, projected as `shared_space_ids` is. */
   origin_space_id: string | null;
   /**
    * The registered OAuth client that minted this connection — a flat client id
@@ -209,7 +201,6 @@ export interface AccessibleIntegrationConnection {
   scope: ConnectionScope;
   /** Same projection as {@link IntegrationConnection.shared_space_ids}. */
   shared_space_ids: string[];
-  /** Owner only; `null` otherwise. */
   origin_space_id: string | null;
   needs_reconnection: boolean;
 }

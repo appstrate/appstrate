@@ -59,7 +59,6 @@ import {
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
-import type { DbOrTx } from "../lib/db-helpers.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
 import { usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -991,10 +990,9 @@ async function loadPins(
 export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
-  executor: DbOrTx = db,
 ): Promise<boolean> {
   // In WHERE position, unlike a select field, drizzle qualifies the predicate's columns.
-  const rows = await executor
+  const rows = await db
     .select({ id: spaces.id })
     .from(spaces)
     .where(and(eq(spaces.id, spaceId), userConnectionsBlocked(spaceId, integrationId)));

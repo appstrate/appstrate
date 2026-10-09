@@ -16,7 +16,6 @@ import {
   connectionRowGrants,
   isConnectionOwnedBy,
   isSharedInSpace,
-  shareTargetSpaces,
   withSpaceShare,
 } from "../connection-ownership";
 
@@ -143,28 +142,5 @@ describe("withSpaceShare", () => {
   it("sends an empty set for a governor withdrawing a colleague's share here", () => {
     // A non-owner sees `[current space]`; the API accepts only that minus the space.
     expect(withSpaceShare(["spc_a"], "spc_a", false)).toEqual([]);
-  });
-});
-
-describe("shareTargetSpaces", () => {
-  const space = (id: string, access: "member" | "none", personal = false) => ({
-    id,
-    access,
-    personal,
-  });
-
-  it("offers the org's spaces the owner is a member of", () => {
-    const spaces = [
-      space("spc_a", "member"),
-      space("spc_closed", "none"),
-      space("spc_b", "member"),
-    ];
-    expect(shareTargetSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a", "spc_b"]);
-  });
-
-  it("leaves out a personal space, unless already a target to remove", () => {
-    const spaces = [space("spc_a", "member"), space("spc_mine", "member", true)];
-    expect(shareTargetSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
-    expect(shareTargetSpaces(spaces, ["spc_mine"]).map((s) => s.id)).toEqual(["spc_a", "spc_mine"]);
   });
 });

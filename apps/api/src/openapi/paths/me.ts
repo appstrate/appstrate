@@ -122,7 +122,8 @@ export const mePaths = {
         "single shape, grouped by source package. For the user's own credential " +
         "(cookie session, CLI or instance token) it crosses orgs/spaces by " +
         "design — does NOT require `X-Org-Id`. For a delegated or end-user credential " +
-        "the list is scoped to its bound organization, and to its space when it pins one.",
+        "the list is scoped to its bound organization, and to its space when it pins one — where a " +
+        "connection's shares, origin space and reuse count show that space only.",
       responses: {
         "200": {
           description: "Connection groups",
@@ -397,8 +398,8 @@ export const mePaths = {
         "leaves them untouched. The lists are " +
         "empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A " +
         "delegated or end-user credential sees its bound organization (and space) only: a connection " +
-        "outside it answers empty lists, and only the owner's schedules inside it are listed, though " +
-        "the delete also rewrites the owner's schedules outside it. A pinned connection is still " +
+        "outside it answers empty lists, and only the owner's pins and schedules inside it are listed, " +
+        "though the delete also rewrites those outside it. A pinned connection is still " +
         "listed, though its delete answers 409 `connection_pinned`. An end user has no pins.",
       parameters: [
         { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
@@ -519,7 +520,7 @@ export const mePaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or an added target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
+            "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or a requested target — added or kept — blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
         },
         "404": {
           $ref: "#/components/responses/NotFound",

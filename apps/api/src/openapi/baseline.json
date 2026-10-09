@@ -5909,7 +5909,7 @@
                                 "locked_by": {
                                   "type": ["string", "null"],
                                   "enum": ["admin_pin", "org_default", null],
-                                  "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                                  "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                                 },
                                 "label": {
                                   "type": "string",
@@ -5925,11 +5925,11 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                                  "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -6959,7 +6959,7 @@
                     "locked_by": {
                       "type": ["string", "null"],
                       "enum": ["admin_pin", "org_default", null],
-                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                     },
                     "label": {
                       "type": "string",
@@ -6975,11 +6975,11 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                      "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -7577,7 +7577,7 @@
                         "locked_by": {
                           "type": ["string", "null"],
                           "enum": ["admin_pin", "org_default", null],
-                          "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                          "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                         },
                         "label": {
                           "type": "string",
@@ -7593,11 +7593,11 @@
                           "items": {
                             "type": "string"
                           },
-                          "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                          "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                         },
                         "origin_space_id": {
                           "type": ["string", "null"],
-                          "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                          "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                         },
                         "client_ref": {
                           "type": ["string", "null"],
@@ -7822,7 +7822,7 @@
                           "locked_by": {
                             "type": ["string", "null"],
                             "enum": ["admin_pin", "org_default", null],
-                            "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                            "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                           },
                           "label": {
                             "type": "string",
@@ -7838,11 +7838,11 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                            "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                           },
                           "origin_space_id": {
                             "type": ["string", "null"],
-                            "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                            "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                           },
                           "client_ref": {
                             "type": ["string", "null"],
@@ -8025,7 +8025,7 @@
                     "locked_by": {
                       "type": ["string", "null"],
                       "enum": ["admin_pin", "org_default", null],
-                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                     },
                     "label": {
                       "type": "string",
@@ -8041,11 +8041,11 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                      "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -8077,11 +8077,11 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and an added target blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`)."
+            "description": "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound",
-            "description": "No connection with this id reaches this space."
+            "description": "No connection with this id: of the caller and reaching this space, or scoped to or shared into it."
           },
           "409": {
             "description": "Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`)",
@@ -8281,7 +8281,7 @@
                                 "locked_by": {
                                   "type": ["string", "null"],
                                   "enum": ["admin_pin", "org_default", null],
-                                  "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                                  "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                                 },
                                 "label": {
                                   "type": "string",
@@ -8297,11 +8297,11 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                                  "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -13567,7 +13567,7 @@
         "operationId": "listMyConnections",
         "tags": ["Profile"],
         "summary": "List the caller's connections across every org/space",
-        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For the user's own credential (cookie session, CLI or instance token) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For a delegated or end-user credential the list is scoped to its bound organization, and to its space when it pins one.",
+        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For the user's own credential (cookie session, CLI or instance token) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For a delegated or end-user credential the list is scoped to its bound organization, and to its space when it pins one — where a connection's shares, origin space and reuse count show that space only.",
         "responses": {
           "200": {
             "description": "Connection groups",
@@ -14004,7 +14004,7 @@
         "operationId": "getMyConnectionDeleteImpact",
         "tags": ["Profile"],
         "summary": "The caller's pins and schedules a connection delete would rewrite",
-        "description": "Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's schedules inside it are listed, though the delete also rewrites the owner's schedules outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.",
+        "description": "Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's pins and schedules inside it are listed, though the delete also rewrites those outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.",
         "parameters": [
           {
             "name": "connectionId",
@@ -14248,7 +14248,7 @@
                     "locked_by": {
                       "type": ["string", "null"],
                       "enum": ["admin_pin", "org_default", null],
-                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`."
+                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
                     },
                     "label": {
                       "type": "string",
@@ -14264,11 +14264,11 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                      "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                      "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -14303,7 +14303,7 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
-            "description": "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or an added target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`)."
+            "description": "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or a requested target — added or kept — blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`)."
           },
           "404": {
             "$ref": "#/components/responses/NotFound",
@@ -31865,11 +31865,11 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Spaces whose members may use the connection by an explicit pick. The owner reads the full set; anyone else reads `[<current space>]` when it is shared into the current space, else `[]`."
+                  "description": "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`."
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],
-                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Owner only; `null` for anyone else, for a space-scoped connection, or once that space is deleted."
+                  "description": "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted."
                 },
                 "needs_reconnection": {
                   "type": "boolean"

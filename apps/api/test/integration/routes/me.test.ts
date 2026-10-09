@@ -585,6 +585,43 @@ describe("Me API (/api/me)", () => {
       ]);
     });
 
+    it("shows a key bound to a space only that space of a connection's reach", async () => {
+      const ctx = await createTestContext({ orgSlug: "orgrow-bound" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: spaceB.id,
+        integrationId: "@conn/bound-reach",
+        userId: ctx.user.id,
+      });
+      await db
+        .update(integrationConnections)
+        .set({ sharedSpaceIds: [spaceB.id, ctx.defaultSpaceId] })
+        .where(eq(integrationConnections.id, id));
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+
+      const res = await app.request("/api/me/connections", {
+        headers: { Authorization: `Bearer ${key.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: Array<{ connections: Array<Record<string, unknown>> }>;
+      };
+      expect(body.data.flatMap((g) => g.connections)).toEqual([
+        expect.objectContaining({
+          connection_id: id,
+          origin_space: null,
+          shared_spaces: [{ id: ctx.defaultSpaceId, name: expect.any(String) }],
+        }),
+      ]);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/connections");
       expect(res.status).toBe(401);
@@ -703,9 +740,13 @@ describe("Me API (/api/me)", () => {
       // An org-scoped row reaches the key's space, wherever it was connected from, but serves
       // other spaces too: the key shares it into its own space, and renames none but its own.
       expect((await patch(inside, connectKey, { label: "y" })).status).toBe(403);
-      expect(
-        (await patch(inside, connectKey, { shared_space_ids: [ctx.defaultSpaceId] })).status,
-      ).toBe(200);
+      const shared = await patch(inside, connectKey, { shared_space_ids: [ctx.defaultSpaceId] });
+      expect(shared.status).toBe(200);
+      // The key reads its own space only: not the space the connection was connected from.
+      expect(await shared.json()).toMatchObject({
+        shared_space_ids: [ctx.defaultSpaceId],
+        origin_space_id: null,
+      });
       expect((await patch(ofKeySpace, connectKey, { label: "y" })).status).toBe(200);
       expect((await patch(ofKeySpace, readKey, { label: "z" })).status).toBe(403);
     });

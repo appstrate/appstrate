@@ -262,7 +262,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // refreshes on window-focus refetch and stays stale across tabs.
   //
   // Tenant scope: `org_id` always, `space_id` NULL for an org-scoped
-  // connection (#1870), which reaches every space of its org.
+  // connection, which reaches every space of its org.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
   // invalidate the right cache; `needs_reconnection` is NULL on delete

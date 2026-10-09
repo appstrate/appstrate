@@ -632,6 +632,18 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(forge.registrations).toHaveLength(1);
   });
 
+  /** Registered and last used past every OAuth state's lifetime. */
+  const age = () =>
+    db
+      .update(integrationOauthClients)
+      .set({
+        createdAt: new Date(Date.now() - 11 * 60_000),
+        updatedAt: new Date(Date.now() - 11 * 60_000),
+      })
+      .where(eq(integrationOauthClients.integrationId, "@myorg/forge"));
+  const issuers = async () =>
+    (await db.select().from(integrationOauthClients)).map((c) => c.issuer).sort();
+
   it("drops the clients of servers no connection uses once no flow can still need them", async () => {
     const complete = async (baseUrl: string) => {
       const { res } = await beginHosted(baseUrl);
@@ -639,13 +651,6 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       const callback = await authorize(redirect_url);
       expect((await app.request(callback.pathname + callback.search)).status).toBe(200);
     };
-    const age = () =>
-      db
-        .update(integrationOauthClients)
-        .set({ createdAt: new Date(Date.now() - 11 * 60_000) })
-        .where(eq(integrationOauthClients.integrationId, "@myorg/forge"));
-    const issuers = async () =>
-      (await db.select().from(integrationOauthClients)).map((c) => c.issuer).sort();
 
     expect((await beginHosted(base)).res.status).toBe(200);
     await age();
@@ -655,6 +660,14 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     await complete(otherBase);
     await age();
     expect((await beginHosted(base)).res.status).toBe(200);
+    expect(await issuers()).toEqual([base, otherBase].sort());
+  });
+
+  it("keeps a server's client a flow just reused, however old", async () => {
+    expect((await beginHosted(base)).res.status).toBe(200);
+    await age();
+    expect((await beginHosted(base)).res.status).toBe(200);
+    expect((await beginHosted(otherBase)).res.status).toBe(200);
     expect(await issuers()).toEqual([base, otherBase].sort());
   });
 

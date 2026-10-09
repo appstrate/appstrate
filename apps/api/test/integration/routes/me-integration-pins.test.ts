@@ -992,6 +992,44 @@ describe("/api/me/integration-pins", () => {
       expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
     });
 
+    it("lists a key bound to a space only the pins of that space", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          accountId: "acct-org",
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: spaceB.id,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
+          scopesGranted: [],
+          label: "Org row",
+        })
+        .returning({ id: integrationConnections.id });
+      await db.insert(integrationPins).values(
+        [ctx.defaultSpaceId, spaceB.id].map((spaceId) => ({
+          spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: ctx.user.id,
+          connectionIds: [row!.id],
+        })),
+      );
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+
+      expect((await impactOf(row!.id)).pins).toHaveLength(2);
+      const bound = await impactOf(row!.id, { Authorization: `Bearer ${apiKey.rawKey}` });
+      expect(bound.pins).toHaveLength(1);
+    });
+
     it("is empty for an id that is not a UUID", async () => {
       expect(await impactOf("not-a-uuid")).toEqual({
         pins: [],

@@ -440,7 +440,7 @@ describe("org-level integration OAuth clients", () => {
           }),
         ).rejects.toMatchObject({ status: 400 });
       }
-      // The DCR path itself registers its client at the org tier, never at a space's.
+      // The DCR path itself registers its client at the org tier.
       const dcr = await createIntegrationOAuthClient(
         org,
         REMOTE,
@@ -449,15 +449,6 @@ describe("org-level integration OAuth clients", () => {
         { autoProvisioned: true },
       );
       expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: true });
-      await expect(
-        createIntegrationOAuthClient(
-          spaceA,
-          REMOTE,
-          "oauth",
-          { clientId: "dcr-space", clientSecret: "", tokenEndpointAuthMethod: "none" },
-          { autoProvisioned: true },
-        ),
-      ).rejects.toThrow(/org-tier only/);
     });
 
     it("rejects an integration of another org", async () => {

@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -47,7 +47,7 @@ import {
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
+import { actorFilter, actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -57,9 +57,15 @@ import { resolveConnectionOwnerNames } from "./integration-connection-owner-name
 import {
   assertConnectionsUnpinned,
   connectionReachView,
-  lockConnectionLabels,
+  lockLabelKeys,
 } from "./integration-connections.ts";
-import { connectionInSpace, sharedInSpace, usableInSpace } from "./connection-reach.ts";
+import {
+  connectionInSpace,
+  ownRowInSpace,
+  scopedOrSharedIn,
+  sharedInSpace,
+  usableInSpace,
+} from "./connection-reach.ts";
 import { assertConnectionShareable, invalidShareTarget } from "./space-members.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import {
@@ -502,133 +508,123 @@ export interface ConnectionUpdate {
 }
 
 /**
- * The one edit of a connection's label and share targets, behind both PATCH routes.
- *
- * Seen from space S, a row is the owner's when it serves S, and a governor's (holding
- * `integrations:configure` in S) when it is S's own or shared into S; anything else is 404. The
- * owner renames and replaces the target set; a governor renames a row scoped to S only, and may
- * only withdraw S. A credential bound to a space renames only a row scoped to it, and adds or
- * removes only it. An added target must be a space of the row's org the row serves (400
- * `invalid_share_target`) and the owner reaches (`assertConnectionShareable`); one blocking user
- * connections for the integration takes a sharer governing it there (403
- * `connection_blocked_by_admin`). Removing T is refused while an admin pin or a default of T names
- * the row, and disables other actors' schedules of T naming it.
- *
- * Every rule is judged on the row read under its lock. Lock order: the label lock (keyed on a
- * first read, re-taken if the row widened in between), the owner's membership and the target
- * spaces, the connection row, then schedules.
+ * The one edit of a connection's label and share targets, behind both PATCH routes; the rules are
+ * `connectionUpdateDescription` (OpenAPI). Lock order: the label keys, the owner's membership and
+ * the target spaces, the connection row, then schedules.
  */
 export async function updateConnection(input: UpdateConnectionInput): Promise<ConnectionUpdate> {
   const { connectionId, viewer, label } = input;
   const c = integrationConnections;
+  const here = viewer.spaceId;
+  // Seen from a space: the owner's row reaching it, or any row a governor there may withdraw.
   const visible = and(
     eq(c.id, connectionId),
-    viewer.spaceId === null ? undefined : connectionInSpace(viewer.spaceId),
+    here === null
+      ? undefined
+      : or(
+          ownRowInSpace(here, viewer.actor),
+          and(sql`(${actorFilter(viewer.actor, c)}) IS NOT TRUE`, scopedOrSharedIn(here)),
+        ),
   );
   const [read] = await db.select().from(c).where(visible).limit(1);
   if (!read) throw notFound(`Connection '${connectionId}' not found`);
   authorizeConnectionEdit(input, read);
   const isOwner = actorOwns(viewer.actor, read);
   const targets = input.sharedSpaceIds && [...new Set(input.sharedSpaceIds)];
-  // A role is resolved outside the transaction: settled here for each target the edit may add.
-  const governed = new Set<string>();
+  // Roles resolve outside the transaction; only a target this edit ADDS is refused (under the lock).
+  const ungoverned = new Set<string>();
   for (const spaceId of isOwner && targets ? targets : []) {
-    if (read.sharedSpaceIds.includes(spaceId)) continue;
-    if (!(await isUserConnectionCreationBlocked(spaceId, read.integrationId))) continue;
-    if (await viewer.governsIn(spaceId)) governed.add(spaceId);
+    if (
+      (await isUserConnectionCreationBlocked(spaceId, read.integrationId)) &&
+      !(await viewer.governsIn(spaceId))
+    ) {
+      ungoverned.add(spaceId);
+    }
   }
 
-  const attempt = (keyed: ConnectionRow) =>
-    db
-      .transaction(async (tx) => {
-        if (label !== undefined) {
-          await lockConnectionLabels(tx, {
-            orgId: keyed.orgId,
-            spaceId: keyed.spaceId,
-            integrationId: keyed.integrationId,
-            ownerId: (keyed.userId ?? keyed.endUserId)!,
-          });
-        }
-        if (isOwner && targets && targets.length > 0) {
-          await assertConnectionShareable(tx, connectionId, targets);
-        }
-        const [row] = await tx.select().from(c).where(visible).for("update");
-        if (!row) throw notFound(`Connection '${connectionId}' not found`);
-        if (label !== undefined && row.spaceId !== keyed.spaceId) return { moved: row };
-        authorizeConnectionEdit(input, row);
-        const current = row.sharedSpaceIds;
-        const next =
-          targets === undefined
-            ? current
-            : isOwner
-              ? targets
-              : current.filter((id) => id !== viewer.spaceId);
-        const added = next.filter((id) => !current.includes(id));
-        const removed = current.filter((id) => !next.includes(id));
-        const bound = viewer.boundSpaceId;
-        if (bound !== null && [...added, ...removed].some((id) => id !== bound)) {
-          throw forbidden(
-            `A credential bound to space '${bound}' can only share into it or withdraw it`,
+  return db
+    .transaction(async (tx) => {
+      if (label !== undefined) {
+        // A row only widens (space → org): both keys it may hold.
+        const key = {
+          orgId: read.orgId,
+          integrationId: read.integrationId,
+          ownerId: (read.userId ?? read.endUserId)!,
+        };
+        await lockLabelKeys(tx, [
+          { ...key, spaceId: read.spaceId },
+          { ...key, spaceId: null },
+        ]);
+      }
+      if (isOwner && targets && targets.length > 0) {
+        await assertConnectionShareable(tx, connectionId, targets);
+      }
+      const [row] = await tx.select().from(c).where(visible).for("update");
+      if (!row) throw notFound(`Connection '${connectionId}' not found`);
+      authorizeConnectionEdit(input, row);
+      const current = row.sharedSpaceIds;
+      const next =
+        targets === undefined ? current : isOwner ? targets : current.filter((id) => id !== here);
+      const added = next.filter((id) => !current.includes(id));
+      const removed = current.filter((id) => !next.includes(id));
+      const bound = viewer.boundSpaceId;
+      if (bound !== null && [...added, ...removed].some((id) => id !== bound)) {
+        throw forbidden(
+          `A credential bound to space '${bound}' can only share into it or withdraw it`,
+        );
+      }
+      const blockedAdd = added.find((id) => ungoverned.has(id));
+      if (blockedAdd) {
+        throw new ApiError({
+          status: 403,
+          code: "connection_blocked_by_admin",
+          title: "Connection Blocked by Admin",
+          detail: `Personal connections to '${row.integrationId}' are disabled in space '${blockedAdd}': only a principal with integrations:configure there may share one into it.`,
+        });
+      }
+      for (const spaceId of added) {
+        const [serves] = await tx
+          .select({ id: c.id })
+          .from(c)
+          .where(and(eq(c.id, connectionId), connectionInSpace(spaceId)));
+        if (!serves) {
+          throw invalidShareTarget(
+            `This connection cannot serve space '${spaceId}': it is confined to its own space, or that space has its own OAuth client for this integration`,
           );
         }
-        for (const spaceId of added) {
-          const [serves] = await tx
-            .select({ id: c.id })
-            .from(c)
-            .where(and(eq(c.id, connectionId), connectionInSpace(spaceId)));
-          if (!serves) {
-            throw invalidShareTarget(
-              `This connection cannot serve space '${spaceId}': it is confined to its own space, or that space has its own OAuth client for this integration`,
-            );
-          }
-          if (
-            !governed.has(spaceId) &&
-            (await isUserConnectionCreationBlocked(spaceId, row.integrationId, tx))
-          ) {
-            throw new ApiError({
-              status: 403,
-              code: "connection_blocked_by_admin",
-              title: "Connection Blocked by Admin",
-              detail: `Personal connections to '${row.integrationId}' are disabled in space '${spaceId}': only a principal with integrations:configure there may share one into it.`,
-            });
-          }
-        }
-        for (const spaceId of removed) {
-          await assertConnectionsUnpinned(
-            tx,
-            [connectionId],
-            `Connection cannot be unshared from space '${spaceId}'`,
-            spaceId,
-          );
-        }
-        const [connection] = await tx
-          .update(c)
-          .set({
-            ...(label !== undefined ? { label } : {}),
-            ...(targets !== undefined ? { sharedSpaceIds: next } : {}),
-            updatedAt: new Date(),
-          })
-          .where(eq(c.id, connectionId))
-          .returning();
-        const owner = actorFromIds(connection!.userId, connection!.endUserId)!;
-        const disabledScheduleIds = await disableForeignSchedules(
+      }
+      for (const spaceId of removed) {
+        await assertConnectionsUnpinned(
           tx,
-          removed.map((spaceId) => ({ id: connectionId, owner, inSpaceId: spaceId })),
-          "connection_unshared",
+          [connectionId],
+          `Connection cannot be unshared from space '${spaceId}'`,
+          spaceId,
         );
-        return { connection: connection!, isOwner, added, removed, disabledScheduleIds };
-      })
-      .catch((err: unknown) => {
-        if (label === undefined || !isUniqueViolation(err)) throw err;
-        throw conflict(
-          "connection_label_taken",
-          `The owner already has a connection of this integration named '${label}'`,
-        );
-      });
-  let outcome = await attempt(read);
-  // A widening moved the row to another label key between the read and the lock; it happens once.
-  while (outcome.moved) outcome = await attempt(outcome.moved);
-  return outcome;
+      }
+      const [connection] = await tx
+        .update(c)
+        .set({
+          ...(label !== undefined ? { label } : {}),
+          ...(targets !== undefined ? { sharedSpaceIds: next } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(c.id, connectionId))
+        .returning();
+      const owner = actorFromIds(connection!.userId, connection!.endUserId)!;
+      const disabledScheduleIds = await disableForeignSchedules(
+        tx,
+        removed.map((spaceId) => ({ id: connectionId, owner, inSpaceId: spaceId })),
+        "connection_unshared",
+      );
+      return { connection: connection!, isOwner, added, removed, disabledScheduleIds };
+    })
+    .catch((err: unknown) => {
+      if (label === undefined || !isUniqueViolation(err)) throw err;
+      throw conflict(
+        "connection_label_taken",
+        `The owner already has a connection of this integration named '${label}'`,
+      );
+    });
 }
 
 /** The viewer's right to this edit of `row` — 404 when it is not theirs to see, else 403. */
@@ -636,9 +632,7 @@ function authorizeConnectionEdit(input: UpdateConnectionInput, row: ConnectionRo
   const { viewer, label, sharedSpaceIds } = input;
   const here = viewer.spaceId;
   if (!actorOwns(viewer.actor, row)) {
-    if (here === null || (row.spaceId !== here && !row.sharedSpaceIds.includes(here))) {
-      throw notFound(`Connection '${row.id}' not found`);
-    }
+    if (here === null) throw notFound(`Connection '${row.id}' not found`);
     if (!viewer.governs) {
       throw forbidden(
         "Only the connection owner or a principal with integrations:configure can update this connection",
@@ -674,6 +668,8 @@ export async function listAccessibleConnections(
   scope: SpaceScope,
   integrationId: string,
   actor: Actor,
+  /** A user principal sees its own rows' whole reach; a delegated credential the current space. */
+  wholeReach = true,
 ): Promise<AccessibleIntegrationConnection[]> {
   const rows = await db
     .select()
@@ -695,7 +691,7 @@ export async function listAccessibleConnections(
       owner_end_user_id: row.endUserId,
       owner_name: ownerName(row),
       scopes_granted: row.scopesGranted ?? [],
-      ...connectionReachView(row, { owner: actorOwns(actor, row), spaceId: scope.spaceId }),
+      ...connectionReachView(row, wholeReach && actorOwns(actor, row) ? null : scope.spaceId),
       needs_reconnection: row.needsReconnection,
     };
   });
@@ -730,6 +726,7 @@ async function resolveAgentIntegrationPick(args: {
   actor: Actor;
   canConnect: boolean;
   canConfigureIntegrations: boolean;
+  wholeReach: boolean;
   /** The manifest of the version under inspection — never re-read from the package. */
   agentManifest: Record<string, unknown>;
   /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
@@ -766,7 +763,7 @@ async function resolveAgentIntegrationPick(args: {
   const memberPins = args.memberPins;
 
   const [candidatesRaw, adminPins, blocked, orgDefault] = await Promise.all([
-    listAccessibleConnections(scope, integrationId, actor),
+    listAccessibleConnections(scope, integrationId, actor, args.wholeReach),
     listIntegrationPins(scope, integrationId),
     isUserConnectionCreationBlocked(scope.spaceId, integrationId),
     getOrgDefault(scope, integrationId),
@@ -867,6 +864,8 @@ export async function resolveAgentConnectionReadiness(args: {
   /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
   canConnect: boolean;
   canConfigureIntegrations: boolean;
+  /** Whether the caller is a user principal: see {@link listAccessibleConnections}. */
+  wholeReach: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —
    * REQUIRED, and the router's decision, not this service's. Who may name
@@ -962,6 +961,7 @@ export async function resolveAgentConnectionReadiness(args: {
         actor,
         canConnect,
         canConfigureIntegrations,
+        wholeReach: args.wholeReach,
         agentManifest,
         resolution: pickResolution,
         runWarnings: runResolution.warnings,

@@ -33,10 +33,14 @@ import {
 import { actorFilter, type Actor } from "../lib/actor.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
+function orgOf(spaceId: string): SQL {
+  return sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`;
+}
+
 /** The rows that may serve space `spaceId`, whoever owns them. */
 export function connectionInSpace(spaceId: string): SQL {
   return and(
-    eq(c.orgId, sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`),
+    eq(c.orgId, orgOf(spaceId)),
     or(
       eq(c.spaceId, spaceId),
       and(
@@ -88,6 +92,11 @@ export function ownRowInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), actorFilter(actor, c))!;
 }
 
+/** Rows scoped to or shared into `spaceId`, reaching it or not: what its governor may withdraw. */
+export function scopedOrSharedIn(spaceId: string): SQL {
+  return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), sharedInto(spaceId)))!;
+}
+
 /** Rows shared into `spaceId` that reach it. */
 export function sharedInSpace(spaceId: string): SQL {
   return and(connectionInSpace(spaceId), sharedInto(spaceId))!;
@@ -96,4 +105,20 @@ export function sharedInSpace(spaceId: string): SQL {
 /** Rows the actor may bind in `spaceId`: {@link ownUsableIn} ∪ {@link sharedInSpace}. */
 export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
+}
+
+export type MeConnectionAuthority =
+  { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
+
+/**
+ * A `bound` authority's org (and space, when it pins one: the rows visible there) as a WHERE
+ * conjunct — in the SQL, so a bound credential can only ever SELECT rows inside its binding.
+ * Nothing for `user_global`.
+ */
+export function meConnectionAuthorityFilter(authority: MeConnectionAuthority): SQL | undefined {
+  if (authority.kind !== "bound") return undefined;
+  return and(
+    eq(c.orgId, authority.orgId),
+    authority.spaceId ? connectionInSpace(authority.spaceId) : undefined,
+  );
 }

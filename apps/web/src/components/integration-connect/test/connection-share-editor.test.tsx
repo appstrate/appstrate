@@ -110,18 +110,16 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
     ]);
   });
 
-  it("offers only spaces the owner is a member of, and no personal one", () => {
+  it("offers only the spaces the owner reaches", () => {
     const tree = treeOf(base);
     expect(propsOf(tree, target(HERE))).toBeDefined();
-    expect(propsOf(tree, target("spc_other"))).toBeDefined();
+    expect(propsOf(tree, target("spc_mine"))).toBeDefined();
     expect(propsOf(tree, target("spc_closed"))).toBeUndefined();
-    expect(propsOf(tree, target("spc_mine"))).toBeUndefined();
   });
 
-  it("refuses removing this space while a pin or the default names the row here", () => {
-    const tree = treeOf({ ...base, sharedSpaceIds: [HERE, "spc_other"], lockHint: "épinglée" });
-    expect(propsOf(tree, target(HERE))?.disabled).toBe(true);
-    expect(propsOf(tree, target("spc_other"))?.disabled).toBe(false);
+  it("leaves removing this space enabled under a lock: the API answers 409", () => {
+    const tree = treeOf({ ...base, sharedSpaceIds: [HERE], lockHint: "épinglée" });
+    expect(propsOf(tree, target(HERE))?.disabled).toBe(false);
   });
 
   it("renders the multi-select trigger with the count", () => {

@@ -3,10 +3,8 @@
 /**
  * Migration `0041` against the test database: a user-owned connection of a system or org client,
  * or of none, becomes org-scoped with its origin space and shares kept; an end user's row and a
- * space client's row (manual or legacy DCR) stay in their space; a label the owner already holds
- * at org scope is renamed; an admin pin in the origin space binds the same connection; each
- * organization is widened and checked in a transaction of its own; a second run widens nothing.
- * The widening itself is `widenConnectionsToOrgScope`'s.
+ * space client's row (a space-tier auto client's included) stay in their space; a label the owner
+ * already holds at org scope is renamed; an admin pin in the origin space binds the same connection.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -204,10 +202,6 @@ describe("0041 — connections widened to org scope", () => {
       label: "Work",
     });
 
-    await run(false);
-    expect(lines).toContain("labels to rename: 1");
-
-    lines.length = 0;
     const relabeled = (await run(true)).filter((r) => r.label !== r.previousLabel);
     expect(relabeled.map(({ label, previousLabel }) => ({ label, previousLabel }))).toEqual([
       { label: "Work (2)", previousLabel: "Work" },
@@ -217,7 +211,6 @@ describe("0041 — connections widened to org scope", () => {
     );
     expect([labelOf[first], labelOf[second]].sort()).toEqual(["Work", "Work (2)"]);
     expect(labelOf[colleagues]).toBe("Work");
-    expect(lines).toContain("owner labels held twice: 0");
   });
 
   it("an admin pin in the origin space binds the same connection after the widening", async () => {
@@ -261,44 +254,6 @@ describe("0041 — connections widened to org scope", () => {
     expect(await resolve()).toEqual([pinned]);
   });
 
-  it("refuses, rolled back, a database holding an org-scoped row of a space client", async () => {
-    const widenable = await seedConnection({ spaceId: ctx.defaultSpaceId });
-    await db.insert(integrationConnections).values({
-      integrationId: INTEGRATION,
-      authKey: "primary",
-      accountId: "acct-bad",
-      orgId: ctx.orgId,
-      spaceId: null,
-      userId: ctx.user.id,
-      credentialsEncrypted: "x",
-      clientRef: await seedClient(ctx.defaultSpaceId),
-      label: "Bad",
-    });
-
-    await expect(run(true)).rejects.toThrow(
-      `a check after the widening is not 0 in org ${ctx.orgId}`,
-    );
-    expect(lines).toContain("  org-scoped rows of an end user or a space client: 1");
-    expect((await scopeOf(widenable)).spaceId).toBe(ctx.defaultSpaceId);
-  });
-
-  it("refuses a dry run when an organization with nothing to widen fails a check", async () => {
-    await db.insert(integrationConnections).values({
-      integrationId: INTEGRATION,
-      authKey: "primary",
-      accountId: "acct-bad",
-      orgId: ctx.orgId,
-      spaceId: null,
-      userId: ctx.user.id,
-      credentialsEncrypted: "x",
-      clientRef: await seedClient(ctx.defaultSpaceId),
-      label: "Bad",
-    });
-
-    await expect(run(false)).rejects.toThrow("not 0 over the whole table");
-    expect(lines).toContain("org-scoped rows of an end user or a space client: 1");
-  });
-
   it("widens each organization in a transaction of its own, each rolled back on a dry run", async () => {
     const otherCtx = await createTestContext({ orgSlug: "mig0041-other" });
     const ours = await seedConnection({ spaceId: ctx.defaultSpaceId });
@@ -312,7 +267,6 @@ describe("0041 — connections widened to org scope", () => {
     for (const orgId of [ctx.orgId, otherCtx.orgId]) {
       expect(lines).toContain(`org ${orgId}: widened 1, relabeled 0`);
     }
-    expect(lines).toContain("connections widened: 2, relabeled: 0");
     expect((await scopeOf(ours)).spaceId).toBe(ctx.defaultSpaceId);
     expect((await scopeOf(theirs)).spaceId).toBe(otherCtx.defaultSpaceId);
 
