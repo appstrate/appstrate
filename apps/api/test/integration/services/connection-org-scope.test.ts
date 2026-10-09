@@ -25,7 +25,10 @@ import {
   validatePinTargets,
 } from "../../../src/services/integration-pins-service.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
-import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import {
+  saveIntegrationConnection,
+  selectAccessibleConnection,
+} from "../../../src/services/integration-connections.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
 const AGENT = "@scopeorg/agent";
@@ -215,6 +218,32 @@ describe("org-scope connections across spaces", () => {
     // Never bound by fallback where it is usable: a colleague's row is a choice.
     expect(await verdictIn(a)).toBe("must_choose_connection");
     expect(await verdictIn(b)).toBe("not_connected");
+  });
+
+  it("a delegated credential's new connection binds in its space only", async () => {
+    const connectFromA = (delegated: boolean) =>
+      saveIntegrationConnection(
+        { orgId: ctx.orgId, spaceId: a },
+        {
+          packageId: INTEGRATION,
+          authKey: AUTH,
+          accountId: `acct-${delegated ? "key" : "session"}`,
+          credentials: { access_token: "t" },
+          actor: me,
+          ...(delegated ? { delegated: true } : {}),
+        },
+      );
+
+    const byKey = await connectFromA(true);
+    expect(byKey.scope).toBe("space");
+    expect(await verdictIn(a)).toEqual([byKey.id]);
+    expect(await verdictIn(b)).toBe("not_connected");
+    expect(await listed(b)).toEqual([]);
+
+    // Control: the owner's own session connects for the whole org.
+    const bySession = await connectFromA(false);
+    expect(bySession.scope).toBe("org");
+    expect(await verdictIn(b)).toEqual([bySession.id]);
   });
 
   it("several own rows: each space binds the one connected from it", async () => {

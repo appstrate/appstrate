@@ -157,7 +157,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1870). Its scope is the tier of the OAuth client that minted it: the
   system client, an org client or none (API key, basic, fields) makes it
   usable by its owner in every space of the org; a space's own OAuth client,
-  or an end user, keeps it in that space. A space whose default OAuth client
+  an end user, or a delegated credential (API key, third-party token)
+  keeps it in that space. A space whose default OAuth client
   for that auth is its own uses only the org-wide connections connected from
   it. The
   owner shares a connection with chosen spaces; losing access to a space

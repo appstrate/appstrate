@@ -2,8 +2,8 @@
 
 /**
  * Reconnecting a connection keeps its scope (#1870): a delegated credential (API key, third-party
- * token) renews only a row scoped to its space, never one serving the whole org; and an org-scoped
- * row reconnects through an org or system client, never narrowed onto its space's own client.
+ * token) creates and renews only rows scoped to its space, never one serving the whole org; and an
+ * org-scoped row reconnects through an org or system client, never narrowed onto its space's own.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -99,6 +99,17 @@ async function seedRow(authKey: string, spaceId: string | null, clientRef?: stri
   return row!;
 }
 
+async function scopeOf(id: string) {
+  const [row] = await db
+    .select({
+      spaceId: integrationConnections.spaceId,
+      originSpaceId: integrationConnections.originSpaceId,
+    })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, id));
+  return row;
+}
+
 async function ciphertextOf(id: string): Promise<string | undefined> {
   const [row] = await db
     .select({ secret: integrationConnections.credentialsEncrypted })
@@ -152,6 +163,50 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
     const spaceRow = await seedRow("api", ctx.defaultSpaceId);
     expect((await reconnect(spaceRow.id, bearer)).status).toBe(200);
     expect(await ciphertextOf(spaceRow.id)).not.toBe(spaceRow.credentialsEncrypted);
+  });
+
+  it("creates a row scoped to its space, where the owner's session creates one for the org", async () => {
+    const create = (headers: Record<string, string>) =>
+      post("api/connect/fields", headers, { credentials: { api_key: "k" } });
+
+    const byKey = await create(bearer);
+    expect(byKey.status).toBe(200);
+    const keyRow = (await byKey.json()) as { id: string; scope: string };
+    expect(keyRow.scope).toBe("space");
+    expect(await scopeOf(keyRow.id)).toEqual({ spaceId: ctx.defaultSpaceId, originSpaceId: null });
+
+    const bySession = await create(authHeaders(ctx));
+    expect(bySession.status).toBe(200);
+    expect(((await bySession.json()) as { scope: string }).scope).toBe("org");
+  });
+
+  it("renews a space row through a system client without widening it, unlike the owner's session", async () => {
+    const spaceRow = await seedRow("google", ctx.defaultSpaceId, SYSTEM_ID);
+    const renew = (delegated: boolean) =>
+      saveIntegrationConnection(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        {
+          packageId: INTEGRATION,
+          authKey: "google",
+          accountId: "default",
+          credentials: { access_token: "new" },
+          actor: { type: "user", id: ctx.user.id },
+          connectionId: spaceRow.id,
+          clientRef: SYSTEM_ID,
+          ...(delegated ? { delegated: true } : {}),
+        },
+      );
+
+    expect((await renew(true)).scope).toBe("space");
+    expect(await scopeOf(spaceRow.id)).toEqual({
+      spaceId: ctx.defaultSpaceId,
+      originSpaceId: null,
+    });
+    expect((await renew(false)).scope).toBe("org");
+    expect(await scopeOf(spaceRow.id)).toEqual({
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
   });
 
   it("carries the restriction through the OAuth state to the write", async () => {

@@ -188,6 +188,7 @@ A connection (`integration_connections`, `packages/db/src/schema/integrations.ts
 | the system client, an org client (the auto-provisioned DCR/CIMD client included), or none (API key, basic, fields, login) | the org — `space_id` NULL, `origin_space_id` the space it was connected from     |
 | a space's own client, registered by hand                                                                                  | that space                                                                       |
 | an end user, whatever the client                                                                                          | that space, never shared (CHECKs `…_end_user_is_space`, `…_end_user_not_shared`) |
+| a delegated credential (API key, third-party token), whatever the client                                                  | its space — its owner's session widens it on a reconnect                         |
 
 Promoting a space client to the org widens its rows in the same transaction (`widenConnectionsToOrgScope`, `apps/api/src/services/integration-connections.ts`); an org-scoped row reconnects through an org or system client, never its space's own — with neither, `409 connection_scope_narrowing`. Rows connected before `0086` stay space-scoped until the operator script `scripts/migration/0041-widen-connections-to-org-scope.ts` widens them.
 

@@ -53,7 +53,7 @@ export interface ConnectSessionClaims {
   auth_key: string;
   /** Present = reconnect/upgrade an existing connection in place. */
   connection_id?: string;
-  /** Minted by a delegated credential: the reconnect may only update a row scoped to `space_id`. */
+  /** Minted by a delegated credential: the row it writes or reconnects is scoped to `space_id`. */
   delegated?: true;
   /** OAuth scopes the caller forwards (agent-inferred required scopes). */
   scopes?: string[];

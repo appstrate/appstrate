@@ -28,7 +28,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createStrictAuthorizationServer,
@@ -422,6 +422,50 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     await consentAndCallback(authUrl);
     expect(await storedConnection()).not.toBeNull();
     expect(provider.tokenRequests[0]!.status).toBe(200);
+  });
+
+  it("scopes to its space a connection an API key began, through an org client", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "org-secret",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "org-secret" },
+      "org",
+    );
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:connect"],
+    });
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    expect(res.status).toBe(200);
+    await consentAndCallback(((await res.json()) as { auth_url: string }).auth_url);
+    expect(await storedConnection()).toMatchObject({
+      spaceId: ctx.defaultSpaceId,
+      originSpaceId: null,
+      userId: ctx.user.id,
+    });
+
+    // Control: the owner's session, through the same client, connects for the whole org.
+    await db.delete(integrationConnections);
+    await consentAndCallback(await beginConnect(ctx));
+    expect(await storedConnection()).toMatchObject({
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
   });
 
   it("connects with a manifest-declared public client (none)", async () => {

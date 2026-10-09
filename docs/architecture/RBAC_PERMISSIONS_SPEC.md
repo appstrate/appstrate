@@ -850,7 +850,7 @@ It has runtime roles (`organizationRole` table, `createRole`, comma-separated ro
 
 Per-resource ACL is ReBAC territory (Zanzibar / OpenFGA / WorkOS FGA): a tuple store, a check API, list-filtering in every query, and a UI to share each thing. Notion does this at page level and it is most of Notion. Rejected; the model here keeps that door open in one specific way — `effective(space)` is computed per request from a resolver, so a later per-resource layer would be a second predicate in the same place, not a rewrite.
 
-The real cost of "space = access unit" is that hiding one agent means a new space. If that bites, the cheap next step is a `visibility: "private"` flag on a package (creator-only, filtered in SQL like `actorScopeFilter` filters runs), not an ACL. Splitting a space does not duplicate connections: an org-scoped connection serves every space of its org, and its owner shares it into the new one (`docs/architecture/SPACES.md` → Connections).
+The real cost of "space = access unit" is that hiding one agent means a new space. If that bites, the cheap next step is a `visibility: "private"` flag on a package (creator-only, filtered in SQL like `actorScopeFilter` filters runs), not an ACL. Splitting a space does not duplicate connections: an org-scoped connection serves every space of its org, and its owner shares it into the new one (`docs/architecture/SPACES.md` → Connections). One a delegated credential (API key, third-party token) creates serves that credential's space only, until its owner's session reconnects it.
 
 ### 13.3 Presets as seeded rows per org
 

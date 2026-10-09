@@ -1247,6 +1247,7 @@ function moveClientToOrg(
     if (!existing) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
+    if (existing.spaceId) await lockSpacesForKeyShare(tx, [existing.spaceId]);
     if (
       existing.autoProvisioned &&
       (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
@@ -2605,7 +2606,13 @@ interface StoreConnectionInput {
  *                      gone or was reconnected meanwhile.
  */
 export type PersistTarget =
-  | { kind: "insert"; scope: SpaceScope; actor: Actor }
+  | {
+      kind: "insert";
+      scope: SpaceScope;
+      actor: Actor;
+      /** Written by a delegated credential (API key, third-party token): scoped to the space. */
+      delegated?: boolean;
+    }
   | {
       kind: "update-owned";
       scope: SpaceScope;
@@ -2615,7 +2622,7 @@ export type PersistTarget =
        * the WHERE so a mismatched `connectionId` matches zero rows. */
       packageId: string;
       authKey: string;
-      /** A delegated credential's write: the row must be scoped to `scope.spaceId`. */
+      /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
       delegated?: boolean;
     }
   | {
@@ -2719,6 +2726,25 @@ async function firstFreeLabel(tx: Tx, key: ConnectionLabelKey, label: string): P
   return dedupeLabel(label, await takenLabels(tx, key), { maxLength: CONNECTION_LABEL_MAX });
 }
 
+/** Org scope: a member, not through a delegated credential, minting with no space client. */
+function writesOrgScope(
+  target: { actor: Actor; delegated?: boolean },
+  clientSpace: string | null,
+): boolean {
+  return target.actor.type === "user" && !target.delegated && clientSpace === null;
+}
+
+/** A write naming a space locks it before its client, label keys and rows: a space deletion's order. */
+async function lockSpacesForKeyShare(tx: Tx, spaceIds: string[]): Promise<void> {
+  if (spaceIds.length === 0) return;
+  await tx
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(inArray(spaces.id, spaceIds))
+    .orderBy(asc(spaces.id))
+    .for("key share");
+}
+
 // The space of `clientRef`'s custom client (`null`: org, system or none), read FOR SHARE: its tier
 // cannot change before the connection it mints commits.
 async function mintingClientSpace(
@@ -2761,6 +2787,7 @@ export async function widenConnectionsToOrgScope(
     })
     .from(c)
     .where(widenable);
+  await lockSpacesForKeyShare(tx, [...new Set(sources.map((source) => source.spaceId!))]);
   await lockLabelKeys(
     tx,
     sources.flatMap((source) => [keyOf(source, source.spaceId), keyOf(source, null)]),
@@ -2853,10 +2880,9 @@ export async function persistCredentialBundle(
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
     const row = await db.transaction(async (tx) => {
-      // The scope is the minting client's tier; an end user's connection serves its space only.
+      await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
       const clientSpace = await mintingClientSpace(tx, input.clientRef);
-      const spaceId =
-        target.actor.type === "end_user" || clientSpace !== null ? target.scope.spaceId : null;
+      const spaceId = writesOrgScope(target, clientSpace) ? null : target.scope.spaceId;
       const key: ConnectionLabelKey = {
         orgId: target.scope.orgId,
         spaceId,
@@ -2954,10 +2980,11 @@ export async function persistCredentialBundle(
       input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
     const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
-      // A re-stamped client re-decides the scope: any but a space client widens a member's row.
+      // A re-stamped client re-decides the scope: see {@link writesOrgScope}.
       const restamped = input.clientRef !== undefined;
+      if (restamped) await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
       const clientSpace = restamped ? await mintingClientSpace(tx, input.clientRef) : null;
-      const widens = restamped && clientSpace === null && target.actor.type === "user";
+      const widens = restamped && writesOrgScope(target, clientSpace);
       if (widens) {
         // The keys a widening leaves and joins, before the row lock.
         const key = {
@@ -3242,7 +3269,12 @@ export async function saveIntegrationConnection(
         persistInput,
       )
     : await persistCredentialBundle(
-        { kind: "insert", scope, actor: input.actor },
+        {
+          kind: "insert",
+          scope,
+          actor: input.actor,
+          ...(input.delegated ? { delegated: true } : {}),
+        },
         { ...persistInput, packageId: input.packageId, authKey: input.authKey },
       );
   // INSERT and update-owned always return a summary (or throw).
