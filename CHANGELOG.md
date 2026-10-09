@@ -129,7 +129,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from this release together. An image built from this tree pulls the new
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
+- **Model credentials: `pg_dump` before the deploy, then script `0042` after
+  it** (#1875). Migration `0087` runs at boot: it adds
+  `model_provider_credentials.owner_user_id`, `org_models.provider_id`
+  (backfilled from each bound credential), makes `org_models.credential_id`
+  nullable and adds `llm_usage.credential_id`. Rolling back past it means
+  restoring that dump. Then, app up:
+  1. dry run (writes nothing):
+     `set -a && . ./.env && set +a && bun scripts/migration/0042-personal-model-subscriptions.ts`;
+  2. read its report per organization, then run it with `--apply`.
+
+  It makes every existing subscription (an `oauth` model credential,
+  recognised by its decrypted blob, never by the provider registry) personal
+  to its creator, deletes the orphans (no creator) with their pairings, and
+  unbinds the organization models bound to a subscription, so each member
+  brings their own credential for them. It lists the members who ran on a
+  subscription they did not own. One transaction per organization; a second
+  run changes nothing. Production never enables a subscription module, so the
+  report should show zero subscriptions there; any it shows is a decision to
+  take before `--apply`.
+
 ### Changed
+
+- **BREAKING (API): a model is paid by its payer's own credential first**
+  (#1875). A call is served by the payer's personal credential when one
+  applies (a subscription, or an API key on a fixed endpoint), else by the
+  model's organization credential. The chain is in
+  `docs/architecture/MODEL_ALIASES.md`, "Who pays".
+  - The model DTO's `credentialId` is nullable (`null`: each member brings
+    their own credential). It adds `credential_label` (the organization
+    credential's label, `null` when unbound) and `billed_to` (`user` | `org`
+    | `null`, for the caller). `POST /api/models` takes `providerId`, which a
+    `null` `credentialId` requires; a personal credential there is refused
+    with `400 personal_credential_not_bindable`.
+  - The credential DTO adds `owner_type` (`org` | `user`), `owner_id` and
+    `owner_name`. `POST /api/model-provider-credentials` takes `owner_type`
+    (default `org`); `user` needs `model-provider-credentials:connect` and
+    refuses a custom endpoint (`400 personal_credential_custom_endpoint`).
+  - `model-provider-credentials` gains the `connect` action, granted to member
+    and guest, never to API keys or end-user tokens. `read` now lists every
+    organization credential; without it a caller lists its own personal ones
+    only (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.7).
+  - A model with no organization credential is served only by each member's
+    own credential, and a payer without one gets
+    `409 model_credential_required`. An aliased model never takes a personal
+    credential.
+  - The sidecar's token door refuses a subscription to any run its owner did
+    not pay for (403).
+  - `llm_usage.credential_id` records the credential that served each call
+    (proxy, runner and chat rows).
+- **BREAKING (modules): the chat platform services take the session user**
+  (#1875). `resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ ..., userId })`; `SubscriptionChatModel` and
+  `ChatUsageRecord` gain `credentialId`. See `packages/core/CHANGELOG.md`.
 
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).
@@ -441,6 +493,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   switched off, or no connection chosen and by whom.
 
 ### Added
+
+- **Personal model credentials** (#1875). A member brings their own model
+  credential: an API key for a fixed-endpoint provider, or a subscription
+  connected through `@appstrate/connect-helper` when a subscription provider is
+  registered. Préférences → Identifiants de modèle adds an API key or connects a
+  subscription, lists, renames and removes them. The member's own credential
+  pays for the organization models they call, ahead of the organization's; a
+  model the organization binds to "each member's own credential" is served by
+  each member's own. Custom endpoints stay organization-only. The run, agent and
+  chat pickers show "Votre identifiant" when the caller's credential pays and
+  "Identifiant requis" when one is needed; the chat offers the fix for
+  `model_credential_required`.
+
+- **Organization setting `personal_model_credentials`** (#1875), in
+  organization settings. Off refuses new personal credentials; existing ones
+  serve nothing. Leaving the organization deletes the member's personal
+  credentials and their pairings.
 
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
   the agent needs at least one connection of that integration to run (#1830).

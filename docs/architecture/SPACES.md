@@ -199,6 +199,8 @@ Promoting a space client to the org widens its rows in the same transaction (`wi
 
 **Access loss and deletion.** An owner who stops reaching T — removed from T, demoted, T closed, or the org left — loses the share into T only, in the same transaction, and other actors' schedules of T naming the row are disabled (`connection_unshared`, `unshareConnectionsOfOwnersWithoutAccess`, `apps/api/src/services/space-members.ts`). Deleting a space withdraws it from every share, nulls `origin_space_id` and cascades its space-scoped rows ("Delete cascade" below).
 
+**Model credentials follow the other rule.** A connection carries an identity, so it is never bound automatically to someone else's (#1610). A model credential (`model_provider_credentials`) carries billing: a call is paid by its payer's own personal credential when one applies, and by the organization's otherwise. The payer's credential is used first and automatically; it is never another member's. The chain and the payer of each door are in `MODEL_ALIASES.md`, "Who pays".
+
 ## Delete cascade
 
 `deleteSpace` (`apps/api/src/services/spaces.ts`) runs the whole teardown in one transaction, in this order:

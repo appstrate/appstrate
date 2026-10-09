@@ -201,6 +201,43 @@ The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 `PlatformServices.usage.list`) never projects `real_model`/`api`.
 
+## Who pays: the credential chain
+
+The model is resolved first, by the cascade, which is actor-free. Then the
+payer decides which credential serves the call (`loadModel`,
+`services/org-models.ts`; the chain in `services/model-providers/credential-chain.ts`).
+The payer is the user whose personal credentials may serve the call, or nobody:
+
+- a session, CLI, MCP or chat call, or a delegated OAuth token: that user;
+- a schedule: the schedule's user;
+- a run: `runs.user_id`, unless `runs.api_key_id` is set;
+- an API key, an end-user token or an OIDC end-user token: nobody.
+
+For a payer, the call is served by, in order:
+
+1. the payer's personal credentials that serve the model: the same catalog
+   family as the model's provider, and the model in that provider's catalog
+   offer. Subscriptions come first, then the oldest. A credential that cannot
+   serve the call is skipped. Nothing applies while the organization has
+   personal model credentials turned off.
+2. otherwise the model's own binding: the platform key of a built-in model, or
+   the organization credential of a custom one.
+3. a model with no binding (`credential_id` NULL) has no step 2. The call is
+   refused with `409 model_credential_required` before dispatch.
+
+Aliased models never take a personal credential: their binding is always the
+alias's own. Metadata reads take no payer, so an unbound model still exists
+in the listing and in `assertExplicitModelExists`. `billed_to` on
+`GET /api/models` tells the caller who pays: `user`, `org`, or `null` when
+neither applies.
+
+The LLM proxy re-resolves the chain on every call with the run's payer, so a
+credential removed during a run stops serving its next call. The sidecar's token
+door (`/internal/oauth-token/{credentialId}`) gives a subscription's token only
+to a run whose payer owns it, and refuses an API-key run, which pays for
+nothing. `llm_usage.credential_id` records the credential that served each
+call.
+
 ## Error surfaces: synthesize, never scrub
 
 Success responses are rewritten by **exact field** (`model`, `message.model`,
