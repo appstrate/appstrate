@@ -1,0 +1,63 @@
+{
+  "name": "@appstrate/browser-use",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Browser Use",
+  "icon": "mdi:web",
+  "description": "Browser Use Cloud's hosted MCP server (api.browser-use.com): delegate web tasks to Browser Use's cloud browser agent. `run_session` starts a session on a task, `send_task` sends a follow-up to an idle keep-alive session, and browser profiles reuse persistent website logins. Tasks run for minutes, so the agent polls `get_session` for status, output and a live URL to watch. Connect with an API key from the Browser Use Cloud dashboard. `run_session` and `send_task` consume Browser Use credits.",
+  "keywords": ["browser-automation", "web-scraping", "ai"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "https://api.browser-use.com/v3/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "auths": {
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["https://api.browser-use.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "title": "Clé d'API",
+              "description": "Clé créée dans le tableau de bord Browser Use Cloud (https://cloud.browser-use.com → API Keys). Les tâches lancées avec cette clé consomment les crédits du projet auquel elle appartient."
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "X-Browser-Use-API-Key",
+          "value": "{$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "get_session": {},
+    "get_session_messages": {},
+    "list_browser_profiles": {},
+    "list_sessions": {},
+    "run_session": {},
+    "send_task": {},
+    "stop_session": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
