@@ -55,6 +55,8 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
   assertScheduleOverridesReachable,
+  sameRecord,
+  sameSet,
 } from "../services/schedule-connections.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
@@ -769,8 +771,15 @@ export function createSchedulesRouter() {
       storedOverrides: actorChanged ? null : existing.connection_overrides,
     });
     // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
-    // A disabled schedule fires nothing, so it warns of nothing either.
-    let warnings: ResolutionFieldError[] = [];
+    // `warnings` stays `null` unless this write moves what a fire resolves with: a disabled
+    // schedule fires nothing, and an unrelated edit has no news to report.
+    const resolutionMoved =
+      actorChanged ||
+      (data.enabled === true && !existing.enabled) ||
+      draftSelectorMoved(data.version_override, existing.version_override) ||
+      !sameRecord(nextOverrides, existing.connection_overrides, sameSet) ||
+      !sameRecord(effectiveDependencyOverrides, existing.dependency_overrides, (x, y) => x === y);
+    let warnings: ResolutionFieldError[] | null = null;
     if (data.enabled ?? existing.enabled) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
       // A version that cannot resolve already fails every tick; it must not block a rename.
@@ -779,7 +788,7 @@ export function createSchedulesRouter() {
         throw err;
       });
       if (definition) {
-        warnings = await assertScheduleConnectionsChosen({
+        const judged = await assertScheduleConnectionsChosen({
           agent: definition,
           orgId: scope.orgId,
           spaceId: scope.spaceId,
@@ -788,6 +797,7 @@ export function createSchedulesRouter() {
           connectionOverrides: nextOverrides,
           dependencyOverrides: effectiveDependencyOverrides ?? null,
         });
+        if (resolutionMoved) warnings = judged;
       }
     }
 

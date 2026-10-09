@@ -22,8 +22,7 @@
 
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
-import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
-import { parseTokenUsage } from "@appstrate/core/token-usage";
+import { parseTokenUsage, type TokenUsage } from "@appstrate/afps-shared/token-usage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";

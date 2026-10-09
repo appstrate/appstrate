@@ -21,6 +21,7 @@ import {
   CONSOLE_MAX_TAIL_BYTES,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROUTES,
+  healthResponseSchema,
   workloadConsolePath,
 } from "../../runner/protocol.ts";
 
@@ -166,6 +167,7 @@ describe("runner server routes", () => {
       platformUrl: "http://10.0.0.1:3000",
       platformReachable: false,
       guestPathVerified: null,
+      artifactsVersion: null,
     });
   });
 
@@ -187,6 +189,7 @@ describe("runner server routes", () => {
       platformUrl: "http://10.0.0.1:3000",
       platformReachable: true,
       guestPathVerified: false,
+      artifactsVersion: null,
     });
   });
 
@@ -203,6 +206,16 @@ describe("runner server routes", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.guestPathVerified).toBeNull();
     expect(body.platformReachable).toBe(true);
+  });
+
+  it("reports the installed guest-artifacts release on health", async () => {
+    const { orchestrator } = fakeOrchestrator();
+    const app = createRunnerApp({ orchestrator, token: TOKEN, artifactsVersion: "v1.0.0-beta.67" });
+    const res = await app.request(RUNNER_ROUTES.health, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const body = healthResponseSchema.parse(await res.json());
+    expect(body.artifactsVersion).toBe("v1.0.0-beta.67");
   });
 
   it("creates a boundary and forwards the runId", async () => {

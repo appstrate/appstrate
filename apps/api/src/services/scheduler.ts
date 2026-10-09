@@ -29,7 +29,7 @@ import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { toLaunchOverrides } from "./integration-connection-resolver.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
-import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
+import { resolveAgentRunVersion, versionRefOf } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, conflict, internalError } from "../lib/errors.ts";
 import { scopedWhere, type Tx } from "../lib/db-helpers.ts";
@@ -523,6 +523,7 @@ export async function triggerScheduledRun(
     try {
       await resolveRunPreflight({
         agent,
+        versionRef: versionRefOf(overrideVersionLabel),
         spaceId,
         orgId,
         actor,

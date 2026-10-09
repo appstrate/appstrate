@@ -457,7 +457,7 @@ describe("POST /api/runs/inline/validate", () => {
         warnings: { code: string; required_scopes?: string[] }[];
       };
       expect(body.valid).toBe(true);
-      expect(body.warnings.map((e) => e.code)).toEqual(["integration_unbound"]);
+      expect(body.warnings.map((e) => e.code)).toEqual(["not_connected"]);
       expect(body.warnings[0]?.required_scopes).toEqual(["search.read"]);
     });
 

@@ -8,7 +8,9 @@
  * other connection verdict is accepted — it is repaired without editing the
  * schedule — and a non-required integration a fire would start without is
  * named in the write's `warnings`, to a caller writing for itself: one writing
- * for another member gets none, the actor's connections being theirs to manage.
+ * for another member gets `null`, the actor's connections being theirs to manage.
+ * A patch moving nothing a fire resolves with answers `null` too, `[]` meaning
+ * judged with nothing to report.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -61,7 +63,7 @@ function agentManifest(integrations: boolean): Record<string, unknown> {
 
 interface WriteBody {
   id: string;
-  warnings: { field: string; code: string; candidate_connections?: { id: string }[] }[];
+  warnings: { field: string; code: string; candidate_connections?: { id: string }[] }[] | null;
 }
 
 interface ProblemBody {
@@ -162,24 +164,32 @@ describe("schedule writes — the connection choice is made up front", () => {
     const res = await create({});
     expect(res.status).toBe(201);
     const body = (await res.json()) as WriteBody;
-    expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-      [`integrations.${INTEGRATION}`, "integration_unbound"],
+    expect(body.warnings!.map((w) => [w.field, w.code])).toEqual([
+      [`integrations.${INTEGRATION}`, "not_connected"],
     ]);
   });
 
-  it("warns on a patch of an armed schedule, and not once it is disabled", async () => {
+  it("answers a patch's warnings only when it moves what a fire resolves with", async () => {
     await seedAgentWithIntegration();
     const schedule = await seedArmedSchedule();
+    const warningsOf = async (body: Record<string, unknown>) => {
+      const res = await patch(schedule.id, body);
+      expect(res.status, await res.clone().text()).toBe(200);
+      return ((await res.json()) as WriteBody).warnings;
+    };
+    const codes = (warnings: WriteBody["warnings"]) => warnings?.map((w) => w.code);
 
-    const armed = await patch(schedule.id, { name: "Renamed" });
-    expect(armed.status).toBe(200);
-    expect(((await armed.json()) as WriteBody).warnings.map((w) => w.code)).toEqual([
-      "integration_unbound",
-    ]);
+    expect(await warningsOf({ name: "Renamed" })).toBeNull();
+    expect(await warningsOf({ enabled: false })).toBeNull();
+    expect(codes(await warningsOf({ enabled: true }))).toEqual(["not_connected"]);
+    expect(await warningsOf({ enabled: true })).toBeNull();
 
-    const disabled = await patch(schedule.id, { enabled: false });
-    expect(disabled.status).toBe(200);
-    expect(((await disabled.json()) as WriteBody).warnings).toEqual([]);
+    const none = { connection_overrides: { [INTEGRATION]: [] } };
+    expect(codes(await warningsOf(none))).toEqual(["integration_unbound"]);
+    expect(await warningsOf(none)).toBeNull();
+
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    expect(await warningsOf({ connection_overrides: null })).toEqual([]);
   });
 
   it("warns of nothing once a connection binds", async () => {
@@ -439,24 +449,24 @@ describe("schedule writes for another actor — only what both reach", () => {
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
-  it("accepts, warning of nothing, when the actor's only reach is a connection someone shared", async () => {
+  it("accepts, withholding the warnings, when the actor's only reach is a connection someone shared", async () => {
     const shared = await seedIntegrationConnection(ctx, INTEGRATION);
     await share(shared);
 
     const res = await createForMember();
     expect(res.status).toBe(201);
-    expect(((await res.json()) as WriteBody).warnings).toEqual([]);
+    expect(((await res.json()) as WriteBody).warnings).toBeNull();
   });
 
-  it("warns of nothing whether the actor holds no connection or one", async () => {
+  it("withholds the warnings whether the actor holds no connection or one", async () => {
     const none = await createForMember();
     expect(none.status).toBe(201);
-    expect(((await none.json()) as WriteBody).warnings).toEqual([]);
+    expect(((await none.json()) as WriteBody).warnings).toBeNull();
 
     await seedIntegrationConnection(member, INTEGRATION);
     const one = await createForMember();
     expect(one.status).toBe(201);
-    expect(((await one.json()) as WriteBody).warnings).toEqual([]);
+    expect(((await one.json()) as WriteBody).warnings).toBeNull();
   });
 
   it("offers a shared candidate, and binding it is accepted", async () => {
@@ -740,7 +750,7 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
     expect(own.status).toBe(201);
     expect(((await own.json()) as WriteBody).warnings).toEqual([
       expect.objectContaining({
-        code: "integration_unbound",
+        code: "auth_key_mismatch",
         required_auth_key: "primary",
         available_auth_keys: ["backup"],
       }),
@@ -748,7 +758,7 @@ describe("schedule writes — a set on an auth serving no selected tool", () => 
 
     const forMember = await createAs(member.user.id);
     expect(forMember.status).toBe(201);
-    expect(((await forMember.json()) as WriteBody).warnings).toEqual([]);
+    expect(((await forMember.json()) as WriteBody).warnings).toBeNull();
   });
 
   it("accepts it when an admin pin binds it — the pin, not the schedule, is what to fix", async () => {

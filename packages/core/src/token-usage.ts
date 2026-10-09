@@ -2,46 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import {
-  isTokenUsageTiers,
-  type TokenUsage,
-  type TokenUsageTier,
-} from "@appstrate/afps-shared/token-usage";
+import { parseTokenUsage, type TokenUsage } from "@appstrate/afps-shared/token-usage";
 
-/**
- * Canonical token-usage shape — the definition now lives in the zero-internal-dependency leaf
- * package `@appstrate/afps-shared`. Re-exported here so the public
- * `@appstrate/core/token-usage` import path stays stable for existing consumers.
- */
 export type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 
-/**
- * Token usage as reported by an LLM provider for a single completion call.
- * Wire shape consumed by the runner-event ingestion route and any
- * cost-accounting consumer.
- */
-export const tokenUsageSchema = z.object({
-  input_tokens: z.number().nonnegative().optional(),
-  output_tokens: z.number().nonnegative().optional(),
-  cache_creation_input_tokens: z.number().nonnegative().optional(),
-  cache_read_input_tokens: z.number().nonnegative().optional(),
-  // Malformed bands degrade to none rather than failing the snapshot; see `parseTokenUsage`.
-  tiers: z
-    .custom<TokenUsageTier[]>(isTokenUsageTiers, "invalid token usage tiers")
-    .optional()
-    .catch(undefined),
+/** {@link parseTokenUsage} as a Zod schema: fails where the snapshot is malformed. */
+export const tokenUsageSchema = z.unknown().transform((raw, ctx): TokenUsage => {
+  const { usage } = parseTokenUsage(raw);
+  if (usage) return usage;
+  ctx.addIssue({ code: "custom", message: "invalid token usage" });
+  return z.NEVER;
 });
-
-/** {@link tokenUsageSchema} at an ingestion seam, flagging the bands it silently dropped. */
-export function parseTokenUsage(raw: unknown): {
-  usage: TokenUsage | null;
-  tiersDropped: boolean;
-} {
-  const parsed = tokenUsageSchema.safeParse(raw);
-  if (!parsed.success) return { usage: null, tiersDropped: false };
-  const sent = (raw as { tiers?: unknown }).tiers !== undefined;
-  return { usage: parsed.data, tiersDropped: sent && parsed.data.tiers === undefined };
-}
 
 /**
  * In-place accumulator for {@link TokenUsage} totals.

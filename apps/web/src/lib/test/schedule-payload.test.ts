@@ -7,11 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  sameActor,
-  scheduleOverridePayload,
-  scheduleUpdateMayChangeFires,
-} from "../schedule-payload.ts";
+import { sameActor, scheduleOverridePayload } from "../schedule-payload.ts";
 import { withDeclaredConnections } from "../connection-set.ts";
 
 const ALICE = { userId: "usr_alice" };
@@ -128,53 +124,5 @@ describe("sameActor", () => {
     expect(sameActor({ userId: "u" }, { endUserId: "u" })).toBe(false);
     expect(sameActor(undefined, undefined)).toBe(true);
     expect(sameActor({ userId: "u" }, undefined)).toBe(false);
-  });
-});
-
-describe("scheduleUpdateMayChangeFires", () => {
-  const STORED = {
-    enabled: true,
-    userId: "usr_alice",
-    endUserId: null,
-    version_override: null,
-    connection_overrides: { "@acme/gmail": ["conn_1", "conn_2"] },
-  };
-
-  it("reads the picks as sets: an echo in another order changes nothing", () => {
-    expect(
-      scheduleUpdateMayChangeFires(
-        { connection_overrides: { "@acme/gmail": ["conn_2", "conn_1"] } },
-        STORED,
-      ),
-    ).toBe(false);
-    expect(
-      scheduleUpdateMayChangeFires({ connection_overrides: { "@acme/gmail": ["conn_1"] } }, STORED),
-    ).toBe(true);
-    // `null` and an empty map both store no pick.
-    expect(
-      scheduleUpdateMayChangeFires(
-        { connection_overrides: {} },
-        { ...STORED, connection_overrides: null },
-      ),
-    ).toBe(false);
-  });
-
-  it("the same actor or version sent back changes nothing; another one does", () => {
-    expect(scheduleUpdateMayChangeFires({ actor: ALICE }, STORED)).toBe(false);
-    expect(scheduleUpdateMayChangeFires({ actor: BOB }, STORED)).toBe(true);
-    expect(scheduleUpdateMayChangeFires({ version_override: null }, STORED)).toBe(false);
-    expect(scheduleUpdateMayChangeFires({ version_override: "1.0.0" }, STORED)).toBe(true);
-  });
-
-  it("only switching on counts, not a pause or an enabled schedule kept on", () => {
-    expect(scheduleUpdateMayChangeFires({ enabled: true }, { ...STORED, enabled: false })).toBe(
-      true,
-    );
-    expect(scheduleUpdateMayChangeFires({ enabled: true }, STORED)).toBe(false);
-    expect(scheduleUpdateMayChangeFires({ enabled: false }, STORED)).toBe(false);
-  });
-
-  it("counts any write when the prior state is unknown", () => {
-    expect(scheduleUpdateMayChangeFires({}, undefined)).toBe(true);
   });
 });

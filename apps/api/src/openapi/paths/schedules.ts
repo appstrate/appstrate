@@ -3,17 +3,33 @@
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { connectionConflictContent } from "../responses.ts";
 
 /** The 409 both schedule writes answer when an armed schedule leaves a connection choice open. */
 const scheduleConnectionNotChosen = {
   description:
     "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead.",
   headers: REQUEST_ID_ONLY_HEADERS,
-  content: {
-    "application/problem+json": {
-      schema: { $ref: "#/components/schemas/ProblemDetail" },
+  content: connectionConflictContent,
+};
+
+/** A schedule write's success body: the schedule, plus what its fires would start without. */
+const scheduleWriteSchema = {
+  allOf: [
+    { $ref: "#/components/schemas/Schedule" },
+    {
+      type: "object",
+      required: ["warnings"],
+      properties: {
+        warnings: {
+          type: ["array", "null"],
+          description:
+            "Declared, non-required integrations the schedule's fires would start without (a `required` integration in the same state is a 409 instead). `null` when this write judged nothing to report: the schedule is disabled, the write moves nothing a fire resolves its connections with (actor, `connection_overrides`, `version_override`, `dependency_overrides`, or switching it on), or the actor is another platform member — whose connections the caller must not learn of, so their absence is withheld. `[]` when the write was judged and its fires lack nothing.",
+          items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
+        },
+      },
     },
-  },
+  ],
 };
 
 export const schedulesPaths = {
@@ -116,7 +132,7 @@ export const schedulesPaths = {
                   description: "Cron expression (e.g. '0 9 * * 1-5')",
                 },
                 timezone: { type: "string", default: "UTC" },
-                input: { type: "object" },
+                input: { type: "object", additionalProperties: true },
                 generation_config_override: {
                   $ref: "#/components/schemas/ModelGenerationSettings",
                   description:
@@ -175,16 +191,11 @@ export const schedulesPaths = {
       responses: {
         "201": {
           description:
-            "Schedule created, plus `warnings`: the integrations its fires would start without (see LaunchWarnings).",
+            "Schedule created, plus `warnings`: the integrations its fires would start without.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/Schedule" },
-                  { $ref: "#/components/schemas/LaunchWarnings" },
-                ],
-              },
+              schema: scheduleWriteSchema,
               example: {
                 id: "sched_cm1abc456def789",
                 packageId: "@acme/email-sorter",
@@ -327,7 +338,7 @@ export const schedulesPaths = {
                 cron_expression: { type: "string" },
                 timezone: { type: "string" },
                 enabled: { type: "boolean" },
-                input: { type: "object" },
+                input: { type: "object", additionalProperties: true },
                 generation_config_override: {
                   oneOf: [
                     { $ref: "#/components/schemas/ModelGenerationSettings" },
@@ -381,16 +392,11 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description:
-            "Schedule updated, plus `warnings`: the integrations its fires would start without (see LaunchWarnings) — empty while the schedule is disabled.",
+            "Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: {
-                allOf: [
-                  { $ref: "#/components/schemas/Schedule" },
-                  { $ref: "#/components/schemas/LaunchWarnings" },
-                ],
-              },
+              schema: scheduleWriteSchema,
             },
           },
         },

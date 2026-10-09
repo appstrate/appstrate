@@ -60,7 +60,7 @@ export async function modelsListCommand(
     }
   } catch (err) {
     // `io` is forwarded so the terminal error and the exit reach the caller's
-    // sink; the default would fire the real `process.exit`.
+    // sink; the default would render on the real stdout.
     exitWithError(err, io);
   }
 }

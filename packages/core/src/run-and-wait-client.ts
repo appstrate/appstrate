@@ -17,7 +17,14 @@ import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
  */
 export const RUN_AND_WAIT_MAX_MS = 30 * 60_000;
 export const RUN_AND_WAIT_BACKOFF_MS = 500;
-const RUN_GET_WAIT_MAX_SECONDS = 55;
+
+/**
+ * What a `done:false` result asks of its reader (`error` only ever reports the run's own
+ * failure). No long-poll advice: the chat reads this with only its closing-reply margin left.
+ */
+export const RUN_AND_WAIT_RESUME_INSTRUCTION =
+  "The run is still going: never call `run_and_wait` again for it — read its outcome " +
+  "with `getRun` on its `id`.";
 
 /**
  * Inline ceiling for a run's structured `result` inside a tool result (≈8k
@@ -359,7 +366,7 @@ function withLaunchWarnings(
   launchRecord: Record<string, unknown>,
 ): Record<string, unknown> {
   const warnings = launchRecord.warnings;
-  return Array.isArray(warnings) && warnings.length > 0 ? { ...payload, warnings } : payload;
+  return { ...payload, warnings: Array.isArray(warnings) ? warnings : [] };
 }
 
 export function isRunAndWaitTerminalStatus(status: unknown): boolean {
@@ -368,12 +375,13 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
 
 /**
  * Project a run record onto the documented run_and_wait payload —
- * `{ id, packageId, status, done, result?, error? }` (the exact shape the tool
- * description promises). The full run resource also carries operational fields
+ * `{ id, packageId, status, done, result?, error? }` (`result`/`error` only once
+ * `done`). The full run resource also carries operational fields
  * (cost, token usage, timestamps) the model has no use for: the
  * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
  * user. A caller that genuinely needs the full resource reads `getRun`.
+ * A key added here must be added to the API's closed `RunAndWaitResult` component too (parity test).
  */
 export function projectRunAndWaitPayload(
   run: Record<string, unknown> | undefined,
@@ -385,6 +393,7 @@ export function projectRunAndWaitPayload(
     status: asString(run?.status) ?? null,
     done,
   };
+  if (!done) return payload;
   if (run?.result !== undefined && run.result !== null) payload.result = run.result;
   const error = asString(run?.error);
   if (error) payload.error = error;
@@ -521,9 +530,9 @@ async function fetchWithDeadline(
   }
 }
 
+/** The server clamps `wait` to its own ceiling, so the client asks for all it has left. */
 function waitQueryForRemainingMs(remainingMs: number): string {
-  const seconds = Math.floor(remainingMs / 1000);
-  return String(Math.max(0, Math.min(seconds, RUN_GET_WAIT_MAX_SECONDS)));
+  return String(Math.max(0, Math.floor(remainingMs / 1000)));
 }
 
 export async function launchRunAndWait(
@@ -793,10 +802,6 @@ export async function waitForRunAndWaitCompletion(
         id: launch.runId,
         packageId: asString(lastRun?.packageId) ?? asString(launch.launchRecord.packageId) ?? null,
         status: asString(lastRun?.status) ?? asString(launch.launchRecord.status) ?? null,
-        // Not a run outcome: the run is still going, so a relaunch would duplicate it.
-        error:
-          "run_and_wait stopped waiting before the run reached a terminal status; the run is " +
-          "still in progress. Do not launch it again — read its outcome later with `getRun` on this `id`.",
       },
       launch.launchRecord,
     ),
@@ -888,31 +893,26 @@ export async function fetchRunFiles(
 }
 
 /**
- * Like {@link runAndWaitSteps}, but enriches the FINAL (terminal) step with the
- * run's published `files` so the model sees `{ uri, name, … }` it can chain
- * into a follow-up run (D6). The extra fetch runs only once the run is terminal
- * and only when a run id exists; a run that published nothing keeps the payload
- * file-free. Used by the chat's `run_and_wait` tool.
- *
- * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
- * step but is INDEPENDENT of the file list — an oversized result is cut back
- * whether or not the run published anything.
+ * The ONE enrichment of a terminal (`done:true`) step: an oversized `result` truncated and the
+ * run's published `files` added, so the model can chain them into a follow-up run.
  */
+export async function enrichTerminalRunAndWaitStep(
+  step: RunAndWaitStep,
+  opts: RunAndWaitClientOptions,
+): Promise<{ step: RunAndWaitStep; files: RunAndWaitFile[] }> {
+  const runId = asString(step.payload.id);
+  if (step.payload.done !== true || !runId) return { step, files: [] };
+  const files = await fetchRunFiles(runId, opts);
+  const payload = truncateRunAndWaitPayload(step.payload);
+  return { step: { ...step, payload: files.length > 0 ? { ...payload, files } : payload }, files };
+}
+
+/** {@link runAndWaitSteps} with {@link enrichTerminalRunAndWaitStep} applied. */
 export async function* runAndWaitStepsWithFiles(
   rawArgs: unknown,
   opts: RunAndWaitClientOptions,
 ): AsyncGenerator<RunAndWaitStep> {
   for await (const step of runAndWaitSteps(rawArgs, opts)) {
-    const runId = asString(step.payload.id);
-    if (step.payload.done === true && runId) {
-      const files = await fetchRunFiles(runId, opts);
-      const payload = truncateRunAndWaitPayload(step.payload);
-      yield {
-        ...step,
-        payload: files.length > 0 ? { ...payload, files } : payload,
-      };
-      continue;
-    }
-    yield step;
+    yield (await enrichTerminalRunAndWaitStep(step, opts)).step;
   }
 }

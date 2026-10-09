@@ -12,6 +12,10 @@ import {
   SKILL_NAME_MAX_LENGTH,
 } from "@appstrate/afps-shared/companion-files";
 import { extractSkillMeta } from "@appstrate/core/validation";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  type ConnectionResolutionWarningCode,
+} from "@appstrate/core/integration";
 import { parseScopedName, toSlug } from "@appstrate/core/naming";
 import { isFileField, type JSONSchemaObject, type SchemaWrapper } from "@appstrate/core/form";
 import { partitionInputFields, type AgentInputSettings } from "@appstrate/core/input-resolution";
@@ -234,6 +238,9 @@ const FILE_STEP =
 const GET_RUN =
   '{ "operation_id": "getRun", "path_params": { "id": "<id>" }, "query": { "wait": true } }';
 
+/** A warning code as the body names it. */
+const code = (warningCode: ConnectionResolutionWarningCode) => `\`${warningCode}\``;
+
 function agentBody(view: AgentLaunchView, scope: string, name: string, files: boolean): string {
   const call = JSON.stringify({ kind: "agent", scope, name, version: view.version, input: {} });
   const steps: string[][] = [
@@ -253,15 +260,18 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
     [`Call \`${RUN_AND_WAIT}\` with:`, "", "```json", call, "```"],
     [
       "On its answer:",
-      `- \`done: false\`, even with an \`error\`: the run is still going. Wait with ` +
+      "- `done: false`: the run is still going, with no outcome yet. Wait with " +
         `\`${INVOKE_OPERATION}\` \`${GET_RUN}\` until it ends, then list its files with ` +
         `\`${LIST_FILES}\` \`{ "runId": "<id>" }\`. Never call \`getRun\` on a finished run.`,
       "- `connect_url` or `must_choose_connection`: follow the Appstrate server's instructions.",
-      "- `warnings` items (`integration_unbound`, `integration_not_active`): the run started " +
-        "without those integrations. Say so with the result; do not retry. They carry no link: " +
-        "connect an `integration_unbound` one only if the user asks, with " +
-        "`initiateIntegrationConnect` as the Appstrate server's instructions describe; an " +
-        "`integration_not_active` one is activated in the space, not connected.",
+      `- \`warnings\` items (${CONNECTION_RESOLUTION_WARNING_CODES.map(code).join(", ")}): the ` +
+        "run started without those integrations. Say so with the result; do not retry. They " +
+        `carry no link: connect a ${code("not_connected")} or ${code("auth_key_mismatch")} one ` +
+        "only if the user asks, with `initiateIntegrationConnect` as the Appstrate server's " +
+        `instructions describe; a ${code("must_choose_connection")} one needs a connection ` +
+        `picked; an ${code("integration_not_active")} one is activated in the space, not ` +
+        `connected; an ${code("integration_unbound")} one was bound to none on purpose (its ` +
+        "`source` says by whom).",
       "- `404` `agent_not_found`, `agent_not_active_in_space` or `no_published_version`, or the " +
         "pinned version not found: this command is out of date. Tell the user to run " +
         `\`${PLUGIN_UPDATE_COMMAND}\`; do not retry.`,

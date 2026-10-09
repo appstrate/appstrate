@@ -278,7 +278,11 @@ describe("GET /mcp", () => {
 });
 
 describe("/mcp — progress relay over SSE, end to end", () => {
-  it("delivers an upstream's progress to an agent client that asked for it", async () => {
+  it("delivers an upstream's progress to an agent client that asked for it, throttled", async () => {
+    // Fake timers hold every macrotask: the in-process hops settle on microtasks.
+    const settle = async () => {
+      for (let i = 0; i < 50; i++) await Promise.resolve();
+    };
     // Upstream integration: reports progress under whatever token it receives.
     const upstream = await createInProcessPair([
       {
@@ -286,12 +290,19 @@ describe("/mcp — progress relay over SSE, end to end", () => {
         handler: async (_args, extra) => {
           const progressToken = extra._meta?.progressToken;
           if (progressToken !== undefined) {
-            for (const progress of [1, 2]) {
-              await extra.sendNotification({
+            const report = (progress: number) =>
+              extra.sendNotification({
                 method: "notifications/progress",
                 params: { progressToken, progress, message: `step ${progress}` },
               });
-            }
+            await report(1);
+            await report(2);
+            await report(3);
+            await settle();
+            jest.advanceTimersByTime(1000);
+            // Still inside the window when the call answers: never relayed.
+            await report(4);
+            await settle();
           }
           return { content: [{ type: "text", text: "done" }] };
         },
@@ -317,16 +328,19 @@ describe("/mcp — progress relay over SSE, end to end", () => {
     });
     try {
       const received: unknown[] = [];
+      jest.useFakeTimers();
       const result = await agent.callTool(
         { name: "up__long" },
         { onProgress: (p) => received.push(p) },
       );
       expect(result.content).toEqual([{ type: "text", text: "done" }]);
+      // The first at once, the latest of the window when it ends.
       expect(received).toEqual([
         { progress: 1, message: "step 1" },
-        { progress: 2, message: "step 2" },
+        { progress: 3, message: "step 3" },
       ]);
     } finally {
+      jest.useRealTimers();
       await agent.close();
       await upstream.close();
     }

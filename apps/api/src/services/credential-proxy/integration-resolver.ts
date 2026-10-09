@@ -105,6 +105,8 @@ interface ResolvedIntegrationProxyCredentials {
   declaredUris: readonly string[];
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;
+  /** The `credential_revision` of the decrypted credential, which a 401 rejects. */
+  credentialRevision: string;
   authKey: string;
   /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
   rejectionStreak: number;
@@ -138,29 +140,24 @@ export async function resolveIntegrationProxyCredentials(
     payload,
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
+    credentialRevision: connection.credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
   };
 }
 
 /**
- * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. `input.connectionId` names
- * the connection the failed call used; the selection still re-checks reach. Throws only the
- * 503 of a key missing from the keyring, which `core.ts` answers instead of the upstream
- * 401. Returns `null` — the proxy relays the upstream 401 unchanged — when there is
- * no accessible connection or declared auth, and on every not-refreshed outcome of
- * {@link refreshConnectionCredential}, which are told apart by what they leave behind:
+ * The proxy's reactive 401 path: the payload to replay the call with, after
+ * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
+ * (`kept`: superseded, so replay with the one the connection holds now).
  *
- *   - `retry` — a transient failure (row untouched, retry later), or the rejection of
- *     a credential nothing can refresh counted below the threshold, as on the sidecar path;
- *   - `dead` — the connection is flagged `needsReconnection` (refresh token revoked, no
- *     stored `refresh_token`, or an unrefreshable credential rejected up to the threshold),
- *     so the relayed 401 is not what stands between the user and a reconnect prompt.
+ * `null` — the proxy relays the upstream 401 unchanged — when nothing accessible serves, and on
+ * `retry` and `dead` (already flagged: the relayed 401 does not hide a reconnect prompt).
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
-): Promise<ResolvedIntegrationProxyCredentials | null> {
+  rejectedRevision: string | null,
+): Promise<ProxyCredentialsPayload | null> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
@@ -174,34 +171,37 @@ export async function forceRefreshIntegrationProxyCredentials(
     authDef,
     scope: { orgId: input.orgId, spaceId: input.spaceId },
     actor: input.actor,
-    force: true,
+    trigger: { kind: "rejected", revision: rejectedRevision },
   });
-  if (outcome.status !== "refreshed") {
-    logger.warn("credential-proxy: integration credential not refreshed — relaying the 401", {
-      integrationId: input.integrationId,
-      authKey: connection.authKey,
-      connectionId: connection.id,
-      outcome: outcome.status,
-      reason: outcome.reason,
-      detail: outcome.detail,
-    });
-    return null;
+  let fields: Record<string, string> | null;
+  switch (outcome.status) {
+    case "refreshed":
+      fields = outcome.fields;
+      break;
+    case "kept":
+      fields = decryptStoredCredential(
+        () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+        {
+          connectionId: connection.id,
+          packageId: input.integrationId,
+          authKey: connection.authKey,
+        },
+      );
+      break;
+    case "retry":
+    case "dead":
+      logger.warn("credential-proxy: integration credential not refreshed — relaying the 401", {
+        integrationId: input.integrationId,
+        authKey: connection.authKey,
+        connectionId: connection.id,
+        outcome: outcome.status,
+        cause: outcome.cause,
+        detail: outcome.detail,
+      });
+      return null;
   }
-
-  const payload = buildPayloadFromFields(
-    manifest,
-    connection.authKey,
-    outcome.fields,
-    connection.variables,
-  );
-  if (!payload) return null;
-  return {
-    payload,
-    declaredUris: declaredUrisOf(manifest, connection.authKey),
-    connectionId: connection.id,
-    authKey: connection.authKey,
-    rejectionStreak: upstreamRejectionStreak(connection),
-  };
+  if (!fields) return null;
+  return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
 }
 
 // ─────────────────────────────────────────────

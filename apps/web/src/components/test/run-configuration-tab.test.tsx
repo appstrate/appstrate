@@ -8,9 +8,11 @@
 
 import { describe, expect, it } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
+import { causeSentence } from "../../lib/launch-warnings.ts";
 
 // The agent link reads the app config off `window`.
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
@@ -35,6 +37,12 @@ function makeRun(overrides: Partial<EnrichedRun>): EnrichedRun {
   } as unknown as EnrichedRun;
 }
 
+const SLACK_UNBOUND = {
+  integration_package_id: "@acme/slack",
+  code: "not_connected",
+  source: null,
+} as const;
+
 const GMAIL_USED = {
   integration_package_id: "@acme/gmail",
   label: "Travail",
@@ -48,7 +56,7 @@ describe("RunConfigurationTab — connections", () => {
       <RunConfigurationTab
         run={makeRun({
           connections_used: [GMAIL_USED] as EnrichedRun["connections_used"],
-          integrations_unbound: ["@acme/slack"],
+          integrations_unbound: [SLACK_UNBOUND],
         })}
       />,
     );
@@ -61,10 +69,37 @@ describe("RunConfigurationTab — connections", () => {
 
   it("shows the card for a run that bound nothing but started without an integration", () => {
     const html = render(
-      <RunConfigurationTab run={makeRun({ integrations_unbound: ["@acme/slack"] })} />,
+      <RunConfigurationTab run={makeRun({ integrations_unbound: [SLACK_UNBOUND] })} />,
     );
     expect(html).toContain(i18n.t("agents:run.infoConnections"));
     expect(html).toContain("run-integration-unbound-@acme/slack");
+  });
+
+  it("says why each integration started without a connection, as the launch toast did", () => {
+    for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+      const html = render(
+        <RunConfigurationTab
+          run={makeRun({ integrations_unbound: [{ ...SLACK_UNBOUND, code }] })}
+        />,
+      );
+      expect(html).toContain(causeSentence({ code }));
+      expect(html).toContain(i18n.t("agents:run.integrationUnbound"));
+    }
+    const chosen = render(
+      <RunConfigurationTab
+        run={makeRun({
+          integrations_unbound: [
+            { ...SLACK_UNBOUND, code: "integration_unbound", source: "schedule_override" },
+          ],
+        })}
+      />,
+    );
+    expect(chosen).toContain(
+      i18n.t("agents:launchWarnings.cause.chosenNoneBy", {
+        count: 1,
+        by: i18n.t("agents:noneChosenBy.scheduleOverride"),
+      }),
+    );
   });
 
   it("shows no card when the run declared nothing to bind", () => {

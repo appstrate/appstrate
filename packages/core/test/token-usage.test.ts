@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { totalTokens, accumulateTokenUsage, parseTokenUsage } from "../src/token-usage.ts";
+import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
+import { totalTokens, accumulateTokenUsage, tokenUsageSchema } from "../src/token-usage.ts";
 
 describe("totalTokens", () => {
   it("sums all four buckets", () => {
@@ -55,38 +56,22 @@ describe("totalTokens", () => {
   });
 });
 
-describe("parseTokenUsage", () => {
-  const usage = { input_tokens: 300_000, output_tokens: 1_000 };
-
-  it("keeps one band per threshold", () => {
-    const tiers = [
-      { input_tokens_above: 200_000, input_tokens: 250_000, output_tokens: 500.5 },
-      { input_tokens_above: 272_000 },
-    ];
-    expect(parseTokenUsage({ ...usage, tiers })).toEqual({
-      usage: { ...usage, tiers },
-      tiersDropped: false,
-    });
-    expect(parseTokenUsage(usage)).toEqual({ usage, tiersDropped: false });
-  });
-
-  it("drops malformed bands, keeps the counters and flags the drop", () => {
-    const band = { input_tokens_above: 200_000, input_tokens: 1 };
-    for (const tiers of [
-      [band, band],
-      [{ input_tokens_above: 0 }],
-      [{ input_tokens_above: 1.5 }],
-      [{ input_tokens_above: 200_000, output_tokens: -1 }],
-      [{ ...band, extra: 1 }],
-      "x",
+describe("tokenUsageSchema", () => {
+  it("answers what parseTokenUsage answers", () => {
+    for (const raw of [
+      { input_tokens: 3, output_tokens: 1, extra: true },
+      { input_tokens: 3, tiers: [{ input_tokens_above: 0 }] },
+      { input_tokens: 3, tiers: [{ input_tokens_above: 1, output_tokens: 2 }] },
+      { input_tokens: 1.5 },
+      { output_tokens: -1 },
+      null,
+      [],
     ]) {
-      expect(parseTokenUsage({ ...usage, tiers })).toEqual({ usage, tiersDropped: true });
-    }
-  });
-
-  it("refuses a malformed counter or a non-object", () => {
-    for (const raw of [{ input_tokens: -1 }, { input_tokens: "1" }, null, undefined, 1]) {
-      expect(parseTokenUsage(raw)).toEqual({ usage: null, tiersDropped: false });
+      const parsed = tokenUsageSchema.safeParse(raw);
+      expect({ raw, usage: parsed.success ? parsed.data : null }).toEqual({
+        raw,
+        usage: parseTokenUsage(raw).usage,
+      });
     }
   });
 });

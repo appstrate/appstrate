@@ -6,7 +6,10 @@ import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import type { ConnectionResolutionSource } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionSource,
+  ConnectionResolutionWarningCode,
+} from "@appstrate/core/integration";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -160,6 +163,14 @@ export interface RunConnectionUsed {
   source: ConnectionResolutionSource;
 }
 
+/** A declared integration the run started bound to no connection, and why. */
+export interface RunIntegrationUnboundWire {
+  integration_package_id: string;
+  code: ConnectionResolutionWarningCode;
+  /** The cascade layer that chose no connection, on `integration_unbound` only. */
+  source: ConnectionResolutionSource | null;
+}
+
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
 export type EnrichedRun = RunWireDto & {
   user_name: string | null;
@@ -168,8 +179,8 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
-  /** Declared integrations the run started bound to no connection, sorted; null with no snapshot. */
-  integrations_unbound: string[] | null;
+  /** In declaration order; null when the run recorded none (no connection resolution ran). */
+  integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
    * True when the requesting recipient has an unread notification for this run
    * (issue #667). Per-recipient: derived from the `notifications` table for the

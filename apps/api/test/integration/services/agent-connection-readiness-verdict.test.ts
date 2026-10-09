@@ -146,10 +146,9 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(await verdictOf()).toMatchObject({
         source: "fallback_auto",
         error_code: null,
-        warning_code: null,
-        required_auth_key: null,
-        available_auth_keys: [],
+        warning: null,
         resolved_connection_ids: [id],
+        org_default_connection_ids: null,
       });
     });
 
@@ -167,6 +166,8 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(await verdictOf()).toMatchObject({
         source: "org_default_enforced",
         error_code: null,
+        org_default_connection_ids: [id],
+        org_default_enforced: true,
       });
     });
 
@@ -266,7 +267,8 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
   });
 
   // Absence degrades: no `error_code`, no layer, no set — and the run is not blocked.
-  describe("unbound — optional, `error_code` null, `warning_code` the reason", () => {
+  // `warning` is the launch's item: the code the required twin raises, or `integration_unbound`.
+  describe("unbound — optional, `error_code` null, `warning` the reason", () => {
     it("nothing connected", async () => {
       await seedAgentDeclaring(TOOLS);
       const entry = await entryOf();
@@ -275,9 +277,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(entry.resolution).toMatchObject({
         source: null,
         error_code: null,
-        warning_code: "integration_unbound",
-        required_auth_key: null,
-        available_auth_keys: [],
+        warning: { field: `integrations.${INTEG}`, code: "not_connected" },
         resolved_connection_ids: [],
         admin_pinned_connection_ids: null,
         member_pinned_connection_ids: null,
@@ -292,9 +292,11 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       // Not « not connected »: the actor has a connection, on the wrong auth.
       expect(entry.resolution).toMatchObject({
         error_code: null,
-        warning_code: "integration_unbound",
-        required_auth_key: "backup",
-        available_auth_keys: ["primary"],
+        warning: {
+          code: "auth_key_mismatch",
+          required_auth_key: "backup",
+          available_auth_keys: ["primary"],
+        },
         resolved_connection_ids: [],
       });
     });
@@ -308,7 +310,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(entry.resolution).toMatchObject({
         source: null,
         error_code: null,
-        warning_code: "integration_unbound",
+        warning: { code: "integration_unbound", source: "admin_pin" },
         resolved_connection_ids: [],
         admin_pinned_connection_ids: [],
         member_pinned_connection_ids: null,
@@ -321,7 +323,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       await pin([], ctx.user.id);
       expect(await verdictOf()).toMatchObject({
         error_code: null,
-        warning_code: "integration_unbound",
+        warning: { code: "integration_unbound", source: "member_pin" },
         resolved_connection_ids: [],
         admin_pinned_connection_ids: null,
         member_pinned_connection_ids: [],
@@ -337,7 +339,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
       expect(entry.resolution).toMatchObject({
         source: null,
         error_code: null,
-        warning_code: "integration_not_active",
+        warning: { code: "integration_not_active" },
         resolved_connection_ids: [],
       });
     });

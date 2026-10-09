@@ -28,7 +28,7 @@ import {
   resolveAgentResources,
 } from "./run-limits.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import { getAgentResourceHints } from "@appstrate/core/validation";
 import { getExecutionMode } from "../infra/mode.ts";
@@ -386,7 +386,8 @@ export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 
 /**
  * Persist the degradation marker for each integration the run starts
- * without: one `run_logs` row per drop (`warn`, `info` for an unbound one), on the same
+ * without: one `run_logs` row per drop (`warn`; `info` when a cascade layer chose
+ * no connection — `integration_unbound` in `unbound`, the run's resolver warnings), on the same
  * pg_notify → SSE path the container's own breadcrumbs use, so the gap is
  * visible on the run page instead of living only in server-side logs.
  *
@@ -404,14 +405,18 @@ export async function recordDroppedIntegrations(
   scope: OrgScope,
   runId: string,
   dropped: readonly DroppedIntegration[],
+  unbound: readonly RunIntegrationUnbound[] = [],
 ): Promise<void> {
   for (const entry of dropped) {
-    // A chosen absence, not a failure to start.
-    const unbound = entry.reason === "unbound";
-    const cause = unbound
-      ? "has no connection bound to this run"
-      : `is declared by this agent but was not started (${entry.reason})` +
-        (entry.detail ? `: ${entry.detail}` : "");
+    const code =
+      entry.reason === "unbound"
+        ? unbound.find((u) => u.integrationId === entry.integrationId)?.code
+        : undefined;
+    const cause =
+      entry.reason === "unbound"
+        ? `has no connection bound to this run${code ? ` (${code})` : ""}`
+        : `is declared by this agent but was not started (${entry.reason})` +
+          (entry.detail ? `: ${entry.detail}` : "");
     await appendDropMarker(
       scope,
       runId,
@@ -422,10 +427,12 @@ export async function recordDroppedIntegrations(
       {
         integrationId: entry.integrationId,
         reason: entry.reason,
+        ...(code !== undefined ? { code } : {}),
         ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
         ...(entry.connectionLabel !== undefined ? { connectionLabel: entry.connectionLabel } : {}),
       },
-      unbound ? "info" : "warn",
+      // A chosen absence, not a failure to start.
+      code === "integration_unbound" ? "info" : "warn",
     );
   }
 }

@@ -1939,9 +1939,6 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
       sessionIdGenerator: undefined,
       enableJsonResponse: !post?.requestsProgress,
       enableDnsRebindingProtection: false,
-      // The envelope was already bounded above; without this the SDK's own
-      // 4 MB default rejects it first and the tool never answers 413 itself.
-      maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
     // Only a POST may stream; a GET's standalone stream would otherwise stay open for the run.
     if (method === "POST") return serveStatelessPost(server, transport, forwarded, post);

@@ -130,11 +130,12 @@ export function isOfferExpired(expiresAt: string | undefined, now = Date.now()):
   return Number.isFinite(at) && at <= now;
 }
 
-/** Withheld while the run is in flight: a connect mid-run would append a resume turn over it. */
-export function extractRunAndWaitAuthOffers(result: unknown): AuthOffer[] {
-  const payload = asRecord(unwrapResult(result));
-  if (payload?.done === false && payload.error === undefined) return [];
-  return extractAuthOffers(result);
+/** Withheld while the call is in flight: a connect then would append a resume turn over it. */
+export function extractRunAndWaitAuthOffers(part: {
+  result?: unknown;
+  isPreliminary?: boolean;
+}): AuthOffer[] {
+  return part.isPreliminary ? [] : extractAuthOffers(part.result);
 }
 
 /** A started run (it has an id), not a refused launch. */

@@ -28,7 +28,7 @@
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
-import { connectionRefusalLines } from "./launch-warnings.ts";
+import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -76,7 +76,7 @@ export interface ReportSession {
    */
   runSecret: string;
   /** The registration's `warnings`: integrations the run starts without. */
-  warnings: unknown[];
+  warnings: LaunchItem[];
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -219,30 +219,30 @@ export async function startReportSession(
     proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
     runSecret: payload.secret,
-    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+    warnings: parseLaunchItems(payload.warnings),
   };
 }
 
-/** The agent-facing reason per warning code, worded as the platform's own prompt words it. */
-const UNAVAILABLE_REASON: Record<string, string> = {
-  integration_unbound: UNAVAILABLE_INTEGRATION_REASONS.unbound,
-  integration_not_active: UNAVAILABLE_INTEGRATION_REASONS.not_active,
-};
-
-/** Integrations the run is bound to none of, one per id, for "Unavailable Integrations". */
+/**
+ * Integrations the run is bound to none of, one per id, for "Unavailable Integrations", with the
+ * reason worded as the platform's own prompt words it.
+ */
 export function unavailableIntegrations(
-  warnings: readonly unknown[],
+  warnings: readonly LaunchItem[],
 ): Array<{ id: string; reason: string }> {
   const byId = new Map<string, string>();
-  for (const item of warnings) {
-    if (item === null || typeof item !== "object") continue;
-    const { field, code, message } = item as Record<string, unknown>;
-    if (typeof field !== "string" || !field.startsWith("integrations.")) continue;
+  for (const { field, code } of warnings) {
+    if (!field?.startsWith("integrations.")) continue;
     const id = field.slice("integrations.".length);
-    const reason =
-      (typeof code === "string" ? UNAVAILABLE_REASON[code] : undefined) ??
-      (typeof message === "string" && message.length > 0 ? message : "it is not available");
-    if (!byId.has(id)) byId.set(id, reason);
+    if (!byId.has(id)) {
+      // The run binds `[]` whatever the cause; only a switched-off integration reads otherwise.
+      byId.set(
+        id,
+        code === "integration_not_active"
+          ? UNAVAILABLE_INTEGRATION_REASONS.not_active
+          : UNAVAILABLE_INTEGRATION_REASONS.unbound,
+      );
+    }
   }
   return [...byId].map(([id, reason]) => ({ id, reason }));
 }

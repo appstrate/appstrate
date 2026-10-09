@@ -94,6 +94,7 @@ export class HttpSink implements EventSink {
   // `lastEventSequence` defaults to 0 on run creation — so the first
   // emitted event must be 1 or it is dropped as a replay.
   private sequence = 1;
+  private readonly aborter = new AbortController();
 
   constructor(opts: HttpSinkOptions) {
     this.url = opts.url;
@@ -111,6 +112,11 @@ export class HttpSink implements EventSink {
     // here so every subsequent send shares the trace-id.
     const parent = parseTraceparent(opts.traceparent);
     this.traceParent = parent ?? nextTraceContext();
+  }
+
+  /** Rejects pending and later `handle` / `finalize` calls with `reason`; nothing keeps running. */
+  abort(reason?: unknown): void {
+    this.aborter.abort(reason);
   }
 
   async handle(event: RunEvent): Promise<void> {
@@ -161,6 +167,7 @@ export class HttpSink implements EventSink {
             traceparent,
           },
           body,
+          signal: this.aborter.signal,
         });
 
         if (res.ok) return;
@@ -179,6 +186,7 @@ export class HttpSink implements EventSink {
         lastError = new Error(`HttpSink: retryable ${res.status} ${res.statusText}`);
       } catch (err) {
         if (err instanceof NonRetryableHttpError) throw err;
+        this.aborter.signal.throwIfAborted();
         lastError = err;
       }
 
@@ -199,7 +207,19 @@ export class HttpSink implements EventSink {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const signal = this.aborter.signal;
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(signal.reason);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      };
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 }
 

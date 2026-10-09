@@ -12,6 +12,7 @@ import { describe, expect, it } from "bun:test";
 import { buildSystemPrompt, formatCallerContext, normalizeChatLocale } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 
 /** The block's text; the skills it injected are pinned in caller-context.test.ts. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -155,7 +156,10 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("`integrations_configuration.<id>.required: true`");
     expect(REDUCED).not.toContain("`integrations_configuration.<id>.required: true`");
     for (const persona of [FULL, REDUCED]) {
-      expect(persona).toContain("`integration_unbound`");
+      // Every warning code the platform emits, from the core tuple: a new one is taught, not missed.
+      expect(persona).toContain(
+        `item (${CONNECTION_RESOLUTION_WARNING_CODES.map((code) => `\`${code}\``).join(", ")};`,
+      );
       expect(persona).toMatch(/offer to connect it/);
       // `required_integration_unbound` is the MCP server's to teach (its instructions reach chat).
       expect(persona).not.toContain("`required_integration_unbound`");
@@ -172,7 +176,13 @@ describe("full persona invariants", () => {
       expect(persona).toMatch(
         /For `integration_not_active`, connecting is not the remedy: the integration is not activated in this space/,
       );
-      expect(persona).toContain("For `integration_unbound`, offer to connect it");
+      expect(persona).toContain(
+        "For `not_connected` or `auth_key_mismatch`, offer to connect it when a connect card appears",
+      );
+      // A chosen none is no connection gap: nothing to connect.
+      expect(persona).toContain(
+        "For `integration_unbound`, a connection choice (its `source`) binds none on purpose",
+      );
     }
   });
 

@@ -2,16 +2,25 @@
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import {
+  RUN_AND_WAIT_LONG_POLL_RESUME,
   RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
   RUN_AND_WAIT_UNSTREAMED_MAX_MS,
   type Dispatch,
   type McpToolContext,
+  type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
-import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  RUN_AND_WAIT_MAX_MS,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+  RUN_CONNECT_OFFERS_HEADER,
+} from "@appstrate/core/run-and-wait-client";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
@@ -72,7 +81,9 @@ function makeRunAndWait(opts: {
     /** The connect-offer opt-in, recorded per request (launch-only contract). */
     connectOffers: string | null;
   }>;
+  events: McpToolEvent[];
 } {
+  const events: McpToolEvent[] = [];
   const calls: Array<{
     method: string;
     path: string;
@@ -132,11 +143,12 @@ function makeRunAndWait(opts: {
     mayShareRoot: async () => false,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    observe: (event) => events.push(event),
   };
   const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");
-  return { tool, calls };
+  return { tool, calls, events };
 }
 
 describe("run_and_wait", () => {
@@ -153,9 +165,11 @@ describe("run_and_wait", () => {
   it("promises the launch warnings in its result shape", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.description).toContain(
-      "`{ id, packageId, status, done:true, result?, error?, warnings? }`",
+      "`{ id, packageId, status, done:true, result?, error?, warnings }`",
     );
-    expect(tool.descriptor.description).toContain("`integration_unbound`");
+    for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+      expect(tool.descriptor.description).toContain(`\`${code}\``);
+    }
   });
 
   it("describes inline defaults and exact manifest overrides", () => {
@@ -385,6 +399,48 @@ describe("run_and_wait", () => {
     );
   });
 
+  it("serves a truncated, file-enriched result that passes the server's outputSchema check", async () => {
+    const { tool } = makeRunAndWait({
+      getRun: [
+        jsonResponse({ id: "run_1", status: "success", result: { blob: "x".repeat(40_000) } }),
+      ],
+      files: [
+        {
+          id: "file_1",
+          uri: "appfile://file_1",
+          name: "report.md",
+          mime: "text/markdown",
+          size: 12,
+          purpose: "agent_output",
+          runId: "run_1",
+        },
+      ],
+    });
+    // Through `createMcpServer`, so a projection drifting from RunAndWaitResult fails here.
+    const pair = await createInProcessPair([tool]);
+    try {
+      const res = (await pair.client.callTool({
+        name: "run_and_wait",
+        arguments: { kind: "agent", scope: "@acme", name: "writer" },
+      })) as CallToolResult;
+      expect(res.structuredContent).toMatchObject({ done: true, truncated: true });
+      expect(res.structuredContent).not.toHaveProperty("result");
+      expect((res.structuredContent as { files: unknown[] }).files).toHaveLength(1);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("reports a failed poll's own HTTP status in telemetry", async () => {
+    const { tool, events } = makeRunAndWait({
+      getRun: [jsonResponse({ type: "about:blank", status: 404 }, 404)],
+    });
+    const res = await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
+
+    expect(res.isError).toBe(true);
+    expect(events.find((e) => e.operationId === "getRun")?.status).toBe(404);
+  });
+
   describe("progress heartbeat and unstreamed wait cap", () => {
     type SentNotification = Parameters<AppstrateRequestExtra["sendNotification"]>[0];
 
@@ -392,7 +448,7 @@ describe("run_and_wait", () => {
       const description = makeRunAndWait({}).tool.descriptor.description;
       expect(description).toContain("`done:false`");
       expect(description).toContain("never call `run_and_wait` again");
-      expect(description).toContain("read its outcome with `getRun` on that `id`");
+      expect(description).toContain(RUN_AND_WAIT_RESUME_INSTRUCTION);
       // The chat reuses this text with only its closing-reply margin left: no long-poll advice.
       expect(description).not.toContain("wait: true");
     });
@@ -469,8 +525,10 @@ describe("run_and_wait", () => {
       await flush();
 
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
-      // A streamed call keeps the full default wait.
-      expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+      // A streamed call asks for its whole default budget; the server clamps it.
+      expect(calls.find((c) => c.method === "GET")?.search).toBe(
+        `?wait=${RUN_AND_WAIT_MAX_MS / 1000}`,
+      );
       // One beat at launch, then one per interval.
       expect(sent).toEqual(
         [
@@ -515,7 +573,7 @@ describe("run_and_wait", () => {
     it("sends nothing and returns done:false with the run id once the cap passes", async () => {
       jest.useFakeTimers();
       const sent: SentNotification[] = [];
-      const { tool, calls } = makeRunAndWait({
+      const { tool, calls, events } = makeRunAndWait({
         launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),
         getRun: [heldPoll().answer],
       });
@@ -534,9 +592,18 @@ describe("run_and_wait", () => {
         `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
       );
       expect(res.isError).toBeFalsy();
-      const payload = parseResult(res);
-      expect(payload).toMatchObject({ id: "run_7", status: "pending", done: false });
-      expect(payload.error).toContain("Do not launch it again");
+      // `done` alone says the wait ended; the next step comes as a second text block.
+      expect(res.structuredContent).toEqual({
+        id: "run_7",
+        packageId: "@acme/writer",
+        status: "pending",
+        done: false,
+        warnings: [],
+      });
+      expect(res.content.slice(1)).toEqual([{ type: "text", text: RUN_AND_WAIT_LONG_POLL_RESUME }]);
+      // Nothing to enrich on a run still going: no file read, and no 200 getRun in telemetry.
+      expect(calls.some((c) => c.path === "/api/files")).toBe(false);
+      expect(events.find((e) => e.operationId === "getRun")?.status).toBe(202);
       expect(sent).toEqual([]);
     });
   });

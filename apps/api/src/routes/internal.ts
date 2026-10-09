@@ -574,7 +574,7 @@ export function createInternalRouter() {
           connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
-        { forceRefresh: true, heldRevision: credentialRevisionQuery(c, false) },
+        { kind: "rejected", revision: credentialRevisionQuery(c, false) ?? null },
       );
     } catch (err) {
       // 410 = the connection was flagged needsReconnection (terminal). Record

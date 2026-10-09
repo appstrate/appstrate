@@ -15,30 +15,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to run. Read by `parseManifestIntegrations`, written by
   `writeManifestIntegrations`. Unrelated to an integration auth's
   `_meta["dev.appstrate/auth"].required`. (#1830)
-- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`integration_unbound`,
-  `integration_not_active`), **`ConnectionResolutionWarningCode`** and
-  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a declared,
-  non-required integration the run starts without — nothing usable to bind or
-  a layer bound none, or switched off in the space — with the same
-  `authKey`, `requiredScopes`, `requiredAuthKey`, `availableAuthKeys` and
-  `candidateConnections` an error carries. (#1830)
+- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`not_connected`,
+  `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`,
+  `integration_unbound`), **`ConnectionResolutionWarningCode`** and
+  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a
+  declared, non-required integration the run starts without carries the code
+  the same state raises as an error on a `required` integration, with the same
+  fields. Only `integration_unbound` has no error twin: a cascade layer
+  (`source`) chose `[]`. (#1830, #1848)
+- **`CONNECT_FLOW_CODES`** (`@appstrate/core/integration`; `not_connected`,
+  `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`): the codes
+  a connect flow resolves. An `auth_key_mismatch` item carries `auth_key` and
+  `required_scopes`, the agent's own auth to connect. (#1848)
+- **`INTEGRATION_MANIFEST_FAILURE_CODES`**,
+  **`MISSING_INTEGRATION_CONNECTION_CODES`** and
+  **`MissingIntegrationConnectionCode`** (`@appstrate/core/integration`): every
+  code an `errors[]` item of a `409 missing_integration_connection` carries —
+  resolution errors, manifest failures and `remote_binds_one_connection`.
+  (#1848)
+- **`RunIntegrationUnbound`** (`{ integrationId, code, source? }`) and
+  **`runIntegrationsUnboundSchema`** (`@appstrate/core/integration`): every
+  read of `runs.integrations_unbound` parses with it. (#1849)
+- **`RunStatusChangeParams.integrationsUnbound?: RunIntegrationUnbound[]`**,
+  set on `started` when the run recorded its connection resolution. (#1849)
+- **`CREDENTIAL_FAILURE_CAUSES`** and **`CredentialFailureCause`**
+  (`@appstrate/core/sidecar-types`): why the platform did not return a
+  refreshed credential, carried as the RFC 9457 `cause` extension member of the
+  internal credential `410`/`502`. (#1853)
 - **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
   the launch's `warnings`** onto every payload it returns (preliminary,
-  terminal and timed out) when the launch reported some; absent otherwise.
+  terminal and timed out), `[]` when none, as REST `LaunchWarnings` does.
   The documented payload becomes
-  `{ id, packageId, status, done, result?, error?, warnings? }`. (#1830)
+  `{ id, packageId, status, done, result?, error?, warnings }`. (#1830, #1851)
+- **`enrichTerminalRunAndWaitStep`** and **`RUN_AND_WAIT_RESUME_INSTRUCTION`**
+  (`@appstrate/core/run-and-wait-client`): the files and truncation of a
+  terminal step (applied only when `done`), and the next-step instruction of a
+  `done: false` step. (#1851)
 
-- **`tokenUsageSchema`** (`@appstrate/core/token-usage`) validates the optional
-  `tiers` of a `TokenUsage` (`@appstrate/afps-shared` `TokenUsage.tiers`) with
-  afps-shared's `isTokenUsageTiers` (at most 16 bands, strict keys, a positive
-  integer `input_tokens_above` unique across bands, finite non-negative
-  counters). It previously stripped the field. Malformed bands are dropped and
-  the counters kept: the snapshot still parses. (#1552)
-
-- **`parseTokenUsage`** (`@appstrate/core/token-usage`): `tokenUsageSchema` at
-  an ingestion seam — `{ usage, tiersDropped }`, `usage` null when the snapshot
-  is malformed, `tiersDropped` set when bands the raw usage carried were
-  dropped, for the seam to log. (#1552)
+- **`ALIAS_BACKING_API_SHAPES`** (`@appstrate/core/model-swap`): every
+  `AliasBackingApiShape`, the vendor protocols a provider can declare. (#1846)
+- **`releaseVersion`** (`@appstrate/core/image-ref`) is exported: the
+  release-version predicate of the runtime-image trio rule (normalizes a
+  leading `v`; `undefined` for `dev`, build stamps and alias tag families). The
+  Firecracker runner handshake applies the same rule through it. (#1852)
 
 - **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
   per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model
@@ -73,29 +92,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
   configuration onto the one already in the manifest**: keys it does not
   model (`_meta`, extensions) are kept instead of dropped. (#1830)
-- **`ResolutionFieldError` (`@appstrate/core/api-errors`) also describes a
-  launch response's `warnings` items**: `auth_key`, `required_scopes`,
-  `required_auth_key`, `available_auth_keys`, `candidate_connections` and
-  `connect_url` may ride an `integration_unbound` warning. Documentation only:
-  the type is unchanged. (#1830)
+- **`ResolutionFieldError` (`@appstrate/core/api-errors`) gains `source?`**,
+  the cascade layer concerned, and also describes a launch response's
+  `warnings` items. (#1830, #1848)
+- **`gone()`** and **`badGateway()`** (`@appstrate/core/api-errors`) take an
+  optional `extensions` argument, like `conflict()`. (#1853)
 
-- **`modelCostSchema`** (`@appstrate/core/module`) refuses a rate card whose
-  tiers break the rule its usage bands follow: `inputTokensAbove` must be an
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) validates
+  the optional `tiers` of a `TokenUsage` (`@appstrate/afps-shared`
+  `TokenUsage.tiers`) with afps-shared's `isTokenUsageTiers` (at most 16 bands,
+  strict keys, a positive integer `input_tokens_above` unique across bands,
+  non-negative integer counters). It previously stripped the field. Malformed
+  bands are dropped and the counters kept: the snapshot still parses. (#1552)
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) is a Zod
+  pipe over afps-shared's `parseTokenUsage` (`z.unknown().transform(...)`), no
+  longer a `z.object`: `.shape`, `.extend()` and `.strict()` are gone, and a
+  fractional counter now fails the parse. (#1846)
+
+- **BREAKING: `modelCostSchema`** (`@appstrate/core/module`) refuses a rate
+  card whose tiers break the rule its usage bands follow: `inputTokensAbove` must be an
   integer (was any positive number), and `tiers` holds at most
   `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
   would otherwise have every band of its usage dropped and price at the base
   rate. (#1552)
 
-- **Requires `@appstrate/afps-shared` `^0.12.1`** (was `^0.12.0`): the
-  `tiers` validation above is its `isTokenUsageTiers`. (#1552)
+- **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
+  `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`
+  is its own. (#1552, #1846)
 
-- **`waitForRunAndWaitCompletion`** (`@appstrate/core/run-and-wait-client`): the
-  `error` of a `done: false` step — the wait ended before the run reached a
-  terminal status — now reads "run_and_wait stopped waiting … the run is still in
-  progress. Do not launch it again — read its outcome later with `getRun` on this
-  `id`." instead of "run_and_wait timed out …". It is not a run outcome (the old
-  wording read like the run's own `timeout` status), and a caller that relaunched
-  on it duplicated a run still going. (#1844)
+- **BREAKING: a `done: false` step carries no `error`**
+  (`waitForRunAndWaitCompletion`, `projectRunAndWaitPayload`,
+  `@appstrate/core/run-and-wait-client`). `done` is the only discriminant:
+  `result` and `error` are set only when `done`, and `error` only reports the
+  run's failure. The old "run_and_wait timed out …" error read like the run's
+  own `timeout` status, and a caller that relaunched on it duplicated a run
+  still going. (#1844, #1851)
+- **The wait poll sends the remaining seconds and the server clamps them**
+  (`@appstrate/core/run-and-wait-client`). (#1851)
 
 ## [15.0.0] — 2026-10-08
 

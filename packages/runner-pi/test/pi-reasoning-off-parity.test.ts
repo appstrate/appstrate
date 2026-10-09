@@ -11,14 +11,12 @@
 import { describe, expect, it } from "bun:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
-import { isAliasBackingShape } from "@appstrate/core/model-swap";
-import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
+import { ALIAS_BACKING_API_SHAPES } from "@appstrate/core/model-swap";
 import { buildPiModel } from "../src/pi-model.ts";
 import { observedReasoningOff, recordSpec, RUN_BASE_URL } from "../src/pi-payload.ts";
 import { piReasoningOff, piTakesReasoningOff } from "../src/pi-reasoning-off.ts";
 
-const SERVED_SHAPES = MODEL_API_SHAPES.filter(isAliasBackingShape);
-const SERVED: ReadonlySet<string> = new Set(SERVED_SHAPES);
+const SERVED: ReadonlySet<string> = new Set(ALIAS_BACKING_API_SHAPES);
 const RECORDS = getBuiltinProviders()
   .flatMap((provider) => getBuiltinModels(provider) as Model<Api>[])
   .filter((record) => SERVED.has(record.api));
@@ -78,7 +76,7 @@ describe("piReasoningOff ↔ the payload Pi builds for off", () => {
 
   it("agrees on a model Pi keeps no record of, per API shape and provider", async () => {
     const models: Array<[string, Model<Api>]> = [
-      ...SERVED_SHAPES.map((shape): [string, Model<Api>] => [
+      ...ALIAS_BACKING_API_SHAPES.map((shape): [string, Model<Api>] => [
         `gateway ${shape}`,
         unrecorded(shape),
       ]),

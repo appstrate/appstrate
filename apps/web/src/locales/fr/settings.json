@@ -477,7 +477,7 @@
   "integration.admin.pinManagement.colConnections": "Connexions",
   "integration.admin.pinManagement.delete": "Supprimer cette épingle",
   "integration.admin.pinManagement.add": "Épingler",
-  "integration.admin.pinManagement.none": "Aucune connexion — l'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige",
+  "integration.admin.pinManagement.noneHint": "L'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige",
   "integration.admin.pinManagement.empty": "Aucune épingle pour cette intégration.",
   "integration.admin.pinManagement.noPinnableConnections": "Aucune connexion partagée disponible. Demandez à un utilisateur d'activer le partage sur sa connexion ou créez-en une vous-même.",
   "integration.admin.pinManagement.noConsumingAgents": "Aucun agent actif n'utilise cette intégration, ou chacun a déjà son épingle.",

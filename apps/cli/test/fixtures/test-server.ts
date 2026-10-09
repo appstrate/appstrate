@@ -192,7 +192,8 @@ export async function startTestServer(
         case "/binary": {
           calls.push(log);
           return new Response(binaryPayload, {
-            status: 200,
+            // `?status=` pairs the large body with a failing exit code.
+            status: Number(u.searchParams.get("status") ?? 200),
             headers: { "Content-Type": "application/octet-stream" },
           });
         }

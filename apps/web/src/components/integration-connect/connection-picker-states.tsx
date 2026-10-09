@@ -11,6 +11,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { unavailableConnectionIds } from "../../lib/connection-set";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { ClearChoiceButton } from "./clear-choice-button";
+import { NoConnectionLabel } from "./no-connection-label";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import type { ConnectionPicker } from "./use-connection-picker";
 
@@ -119,10 +120,11 @@ export function LockedPicker({
           type="button"
           variant="outline"
           size="sm"
+          className="h-auto py-1 text-left text-xs"
           onClick={() => void persist([])}
           data-testid={`member-pick-none-${integrationId}`}
         >
-          {t("detail.integrationMemberPicker.none")}
+          <NoConnectionLabel />
         </Button>
       )}
       {clearable && (

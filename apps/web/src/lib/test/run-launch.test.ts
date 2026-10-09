@@ -11,10 +11,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { ApiError } from "../../api/errors.ts";
 import {
   inheritedEntry,
-  launchedVersion,
   launchFromOptions,
+  launchRefusal,
   launchFlight,
   retryLaunch,
 } from "../run-launch.ts";
@@ -98,13 +99,26 @@ describe("launchFlight", () => {
   });
 });
 
-describe("launchedVersion", () => {
-  it("names the version a refused launch ran, so recovery reads that version's readiness", () => {
-    expect(launchedVersion({ version: "draft" })).toBe("draft");
-    expect(launchedVersion({ version: "1.2.0" })).toBe("1.2.0");
-    // An omitted selector runs the latest published version; readiness would read the
-    // draft for a writer, so it is spelled out.
-    expect(launchedVersion({})).toBe("published");
+describe("launchRefusal", () => {
+  const ITEM = { field: "integrations.@acme/crm", code: "not_connected", message: "connect" };
+  const refusal = (extensions?: Record<string, unknown>) =>
+    new ApiError("missing_integration_connection", "refused", 409, [ITEM], extensions);
+
+  it("reads the version the 409 judged, so recovery reads that version's readiness", () => {
+    expect(launchRefusal(refusal({ version_ref: "1.2.0" }))).toEqual({
+      errors: [ITEM],
+      version: "1.2.0",
+    });
+    expect(launchRefusal(refusal({ version_ref: "draft" }))?.version).toBe("draft");
+  });
+
+  it("names no version the server did not", () => {
+    expect(launchRefusal(refusal())).toEqual({ errors: [ITEM], version: undefined });
+  });
+
+  it("is null for any other failure", () => {
+    expect(launchRefusal(new ApiError("not_found", "gone", 404))).toBeNull();
+    expect(launchRefusal(new Error("network"))).toBeNull();
   });
 });
 

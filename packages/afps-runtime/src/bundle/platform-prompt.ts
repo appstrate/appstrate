@@ -57,7 +57,7 @@ export interface PlatformPromptSchema {
 /** Why a declared integration is unavailable, as the agent reads it; every host shares it. */
 export const UNAVAILABLE_INTEGRATION_REASONS = {
   unbound: "no connection is bound to this run",
-  not_active: "it is switched off in this space",
+  not_active: "it is switched off",
   not_found: "its package does not exist",
   not_integration: "the declared package is not an integration",
   invalid_manifest: "its manifest is invalid",

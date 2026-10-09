@@ -21,6 +21,7 @@ import {
 import type { SchemaField } from "../schema-section";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
 
 // ─── getManifestName ────────────────────────────────────────
 
@@ -203,6 +204,24 @@ describe("getResourceEntries / setResourceEntries", () => {
           _meta: { "dev.vendor/x": { a: 1 } },
         },
       });
+    });
+
+    // A key the core models next must not need an editor change to survive a save.
+    it("hands the core's integration entries through whole, both ways", () => {
+      const m: Record<string, unknown> = {
+        dependencies: { integrations: { "@vendor/gmail": "^1.0.0" } },
+        integrations_configuration: {
+          "@vendor/gmail": { tools: ["a"], scopes: ["s"], auth_key: "oauth", required: true },
+        },
+      };
+      const entries = getResourceEntries(m, "integrations");
+      expect(entries).toStrictEqual(parseManifestIntegrations(m));
+
+      const viaEditor: Record<string, unknown> = { dependencies: {} };
+      const viaCore: Record<string, unknown> = { dependencies: {} };
+      setResourceEntries(viaEditor, "integrations", entries);
+      writeManifestIntegrations(viaCore, parseManifestIntegrations(m));
+      expect(viaEditor).toStrictEqual(viaCore);
     });
 
     it("round-trips the wildcard tools literal through set → get", () => {

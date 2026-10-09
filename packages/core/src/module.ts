@@ -27,6 +27,7 @@ import type {
   EnforcedChatSkillRef,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
+import type { RunIntegrationUnbound } from "./integration.ts";
 import type { TerminalRunStatus } from "./run-status.ts";
 
 // ---------------------------------------------------------------------------
@@ -1179,6 +1180,8 @@ export interface RunStatusChangeParams {
    * round-trip.
    */
   packageEphemeral?: boolean;
+  /** On `started` only; omitted when not recorded, `[]` when every integration is bound. */
+  integrationsUnbound?: RunIntegrationUnbound[];
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
 }

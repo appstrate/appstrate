@@ -17,8 +17,8 @@
  * naming anything outside it is `override_outranked`. A shared connection is never bound
  * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
  * bind (or switched off in the space), a `required` integration is an error, any other binds
- * none with a warning. `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its
- * inputs.
+ * none with a warning carrying the same code — `integration_unbound` (a layer's `[]`) aside.
+ * `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
@@ -45,6 +45,7 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
+  CONNECT_FLOW_CODES,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -52,8 +53,10 @@ import {
   type ConnectionResolutionResult,
   type ConnectionResolutionSource,
   type ConnectionResolutionWarning,
+  type ConnectionResolutionWarningCode,
   type ResolvedConnection,
   type ResolvedConnectionMap,
+  type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
@@ -96,8 +99,8 @@ export interface IntegrationRequirement {
   /** The agent's explicit oauth scopes — the only scope signal of an apiCall integration. */
   agentScopes: readonly string[];
   /** An auth is marked `_meta["dev.appstrate/auth"].required`: active even with no selection. */
-  hasRequiredAuth?: boolean;
-  /** The agent's `integrations_configuration[id].required` — not {@link hasRequiredAuth}. */
+  hasMandatoryAuth?: boolean;
+  /** The agent's `integrations_configuration[id].required` — not {@link hasMandatoryAuth}. */
   required: boolean;
   /** AFPS §4.1 `auth_key`: only rows on that auth are candidates, at every layer. */
   requiredAuthKey?: string;
@@ -134,6 +137,15 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   const pinIds = (integrationId: string, userId: string | null) =>
     input.pins.find((p) => p.integrationId === integrationId && p.userId === userId)
       ?.connectionIds ?? null;
+  const record = (integrationId: string, result: ResolveOneResult): void => {
+    if (result.kind === "error") {
+      errors.push(result.error);
+      return;
+    }
+    // `[]` when unbound, so the run's snapshot lists it with the launch's other unbound ones.
+    resolved[integrationId] = result.value;
+    if (result.kind === "unbound") warnings.push(result.warning);
+  };
 
   for (const req of input.requirements) {
     // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
@@ -141,20 +153,18 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       !req.required &&
       !req.hasSelectedTools &&
       req.agentScopes.length === 0 &&
-      !req.hasRequiredAuth &&
+      !req.hasMandatoryAuth &&
       !input.includeInert
     )
       continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
-      const item = { integrationId: req.integrationId, code: "integration_not_active" as const };
-      const notActive = `Integration '${req.integrationId}' is not active in this space`;
-      if (req.required) {
-        errors.push({ ...item, message: `${notActive}.` });
-      } else {
-        // Bound to none, so the run's snapshot lists it with the launch's other unbound ones.
-        resolved[req.integrationId] = [];
-        warnings.push({ ...item, message: `${notActive}; the run proceeds without it.` });
-      }
+      record(
+        req.integrationId,
+        gapOf(req, {
+          code: "integration_not_active",
+          message: `Integration '${req.integrationId}' is not active in this space`,
+        }),
+      );
       continue;
     }
 
@@ -193,13 +203,10 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
         : undefined;
     if (availableAuthKeys && req.required) {
       // Not `not_connected`: that would hide the real cause.
-      errors.push({
-        integrationId: req.integrationId,
-        code: "auth_key_mismatch",
-        requiredAuthKey: req.requiredAuthKey,
-        availableAuthKeys,
-        message: `Integration '${req.integrationId}' requires auth '${req.requiredAuthKey}' but the actor's accessible connections use [${availableAuthKeys.join(", ")}].`,
-      });
+      record(
+        req.integrationId,
+        gapOf(req, authKeyMismatch({ ...req, auth }, req.requiredAuthKey!, availableAuthKeys)),
+      );
       continue;
     }
 
@@ -222,12 +229,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
     });
 
-    if (result.kind === "error") {
-      errors.push(result.error);
-      continue;
-    }
-    resolved[req.integrationId] = result.value;
-    if (result.kind === "unbound") warnings.push(result.warning);
+    record(req.integrationId, result);
   }
 
   return { resolved, errors, warnings };
@@ -407,6 +409,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
           warning: {
             integrationId: args.integrationId,
             code: "integration_unbound",
+            source: layer.source,
             message: `Integration '${args.integrationId}' is bound to no connection by ${LAYER_PHRASE[layer.source]}; the run proceeds without it.`,
           },
         };
@@ -438,27 +441,14 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // Health plays no part: a dead own row is still the pick, so an expiry never switches accounts.
   const own = serving.filter((c) => isOwnedByActor(args, c));
   if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
-  if (!args.required && own.length === 0) return unboundOf(args, serving);
-
-  if (serving.length === 0) {
+  if (own.length > 1) {
     return errorOf(args, {
-      code: "not_connected",
-      ...connectTarget(args),
-      message:
-        args.candidates.length === 0
-          ? `Integration '${args.integrationId}' has no connection accessible to this actor.`
-          : `Integration '${args.integrationId}' has no connection accessible to this actor on an auth that exposes the agent's selected tools.`,
+      code: "must_choose_connection",
+      message: `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
+      candidateConnections: serving.map((c) => candidateOf(args, c)),
     });
   }
-
-  return errorOf(args, {
-    code: "must_choose_connection",
-    message:
-      own.length === 0
-        ? `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own.`
-        : `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
-    candidateConnections: serving.map((c) => candidateOf(args, c)),
-  });
+  return gapOf(args, nothingOwnServes(args, serving));
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -470,40 +460,65 @@ const LAYER_PHRASE: Record<ExplicitSource, string> = {
   org_default: "an org default",
 };
 
-/** A non-required integration nothing usable serves: the run starts without it, saying why. */
-function unboundOf(args: ResolveOneArgs, serving: ConnectionRow[]): ResolveOneResult {
-  const { requiredAuthKey } = args.auth;
-  let detail: Pick<
-    ConnectionResolutionWarning,
-    "requiredAuthKey" | "availableAuthKeys" | "candidateConnections"
-  > = {};
-  let why = "has no connection accessible to this actor";
-  if (args.availableAuthKeys && requiredAuthKey !== undefined) {
-    detail = { requiredAuthKey, availableAuthKeys: args.availableAuthKeys };
-    why = `requires auth '${requiredAuthKey}' but the actor's accessible connections use [${args.availableAuthKeys.join(", ")}]`;
-  } else if (serving.length > 0) {
-    detail = { candidateConnections: serving.map((c) => candidateOf(args, c)) };
-    why =
-      "has only connections shared by other members, never bound implicitly — choose one (member pin or run override) or connect your own";
-  } else if (args.candidates.length > 0) {
-    why =
-      "has no connection accessible to this actor on an auth that exposes the agent's selected tools";
-  }
+/** A degraded state's twin code: a `required` integration in it is refused, any other is not. */
+type GapCode = Exclude<ConnectionResolutionWarningCode, "integration_unbound">;
+
+/** The state alone; {@link gapOf} adds the integration and finishes `message` per severity. */
+type Gap = Omit<ConnectionResolutionWarning, "integrationId" | "code"> & { code: GapCode };
+
+function gapOf(req: { integrationId: string; required: boolean }, gap: Gap): ResolveOneResult {
+  const item = { ...gap, integrationId: req.integrationId };
+  return req.required
+    ? { kind: "error", error: { ...item, message: `${gap.message}.` } }
+    : {
+        kind: "unbound",
+        value: [],
+        warning: { ...item, message: `${gap.message}; the run proceeds without it.` },
+      };
+}
+
+/** Connecting the dep's own `auth_key` clears it, so it carries that connect target. */
+function authKeyMismatch(
+  args: ConnectTargetArgs & { integrationId: string },
+  requiredAuthKey: string,
+  availableAuthKeys: string[],
+): Gap {
   return {
-    kind: "unbound",
-    value: [],
-    warning: {
-      integrationId: args.integrationId,
-      code: "integration_unbound",
-      ...connectTarget(args),
-      ...detail,
-      message: `Integration '${args.integrationId}' ${why}; the run proceeds without it.`,
-    },
+    code: "auth_key_mismatch",
+    requiredAuthKey,
+    availableAuthKeys,
+    ...connectTarget(args),
+    message: `Integration '${args.integrationId}' requires auth '${requiredAuthKey}' but the actor's accessible connections use [${availableAuthKeys.join(", ")}]`,
   };
 }
 
+/** No layer bound a set and the actor owns no serving connection: why. */
+function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
+  const { requiredAuthKey } = args.auth;
+  if (args.availableAuthKeys && requiredAuthKey !== undefined) {
+    return authKeyMismatch(args, requiredAuthKey, args.availableAuthKeys);
+  }
+  if (serving.length > 0) {
+    return {
+      code: "must_choose_connection",
+      candidateConnections: serving.map((c) => candidateOf(args, c)),
+      message: `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own`,
+    };
+  }
+  return {
+    code: "not_connected",
+    ...connectTarget(args),
+    message:
+      args.candidates.length === 0
+        ? `Integration '${args.integrationId}' has no connection accessible to this actor`
+        : `Integration '${args.integrationId}' has no connection accessible to this actor on an auth that exposes the agent's selected tools`,
+  };
+}
+
+type ConnectTargetArgs = Pick<ResolveOneArgs, "manifest" | "auth" | "agentTools" | "agentScopes">;
+
 /** The auth and scopes a connect flow needs, so its consent clears the next resolution. */
-function connectTarget(args: ResolveOneArgs): { authKey?: string; requiredScopes?: string[] } {
+function connectTarget(args: ConnectTargetArgs): { authKey?: string; requiredScopes?: string[] } {
   const authKey = connectTargetAuthKey(args);
   if (authKey === null) return {};
   const requiredScopes = oauthScopesForAuth(args, authKey);
@@ -545,7 +560,7 @@ function servesSelection(auth: AuthFilter, key: string): boolean {
   );
 }
 
-function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
+function servesAuth(args: Pick<ResolveOneArgs, "auth">, authKey: string): boolean {
   return args.auth.serving === null || args.auth.serving.has(authKey);
 }
 
@@ -554,7 +569,7 @@ function servesAuth(args: ResolveOneArgs, authKey: string): boolean {
  * serving auth of any type, else the single serving `oauth2` one (the only type a connect link
  * is minted for); `null` when that is ambiguous, and the user chooses.
  */
-function connectTargetAuthKey(args: ResolveOneArgs): string | null {
+function connectTargetAuthKey(args: ConnectTargetArgs): string | null {
   if (args.auth.requiredAuthKey !== undefined) {
     const key = declaredAuthKey(args.manifest, args.auth.requiredAuthKey);
     return key !== null && servesAuth(args, key) ? key : null;
@@ -571,7 +586,7 @@ function declaredAuthKey(manifest: IntegrationManifest, key: string): string | n
   return manifest.auths?.[key] ? key : null;
 }
 
-function oauthScopesForAuth(args: ResolveOneArgs, authKey: string): string[] {
+function oauthScopesForAuth(args: ConnectTargetArgs, authKey: string): string[] {
   if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
   return requiredScopesForAgent({
     manifest: args.manifest,
@@ -744,47 +759,57 @@ export async function resolveConnectionsForRun(
   });
 }
 
-export function missingIntegrationConnection(errors: ValidationFieldError[]): ApiError {
+/** `versionRef`: the launch's `runs.version_ref`, not necessarily the draft readiness reads. */
+export function missingIntegrationConnection(
+  errors: ValidationFieldError[],
+  versionRef?: string,
+): ApiError {
   return new ApiError({
     status: 409,
     code: "missing_integration_connection",
     title: "Missing Integration Connection",
     detail: errors[0]!.message,
     errors,
+    ...(versionRef ? { extensions: { version_ref: versionRef } } : {}),
   });
 }
 
 type ResolveRunConnectionsOutcome =
-  { ok: true; resolved: ResolvedConnectionMap | null } | { ok: false; error: ApiError };
+  | {
+      ok: true;
+      resolved: ResolvedConnectionMap | null;
+      /** One per `[]` of `resolved`: its warning as the run records it. */
+      integrationsUnbound: RunIntegrationUnbound[];
+    }
+  | { ok: false; error: ApiError };
 
 /** The run's connection snapshot (`null` when empty, all-`[]` kept), else the kickoff 409. */
 export async function resolveRunConnectionsOrError(
   input: ResolveConnectionsForRunInput,
+  versionRef: string,
 ): Promise<ResolveRunConnectionsOutcome> {
   const resolution = await resolveConnectionsForRun(input);
   if (resolution.errors.length > 0) {
     return {
       ok: false,
-      error: missingIntegrationConnection(resolution.errors.map(translateResolutionError)),
+      error: missingIntegrationConnection(
+        resolution.errors.map(translateResolutionError),
+        versionRef,
+      ),
     };
   }
   const resolved = Object.keys(resolution.resolved).length > 0 ? resolution.resolved : null;
-  return { ok: true, resolved };
+  const integrationsUnbound = resolution.warnings.map(({ integrationId, code, source }) => ({
+    integrationId,
+    code,
+    ...(source ? { source } : {}),
+  }));
+  return { ok: true, resolved, integrationsUnbound };
 }
 
 type ResolutionItem = ConnectionResolutionError | ConnectionResolutionWarning;
 
-/**
- * The resolution codes a connect flow can clear, and so the ones that carry
- * the `auth_key` + `required_scopes` relay: a first connect, a reconnect in
- * place, and a scope upgrade all end at the same consent screen.
- */
-const CONNECT_FLOW_CODES: ReadonlySet<ResolutionItem["code"]> = new Set([
-  "not_connected",
-  "integration_unbound",
-  "needs_reconnection",
-  "insufficient_scopes",
-]);
+const connectFlowCodes: ReadonlySet<string> = new Set(CONNECT_FLOW_CODES);
 
 /**
  * A resolution error (a 409 item) or warning (a launch `warnings` item) as the wire-format
@@ -797,6 +822,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
     code: e.code,
     title,
     message: e.message,
+    ...(e.source ? { source: e.source } : {}),
     // Relayed even empty: "none you may pick" is then the answer.
     ...(e.candidateConnections
       ? {
@@ -810,7 +836,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
         }
       : {}),
     // Forwarded as the connect kickoff's `scopes`, so one consent covers the selection.
-    ...(CONNECT_FLOW_CODES.has(e.code)
+    ...(connectFlowCodes.has(e.code)
       ? {
           ...(e.authKey ? { auth_key: e.authKey } : {}),
           ...(e.requiredScopes && e.requiredScopes.length > 0
@@ -839,9 +865,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
         }
       : {}),
     // AFPS §4.1: the dep's `auth_key` and, on a mismatch, the auths the actor's rows use.
-    ...(e.code === "auth_key_mismatch" ||
-    e.code === "auth_key_serves_no_selected_tool" ||
-    e.code === "integration_unbound"
+    ...(e.code === "auth_key_mismatch" || e.code === "auth_key_serves_no_selected_tool"
       ? {
           ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
           ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
@@ -865,7 +889,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
   required_integration_unbound: "Required Integration Bound To No Connection",
   integration_not_active: "Integration Not Active",
-  integration_unbound: "Integration Not Bound — Run Proceeds Without It",
+  integration_unbound: "Integration Bound To No Connection — Run Proceeds Without It",
 };
 
 async function buildRequirement(
@@ -892,7 +916,7 @@ export function requirementOf(
     integrationId: entry.id,
     manifest,
     hasSelectedTools,
-    hasRequiredAuth: manifestHasRequiredAuth(manifest),
+    hasMandatoryAuth: manifestHasRequiredAuth(manifest),
     required: entry.required === true,
     // Scope inference stays on the agent's OWN selection: the inherited defaults would newly
     // fail `insufficient_scopes` on connections that work.

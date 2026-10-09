@@ -51,6 +51,7 @@ import {
 import { buildShadowLoadedPackage, generateShadowPackageId } from "./inline-run.ts";
 import { getInlineRunLimits } from "./run-limits.ts";
 import { validateAgentReadiness, collectAgentReadiness } from "./agent-readiness.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import type { InlineRunBody } from "@appstrate/core/platform-types";
 import { toLaunchOverrides, type LaunchOverrides } from "./integration-connection-resolver.ts";
 import { connectionOverrideRefusals } from "../lib/launch-schemas.ts";
@@ -79,7 +80,7 @@ export interface InlineRunPreflightResult {
    * second time.
    */
   manifestCache: IntegrationManifestCache;
-  /** Readiness warnings (`integration_unbound`) — the launch / validate response's `warnings`. */
+  /** Readiness warnings — the launch / validate response's `warnings`. */
   warnings: ResolutionFieldError[];
 }
 
@@ -213,14 +214,7 @@ export async function runInlinePreflight(params: {
     );
     if (refusals.length > 0) {
       if (mode === "fail-fast") throw refusals[0]!.error;
-      push(
-        refusals.map(({ error }) => ({
-          field: "connection_overrides",
-          code: error.code,
-          title: error.title,
-          message: error.message,
-        })),
-      );
+      push(refusals.map((r) => r.item));
       const refused = new Set(refusals.map((r) => r.key));
       readinessOverrides = Object.fromEntries(
         Object.entries(body.connection_overrides ?? {}).filter(([key]) => !refused.has(key)),
@@ -289,6 +283,8 @@ export async function runInlinePreflight(params: {
     if (mode === "fail-fast") {
       warnings = await validateAgentReadiness({
         agent: probeAgent,
+        // An inline run executes its posted definition, recorded as the draft.
+        versionRef: VERSION_SELECTOR_DRAFT,
         orgId,
         spaceId,
         actor,

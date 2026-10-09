@@ -629,7 +629,7 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<AccessibleIntegr
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
  * The decision is {@link resolveConnectionsForRun}'s, never re-implemented:
- * `source` and `error_code` are its verdict verbatim, and per-candidate
+ * `source`, `error_code` and `warning` are its verdict verbatim, and per-candidate
  * `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
@@ -697,8 +697,6 @@ async function resolveAgentIntegrationPick(args: {
     adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? null;
   const memberPinnedConnectionIds =
     memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? null;
-  const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
-  const orgDefaultEnforced = orgDefault?.enforce ?? false;
 
   // The resolver's own candidate universe (orphaned-auth guard, the dep's pinned
   // `auth_key`, auths serving the selection), so the picker offers exactly the
@@ -732,9 +730,7 @@ async function resolveAgentIntegrationPick(args: {
   return {
     source: resolved?.[0]?.source ?? err?.source ?? null,
     error_code: err?.code ?? null,
-    warning_code: warning?.code ?? null,
-    required_auth_key: warning?.requiredAuthKey ?? null,
-    available_auth_keys: warning?.availableAuthKeys ?? [],
+    warning: warning ? translateResolutionError(warning) : null,
     // A set that failed its health check is still the set the layer binds.
     resolved_connection_ids: resolved
       ? resolved.map((r) => r.connectionId)
@@ -742,8 +738,8 @@ async function resolveAgentIntegrationPick(args: {
     resolved_missing_scopes: err?.missingScopes ?? [],
     admin_pinned_connection_ids: adminPinnedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
-    org_default_connection_ids: orgDefaultConnectionIds,
-    org_default_enforced: orgDefaultEnforced,
+    org_default_connection_ids: orgDefault?.connection_ids ?? null,
+    org_default_enforced: orgDefault?.enforce ?? false,
     can_add_connection: canConnect && (canConfigureIntegrations || !blocked),
     candidates,
   };

@@ -477,7 +477,7 @@
   "integration.admin.pinManagement.colConnections": "Connections",
   "integration.admin.pinManagement.delete": "Remove this pin",
   "integration.admin.pinManagement.add": "Pin",
-  "integration.admin.pinManagement.none": "No connection — the agent runs without this integration, or does not start if it requires it",
+  "integration.admin.pinManagement.noneHint": "The agent runs without this integration, or does not start if it requires it",
   "integration.admin.pinManagement.empty": "No pins for this integration.",
   "integration.admin.pinManagement.noPinnableConnections": "No shared connection available. Ask a user to enable sharing on their connection, or create one yourself.",
   "integration.admin.pinManagement.noConsumingAgents": "No active agent uses this integration, or each one is already pinned.",

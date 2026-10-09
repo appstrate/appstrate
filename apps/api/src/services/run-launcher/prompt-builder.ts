@@ -37,7 +37,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
 import { fetchIntegrationPromptDocs } from "../integration-service.ts";
-import type { DroppedIntegration, IntegrationDropReason } from "../integration-spawn-resolver.ts";
+import type { DroppedIntegration } from "../integration-spawn-resolver.ts";
 import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
 /**
@@ -136,16 +136,14 @@ export async function buildPlatformSystemPrompt(
   return renderPlatformPrompt(inputs);
 }
 
-/** A drop as the agent reads it; the raw reason stays in the run log. */
-const DROP_REASON_TEXT: Record<IntegrationDropReason, string> = UNAVAILABLE_INTEGRATION_REASONS;
-
 /** One entry per integration id, its causes joined (a set drops one entry per connection). */
 function unavailableIntegrationsOf(
   dropped: readonly DroppedIntegration[],
 ): Array<{ id: string; reason: string }> {
   const reasons = new Map<string, Set<string>>();
   for (const entry of dropped) {
-    const text = DROP_REASON_TEXT[entry.reason];
+    // As the agent reads it; the raw reason stays in the run log.
+    const text = UNAVAILABLE_INTEGRATION_REASONS[entry.reason];
     const reason = entry.connectionLabel ? `connection '${entry.connectionLabel}': ${text}` : text;
     reasons.set(entry.integrationId, (reasons.get(entry.integrationId) ?? new Set()).add(reason));
   }

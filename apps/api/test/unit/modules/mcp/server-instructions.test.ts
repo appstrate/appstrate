@@ -15,6 +15,9 @@
 
 import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
+import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor } from "./helpers.ts";
 
@@ -103,13 +106,17 @@ describe("MCP server instructions — connect bullet", () => {
     const external = connectBullet(false);
     for (const bullet of [chat, external]) {
       expect(bullet).toMatch(/marks it `required`/);
-      expect(bullet).toContain("`integration_unbound`");
+      // Generated from the tuple, so a new warning code reaches the model.
+      for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+        expect(bullet).toContain(`\`${code}\``);
+      }
       // An explicit `[]` and an inactive integration warn too, without a connect target.
       expect(bullet).toMatch(/bound to none on purpose \(`\[\]`\), or inactive in the space/);
-      expect(bullet).toContain("`integration_not_active`");
       expect(bullet).toMatch(/do not start a connect flow or re-run unless the caller asks/);
-      // Another member's schedule: the caller must not learn what their connections lack.
-      expect(bullet).toMatch(/schedule written for another member answers `warnings: \[\]`/);
+      // `null` = nothing judged (another member's schedule: their connections stay unrevealed).
+      expect(bullet).toMatch(/A schedule write answers `warnings: null` when it judged nothing/);
+      expect(bullet).toMatch(/written for another member, whose connections it never reveals/);
+      expect(bullet).toMatch(/`\[\]` only when it judged and found nothing to report/);
     }
     // A started run's warning never carries a link from this server; the chat renders its own card.
     for (const bullet of [chat, external]) {
@@ -211,11 +218,12 @@ describe("MCP server instructions — run guidance", () => {
         .find((line) => line.startsWith("- Shortcut —"))!;
     const external = shortcutOf(false);
     expect(external).toContain(
-      "`done:false` (with an `error`) means the run is still going: never call `run_and_wait` again for it — wait for it with `getRun` (`query: { wait: true }`) on that `id`.",
+      `\`done:false\` means its wait ended first. ${RUN_AND_WAIT_LONG_POLL_RESUME}`,
     );
+    expect(external).not.toContain("with an `error`");
     const chat = shortcutOf(true);
     expect(chat).toContain(
-      "never call `run_and_wait` again for it — read its outcome with `getRun` on that `id`.",
+      `\`done:false\` means its wait ended first. ${RUN_AND_WAIT_RESUME_INSTRUCTION}`,
     );
     expect(chat).not.toContain("wait: true");
     // The generic run bullet defers to the shortcut instead of contradicting it.

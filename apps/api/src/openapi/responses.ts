@@ -8,6 +8,21 @@ export const problemContent = {
 } as const;
 
 /**
+ * The `content` of a 409 that may be `missing_integration_connection`: `anyOf`, since that problem
+ * IS a `ProblemDetail` (a `oneOf` would match both), and only it types its `errors[].code`.
+ */
+export const connectionConflictContent = {
+  "application/problem+json": {
+    schema: {
+      anyOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { $ref: "#/components/schemas/MissingIntegrationConnectionProblem" },
+      ],
+    },
+  },
+} as const;
+
+/**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
 export const responses = {
@@ -229,7 +244,7 @@ export const responses = {
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        ...connectionConflictContent["application/problem+json"],
         examples: {
           idempotencyInProgress: {
             summary: "Same Idempotency-Key still in flight",

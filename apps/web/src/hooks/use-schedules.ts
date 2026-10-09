@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { client, type components, type paths } from "../api/client";
+import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -13,11 +13,8 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
-import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
+import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
-import { scheduleUpdateMayChangeFires } from "../lib/schedule-payload";
-
-type LaunchWarnings = components["schemas"]["LaunchWarnings"];
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -108,77 +105,43 @@ export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (data: {
-      name?: string;
-      cron_expression: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-      model_id_override?: string | null;
-      generation_config_override?: ModelGenerationSettings | null;
-      proxy_id_override?: string | null;
-      version_override?: string | null;
-      connection_overrides?: Record<string, string[]> | null;
-      actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto & LaunchWarnings> => {
+    mutationFn: async (body: CreateScheduleBody) => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
-        // Spec body types `input` as a bare object.
-        body: data as CreateScheduleBody,
+        body,
       });
       return created!;
     },
     onSuccess: (created) => {
       invalidateSchedules(qc);
-      toastWarnings({ kind: "schedule", userId: created.userId }, packageId, created.warnings);
+      if (created.warnings) {
+        toastWarnings({ kind: "schedule", userId: created.userId }, packageId, created.warnings);
+      }
     },
   });
 }
 
-interface UpdateScheduleVariables {
-  id: string;
-  name?: string;
-  cron_expression?: string;
-  timezone?: string;
-  input?: Record<string, unknown>;
-  enabled?: boolean;
-  model_id_override?: string | null;
-  generation_config_override?: ModelGenerationSettings | null;
-  proxy_id_override?: string | null;
-  version_override?: string | null;
-  connection_overrides?: Record<string, string[]> | null;
-  actor?: { userId?: string; endUserId?: string };
-}
-
 export function useUpdateSchedule() {
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const spaceId = useCurrentSpaceId();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    // The schedule as it stood, read before the write invalidates it.
-    onMutate: ({ id }: UpdateScheduleVariables) => ({
-      previous: qc.getQueryData<EnrichedSchedule>(scheduleKeys.detail(orgId, spaceId, id)),
-    }),
-    mutationFn: async ({
-      id,
-      ...data
-    }: UpdateScheduleVariables): Promise<ScheduleWireDto & LaunchWarnings> => {
+    mutationFn: async ({ id, ...body }: UpdateScheduleBody & { id: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
-        // Spec body types `input` as a bare object.
-        body: data as UpdateScheduleBody,
+        body,
       });
       return updated!;
     },
-    onSuccess: (updated, body, context) => {
+    onSuccess: (updated) => {
       invalidateSchedules(qc);
-      if (!scheduleUpdateMayChangeFires(body, context?.previous)) return;
-      toastWarnings(
-        { kind: "schedule", userId: updated.userId },
-        updated.packageId,
-        updated.warnings,
-      );
+      if (updated.warnings) {
+        toastWarnings(
+          { kind: "schedule", userId: updated.userId },
+          updated.packageId,
+          updated.warnings,
+        );
+      }
     },
   });
 }

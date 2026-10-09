@@ -8,6 +8,7 @@ import {
   buildTokenBody,
   assertClientAuthCoherent,
   type ParsedTokenResponse,
+  type TokenErrorKind,
 } from "./token-utils.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { oauthEgressFetch } from "./oauth-egress.ts";
@@ -40,7 +41,7 @@ export interface RefreshContext {
 /**
  * Error thrown by performRefreshTokenExchange when the OAuth token refresh call fails.
  *
- * `kind` discriminates between two cases that callers MUST treat differently:
+ * `kind` discriminates between three cases that callers MUST treat differently:
  *
  * - `"revoked"`: the OAuth server answered `{ "error": "invalid_grant" }`
  *   (RFC 6749 §5.2) on `HTTP 400`, `HTTP 401` (mandated by §5.2 when client
@@ -57,11 +58,15 @@ export interface RefreshContext {
  *   false positives that force users to reconnect unnecessarily, especially
  *   when the initial 401 that triggered the refresh came from a malformed
  *   agent request (wrong header name, wrong auth scheme, wrong endpoint).
+ *
+ * - `"client_rejected"`: the server rejected the client itself (`invalid_client`
+ *   or `unauthorized_client`). The grant may be intact: callers MUST NOT flag
+ *   the connection nor count it as a transient failure.
  */
 export class RefreshError extends Error {
   constructor(
     message: string,
-    public readonly kind: "revoked" | "transient",
+    public readonly kind: TokenErrorKind,
     public readonly status?: number,
     public readonly body?: string,
     /**
@@ -80,8 +85,7 @@ export class RefreshError extends Error {
 export interface RefreshExchangeResult {
   /** Normalised token response (access/refresh token, expiry, scopes). */
   parsed: ParsedTokenResponse;
-  /** Raw JSON body — callers that need provider-specific fields (e.g. the
-   *  authoritative `scope` echo for shrink detection) read it directly. */
+  /** Raw JSON body, for provider-specific fields (e.g. `id_token`). */
   raw: Record<string, unknown>;
 }
 
@@ -165,6 +169,6 @@ export async function performRefreshTokenExchange(
   // `refreshToken` as the third argument is a DIFFERENT case: RFC 6749 §6 lets
   // the server omit `refresh_token` to mean "keep the one you have", so
   // non-rotating providers (Google, Slack, GitHub) depend on it.
-  const parsed = parseTokenResponse(read.raw, undefined, refreshToken);
+  const parsed = parseTokenResponse(read.raw, refreshToken);
   return { parsed, raw: read.raw };
 }

@@ -20,6 +20,10 @@ import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import { parseVersionEtag } from "@appstrate/core/etag";
 import type { PrincipalKind } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  type ConnectionResolutionWarningCode,
+} from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import type { ChatPlatformDeps } from "./platform-services.ts";
@@ -34,6 +38,9 @@ import {
 } from "./skills.ts";
 
 type InjectedSkillMap = InjectedSkills["skills"];
+
+/** A launch warning code as the persona names it. */
+const warningCode = (code: ConnectionResolutionWarningCode) => `\`${code}\``;
 
 /** Structural mirror of `SpaceRoleRef` (`apps/api/src/lib/space-role.ts`) — not importable from here. */
 type SpaceRoleRefLike =
@@ -197,7 +204,7 @@ Then read \`result.summary\` from the \`run_and_wait\` result and reply to the u
 )}
 You already have the exact shape for \`run_and_wait\`: for existing agents pass \`{ kind:"agent", scope, name, version?, input? }\`${inline('; for inline runs pass `{ kind:"inline", manifest, prompt, input?, context_files? }` — those two optional arguments are the ONLY top-level way to give an inline run a file, and any other argument name is dropped before the launch')}. ${inline("Either kind also takes", "It also takes")} \`connection_overrides\` — a top-level \`{ "<integration id>": ["<connection id>", …] }\` map (always an array, even for one id), used to retry after a \`must_choose_connection\` error names its \`candidate_connections\` (each with \`label\`, \`account_id\`, \`owned_by_actor\` and \`needs_reconnection\` — pick from those, don't go list connections; never pick one with \`needs_reconnection: true\`, the run fails on it — ask the user to reconnect it instead; and a candidate with \`owned_by_actor: false\` is a colleague's shared account, so use it only when the user named it, otherwise ask), and to bind several connections of one integration when the task needs them all; \`[]\` runs without that integration (refused for one the agent marks \`required\`). (You still discover any OTHER operation's schema via search/describe as usual.) Read \`run_and_wait\`'s returned \`result\` field — that is the sub-agent's deliverable; answer the user from it and never fabricate it. If the run fails, read its \`error\` and report it plainly.
 
-After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (\`integration_unbound\` or \`integration_not_active\`, \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For \`integration_unbound\`, offer to connect it when a connect card appears under the run. For \`integration_not_active\`, connecting is not the remedy: the integration is not activated in this space, which someone allowed to manage the space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
+After a successful \`run_and_wait\`, deliver the result directly and briefly: present the \`result\` content (formatted for readability) and stop. Do not narrate what the run did, restate its progress logs, or add closing commentary — the user watched the run live on its card. One short lead-in sentence at most. One exception: each \`warnings\` item (${CONNECTION_RESOLUTION_WARNING_CODES.map(warningCode).join(", ")}; \`field: "integrations.<id>"\`) names an integration the run started without, so the result lacks what it would have provided. Say so in one sentence per integration and never present the result as covering that source. For ${warningCode("not_connected")} or ${warningCode("auth_key_mismatch")}, offer to connect it when a connect card appears under the run. For ${warningCode("must_choose_connection")}, only colleagues' shared connections exist: offer a re-run with the one the user names among its \`candidate_connections\`. For ${warningCode("integration_unbound")}, a connection choice (its \`source\`) binds none on purpose: say so, and offer nothing to connect. For ${warningCode("integration_not_active")}, connecting is not the remedy: the integration is not activated in this space, which someone allowed to manage the space fixes by activating it (\`activatePackage\`, below) — offer that, and do not re-run unless the user asks.
 
 `,
   "\n",

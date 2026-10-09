@@ -11,6 +11,8 @@ import {
   parseResume,
   INTEGRATION_RESUME_MARKER,
 } from "../src/ui/auth-offer.ts";
+import { runAndWaitSteps } from "@appstrate/core/run-and-wait-client";
+import { toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
 
 const BODY = { auth_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1", state: "abc-123" };
 const OFFER = { connect_url: "https://app/api/integrations/connect/start?token=t" };
@@ -161,23 +163,61 @@ describe("extractAuthOffers", () => {
 });
 
 describe("extractRunAndWaitAuthOffers", () => {
-  const step = (payload: Record<string, unknown>) => ({
-    content: [{ type: "text", text: JSON.stringify(payload) }],
-    connectOffers: [OFFER],
-  });
+  const warning = {
+    field: "integrations.@appstrate/gmail",
+    code: "not_connected",
+    message: "Gmail is not connected",
+    connect_url: OFFER.connect_url,
+  };
 
-  it("withholds a started run's offers until the run ends (#1830)", () => {
-    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: false }))).toEqual([]);
-    expect(extractRunAndWaitAuthOffers(step({ id: "run_1", done: true }))).toEqual([
+  /**
+   * The parts the card renders for one call, built as the chat builds them: core's
+   * own steps, wrapped by the engine's `toPiToolResult`; every step but the last is a
+   * live (preliminary) chunk, the last is the settled tool result.
+   */
+  async function parts(run: Record<string, unknown>, maxMs?: number) {
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0]) => {
+      const body = String(input).endsWith("/run")
+        ? { id: "run_1", packageId: "@acme/writer", status: "pending", warnings: [warning] }
+        : { id: "run_1", packageId: "@acme/writer", ...run };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    const steps = [];
+    for await (const step of runAndWaitSteps(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl, maxMs },
+    )) {
+      steps.push(step.payload);
+    }
+    return steps.map((payload, i) => ({
+      result: toPiToolResult(payload),
+      isPreliminary: i < steps.length - 1,
+    }));
+  }
+
+  it("withholds a started run's offers while the call is in flight (#1830)", async () => {
+    const [live] = await parts({ status: "success" });
+    expect(extractRunAndWaitAuthOffers(live!)).toEqual([]);
+    // The same payload settled (a page reload reads only the settled result) shows them.
+    expect(extractRunAndWaitAuthOffers({ ...live!, isPreliminary: false })).toEqual([
       { authUrl: OFFER.connect_url },
     ]);
   });
 
-  it("shows them on a timed-out wait and on a refused launch", () => {
-    expect(
-      extractRunAndWaitAuthOffers(step({ id: "run_1", done: false, error: "timed out" })),
-    ).toEqual([{ authUrl: OFFER.connect_url }]);
-    expect(extractRunAndWaitAuthOffers(step({ status: 409, body: {} }))).toEqual([
+  it("shows them once the call settles, whether the run ended or the wait did", async () => {
+    for (const settled of [
+      (await parts({ status: "success" })).at(-1)!,
+      (await parts({ status: "running" }, 0)).at(-1)!,
+    ]) {
+      expect(extractRunAndWaitAuthOffers(settled)).toEqual([{ authUrl: OFFER.connect_url }]);
+    }
+  });
+
+  it("shows them on a refused launch", () => {
+    const refused = { content: [], connectOffers: [OFFER] };
+    expect(extractRunAndWaitAuthOffers({ result: refused })).toEqual([
       { authUrl: OFFER.connect_url },
     ]);
   });
@@ -206,7 +246,7 @@ describe("resuming after a connect from run_and_wait", () => {
 
   it("tells a started run from a refused launch", () => {
     expect(isStartedRunResult(result({ id: "run_1", done: true }))).toBe(true);
-    expect(isStartedRunResult(result({ id: "run_1", done: false, error: "timed out" }))).toBe(true);
+    expect(isStartedRunResult(result({ id: "run_1", done: false }))).toBe(true);
     expect(isStartedRunResult(result({ status: 409, body: {} }))).toBe(false);
   });
 

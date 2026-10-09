@@ -43,7 +43,7 @@ import {
   downloadRunFileStream,
 } from "../services/run-workspace-storage.ts";
 import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
-import { parseTokenUsage } from "@appstrate/core/token-usage";
+import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";

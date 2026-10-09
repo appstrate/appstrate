@@ -179,12 +179,22 @@ bill a run you could never read. It declares the inline kind and its arguments
 (`manifest`, `prompt`, `context_files`) only to a caller who also holds
 `agents:write`; anyone else is offered `kind:"agent"` alone.
 
-How long it waits depends on the client. A request carrying
+Its `structuredContent` follows the tool's declared `outputSchema` (the
+`RunAndWaitResult` component of the OpenAPI spec), and the server refuses to
+answer anything else: `{ id, packageId, status, done, warnings }`, plus
+`result`, `error` and `files` once the run is over. `done` is the only thing
+that tells a finished run from one still going; `error` is always the run's own
+failure, and `warnings` is `[]` when the launch reported none.
+
+How long it waits depends on the client. Both delays derive from the MCP SDK
+client's default request timeout (60 s). A request carrying
 `params._meta.progressToken` is answered over SSE: the call streams
-`notifications/progress` every 15 s and returns `done:true` once the run is
-over. Without a token nothing can keep the request alive, so after about 45 s
-it returns `done:false` with the run `id`; continue with `getRun`
-(`query: { wait: true }`) on that id, never with a second `run_and_wait`.
+`notifications/progress` every 15 s (a quarter of it) and returns `done:true`
+once the run is over. Without a token nothing can keep the request alive, so
+after 45 s (one heartbeat short of it) it returns `done:false` with the run
+`id` and no outcome, and a second text block saying what to do next: continue
+with `getRun` (`query: { wait: true }`, which the server holds for at most
+55 s) on that id, never with a second `run_and_wait`.
 Progress only helps a client that resets its request timeout on it: the MCP
 TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
 `false`). A client that sends a token without resetting its timeout on progress

@@ -60,6 +60,7 @@ import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { versionRefOf } from "../services/agent-version-resolver.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
@@ -333,6 +334,7 @@ export function createRunsRemoteRouter() {
         // Readiness gate — same checks the inline preflight ends with.
         warnings = await validateAgentReadiness({
           agent: agentForRun,
+          versionRef: versionRefOf(overrideVersionLabel),
           orgId,
           spaceId,
           actor,

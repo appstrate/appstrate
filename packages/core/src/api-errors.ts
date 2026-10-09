@@ -10,6 +10,8 @@
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
 
+import type { ConnectionResolutionSource } from "./integration.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -57,7 +59,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * round-trip through the connection list before the caller could choose.
    * On the credential proxy the candidates are the `X-Run-Id` run's bound set
    * (else every own and shared connection), and the retry names one in
-   * `X-Connection-Id`. Also on an `integration_unbound` warning (shared-only reach).
+   * `X-Connection-Id`.
    */
   candidate_connections?: {
     id: string;
@@ -71,9 +73,8 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
   /**
-   * The connect-flow codes (`insufficient_scopes`, `not_connected`, `needs_reconnection`,
-   * `integration_unbound`) — OAuth scopes the run's selected tools require on
-   * `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.
+   * The connect-flow codes (`CONNECT_FLOW_CODES`) — OAuth scopes the run's selected tools require
+   * on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.
    */
   required_scopes?: string[];
   /** The connect-flow codes — the auth the connect flow must target (`/auths/{authKey}/connect/...`). */
@@ -84,10 +85,12 @@ export interface ResolutionFieldError extends ValidationFieldError {
    * a foreign-owned one is a read-only error.
    */
   owned_by_actor?: boolean;
-  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` / `integration_unbound` — the dep's `auth_key` (AFPS §4.1). */
+  /** `auth_key_mismatch` / `auth_key_serves_no_selected_tool` — the dep's `auth_key` (AFPS §4.1). */
   required_auth_key?: string;
-  /** `auth_key_mismatch` / `integration_unbound` — auth keys the actor's existing connections use. */
+  /** `auth_key_mismatch` — auth keys the actor's existing connections use. */
   available_auth_keys?: string[];
+  /** The cascade layer whose set failed, or that chose `[]` (the `*integration_unbound` codes). */
+  source?: ConnectionResolutionSource;
   /**
    * Ready-to-open hosted-connect link for THIS item. Present only on a
    * run-kickoff 409 (or launch `warnings`) whose caller opted in (`RUN_CONNECT_OFFERS_HEADER`, whose
@@ -315,12 +318,17 @@ export function conflict(
   });
 }
 
-export function gone(code: string, detail: string): ApiError {
+export function gone(
+  code: string,
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 410,
     code,
     title: "Gone",
     detail,
+    extensions,
   });
 }
 
@@ -404,12 +412,16 @@ export function internalError(): ApiError {
   });
 }
 
-export function badGateway(detail: string): ApiError {
+export function badGateway(
+  detail: string,
+  extensions?: Readonly<Record<string, unknown>>,
+): ApiError {
   return new ApiError({
     status: 502,
     code: "bad_gateway",
     title: "Bad Gateway",
     detail,
+    extensions,
   });
 }
 

@@ -49,7 +49,12 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { createConsoleSink } from "./sink.ts";
-import { announceLaunch, connectionRefusalLines } from "./launch-warnings.ts";
+import {
+  announceLaunch,
+  connectionRefusalLines,
+  parseLaunchItems,
+  type LaunchItem,
+} from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
@@ -278,10 +283,7 @@ export async function runRemote(
   // ─── 1. Trigger the run ────────────────────────────────────────────
   const { runId, warnings } = await triggerRun(opts, { fetchImpl, requestTimeoutMs });
 
-  // Match the local path's preamble verbatim so the user sees the same
-  // "→ running ... (reporting to ... as run_xxx)" line in both modes.
-  // The local path emits this on stderr from runCommandLocal:534 — see
-  // also `runCommand.ts` for the source of the format string.
+  // Same helper as the local path, so both modes print the same preamble.
   announceLaunch({
     type: "appstrate.remote.triggered",
     json: opts.json,
@@ -562,7 +564,7 @@ function refusalHint(body: unknown): string | undefined {
 async function triggerRun(
   opts: RunRemoteOptions,
   deps: HttpDeps,
-): Promise<{ runId: string; warnings: unknown[] }> {
+): Promise<{ runId: string; warnings: LaunchItem[] }> {
   // Don't encode scope/name. They're already validated by `package-spec.ts`
   // as `@[a-z0-9-]+/[a-z0-9-]+`, and `encodeURIComponent("@acme")` produces
   // `%40acme` which the server route `:scope{@[^/]+}` rejects as 404 —
@@ -652,7 +654,7 @@ async function triggerRun(
       hint: "Expected the created run resource (`{ id: string, ... }`). The platform may be incompatible with this CLI version.",
     });
   }
-  return { runId: payload.id, warnings: Array.isArray(payload.warnings) ? payload.warnings : [] };
+  return { runId: payload.id, warnings: parseLaunchItems(payload.warnings) };
 }
 
 async function fetchRunRecord(

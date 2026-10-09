@@ -392,7 +392,6 @@ export async function handleIntegrationOAuthCallback(
     codeVerifier: stateRow.codeVerifier || undefined,
     redirectUri: stateRow.redirectUri,
     code,
-    scopesRequested: stateRow.scopesRequested,
     // RFC 8707 — re-bind on the token request even if we sent it on the
     // authorize URL; some IdPs only honour it here.
     ...(integration.resource ? { extraTokenParams: { resource: integration.resource } } : {}),
@@ -416,7 +415,8 @@ export async function handleIntegrationOAuthCallback(
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
-    scopesGranted: parsed.scopesGranted,
+    // RFC 6749 §5.1: an omitted `scope` is the requested one.
+    scopesGranted: parsed.scopesReturned ?? stateRow.scopesRequested,
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),

@@ -74,13 +74,13 @@ describe("ScheduleForm — another member's schedule", () => {
     const html = renderForm([{ id: GMAIL, required: true }, { id: SLACK }]);
     expect(html).toContain('data-testid="schedule-actor-connections"');
     expect(html).toContain(`schedule-actor-none-${SLACK}`);
-    expect(html).toContain(`sched-none-${SLACK}`);
+    expect(html).toContain(`sched-choice-${SLACK}-none`);
     expect(html).not.toContain(`schedule-actor-none-${GMAIL}`);
-    expect(html).not.toContain(`sched-none-${GMAIL}`);
+    expect(html).not.toContain(`sched-choice-${GMAIL}-none`);
   });
 
   it("offers it for an integration once the agent stops requiring it", () => {
     const html = renderForm([{ id: GMAIL, required: false }]);
-    expect(html).toContain(`sched-none-${GMAIL}`);
+    expect(html).toContain(`sched-choice-${GMAIL}-none`);
   });
 });

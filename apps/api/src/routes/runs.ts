@@ -14,7 +14,7 @@ import {
   RUN_LOG_LEVELS,
   GLOBAL_RUN_KINDS,
 } from "../services/state/runs.ts";
-import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
+import { resolveAgentRunVersion, versionRefOf } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
@@ -224,14 +224,11 @@ function closedSetQuery<T extends string>(
 
 // --- Router ---
 
-/** A launch body as the idempotency cache keeps it: no connect link on `warnings` or `errors`. */
+/** A launch body as the idempotency cache keeps it: no connect link on `warnings`. */
 function storedLaunchBody(body: Record<string, unknown>): Record<string, unknown> {
-  const stripped = { ...body };
-  for (const key of ["warnings", "errors"] as const) {
-    const items = body[key];
-    if (Array.isArray(items)) stripped[key] = withoutConnectOffers(items as ResolutionFieldError[]);
-  }
-  return stripped;
+  const { warnings } = body;
+  if (!Array.isArray(warnings)) return body;
+  return { ...body, warnings: withoutConnectOffers(warnings as ResolutionFieldError[]) };
 }
 
 const runLaunchIdempotency = () => idempotency({ replay: replayRun, storedBody: storedLaunchBody });
@@ -379,6 +376,7 @@ export function createRunsRouter() {
 
         const warnings = await resolveRunPreflight({
           agent: effectiveAgent,
+          versionRef: versionRefOf(overrideVersionLabel),
           spaceId: c.get("spaceId"),
           orgId,
           actor,

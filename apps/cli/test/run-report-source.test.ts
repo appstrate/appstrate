@@ -198,7 +198,7 @@ describe("startReportSession — integration readiness", () => {
   const SOURCE: ReportSource = { kind: "inline", bundle: makeBundle() };
   const WARNING = {
     field: "integrations.@appstrate/gmail",
-    code: "integration_unbound",
+    code: "not_connected" as const,
     message: "Integration '@appstrate/gmail' is not connected",
   };
   let stub: ReturnType<typeof installStubFetch>;
@@ -263,8 +263,31 @@ describe("startReportSession — integration readiness", () => {
     expect(out.stdout).toBe("");
     expect(out.stderr).toBe(
       `→ running @scope/agent@1.0.0 (reporting to ${REPORT_CTX.instance} as ${SUCCESS_BODY.id})\n` +
-        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (integration_unbound)\n",
+        "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n",
     );
+  });
+
+  it("names the layer that chose no connection, and keeps codes and sources it does not know", async () => {
+    const chosenNone = {
+      field: "integrations.@appstrate/notion",
+      code: "integration_unbound" as const,
+      source: "member_pin" as const,
+      message: "Integration '@appstrate/notion' is bound to no connection by your pin",
+    };
+    const newer = { field: "integrations.@appstrate/slack", code: "newer_code", source: "newer" };
+    const runLevel = { code: "not_connected", message: "no field" };
+    const malformed = ["not an item", { field: "integrations.x" }, { code: "c", source: 1 }];
+    stub = installStubFetch(() =>
+      ok({ ...SUCCESS_BODY, warnings: [WARNING, chosenNone, newer, runLevel, ...malformed] }),
+    );
+    const live = await session();
+    expect(live.warnings).toEqual([WARNING, chosenNone, newer, runLevel]);
+    const { stderr } = announce(live, false);
+    expect(stderr).toContain(
+      "⚠ @appstrate/notion: Integration '@appstrate/notion' is bound to no connection by your pin (integration_unbound via member_pin)\n",
+    );
+    expect(stderr).toContain("⚠ @appstrate/slack: newer_code (newer_code via newer)\n");
+    expect(stderr).toContain("⚠ run: no field (not_connected)\n");
   });
 
   it("announces nothing on stdout for an unreported local run under --json", () => {

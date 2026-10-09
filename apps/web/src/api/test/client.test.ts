@@ -43,12 +43,13 @@ describe("toApiError", () => {
     expect(apiError.param).toBe("input.file");
   });
 
-  it("carries the polymorphic `errors` payload through as details", async () => {
+  it("carries the polymorphic `errors` payload through as errors", async () => {
     const error = (await toApiError(
       problem({ code: "validation_failed", detail: "invalid", errors: [{ path: "name" }] }, 400),
     )) as ApiError;
 
-    expect(error.details).toEqual([{ path: "name" }] as never);
+    expect(error.errors).toEqual([{ path: "name" }]);
+    expect(error.details).toBeUndefined();
   });
 
   it("carries a problem's extension members through as details", async () => {
@@ -74,16 +75,21 @@ describe("toApiError", () => {
     expect(error.details).toEqual({ packageId: "@acme/skill", active_version: "1.0.0" });
   });
 
-  it("prefers `errors` when a problem carries both it and extension members", async () => {
-    // Consumers of a validation problem index `details` as an array.
+  it("keeps both when a problem carries `errors` and extension members", async () => {
     const error = (await toApiError(
       problem(
-        { code: "validation_failed", detail: "invalid", errors: [{ path: "name" }], hint: "x" },
-        400,
+        {
+          code: "missing_integration_connection",
+          detail: "not connected",
+          errors: [{ path: "name" }],
+          version_ref: "1.2.0",
+        },
+        409,
       ),
     )) as ApiError;
 
-    expect(error.details).toEqual([{ path: "name" }] as never);
+    expect(error.errors).toEqual([{ path: "name" }]);
+    expect(error.details).toEqual({ version_ref: "1.2.0" });
   });
 
   it("leaves details undefined when a problem has only standard fields", async () => {

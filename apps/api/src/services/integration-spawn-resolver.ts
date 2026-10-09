@@ -48,7 +48,7 @@ import {
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
-import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { BundleError, UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
@@ -115,23 +115,10 @@ interface ResolveIntegrationsInput {
  * Machine-readable reason a declared integration did NOT make it into the
  * run's spawn set. One value per drop site in {@link resolveOne} — the run
  * marker persists it verbatim, so an operator reading `run_logs` gets the
- * same discrimination the server-side log has instead of a prose blob.
+ * same discrimination the server-side log has instead of a prose blob. The
+ * keys of the agent-facing table, so a reason cannot lack its text, nor a text its reason.
  */
-export type IntegrationDropReason =
-  | "not_found"
-  | "not_integration"
-  | "invalid_manifest"
-  | "not_active"
-  | "remote_source_invalid"
-  | "remote_url_unrenderable"
-  | "remote_url_blocked"
-  | "local_server_ref_missing"
-  | "mcp_server_unresolved"
-  | "mcp_server_not_runnable"
-  | "no_delivery"
-  | "bound_set_incomplete"
-  | "unbound"
-  | "resolve_error";
+export type IntegrationDropReason = keyof typeof UNAVAILABLE_INTEGRATION_REASONS;
 
 /** One declared integration the run will start WITHOUT, plus why. */
 export interface DroppedIntegration {

@@ -1722,10 +1722,9 @@ describe("Runs API", () => {
       expect(JSON.stringify(body.connections_used)).not.toContain(
         "22222222-2222-2222-2222-222222222222",
       );
-      expect(body.integrations_unbound).toEqual([]);
     });
 
-    it("GET /api/runs/:id lists the integrations the run started without in integrations_unbound", async () => {
+    it("GET /api/runs/:id lists the integrations the run started without, with their cause", async () => {
       await seedAgent({ id: "@runorg/unbound-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/unbound-agent",
@@ -1733,33 +1732,42 @@ describe("Runs API", () => {
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
-        resolvedConnections: {
-          "@acme/slack": [],
-          "@acme/gmail": [
-            {
-              connectionId: "11111111-1111-1111-1111-111111111111",
-              source: "fallback_auto",
-              label: "Gmail Boulot",
-              accountId: "dt@tractr.net",
-            },
-          ],
-          "@acme/notion": [],
-        },
+        resolvedConnections: { "@acme/slack": [], "@acme/notion": [] },
+        integrationsUnbound: [
+          { integrationId: "@acme/slack", code: "integration_unbound", source: "member_pin" },
+          { integrationId: "@acme/notion", code: "not_connected" },
+        ],
       });
 
       const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.integrations_unbound).toEqual(["@acme/notion", "@acme/slack"]);
-      expect(body.connections_used).toEqual([
+      expect(body.integrations_unbound).toEqual([
         {
-          integration_package_id: "@acme/gmail",
-          label: "Gmail Boulot",
-          account_id: "dt@tractr.net",
-          source: "fallback_auto",
+          integration_package_id: "@acme/slack",
+          code: "integration_unbound",
+          source: "member_pin",
         },
+        { integration_package_id: "@acme/notion", code: "not_connected", source: null },
       ]);
+    });
+
+    it("GET /api/runs/:id refuses to serve an integrations_unbound row that drifted from its shape", async () => {
+      await seedAgent({ id: "@runorg/drift-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/drift-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        integrationsUnbound: ["@acme/slack"] as never,
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      // Parsed, never trusted as typed: a drifted row fails loudly, not as a half-shaped item.
+      expect(res.status).toBe(500);
     });
 
     it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {
@@ -1777,6 +1785,7 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.connections_used).toBeNull();
+      // NULL column = not recorded (no resolution ran, or the run predates the record).
       expect(body.integrations_unbound).toBeNull();
     });
 

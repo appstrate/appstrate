@@ -39,10 +39,10 @@ import {
  * at the bottom of this file need: "what did the *second* command print?"
  * is answered by that command's own sink, not by clearing a shared array.
  *
- * `io.exit` throws `ExitError`, so exit-code branches unwind without
+ * `io.exit` throws `CommandExit`, so exit-code branches unwind without
  * terminating the worker.
  */
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-openapi-cfg-");
@@ -205,7 +205,7 @@ describe("openapi list", () => {
     try {
       await openapiListCommand({ profile: "default" }, io);
     } catch (err) {
-      if (err instanceof ExitError) code = err.code;
+      if (err instanceof CommandExit) code = err.code;
       else throw err;
     }
     expect(code).toBe(1);
@@ -348,7 +348,7 @@ describe("openapi show", () => {
     try {
       await openapiShowCommand("doesNotExist", undefined, { profile: "default" }, io);
     } catch (err) {
-      if (err instanceof ExitError) code = err.code;
+      if (err instanceof CommandExit) code = err.code;
       else throw err;
     }
     expect(code).toBe(1);

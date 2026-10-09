@@ -50,42 +50,76 @@ import {
   type CallToolResult,
   type Tool,
 } from "@appstrate/mcp-transport";
+import type { Progress } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.ts";
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
 
-/** Relays upstream progress under the agent's own token, so its client's timeout restarts too. */
-function relayProgress(
-  extra: AppstrateRequestExtra,
-): Parameters<AppstrateMcpClient["callTool"]>[1] {
+/** At most one relayed progress per call per window: each relay restarts the agent's timeout. */
+const PROGRESS_RELAY_WINDOW_MS = 1000;
+
+interface ProgressRelay {
+  onProgress(update: Progress): void;
+  /** Ends the relay: the pending value is dropped, the window timer cleared. */
+  close(): void;
+}
+
+/**
+ * Relays upstream progress under the agent's own token, so its client's timeout restarts too.
+ * Untrusted: a value that does not increase is dropped (MCP requires progress to increase).
+ */
+function relayProgress(extra: AppstrateRequestExtra): ProgressRelay | undefined {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return undefined;
-  return {
-    onProgress: ({ progress, total, message }) => {
-      notifyDetached(
-        extra,
-        {
-          method: "notifications/progress",
-          params: {
-            progressToken,
-            progress,
-            ...(total !== undefined ? { total } : {}),
-            ...(message !== undefined
-              ? {
-                  // By code point, so the cut never splits a surrogate pair.
-                  message: Array.from(message)
-                    .slice(0, RELAYED_PROGRESS_MESSAGE_MAX_CHARS)
-                    .join(""),
-                }
-              : {}),
-          },
+  let highest = -Infinity;
+  let pending: Progress | undefined;
+  let windowTimer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+
+  const send = ({ progress, total, message }: Progress) => {
+    notifyDetached(
+      extra,
+      {
+        method: "notifications/progress",
+        params: {
+          progressToken,
+          progress,
+          ...(total !== undefined ? { total } : {}),
+          ...(message !== undefined
+            ? {
+                // By code point, so the cut never splits a surrogate pair.
+                message: Array.from(message).slice(0, RELAYED_PROGRESS_MESSAGE_MAX_CHARS).join(""),
+              }
+            : {}),
         },
-        (err) =>
-          logger.debug("mcp: progress relay to the agent failed", {
-            error: err instanceof Error ? err.message : String(err),
-          }),
-      );
+      },
+      (err) =>
+        logger.debug("mcp: progress relay to the agent failed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+    windowTimer = setTimeout(endWindow, PROGRESS_RELAY_WINDOW_MS);
+  };
+  const endWindow = () => {
+    windowTimer = undefined;
+    const next = pending;
+    pending = undefined;
+    if (next) send(next);
+  };
+
+  return {
+    onProgress(update) {
+      if (closed || !(update.progress > highest)) return;
+      highest = update.progress;
+      if (windowTimer === undefined) send(update);
+      else pending = update;
+    },
+    close() {
+      closed = true;
+      pending = undefined;
+      if (windowTimer !== undefined) clearTimeout(windowTimer);
+      windowTimer = undefined;
     },
   };
 }
@@ -643,13 +677,22 @@ export class McpHost {
         route: ToolRoute,
         args: Record<string, unknown>,
         extra: AppstrateRequestExtra,
-      ): Promise<CallToolResult> =>
-        stripForgedRuntimeEvents(
-          await route.client.callTool(
-            { name: route.originalName, arguments: args },
-            { ...(extra.signal ? { signal: extra.signal } : {}), ...relayProgress(extra) },
-          ),
-        );
+      ): Promise<CallToolResult> => {
+        const relay = relayProgress(extra);
+        try {
+          return stripForgedRuntimeEvents(
+            await route.client.callTool(
+              { name: route.originalName, arguments: args },
+              {
+                ...(extra.signal ? { signal: extra.signal } : {}),
+                ...(relay ? { onProgress: relay.onProgress } : {}),
+              },
+            ),
+          );
+        } finally {
+          relay?.close();
+        }
+      };
       // One connection: the upstream descriptor as is. Several: every tool of the
       // slot names its connection, so a call always states the account it acts on.
       if (labelsBySlot.get(this.toolToNamespace.get(desc.name)!)!.size < 2) {

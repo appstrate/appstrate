@@ -1,46 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 6 — refresh-time scope-shrink awareness.
+ * `refreshConnectionCredential` — the one decision over a connection's credential — and the
+ * refresh it runs: the write-back (outputs kept, `scopes_granted` overwritten only by an echoed
+ * `scope`, OAuth 2 §5.1), the freshness short-circuit on both sides of the lead window, the
+ * pinning to the upstream the caller read, and the refresh-failure escalation.
  *
- * `forceRefreshIntegrationConnection` is the refresh helper behind
- * `refreshConnectionCredential`. Phase 6 added two behaviours:
- *
- *   1. When the IdP echoes a `scope` field in the refresh response,
- *      `scopes_granted` on the DB row is overwritten with the new
- *      authoritative set (OAuth 2 §5.1).
- *   2. The result surfaces `shrinkDetected = true` when the new set is
- *      strictly narrower than the previously-stored one, so
- *      `refreshConnectionCredential` can cross-check against installed
- *      agents' `requiredScopes` and flip `needsReconnection` if the actor
- *      dropped below the floor.
- *
- * The tests below stand up a controllable Bun.serve as the upstream
- * token endpoint and walk the helper through the four cases that
- * matter: (a) response omits `scope` (no-op), (b) response keeps the
- * same scopes, (c) response shrinks, (d) response widens (scope creep).
+ * A controllable Bun.serve stands in for the token endpoint, which the manifest declares; each
+ * connection pins a per-space OAuth client so the refresh context builds.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
-  RefreshError,
   decryptCredentialsToStringMap,
   encryptCredentialEnvelope,
   encryptCredentials,
 } from "@appstrate/connect";
+import { getEnv } from "@appstrate/env";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import {
-  forceRefreshIntegrationConnection,
   refreshConnectionCredential,
   type RefreshTarget,
+  type RefreshTrigger,
 } from "../../../src/services/integration-token-refresh.ts";
-import { recordIntegrationRefreshFailure } from "../../../src/services/integration-connections.ts";
+import {
+  readCredentialRevision,
+  recordIntegrationRefreshFailure,
+} from "../../../src/services/integration-connections.ts";
+
+const PACKAGE_ID = "@official/gmail";
+
+/** An upstream 401 on the credential the connection holds. */
+const REJECTED: RefreshTrigger = { kind: "rejected", revision: null };
+const EXPIRING: RefreshTrigger = { kind: "expiring" };
 
 interface TokenServer {
   url: string;
@@ -113,45 +111,131 @@ function startTokenServer(): TokenServer {
   };
 }
 
-describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness", () => {
+function gmailManifest(tokenUrl: string): IntegrationManifest {
+  return {
+    schema_version: "0.1",
+    type: "integration",
+    name: PACKAGE_ID,
+    version: "1.0.0",
+    display_name: "Gmail",
+    source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
+    auths: {
+      primary: {
+        type: "oauth2",
+        authorization_endpoint: "https://idp/a",
+        token_endpoint: tokenUrl,
+        authorized_uris: ["https://api/*"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
+    },
+  } as unknown as IntegrationManifest;
+}
+
+/**
+ * The integration, its token endpoint at `token`, and the per-space OAuth client a connection
+ * pins (`client_ref`) so its refresh context builds. Returns that client's id.
+ */
+async function seedPinnedClient(ctx: TestContext, token: TokenServer): Promise<string> {
+  await seedPackage({
+    id: PACKAGE_ID,
+    orgId: ctx.orgId,
+    type: "integration",
+    source: "local",
+    draftManifest: gmailManifest(token.url) as unknown as Record<string, unknown>,
+  });
+  const [client] = await db
+    .insert(integrationOauthClients)
+    .values({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      integrationId: PACKAGE_ID,
+      authKey: "primary",
+      clientId: "cid",
+      clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+    })
+    .returning({ id: integrationOauthClients.id });
+  return client!.id;
+}
+
+type Target = RefreshTarget & { expiresAt: Date | null; credentialRevision: string };
+
+/** The connection as a resolver reads it: what a refresh is pinned to. */
+async function readTarget(connId: string): Promise<Target> {
+  const [row] = await db
+    .select({
+      id: integrationConnections.id,
+      credentialsEncrypted: integrationConnections.credentialsEncrypted,
+      clientRef: integrationConnections.clientRef,
+      oauthResource: integrationConnections.oauthResource,
+      expiresAt: integrationConnections.expiresAt,
+    })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connId));
+  return { ...row!, credentialRevision: (await readCredentialRevision(connId))! };
+}
+
+/** Ask `refreshConnectionCredential` about `target` for the test context's owner. */
+function refreshOf(
+  ctx: TestContext,
+  token: TokenServer,
+  target: Target,
+  trigger: RefreshTrigger = REJECTED,
+) {
+  const manifest = gmailManifest(token.url);
+  return refreshConnectionCredential({
+    connection: { ...target, authKey: "primary" },
+    integrationId: PACKAGE_ID,
+    manifest,
+    authDef: manifest.auths!.primary as AfpsManifestAuth,
+    scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+    actor: { type: "user", id: ctx.user.id },
+    trigger,
+  });
+}
+
+/** The fields of a `refreshed` outcome. */
+function refreshedFields(
+  outcome: Awaited<ReturnType<typeof refreshConnectionCredential>>,
+): Record<string, string> {
+  if (outcome.status !== "refreshed") {
+    throw new Error(`expected a refreshed outcome, got ${JSON.stringify(outcome)}`);
+  }
+  return outcome.fields;
+}
+
+async function fetchEncrypted(connId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connId));
+  return row?.credentialsEncrypted ?? null;
+}
+
+async function storedScopes(connId: string): Promise<string[]> {
+  const [row] = await db
+    .select({ scopesGranted: integrationConnections.scopesGranted })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connId));
+  return [...row!.scopesGranted].sort();
+}
+
+describe("refreshConnectionCredential — the refresh and its write-back", () => {
   let ctx: TestContext;
   let token: TokenServer;
-  const PACKAGE_ID = "@official/gmail";
+  let clientId: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "refresh" });
-    await seedPackage({
-      id: PACKAGE_ID,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: {
-        schema_version: "0.1",
-        type: "integration",
-        name: PACKAGE_ID,
-        version: "1.0.0",
-        display_name: "Gmail",
-        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorization_endpoint: "https://idp/a",
-            token_endpoint: "https://idp/token",
-            authorized_uris: ["https://api/*"],
-            delivery: {
-              http: {
-                in: "header",
-                name: "Authorization",
-                prefix: "Bearer ",
-                value: "{$credential.access_token}",
-              },
-            },
-          },
-        },
-      },
-    });
     token = startTokenServer();
+    clientId = await seedPinnedClient(ctx, token);
   });
 
   afterEach(() => {
@@ -178,36 +262,23 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,
         scopesGranted: initialScopes,
+        clientRef: clientId,
         ...(expiresAt ? { expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
   }
 
+  const refresh = async (connId: string, trigger: RefreshTrigger = REJECTED) =>
+    refreshOf(ctx, token, await readTarget(connId), trigger);
+
   it("preserves scopesGranted when the refresh response omits `scope`", async () => {
     const connId = await seedConnection(["read", "send"]);
     token.setResponse({ access_token: "new-access", expires_in: 3600 });
 
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      {
-        tokenEndpoint: token.url,
-        clientId: "cid",
-        clientSecret: "csec",
-      },
-    );
-
-    expect(result.scopesGranted).toBeNull();
-    expect(result.shrinkDetected).toBe(false);
-
-    const [row] = await db
-      .select({ scopesGranted: integrationConnections.scopesGranted })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
+    expect(refreshedFields(await refresh(connId)).access_token).toBe("new-access");
     // Untouched — `scope` was absent on the wire so the high-water-mark stays.
-    expect(row!.scopesGranted).toEqual(["read", "send"]);
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
   it("keeps the outputs a refresh response does not send again, and takes those it does", async () => {
@@ -226,14 +297,6 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
         }),
       })
       .where(eq(integrationConnections.id, connId));
-    const refresh = async () =>
-      (
-        await forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
-          tokenEndpoint: token.url,
-          clientId: "cid",
-          clientSecret: "csec",
-        })
-      ).fields;
 
     token.setResponse({ access_token: "access-2", expires_in: 3600 });
     const kept = {
@@ -243,7 +306,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       id_token: "idt-1",
       scope: "read send",
     };
-    expect(await refresh()).toEqual(kept);
+    expect(refreshedFields(await refresh(connId))).toEqual(kept);
     expect(decryptCredentialsToStringMap((await fetchEncrypted(connId))!)).toEqual(kept);
 
     token.setResponse({
@@ -254,7 +317,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       scope: "read",
       expires_in: 3600,
     });
-    expect(await refresh()).toEqual({
+    expect(refreshedFields(await refresh(connId))).toEqual({
       access_token: "access-3",
       refresh_token: "rt-2",
       token_type: "DPoP",
@@ -265,116 +328,19 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
 
   it("writes back scopesGranted unchanged when the IdP echoes the same set", async () => {
     const connId = await seedConnection(["read", "send"]);
-    token.setResponse({
-      access_token: "new-access",
-      expires_in: 3600,
-      scope: "read send",
-    });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-
-    expect(result.scopesGranted?.sort()).toEqual(["read", "send"]);
-    expect(result.shrinkDetected).toBe(false);
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
-  it("detects shrink when the IdP returns fewer scopes than previously granted", async () => {
+  it("persists a narrowed grant, and leaves the connection usable when no agent needs the lost scope", async () => {
     const connId = await seedConnection(["read", "send", "delete"]);
     // User went to their Google account and revoked `delete`.
-    token.setResponse({
-      access_token: "new-access",
-      expires_in: 3600,
-      scope: "read send",
-    });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-
-    expect(result.shrinkDetected).toBe(true);
-    expect(result.scopesGranted?.sort()).toEqual(["read", "send"]);
-
-    const [row] = await db
-      .select({ scopesGranted: integrationConnections.scopesGranted })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
-  });
-
-  // ── The freshness short-circuit, both sides of it ──
-  //
-  // `dedupedRefresh` re-reads the row after winning the lock and may answer
-  // from it instead of spending the refresh_token. That short-circuit is
-  // correct for a PROACTIVE refresh and wrong for a FORCED one, so both
-  // directions are pinned here: removing it entirely would burn a peer's
-  // just-rotated token on every lead-window pass, and leaving it in the forced
-  // path is the bug it was masking.
-
-  it("force (default): refreshes a token that is nowhere near expiry", async () => {
-    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
-    token.setResponse({ access_token: "rotated", expires_in: 3600 });
-
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-
-    expect(result.fields.access_token).toBe("rotated");
-  });
-
-  it("force:false: serves the stored token when it is nowhere near expiry", async () => {
-    // CONTROL for the test above. The proactive caller has no evidence against
-    // the stored token, and a peer may have written it microseconds ago — so
-    // the exchange is skipped and the refresh_token is not double-spent. The
-    // token server is armed with a DIFFERENT token, so contacting it would show.
-    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
-    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
-
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-      { force: false },
-    );
-
-    expect(result.fields.access_token).toBe("old-access");
-  });
-
-  it("never exchanges concurrently for a forced and a proactive refresh of one connection", async () => {
-    // Expiry INSIDE the 5-minute lead window, so the proactive caller has no
-    // short-circuit either when it starts: both flights want the endpoint, and
-    // only the per-key serialization in `dedupedRefresh` keeps them apart.
-    const connId = await seedConnection(["read"], new Date(Date.now() + 2 * 60_000));
-    token.setResponse({ access_token: "rotated", expires_in: 3600 });
-    token.setDelayMs(50);
-    // The assertion below must measure these two flights and nothing else.
-    token.resetPeak();
-
-    const target = await readTarget(connId);
-    const refreshCtx = { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" };
-    const [forced, proactive] = await Promise.all([
-      forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", refreshCtx),
-      forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", refreshCtx, {
-        force: false,
-      }),
-    ]);
-
-    expect(forced.fields.access_token).toBe("rotated");
-    // The proactive flight re-reads after the forced one wrote, so it answers
-    // from the row instead of spending the refresh_token a second time.
-    expect(proactive.fields.access_token).toBe("rotated");
-    expect(token.maxConcurrent()).toBe(1);
-
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -382,9 +348,94 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     expect(row!.needsReconnection).toBe(false);
   });
 
+  it("persists a widened grant (scope creep): the high-water-mark moves up", async () => {
+    const connId = await seedConnection(["read"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
+  });
+
+  it("an echoed `scope` holding no token keeps the stored grant and flags nothing", async () => {
+    const connId = await seedConnection(["read", "send"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: " " });
+
+    expect(refreshedFields(await refresh(connId)).access_token).toBe("new-access");
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
+  // ── The lead window and the freshness short-circuit, both sides of them ──
+  //
+  // A rejection is evidence against the stored token whatever its remaining lifetime; an
+  // `expiring` trigger is not, so it neither exchanges ahead of the lead window nor spends a
+  // refresh_token a peer has just rotated.
+
+  it("a rejection refreshes a token that is nowhere near expiry", async () => {
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    expect(refreshedFields(await refresh(connId)).access_token).toBe("rotated");
+  });
+
+  it("an expiring trigger keeps a token that is nowhere near expiry, without an exchange", async () => {
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
+
+    expect(await refresh(connId, EXPIRING)).toMatchObject({ status: "kept" });
+    expect(token.requests()).toBe(0);
+  });
+
+  it("a rejection of a credential the connection no longer holds is a read", async () => {
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    const held = (await readTarget(connId)).credentialRevision;
+    await db
+      .update(integrationConnections)
+      .set({
+        credentialsEncrypted: encryptCredentialEnvelope({
+          outputs: { access_token: "peer-access", refresh_token: "rt-2" },
+        }),
+      })
+      .where(eq(integrationConnections.id, connId));
+    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
+
+    expect(await refresh(connId, { kind: "rejected", revision: held })).toMatchObject({
+      status: "kept",
+    });
+    expect(token.requests()).toBe(0);
+  });
+
+  it("never exchanges concurrently for a rejection and an expiring trigger on one connection", async () => {
+    // Expiry INSIDE the 5-minute lead window, so the expiring trigger has no short-circuit either
+    // when it starts: both want the endpoint, and only the per-key serialization in
+    // `dedupedRefresh` keeps them apart.
+    const connId = await seedConnection(["read"], new Date(Date.now() + 2 * 60_000));
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+    token.setDelayMs(50);
+    // The assertion below must measure these two flights and nothing else.
+    token.resetPeak();
+
+    const target = await readTarget(connId);
+    const [forced, proactive] = await Promise.all([
+      refreshOf(ctx, token, target, REJECTED),
+      refreshOf(ctx, token, target, EXPIRING),
+    ]);
+
+    expect(refreshedFields(forced).access_token).toBe("rotated");
+    // The proactive flight answers from the row the forced one wrote (or adopts its exchange)
+    // instead of spending the refresh_token a second time.
+    expect(refreshedFields(proactive).access_token).toBe("rotated");
+    expect(token.maxConcurrent()).toBe(1);
+    expect(token.requests()).toBe(1);
+  });
+
   // A reconnect through another client (another authorization server) while a refresh waited:
   // the refresh must neither spend the new credential at the old server nor hand back its token.
-  it("refuses a refresh once the connection was reconnected elsewhere, without an exchange", async () => {
+  it("answers retry once the connection was reconnected elsewhere, without an exchange", async () => {
     const connId = await seedConnection(["read"]);
     const target = await readTarget(connId);
     const reconnected = encryptCredentialEnvelope({
@@ -396,18 +447,15 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .where(eq(integrationConnections.id, connId));
     token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
 
-    const refused = forceRefreshIntegrationConnection(target, PACKAGE_ID, "primary", {
-      tokenEndpoint: token.url,
-      clientId: "cid",
-      clientSecret: "csec",
+    expect(await refreshOf(ctx, token, target)).toMatchObject({
+      status: "retry",
+      cause: "connection_changed",
     });
-    await expect(refused).rejects.toBeInstanceOf(RefreshError);
-    await expect(refused).rejects.toMatchObject({ kind: "transient" });
     expect(token.requests()).toBe(0);
     expect(await fetchEncrypted(connId)).toBe(reconnected);
   });
 
-  it("discards a token refreshed while the connection was reconnected", async () => {
+  it("discards a token refreshed while the connection was reconnected, and answers retry", async () => {
     const connId = await seedConnection(["read"]);
     const reconnected = encryptCredentialEnvelope({
       outputs: { access_token: "other-access", refresh_token: "other-rt" },
@@ -420,158 +468,56 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
         .where(eq(integrationConnections.id, connId));
     });
 
-    const refused = forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-    await expect(refused).rejects.toMatchObject({ name: "RefreshError", kind: "transient" });
+    expect(await refresh(connId)).toMatchObject({ status: "retry", cause: "connection_changed" });
     expect(token.requests()).toBe(1);
     expect(await fetchEncrypted(connId)).toBe(reconnected);
   });
 
-  it("treats scope creep (response wider than stored) as non-shrink", async () => {
+  it("throws the 503 for a stored blob under a missing kid (not transient)", async () => {
     const connId = await seedConnection(["read"]);
-    token.setResponse({
-      access_token: "new-access",
-      expires_in: 3600,
-      scope: "read send", // IdP added a scope the user previously had
-    });
-
-    const result = await forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-
-    expect(result.shrinkDetected).toBe(false);
-    expect(result.scopesGranted?.sort()).toEqual(["read", "send"]);
-
-    const [row] = await db
-      .select({ scopesGranted: integrationConnections.scopesGranted })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    // The wider set is persisted — high-water-mark moves up.
-    expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
-  });
-
-  it("refreshConnectionCredential throws the 503 for a stored blob under a missing kid (not transient)", async () => {
-    const connId = await seedConnection(["read"]);
-    // A resolvable pinned client: the refresh context builds, and the exchange is what decrypts.
-    const [client] = await db
-      .insert(integrationOauthClients)
-      .values({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        integrationId: PACKAGE_ID,
-        authKey: "primary",
-        clientId: "cid",
-        clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
-      })
-      .returning({ id: integrationOauthClients.id });
     await db
       .update(integrationConnections)
-      .set({
-        credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}`,
-        clientRef: client!.id,
-      })
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
       .where(eq(integrationConnections.id, connId));
-    const [pkg] = await db
-      .select({ draftManifest: packages.draftManifest })
-      .from(packages)
-      .where(eq(packages.id, PACKAGE_ID));
-    const manifest = pkg!.draftManifest as unknown as IntegrationManifest;
-    const outcome = refreshConnectionCredential({
-      connection: { ...(await readTarget(connId)), authKey: "primary" },
-      integrationId: PACKAGE_ID,
-      manifest,
-      authDef: manifest.auths!.primary as AfpsManifestAuth,
-      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      actor: { type: "user", id: ctx.user.id },
-      force: true,
-    });
-    await expect(outcome).rejects.toMatchObject({
+
+    await expect(refresh(connId)).rejects.toMatchObject({
       status: 503,
       code: "encryption_key_unavailable",
     });
     expect(token.requests()).toBe(0);
   });
+
+  it("rethrows a fault that is no verdict on the connection, never answering retry", async () => {
+    const connId = await seedConnection(["read"]);
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: "not-a-ciphertext" })
+      .where(eq(integrationConnections.id, connId));
+
+    await expect(refresh(connId)).rejects.toMatchObject({ name: "CredentialDecryptError" });
+    expect(token.requests()).toBe(0);
+  });
 });
-
-/** The connection as a resolver reads it: what a refresh is pinned to. */
-async function readTarget(connId: string): Promise<RefreshTarget> {
-  const [row] = await db
-    .select({
-      id: integrationConnections.id,
-      credentialsEncrypted: integrationConnections.credentialsEncrypted,
-      clientRef: integrationConnections.clientRef,
-      oauthResource: integrationConnections.oauthResource,
-    })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connId));
-  return row!;
-}
-
-async function fetchEncrypted(connId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connId));
-  return row?.credentialsEncrypted ?? null;
-}
 
 /**
  * Transient-refresh-failure escalation.
  *
- * `recordIntegrationRefreshFailure` increments a per-connection counter on
- * every transient (non-`invalid_grant`) refresh failure and flips
- * `needsReconnection` ONLY when the streak crosses the threshold AND the token
- * is already expired past the grace window — the silent-death case behind the
- * original Gmail scheduled-run incident. A successful credential write resets
- * the counter (via `persistCredentialBundle`).
+ * `recordIntegrationRefreshFailure` increments a per-connection counter on every transient
+ * (non-`invalid_grant`) refresh failure and flips `needsReconnection` ONLY when the streak
+ * crosses the threshold AND the token is already expired past the grace window. A successful
+ * credential write resets the counter (via `persistCredentialBundle`).
  */
 describe("integration refresh-failure escalation", () => {
   let ctx: TestContext;
   let token: TokenServer;
-  const PACKAGE_ID = "@official/gmail";
+  let clientId: string;
   const HOUR_MS = 3_600_000;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "refresh-esc" });
-    await seedPackage({
-      id: PACKAGE_ID,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: {
-        schema_version: "0.1",
-        type: "integration",
-        name: PACKAGE_ID,
-        version: "1.0.0",
-        display_name: "Gmail",
-        source: { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } },
-        auths: {
-          primary: {
-            type: "oauth2",
-            authorization_endpoint: "https://idp/a",
-            token_endpoint: "https://idp/token",
-            authorized_uris: ["https://api/*"],
-            delivery: {
-              http: {
-                in: "header",
-                name: "Authorization",
-                prefix: "Bearer ",
-                value: "{$credential.access_token}",
-              },
-            },
-          },
-        },
-      },
-    });
     token = startTokenServer();
+    clientId = await seedPinnedClient(ctx, token);
   });
 
   afterEach(() => {
@@ -604,6 +550,7 @@ describe("integration refresh-failure escalation", () => {
         expiresAt: opts.expiresAt,
         refreshFailureCount: opts.refreshFailureCount ?? 0,
         needsReconnection: opts.needsReconnection ?? false,
+        clientRef: clientId,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -673,20 +620,18 @@ describe("integration refresh-failure escalation", () => {
     expect((await readRow(connId)).needsReconnection).toBe(true);
   });
 
+  const refresh = async (connId: string, trigger: RefreshTrigger = REJECTED) =>
+    refreshOf(ctx, token, await readTarget(connId), trigger);
+
   it("a successful refresh resets the failure streak", async () => {
     // Seed an expired token with an accumulated streak (not yet escalated).
     const connId = await seedConn({
       expiresAt: new Date(Date.now() - 30 * 60_000),
       refreshFailureCount: 2,
     });
-    // Expired → reReadFreshness does not short-circuit → doRefresh runs.
     token.setResponse({ access_token: "fresh-access", expires_in: 3600 });
 
-    await forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
-      tokenEndpoint: token.url,
-      clientId: "cid",
-      clientSecret: "csec",
-    });
+    refreshedFields(await refresh(connId));
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(0);
@@ -705,13 +650,11 @@ describe("integration refresh-failure escalation", () => {
     });
     token.setResponse({}, 200);
 
-    await expect(
-      forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
-        tokenEndpoint: token.url,
-        clientId: "cid",
-        clientSecret: "csec",
-      }),
-    ).rejects.toThrow(/HTTP 200 without access_token/);
+    expect(await refresh(connId)).toMatchObject({
+      status: "retry",
+      cause: "upstream_transient",
+      detail: expect.stringMatching(/HTTP 200 without access_token/),
+    });
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(2);
@@ -727,48 +670,75 @@ describe("integration refresh-failure escalation", () => {
     });
     token.setResponse({ error: "invalid_grant" }, 200);
 
-    const refused = forceRefreshIntegrationConnection(
-      await readTarget(connId),
-      PACKAGE_ID,
-      "primary",
-      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-    );
-    await expect(refused).rejects.toBeInstanceOf(RefreshError);
-    await expect(refused).rejects.toMatchObject({ kind: "revoked" });
+    expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "refresh_token_revoked" });
 
     const row = await readRow(connId);
     expect(row.needsReconnection).toBe(true);
     expect(row.refreshFailureCount).toBe(1);
   });
 
-  it("a transient upstream failure during refresh increments the counter and rethrows", async () => {
+  it("a transient upstream failure during refresh increments the counter and answers retry", async () => {
     const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
     token.setResponse({ error: "temporarily_unavailable" }, 503); // 5xx → transient
 
-    await expect(
-      forceRefreshIntegrationConnection(await readTarget(connId), PACKAGE_ID, "primary", {
-        tokenEndpoint: token.url,
-        clientId: "cid",
-        clientSecret: "csec",
-      }),
-    ).rejects.toThrow();
-
+    expect(await refresh(connId)).toMatchObject({ status: "retry", cause: "upstream_transient" });
     expect((await readRow(connId)).refreshFailureCount).toBe(1);
   });
 
-  // ── A successful exchange never clears a flag set before its write ──
+  // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
+  // even on a token expired past the grace window with a streak one short of the threshold.
+  it.each(["invalid_client", "unauthorized_client"])(
+    "a refused client (%s) answers retry without counting toward the streak",
+    async (error) => {
+      const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+        getEnv();
+      const connId = await seedConn({
+        expiresAt: new Date(Date.now() - (grace + 3600) * 1000),
+        refreshFailureCount: max - 1,
+      });
+      token.setResponse({ error }, 401);
+
+      expect(await refresh(connId)).toMatchObject({
+        status: "retry",
+        cause: "oauth_client_rejected",
+      });
+      const row = await readRow(connId);
+      expect(row.refreshFailureCount).toBe(max - 1);
+      expect(row.needsReconnection).toBe(false);
+    },
+  );
+
+  it("the transient failure that escalates the streak answers dead", async () => {
+    const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+      getEnv();
+    const connId = await seedConn({
+      expiresAt: new Date(Date.now() - (grace + 3600) * 1000),
+      refreshFailureCount: max - 1,
+    });
+    token.setResponse({ error: "temporarily_unavailable" }, 503);
+
+    expect(await refresh(connId)).toMatchObject({
+      status: "dead",
+      cause: "refresh_failures_exhausted",
+      detail: expect.stringContaining("HTTP 503"),
+    });
+    const row = await readRow(connId);
+    expect(row.refreshFailureCount).toBe(max);
+    expect(row.needsReconnection).toBe(true);
+  });
+
+  // ── A connection flagged needsReconnection never spends its refresh token ──
   //
-  // The write-back passes `needsReconnection: false`, and a write that clears the
-  // flag only matches an unflagged row (`persistCredentialBundle`, "Monotonic
-  // clear"). On a row already flagged — revoked, scopes below the floor, an
-  // escalated streak — it writes nothing and the refresh fails as transient: the
-  // flag holds until a reconnect, and the fresh token is discarded.
+  // A write that clears the flag only matches an unflagged row (`persistCredentialBundle`,
+  // "Monotonic clear"), so an exchange on a flagged row could only burn the refresh token a
+  // rotating IdP just replaced. The flag is read under the refresh lock: a rejection then finds
+  // the credential dead, an expiring trigger keeps serving the stored token.
   describe("on a connection already flagged needsReconnection", () => {
     let connId: string;
     let seeded: Awaited<ReturnType<typeof readRow>>;
 
     beforeEach(async () => {
-      // Expired, so the freshness re-read could not answer even a proactive caller.
+      // Expired, so the freshness re-read could not answer even an expiring trigger.
       connId = await seedConn({
         expiresAt: new Date(Date.now() - HOUR_MS),
         needsReconnection: true,
@@ -778,68 +748,43 @@ describe("integration refresh-failure escalation", () => {
     });
 
     async function expectUntouched(): Promise<void> {
-      // The exchange did run: the flag held at the write, not before it.
-      expect(token.requests()).toBe(1);
+      expect(token.requests()).toBe(0);
       const row = await readRow(connId);
       expect(row.needsReconnection).toBe(true);
+      expect(row.refreshFailureCount).toBe(seeded.refreshFailureCount);
       expect(row.credentialsEncrypted).toBe(seeded.credentialsEncrypted);
       expect(row.expiresAt).toEqual(seeded.expiresAt);
     }
 
-    it("forceRefreshIntegrationConnection rejects as transient and writes nothing", async () => {
-      const refused = forceRefreshIntegrationConnection(
-        await readTarget(connId),
-        PACKAGE_ID,
-        "primary",
-        { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
-      );
-      await expect(refused).rejects.toBeInstanceOf(RefreshError);
-      await expect(refused).rejects.toMatchObject({
-        kind: "transient",
-        message: expect.stringContaining("changed while its token was refreshed"),
-      });
+    it("a rejection answers dead without an exchange", async () => {
+      expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "connection_flagged" });
       await expectUntouched();
     });
 
-    it("refreshConnectionCredential (forced) answers retry and writes nothing", async () => {
-      // A resolvable pinned client, so the refresh context builds.
-      const [client] = await db
-        .insert(integrationOauthClients)
-        .values({
-          orgId: ctx.orgId,
-          spaceId: ctx.defaultSpaceId,
-          integrationId: PACKAGE_ID,
-          authKey: "primary",
-          clientId: "cid",
-          clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
-        })
-        .returning({ id: integrationOauthClients.id });
+    it("an expiring trigger keeps the stored credential without an exchange", async () => {
+      expect(await refresh(connId, EXPIRING)).toMatchObject({
+        status: "kept",
+        cause: "connection_flagged",
+      });
+      await expectUntouched();
+    });
+  });
+
+  it("a connection flagged while its token was refreshed answers dead, keeping the flag", async () => {
+    const connId = await seedConn({ expiresAt: new Date(Date.now() - HOUR_MS) });
+    const seeded = await readRow(connId);
+    token.setResponse({ access_token: "fresh-access", expires_in: 3600 });
+    token.setDuringExchange(async () => {
       await db
         .update(integrationConnections)
-        .set({ clientRef: client!.id })
+        .set({ needsReconnection: true })
         .where(eq(integrationConnections.id, connId));
-      const [pkg] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, PACKAGE_ID));
-      const manifest = pkg!.draftManifest as unknown as IntegrationManifest;
-
-      const outcome = await refreshConnectionCredential({
-        connection: { ...(await readTarget(connId)), authKey: "primary" },
-        integrationId: PACKAGE_ID,
-        manifest,
-        authDef: { ...(manifest.auths!.primary as AfpsManifestAuth), token_endpoint: token.url },
-        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-        actor: { type: "user", id: ctx.user.id },
-        force: true,
-      });
-
-      expect(outcome).toMatchObject({
-        status: "retry",
-        reason: "token refresh failed upstream (transient)",
-        detail: expect.stringContaining("changed while its token was refreshed"),
-      });
-      await expectUntouched();
     });
+
+    expect(await refresh(connId)).toMatchObject({ status: "dead", cause: "connection_flagged" });
+    expect(token.requests()).toBe(1);
+    const row = await readRow(connId);
+    expect(row.needsReconnection).toBe(true);
+    expect(row.credentialsEncrypted).toBe(seeded.credentialsEncrypted);
   });
 });

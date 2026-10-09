@@ -137,7 +137,7 @@ export function useConnectionPicker(
   // this the "add connection" entries offered a flow doomed to 403.
   const connectable = connectableAuthKeys(manifest, authStatuses);
   // When the actor's connections sit on another auth, only the agent's own auth fixes it.
-  const requiredAuthKey = entry?.resolution.required_auth_key ?? null;
+  const requiredAuthKey = entry?.resolution.warning?.required_auth_key ?? null;
   const authKeys = Object.keys(auths).filter(
     (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
   );

@@ -114,6 +114,13 @@ describe("launch override — the bound set names the launch it came from", () =
     return { code: body.errors[0]!.code, text };
   }
 
+  /** `integrations_unbound` as `GET /api/runs/{id}` serves it. */
+  async function unboundOnRun(runId: string): Promise<unknown> {
+    const res = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { integrations_unbound: unknown }).integrations_unbound;
+  }
+
   it("a run's connection_overrides bind as run_override, and are kept on the row", async () => {
     const res = await launch([picked]);
     expect(res.status).toBe(201);
@@ -124,6 +131,8 @@ describe("launch override — the bound set names the launch it came from", () =
       [INTEGRATION]: [{ connectionId: picked, source: "run_override" }],
     });
     expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [picked] });
+    // Recorded, and nothing to record.
+    expect(await unboundOnRun(id)).toEqual([]);
     await waitForRunPipelineSettled();
   });
 
@@ -259,6 +268,7 @@ describe("launch override — the bound set names the launch it came from", () =
       expect(warning).toMatchObject({
         field: `integrations.${INTEGRATION}`,
         code: "integration_unbound",
+        source: "run_override",
         message: expect.stringContaining("this run's connection_overrides"),
       });
       // The absence was chosen: nothing to connect.
@@ -269,6 +279,13 @@ describe("launch override — the bound set names the launch it came from", () =
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
       expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+      expect(await unboundOnRun(body.id)).toEqual([
+        {
+          integration_package_id: INTEGRATION,
+          code: "integration_unbound",
+          source: "run_override",
+        },
+      ]);
       await waitForRunPipelineSettled();
     });
 
@@ -307,10 +324,17 @@ describe("launch override — the bound set names the launch it came from", () =
         body: JSON.stringify({ connection_overrides: { [INTEGRATION]: [] } }),
       });
       expect(res.status).toBe(400);
-      const body = (await res.json()) as { code: string; param?: string; detail: string };
-      expect(body.code).toBe("invalid_request");
-      expect(body.param).toBe("connection_overrides");
-      expect(body.detail).toContain(INTEGRATION);
+      const body = (await res.json()) as {
+        code: string;
+        param?: string;
+        errors: { field: string; code: string }[];
+      };
+      // The code a `[]` pin raises, on the override's own key.
+      expect(body.code).toBe("validation_failed");
+      expect(body.param).toBeUndefined();
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
       expect(await db.select().from(runs)).toHaveLength(0);
     });
   });
@@ -340,17 +364,21 @@ describe("launch override — the bound set names the launch it came from", () =
       });
     }
 
-    it("starts the run without it, warning integration_unbound and snapshotting an empty set", async () => {
+    it("starts the run without it, warning not_connected and snapshotting an empty set", async () => {
       await seedOptionalAgent(false);
 
       const res = await launchOptional();
       expect(res.status).toBe(201);
       const body = (await res.json()) as { id: string; warnings: LaunchWarning[] };
       expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
-        [`integrations.${UNCONNECTED}`, "integration_unbound"],
+        [`integrations.${UNCONNECTED}`, "not_connected"],
       ]);
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });
+      // The run keeps the warning's cause, not just the empty set.
+      expect(await unboundOnRun(body.id)).toEqual([
+        { integration_package_id: UNCONNECTED, code: "not_connected", source: null },
+      ]);
       await waitForRunPipelineSettled();
     });
 
@@ -396,6 +424,10 @@ describe("launch override — the bound set names the launch it came from", () =
 
       const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
       expect(row!.resolvedConnections).toEqual({ [UNCONNECTED]: [] });
+      // A fire returns its warnings to no one: the run is where they are read.
+      expect(await unboundOnRun(row!.id)).toEqual([
+        { integration_package_id: UNCONNECTED, code: "not_connected", source: null },
+      ]);
       await waitForRunPipelineSettled();
     });
   });
@@ -419,10 +451,9 @@ describe("launch override — the bound set names the launch it came from", () =
       ]);
       const [row] = await db.select().from(runs).where(eq(runs.id, body.id));
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
-      const read = await app.request(`/api/runs/${body.id}`, { headers: authHeaders(ctx) });
-      expect(
-        ((await read.json()) as { integrations_unbound: string[] }).integrations_unbound,
-      ).toEqual([INTEGRATION]);
+      expect(await unboundOnRun(body.id)).toEqual([
+        { integration_package_id: INTEGRATION, code: "integration_not_active", source: null },
+      ]);
       await waitForRunPipelineSettled();
     });
 

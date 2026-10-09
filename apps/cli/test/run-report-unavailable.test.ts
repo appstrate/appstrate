@@ -10,8 +10,11 @@ import { buildApiCallExtensionFactory } from "@appstrate/runner-pi";
 import {
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  UNAVAILABLE_INTEGRATION_REASONS,
   type Bundle,
 } from "@appstrate/afps-runtime/bundle";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { parseLaunchItems } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
 
 const GMAIL = "@appstrate/gmail";
@@ -63,10 +66,10 @@ function makeBundle(): Bundle {
   } as unknown as Bundle;
 }
 
-const WARNINGS = [
-  { field: `integrations.${GMAIL}`, code: "integration_unbound", message: "not connected" },
+const WARNINGS = parseLaunchItems([
+  { field: `integrations.${GMAIL}`, code: "not_connected", message: "not connected" },
   { field: "run", code: "something_else", message: "ignored" },
-];
+]);
 
 /** Tool names the bridge registers for `bundle`, one resolved tool per requested ref. */
 async function exposedTools(bundle: Bundle): Promise<string[]> {
@@ -102,8 +105,29 @@ describe("--report local run — integrations bound to none", () => {
       ]),
     ).toEqual([
       { id: GMAIL, reason: "no connection is bound to this run" },
-      { id: NOTION, reason: "it is switched off in this space" },
+      { id: NOTION, reason: "it is switched off" },
     ]);
+  });
+
+  it("words every warning code: a switched-off integration, else nothing bound", () => {
+    const reasons = CONNECTION_RESOLUTION_WARNING_CODES.map(
+      (code) =>
+        unavailableIntegrations([{ field: `integrations.${GMAIL}`, code, message: code }])[0]
+          ?.reason,
+    );
+    expect(reasons).toEqual(
+      CONNECTION_RESOLUTION_WARNING_CODES.map((code) =>
+        code === "integration_not_active"
+          ? UNAVAILABLE_INTEGRATION_REASONS.not_active
+          : UNAVAILABLE_INTEGRATION_REASONS.unbound,
+      ),
+    );
+  });
+
+  it("withholds an integration on a code this CLI does not know, as unbound", () => {
+    expect(
+      unavailableIntegrations([{ field: `integrations.${GMAIL}`, code: "newer_code" }]),
+    ).toEqual([{ id: GMAIL, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound }]);
   });
 
   it("tells the agent which integrations it runs without", () => {

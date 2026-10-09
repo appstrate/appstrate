@@ -218,6 +218,20 @@ describe("performRefreshTokenExchange — failure classification", () => {
     expect((err as RefreshError).status).toBe(400);
   });
 
+  it("classifies HTTP 401 invalid_client as client_rejected", async () => {
+    const err = await captureError(
+      responding(
+        () =>
+          new Response(JSON.stringify({ error: "invalid_client" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).kind).toBe("client_rejected");
+  });
+
   it("classifies HTTP 5xx as transient", async () => {
     const err = await captureError(
       responding(

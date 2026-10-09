@@ -595,7 +595,7 @@ describe("runRemote — happy path", () => {
 describe("runRemote — launch warnings", () => {
   const WARNING = {
     field: "integrations.@appstrate/gmail",
-    code: "integration_unbound",
+    code: "not_connected",
     message: "Integration '@appstrate/gmail' is not connected",
   };
   function fetchWithWarning(): typeof fetch {
@@ -621,7 +621,7 @@ describe("runRemote — launch warnings", () => {
       new AbortController().signal,
     );
     expect(writers.stderr.join("")).toContain(
-      "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (integration_unbound)\n",
+      "⚠ @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n",
     );
   });
 

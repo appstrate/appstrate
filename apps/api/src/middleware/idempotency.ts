@@ -5,6 +5,9 @@
  * produce the same response without re-executing.
  *
  * Pattern: Stripe `Idempotency-Key` header (IETF draft-ietf-httpapi-idempotency-key-header).
+ *
+ * Only a 2xx is stored, as at Stripe: a 4xx is a refusal that often depends on state the caller
+ * can change (a connection, a quota), so its key is released and a retry is judged again.
  */
 
 import type { Context, Next } from "hono";
@@ -77,7 +80,7 @@ function storableBody(
 export function idempotency(
   options: {
     replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
-    /** Rewrites a JSON-object body before it is stored, and so replayed to any key reuser. */
+    /** Rewrites a stored 2xx JSON-object body, and so what is replayed to any key reuser. */
     storedBody?: (body: Record<string, unknown>) => Record<string, unknown>;
   } = {},
 ) {
@@ -151,9 +154,8 @@ export function idempotency(
     (c.req as { raw: Request }).raw = freshRequest;
 
     // Hono's compose turns an `Error` thrown downstream into `c.res` through
-    // the app's `onError` before `next()` returns, so a thrown 4xx `ApiError`
-    // is cached below like a returned one (hence `storedBody`). This catch only
-    // sees what compose rethrows; release the lock so the client can retry.
+    // the app's `onError` before `next()` returns, so a thrown `ApiError` is judged by its status
+    // below. This catch only sees what compose rethrows: release the lock so the client can retry.
     try {
       await next();
     } catch (err) {
@@ -168,8 +170,7 @@ export function idempotency(
     const res = c.res;
     const statusCode = res.status;
 
-    // Only cache 2xx and 4xx (deterministic). 5xx = release lock for retry.
-    if (statusCode >= 500) {
+    if (statusCode < 200 || statusCode >= 300) {
       await releaseIdempotencyLock(orgId, spaceId, key);
       return;
     }

@@ -30,7 +30,12 @@ import {
   type IntegrationRequirement,
 } from "../../../src/services/integration-connection-resolver.ts";
 import { connectOfferTarget } from "../../../src/services/connect/preflight-connect-offer.ts";
-import type { ConnectionResolutionSource, IntegrationManifest } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  type ConnectionResolutionSource,
+  type ConnectionResolutionWarningCode,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -430,7 +435,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
 
   /**
    * Bind `rows[bind]`, raise `error` — on `rows[on]` when the error names a connection — or
-   * bind none with an `integration_unbound` warning offering `rows[unbound]`.
+   * bind none with a warning offering `rows[unbound]`, coded as the required verdict's error.
    */
   type Verdict =
     | { bind: number }
@@ -492,7 +497,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   ];
 
   const outcome = (v: Verdict) =>
-    "bind" in v ? "binds it" : "error" in v ? v.error : "binds none + integration_unbound";
+    "bind" in v ? "binds it" : "error" in v ? v.error : "binds none + its warning";
 
   for (const { name, rows: build, verdict: requiredVerdict, optional } of cases) {
     for (const required of [true, false]) {
@@ -521,7 +526,10 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           expect(result.resolved[INTEG]).toEqual([]);
           expect(result.warnings).toHaveLength(1);
           const warning = result.warnings[0]!;
-          expect(warning).toMatchObject({ integrationId: INTEG, code: "integration_unbound" });
+          // The code the same state raises on a required integration; no layer chose it.
+          const twin = "error" in requiredVerdict ? requiredVerdict.error : undefined;
+          expect(warning).toMatchObject({ integrationId: INTEG, code: twin });
+          expect(warning.source).toBeUndefined();
           // A shared row is offered, never bound.
           expect(warning.candidateConnections?.map((c) => c.id)).toEqual(
             verdict.unbound.length > 0 ? verdict.unbound.map((i) => rows[i]!.id) : undefined,
@@ -871,7 +879,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
       integrationId: INTEG,
       manifest: requiredOauth2Manifest(),
       hasSelectedTools: false,
-      hasRequiredAuth: true,
+      hasMandatoryAuth: true,
       agentTools: [],
       agentScopes: [],
       required,
@@ -897,7 +905,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     });
     expect(result.errors).toEqual([]);
     expect(result.resolved).toEqual({ [INTEG]: [] });
-    expect(result.warnings.map((w) => w.code)).toEqual(["integration_unbound"]);
+    expect(result.warnings.map((w) => w.code)).toEqual(["not_connected"]);
   });
 
   it("auto-resolves an inert required-auth integration when one healthy connection exists", () => {
@@ -1232,9 +1240,11 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     expect(err.integrationId).toBe(INTEG);
     expect(err.requiredAuthKey).toBe("nonexistent");
     expect(err.availableAuthKeys).toEqual(["oauth"]);
+    // An auth the manifest does not declare is no connect target.
+    expect(err.authKey).toBeUndefined();
   });
 
-  it("a non-required integration binds none on a mismatch, warning with both auth keys", () => {
+  it("a non-required integration binds none on a mismatch, warning auth_key_mismatch with both keys", () => {
     const oauthConn = conn({ authKey: "oauth" });
     const result = resolveConnections({
       requirements: [reqWithAuthKey("pat", false)],
@@ -1245,18 +1255,23 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
     expect(result.resolved[INTEG]).toEqual([]);
     const warning = result.warnings[0]!;
     expect(warning).toMatchObject({
-      code: "integration_unbound",
+      code: "auth_key_mismatch",
       requiredAuthKey: "pat",
       availableAuthKeys: ["oauth"],
+      // Connecting the dep's own auth clears it.
+      authKey: "pat",
     });
     expect(warning.candidateConnections).toBeUndefined();
     expect(warning.message).toContain("requires auth 'pat'");
-    expect(translateResolutionError(warning)).toMatchObject({
+    const item = translateResolutionError(warning);
+    expect(item).toMatchObject({
       field: `integrations.${INTEG}`,
-      code: "integration_unbound",
+      code: "auth_key_mismatch",
       required_auth_key: "pat",
       available_auth_keys: ["oauth"],
+      auth_key: "pat",
     });
+    expect(connectOfferTarget(item)).toEqual({ integrationId: INTEG, authKey: "pat", scopes: [] });
   });
 
   it("a non-required mismatch still yields to an explicit layer: a pin on the off-auth row fails", () => {
@@ -1537,7 +1552,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.requiredScopes).toEqual(["repo"]);
   });
 
-  it("integration_unbound carries the connect target not_connected would, on the wire too", () => {
+  it("an optional not_connected warning carries the error's connect target, on the wire too", () => {
     const result = resolveConnections({
       requirements: [req(scopedManifest(), ["t1"], [])],
       accessibleConnections: [],
@@ -1546,14 +1561,14 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(result.errors).toEqual([]);
     const warning = result.warnings[0]!;
     expect(warning).toMatchObject({
-      code: "integration_unbound",
+      code: "not_connected",
       authKey: "oauth",
       requiredScopes: ["repo"],
     });
     const item = translateResolutionError(warning);
     expect(item).toEqual({
       field: `integrations.${INTEG}`,
-      code: "integration_unbound",
+      code: "not_connected",
       title: expect.any(String),
       message: warning.message,
       auth_key: "oauth",
@@ -1605,7 +1620,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(field).not.toHaveProperty("required_scopes");
   });
 
-  it("integration_unbound on an api_key-only integration carries the same connect target", () => {
+  it("an optional not_connected on an api_key-only integration carries the same connect target", () => {
     const result = resolveConnections({
       requirements: [req(apiKeyOnlyManifest(), ["t1"], [])],
       accessibleConnections: [],
@@ -1614,10 +1629,10 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(result.errors).toEqual([]);
     expect(result.resolved).toEqual({ [INTEG]: [] });
     const warning = result.warnings[0]!;
-    expect(warning).toMatchObject({ code: "integration_unbound", authKey: "pat" });
+    expect(warning).toMatchObject({ code: "not_connected", authKey: "pat" });
     expect(warning.requiredScopes).toBeUndefined();
     const field = translateResolutionError(warning);
-    expect(field).toMatchObject({ code: "integration_unbound", auth_key: "pat" });
+    expect(field).toMatchObject({ code: "not_connected", auth_key: "pat" });
     expect(field).not.toHaveProperty("required_scopes");
   });
 
@@ -1631,6 +1646,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
       {
         integrationId: INTEG,
         code: "integration_unbound",
+        source: "member_pin",
         message: expect.stringContaining("is bound to no connection by your pin"),
       },
     ]);
@@ -1646,7 +1662,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
         pins: [],
       });
       const [item] = required ? result.errors : result.warnings;
-      expect(item!.code).toBe(required ? "not_connected" : "integration_unbound");
+      expect(item!.code).toBe("not_connected");
       expect(item!.authKey).toBeUndefined();
       expect(translateResolutionError(item!)).not.toHaveProperty("auth_key");
     }
@@ -2024,14 +2040,12 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
     expect(result.warnings).toEqual([
       {
         integrationId: INTEG,
-        code: "integration_unbound",
+        code: "not_connected",
         authKey: "oauth",
         message: `Integration '${INTEG}' has no connection accessible to this actor on an auth that exposes the agent's selected tools; the run proceeds without it.`,
       },
     ]);
-    expect(translateResolutionError(result.warnings[0]!).title).toBe(
-      "Integration Not Bound — Run Proceeds Without It",
-    );
+    expect(translateResolutionError(result.warnings[0]!).title).toBe("Integration Not Connected");
   });
 
   it("targets the lone serving auth whatever its type, and the mint stays a pure decision", () => {
@@ -2197,7 +2211,7 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
       }
     });
 
-    it(`${layer.name} \`[]\`, non-required → binds none, warned without a connect target`, () => {
+    it(`${layer.name} \`[]\`, non-required → integration_unbound naming the layer, no connect target`, () => {
       const { result } = resolveWith(layer.input([]), false);
       expect(result.errors).toEqual([]);
       expect(result.resolved).toEqual({ [INTEG]: [] });
@@ -2207,9 +2221,12 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
       expect(warning).toEqual({
         integrationId: INTEG,
         code: "integration_unbound",
+        source: layer.source,
         message: expect.stringContaining("is bound to no connection by"),
       });
-      expect(connectOfferTarget(translateResolutionError(warning!))).toBeNull();
+      const item = translateResolutionError(warning!);
+      expect(item).toMatchObject({ code: "integration_unbound", source: layer.source });
+      expect(connectOfferTarget(item)).toBeNull();
     });
 
     it(`${layer.name} \`[]\`, required → required_integration_unbound naming the layer`, () => {
@@ -2227,6 +2244,7 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
         field: `integrations.${INTEG}`,
         code: "required_integration_unbound",
         title: "Required Integration Bound To No Connection",
+        source: layer.source,
       });
     });
   }
@@ -2385,5 +2403,64 @@ describe("resolveConnections — integration switched off in the space", () => {
       ...inactive,
     });
     expect(result.errors.map((e) => e.code)).toEqual(["integration_not_active"]);
+  });
+});
+
+describe("resolveConnections — a warning carries the code its state raises on a required integration", () => {
+  /** One degraded state, `required` aside; the explicit `[]` pair is covered per layer above. */
+  const states: {
+    code: ConnectionResolutionWarningCode;
+    requirement: IntegrationRequirement;
+    input: () => Partial<Parameters<typeof resolveConnections>[0]>;
+  }[] = [
+    { code: "not_connected", requirement: req(oauth2Manifest()), input: () => ({}) },
+    {
+      code: "must_choose_connection",
+      requirement: req(oauth2Manifest()),
+      input: () => ({
+        accessibleConnections: [conn({ userId: "user_colleague", sharedWithOrg: true })],
+      }),
+    },
+    {
+      code: "auth_key_mismatch",
+      requirement: { ...req(oauth2Manifest()), requiredAuthKey: "pat" },
+      input: () => ({ accessibleConnections: [conn({ authKey: "oauth" })] }),
+    },
+    {
+      code: "integration_not_active",
+      requirement: req(oauth2Manifest()),
+      input: () => ({
+        accessibleConnections: [conn({})],
+        inactiveIntegrationIds: new Set([INTEG]),
+      }),
+    },
+  ];
+
+  for (const { code, requirement, input } of states) {
+    it(`${code}: the same item, an error when required and a warning otherwise`, () => {
+      const layers = input();
+      const [error, warning] = [true, false].map((required) => {
+        const result = resolveConnections({
+          requirements: [{ ...requirement, required }],
+          accessibleConnections: [],
+          pins: [],
+          ...layers,
+        });
+        const items = required ? result.errors : result.warnings;
+        expect(items).toHaveLength(1);
+        expect(items[0]!.code).toBe(code);
+        // Only the message's ending differs: refused, or "the run proceeds without it".
+        const { message: _internal, ...internal } = items[0]!;
+        const { message: _wire, ...wire } = translateResolutionError(items[0]!);
+        return { internal, wire };
+      });
+      expect(warning).toEqual(error!);
+    });
+  }
+
+  it("covers every warning code with an error twin", () => {
+    expect(states.map((s) => s.code).sort()).toEqual(
+      CONNECTION_RESOLUTION_WARNING_CODES.filter((c) => c !== "integration_unbound").sort(),
+    );
   });
 });

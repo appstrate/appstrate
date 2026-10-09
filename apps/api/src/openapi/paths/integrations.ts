@@ -108,8 +108,9 @@ export const connectionIdSetJsonSchema = {
   items: { type: "string", format: "uuid" },
   minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+  uniqueItems: true,
   description:
-    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, a `[]` launch override is a 400 and a `[]` pin refuses the runs it governs (409 `required_integration_unbound`).",
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
 } as const;
 
 /** The org default's set: never empty — none for every agent of the space is deactivation. */

@@ -40,10 +40,10 @@ let keyring: FakeKeyringInstall;
  * `toBe("")` checks below assertions about whatever else the single
  * `bun test` process happened to write at that moment (issue #1180).
  *
- * `io.exit` throws `ExitError` so the error branches unwind without taking
+ * `io.exit` throws `CommandExit` so the error branches unwind without taking
  * the test worker down with them.
  */
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 function makeJwt(payload: Record<string, unknown>): string {
@@ -254,7 +254,7 @@ describe("token (error paths)", () => {
     try {
       await tokenCommand({ profile: "missing-profile" }, io);
     } catch (err) {
-      if (err instanceof ExitError) exitCode = err.code;
+      if (err instanceof CommandExit) exitCode = err.code;
       else throw err;
     }
     expect(exitCode).toBe(1);
@@ -274,7 +274,7 @@ describe("token (error paths)", () => {
     try {
       await tokenCommand({ profile: "default" }, io);
     } catch (err) {
-      if (err instanceof ExitError) exitCode = err.code;
+      if (err instanceof CommandExit) exitCode = err.code;
       else throw err;
     }
     expect(exitCode).toBe(1);

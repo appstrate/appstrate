@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  ConnectionResolutionSource,
+  ConnectionResolutionWarningCode,
+} from "@appstrate/core/integration";
 import i18n from "../i18n";
 import type { components } from "../api/schema";
 import { integrationIdOfField } from "./connection-choice";
 
-/** One `warnings[]` item (`integration_unbound` | `integration_not_active`). */
-export type LaunchWarning = components["schemas"]["ResolutionFieldError"];
+/** One `warnings[]` item: an integration the run starts without, and why. */
+export type LaunchWarning = components["schemas"]["ConnectionResolutionWarning"];
 
 /** A run (always the viewer's), or a schedule running as `userId`. */
 export type LaunchTarget = { kind: "run" } | { kind: "schedule"; userId: string | null };
@@ -15,40 +19,66 @@ export function isViewersLaunch(target: LaunchTarget, viewerId: string | undefin
   return target.kind === "run" || (target.userId !== null && target.userId === viewerId);
 }
 
-// Full literal keys: the locale guard cannot see a key built from a template string.
-const MESSAGE_KEYS = { run: "launchWarnings.run", schedule: "launchWarnings.schedule" } as const;
-const CAUSE_KEYS = {
-  notConnected: "launchWarnings.cause.notConnected",
-  otherAuthMethod: "launchWarnings.cause.otherAuthMethod",
-  sharedOnly: "launchWarnings.cause.sharedOnly",
-  inactive: "launchWarnings.cause.inactive",
-  other: "launchWarnings.cause.other",
-} as const;
-type WarningCause = keyof typeof CAUSE_KEYS;
+/** The layers that can choose `[]`: an org default is never empty, and the fallback binds. */
+type NoneChoosingSource = Exclude<
+  ConnectionResolutionSource,
+  "org_default" | "org_default_enforced" | "fallback_auto"
+>;
 
-function causeOf(w: LaunchWarning): WarningCause {
-  if (w.code === "integration_not_active") return "inactive";
-  if ((w.candidate_connections?.length ?? 0) > 0) return "sharedOnly";
-  if (w.required_auth_key !== undefined) return "otherAuthMethod";
-  // Without a connect target, it may be a deliberate "no connection".
-  if (w.auth_key !== undefined) return "notConnected";
-  return "other";
+const NONE_CHOSEN_BY_KEYS = {
+  admin_pin: "noneChosenBy.adminPin",
+  run_override: "noneChosenBy.runOverride",
+  schedule_override: "noneChosenBy.scheduleOverride",
+  member_pin: "noneChosenBy.memberPin",
+} as const satisfies Record<NoneChoosingSource, string>;
+
+/** Every layer that can choose `[]`. */
+export const NONE_CHOOSING_SOURCES = Object.keys(NONE_CHOSEN_BY_KEYS) as NoneChoosingSource[];
+
+const choosesNone = (source: ConnectionResolutionSource): source is NoneChoosingSource =>
+  source in NONE_CHOSEN_BY_KEYS;
+
+/** The layer that chose no connection, as an `agents` phrase; `null` when none is named. */
+export function noneChosenBy(source: ConnectionResolutionSource | null | undefined): string | null {
+  if (!source || !choosesNone(source)) return null;
+  return i18n.t(NONE_CHOSEN_BY_KEYS[source], { ns: "agents" });
 }
 
-/** Each warned integration, once, in the server's order, with its first item's cause. */
-function causesOf(warnings: readonly LaunchWarning[]): Map<string, WarningCause> {
-  const causes = new Map<string, WarningCause>();
+// Full literal keys: the locale guard cannot see a key built from a template string.
+const MESSAGE_KEYS = { run: "launchWarnings.run", schedule: "launchWarnings.schedule" } as const;
+const CAUSES = {
+  not_connected: { key: "launchWarnings.cause.notConnected", connectable: true },
+  must_choose_connection: { key: "launchWarnings.cause.sharedOnly", connectable: true },
+  auth_key_mismatch: { key: "launchWarnings.cause.otherAuthMethod", connectable: true },
+  integration_not_active: { key: "launchWarnings.cause.inactive", connectable: false },
+  integration_unbound: { key: "launchWarnings.cause.chosenNone", connectable: false },
+} as const satisfies Record<ConnectionResolutionWarningCode, { key: string; connectable: boolean }>;
+
+/** Each warned integration, once, in the server's order, with its first item. */
+function warningsByIntegration(warnings: readonly LaunchWarning[]): Map<string, LaunchWarning> {
+  const byId = new Map<string, LaunchWarning>();
   for (const w of warnings) {
     if (!w.field.startsWith("integrations.")) continue;
     const id = integrationIdOfField(w.field);
-    if (!causes.has(id)) causes.set(id, causeOf(w));
+    if (!byId.has(id)) byId.set(id, w);
   }
-  return causes;
+  return byId;
+}
+
+/** Why integrations started without a connection, for warnings sharing one cause. */
+export function causeSentence(
+  w: { code: ConnectionResolutionWarningCode; source?: ConnectionResolutionSource | null },
+  count = 1,
+): string {
+  const by = w.code === "integration_unbound" ? noneChosenBy(w.source) : null;
+  return by
+    ? i18n.t("launchWarnings.cause.chosenNoneBy", { ns: "agents", count, by })
+    : i18n.t(CAUSES[w.code].key, { ns: "agents", count });
 }
 
 /** Whether {@link launchWarningsToast} has anything to say. */
 export function hasLaunchWarnings(warnings: readonly LaunchWarning[]): boolean {
-  return causesOf(warnings).size > 0;
+  return warningsByIntegration(warnings).size > 0;
 }
 
 /** The one toast a launch's warnings make, or `null` when there is nothing to say. */
@@ -57,19 +87,21 @@ export function launchWarningsToast(input: {
   warnings: readonly LaunchWarning[];
   nameOf: (integrationId: string) => string;
 }): { message: string; description: string; connectable: boolean } | null {
-  const causes = causesOf(input.warnings);
-  if (causes.size === 0) return null;
-  const count = causes.size;
-  const distinct = new Set(causes.values());
-  const cause = distinct.size === 1 ? [...distinct][0]! : "other";
+  const byId = warningsByIntegration(input.warnings);
+  const items = [...byId.values()];
+  const [first] = items;
+  if (!first) return null;
+  const count = items.length;
+  const oneCause = items.every((w) => w.code === first.code && w.source === first.source);
   return {
     message: i18n.t(MESSAGE_KEYS[input.kind], {
       ns: "agents",
       count,
-      names: [...causes.keys()].map(input.nameOf).join(", "),
+      names: [...byId.keys()].map(input.nameOf).join(", "),
     }),
-    description: i18n.t(CAUSE_KEYS[cause], { ns: "agents", count }),
-    connectable:
-      distinct.has("notConnected") || distinct.has("otherAuthMethod") || distinct.has("sharedOnly"),
+    description: oneCause
+      ? causeSentence(first, count)
+      : i18n.t("launchWarnings.cause.other", { ns: "agents", count }),
+    connectable: items.some((w) => CAUSES[w.code].connectable),
   };
 }

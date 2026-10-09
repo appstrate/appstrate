@@ -14,7 +14,7 @@
  * tests.
  */
 
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect, jest } from "bun:test";
 import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
@@ -455,10 +455,7 @@ describe("McpHost — progress relay", () => {
 
   async function callLong(
     extra: Partial<AppstrateRequestExtra>,
-    steps: Array<Record<string, unknown>> = [1, 2].map((progress) => ({
-      progress,
-      message: `step ${progress}`,
-    })),
+    steps: Array<Record<string, unknown>> = [{ progress: 1, message: "step 1" }],
   ) {
     const upstream = await makeUpstream(reportingTool(steps));
     try {
@@ -480,12 +477,12 @@ describe("McpHost — progress relay", () => {
       },
     });
     expect(result.content).toEqual([{ type: "text", text: "done" }]);
-    expect(sent).toEqual(
-      [1, 2].map((progress) => ({
+    expect(sent).toEqual([
+      {
         method: "notifications/progress",
-        params: { progress, message: `step ${progress}`, progressToken: "agent_tok" },
-      })),
-    );
+        params: { progress: 1, message: "step 1", progressToken: "agent_tok" },
+      },
+    ]);
   });
 
   it("relays only the spec fields, with the message capped", async () => {
@@ -540,6 +537,127 @@ describe("McpHost — progress relay", () => {
       },
     });
     expect(result.content).toEqual([{ type: "text", text: "done" }]);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /** Fake timers hold every macrotask: let the in-process hops settle on microtasks. */
+  async function settle() {
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+  }
+
+  /** A call held open upstream, whose progress the test emits step by step. */
+  async function openCall(signal?: AbortSignal) {
+    let upstream!: AppstrateRequestExtra;
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const up = await makeUpstream([
+      {
+        descriptor: { name: "long", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          upstream = extra;
+          started.resolve();
+          await release.promise;
+          return { content: [{ type: "text", text: "done" }] };
+        },
+      },
+    ]);
+    const host = new McpHost();
+    await host.register({ connection: CONN_A, namespace: "up", client: up.client });
+    const tool = host.buildTools().find((t) => t.descriptor.name === "up__long")!;
+    const relayed: number[] = [];
+    jest.useFakeTimers();
+    const result = tool.handler({}, {
+      _meta: { progressToken: "agent_tok" },
+      ...(signal ? { signal } : {}),
+      sendNotification: async (n: { params: { progress: number } }) => {
+        relayed.push(n.params.progress);
+      },
+    } as unknown as AppstrateRequestExtra);
+    await started.promise;
+    const idleTimers = jest.getTimerCount();
+    return {
+      relayed,
+      result,
+      /** Relay windows open on top of the call's own timers. */
+      windows: () => jest.getTimerCount() - idleTimers,
+      async emit(...values: number[]) {
+        for (const progress of values) {
+          await upstream.sendNotification({
+            method: "notifications/progress",
+            params: { progressToken: upstream._meta!.progressToken!, progress },
+          });
+        }
+        await settle();
+      },
+      async advance(ms: number) {
+        jest.advanceTimersByTime(ms);
+        await settle();
+      },
+      async finish() {
+        release.resolve();
+        await result.catch(() => {});
+        await up.pair.close();
+      },
+    };
+  }
+
+  it("drops progress that does not increase", async () => {
+    const call = await openCall();
+    try {
+      await call.emit(2, 2, 1);
+      await call.advance(1000);
+      await call.emit(1.5, 3);
+      expect(call.relayed).toEqual([2, 3]);
+    } finally {
+      await call.finish();
+    }
+  });
+
+  it("relays a burst once per second, the latest value when the window ends", async () => {
+    const call = await openCall();
+    try {
+      await call.emit(1, 2, 3, 4);
+      expect(call.relayed).toEqual([1]);
+      await call.advance(999);
+      expect(call.relayed).toEqual([1]);
+      await call.advance(1);
+      expect(call.relayed).toEqual([1, 4]);
+      // That relay opened a window of its own; it ends with nothing to send.
+      expect(call.windows()).toBe(1);
+      await call.advance(1000);
+      expect(call.relayed).toEqual([1, 4]);
+      expect(call.windows()).toBe(0);
+    } finally {
+      await call.finish();
+    }
+  });
+
+  it("relays nothing once the call has answered, and leaves no timer behind", async () => {
+    const call = await openCall();
+    await call.emit(1, 2);
+    expect(call.windows()).toBe(1);
+    await call.finish();
+    expect((await call.result).content).toEqual([{ type: "text", text: "done" }]);
+    expect(jest.getTimerCount()).toBe(0);
+    await call.advance(1000);
+    expect(call.relayed).toEqual([1]);
+  });
+
+  it("leaves no timer behind when the call is aborted", async () => {
+    const abort = new AbortController();
+    const call = await openCall(abort.signal);
+    try {
+      await call.emit(1, 2);
+      abort.abort();
+      await expect(call.result).rejects.toThrow();
+      expect(jest.getTimerCount()).toBe(0);
+      expect(call.relayed).toEqual([1]);
+    } finally {
+      await call.finish();
+    }
   });
 });
 

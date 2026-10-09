@@ -23,7 +23,7 @@ import { readConfig, requireLoggedIn, resolveProfileName } from "../lib/config.t
 import { loadTokens } from "../lib/keyring.ts";
 import { decodeJwtPayload } from "../lib/jwt-identity.ts";
 import { formatError } from "../lib/ui.ts";
-import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { CommandExit, DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { loginFix, remedyLine } from "../lib/remedy.ts";
 
 interface TokenOptions {
@@ -107,6 +107,7 @@ export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_I
 
     io.stdout.write(lines.join("\n") + "\n");
   } catch (err) {
+    if (err instanceof CommandExit) throw err;
     io.stderr.write(formatError(err) + "\n");
     io.exit(1);
   }

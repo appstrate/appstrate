@@ -492,6 +492,7 @@ column runs.generation_config_override jsonb
 column runs.id text not null
 column runs.inference_route inference_route
 column runs.input jsonb
+column runs.integrations_unbound jsonb
 column runs.last_event_sequence integer not null default 0
 column runs.last_heartbeat_at timestamp with time zone not null default now()
 column runs.metadata jsonb
