@@ -80,8 +80,7 @@ export async function disableSchedules(
 /**
  * Disable, with `reason`, the schedules {@link isForeignNaming} one of `connections` (of its
  * `inSpaceId` when set); returns their ids, whose jobs the caller removes once committed. Every
- * schedule naming one is locked, with those `alsoLock` matches, in one id-ordered statement, for
- * a caller that writes those next.
+ * schedule naming one is locked, with the `alsoLock` matches, in one id-ordered statement.
  */
 export async function disableForeignSchedules(
   tx: Tx,

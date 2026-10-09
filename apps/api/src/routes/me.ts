@@ -362,7 +362,6 @@ async function ownConnectionOrg(
   return row?.orgId ?? null;
 }
 
-/** `PATCH /api/me/connections/:connectionId` — the owner's edit, wherever the row lives. */
 router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
   const connectionId = c.req.param("connectionId")!;
   if (!z.uuid().safeParse(connectionId).success) {

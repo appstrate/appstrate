@@ -7,14 +7,10 @@
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0041-widen-connections-to-org-scope.ts [--apply]
  *
- * From drizzle `0086` a connection's scope is the tier of the OAuth client that minted it, and
- * every row it found is space-scoped. This widens the user-owned rows minted by a system or org
- * client, or by none, with `widenConnectionsToOrgScope` (what promoting a space client does).
- * End users' rows and space clients' rows (a space-tier auto client's included) stay in their space.
- *
- * Run after the deploy, app up, `pg_dump` first. Refuses an empty `DATABASE_URL` (the client
- * would open `./data/pglite`). One transaction per organization, so the label locks stay bounded;
- * dry run by default (each rolled back), `--apply` commits each. Idempotent.
+ * Drizzle `0086` left every row space-scoped; this widens the user-owned rows not minted by a space
+ * client (`widenConnectionsToOrgScope`). Run after the deploy, `pg_dump` first. Refuses an empty
+ * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization, so the
+ * label locks stay bounded; dry run by default (each rolled back), `--apply` commits each. Idempotent.
  */
 
 import { parseArgs } from "node:util";
@@ -34,7 +30,6 @@ export interface WidenedConnection {
   previousLabel: string;
 }
 
-/** @returns the connections widened (or that would be, on a dry run). */
 export async function runWidenConnectionsToOrgScope(options: {
   apply: boolean;
   out: (line: string) => void;

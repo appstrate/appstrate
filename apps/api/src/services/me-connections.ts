@@ -88,11 +88,7 @@ const declaredIntegrationIds = sql<string[]>`ARRAY(
   )
 )`;
 
-/**
- * Fetch every integration_connections row owned by the actor. Cross-space,
- * cross-org for a `user_global` authority; confined to the authority's org —
- * and to the rows visible in its space when it pins one — for a `bound` caller.
- */
+/** Every connection the actor owns, within the authority ({@link meConnectionAuthorityFilter}). */
 async function listAllActorIntegrationConnections(
   actor: Actor,
   authority: MeConnectionAuthority,

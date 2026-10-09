@@ -17,10 +17,8 @@
  *     map (§7.4) — the connect layer renders it into the row's
  *     `identityClaims` JSONB and `accountId` discriminator.
  *
- *   - A connection belongs to an organization and takes the scope of the
- *     OAuth client that minted it: `spaceId` NULL is org scope
- *     (system or org client, or no client), a space id is that space only
- *     (a space's own client, or an end-user's connection). The owner is
+ *   - A connection belongs to an organization; its scope is the minting
+ *     client's tier (`apps/api/src/services/connection-reach.ts`). The owner is
  *     either a dashboard user (`userId`) or a headless end-user
  *     (`endUserId`), enforced by a check constraint.
  *
@@ -217,8 +215,7 @@ export const integrationConnections = pgTable(
  * Custom (BYO-app) OAuth2 clients for integration auths: a space row overrides the
  * org rows (`space_id IS NULL`) every space inherits (space > org > system client).
  * At most one `is_default` per tier and `(integration, auth)`. The service keeps a
- * space row's `org_id` equal to its space's org. A connection takes its client's
- * tier as its scope.
+ * space row's `org_id` equal to its space's org.
  */
 export const integrationOauthClients = pgTable(
   "integration_oauth_clients",

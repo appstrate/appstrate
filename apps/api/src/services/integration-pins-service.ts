@@ -377,9 +377,8 @@ async function assertAgentActiveHere(scope: SpaceScope, agentPackageId: string):
 /**
  * Asserts, in one query, that the caller may pin every one of `connectionIds` for `integrationId`
  * here: rows shared into the space, plus `allowOwnedBy`'s own usable here for a member pin. Every
- * refusal — unknown id, out of the space's reach, another integration, a row neither shared here
- * nor the caller's own — is the SAME 404 naming the first refused id, so a pin write cannot tell a
- * colleague's private uuid from a made-up one.
+ * refusal is the SAME 404 naming the first refused id, so a pin write cannot tell a colleague's
+ * private uuid from a made-up one.
  */
 export async function validatePinTargets(
   scope: SpaceScope,
@@ -476,7 +475,6 @@ export async function listMemberPinsForAgent(
 
 // ─────────────────────────── Connection edits ─────────────────────────────────
 
-/** Who edits a connection, and from where. */
 export interface ConnectionViewer {
   actor: Actor;
   /** The space the edit is made from; `null` on the account surface, where only the owner edits. */
@@ -500,7 +498,6 @@ interface UpdateConnectionInput {
 export interface ConnectionUpdate {
   connection: ConnectionRow;
   isOwner: boolean;
-  /** Share targets this write added and removed — one audit row each. */
   added: string[];
   removed: string[];
   /** Other actors' schedules of a removed target naming the row; the caller removes their jobs. */
@@ -864,7 +861,6 @@ export async function resolveAgentConnectionReadiness(args: {
   /** `integrations:connect` and `integrations:configure`: together they drive `can_add_connection`. */
   canConnect: boolean;
   canConfigureIntegrations: boolean;
-  /** Whether the caller is a user principal: see {@link listAccessibleConnections}. */
   wholeReach: boolean;
   /**
    * Version selector (`draft` | `published` | concrete semver | dist-tag) —

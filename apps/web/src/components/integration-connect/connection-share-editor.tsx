@@ -18,11 +18,7 @@ import { useOrgSpaces } from "../../hooks/use-spaces";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { withSpaceShare } from "./connection-ownership";
 
-/**
- * The spaces a connection is shared into: the owner picks any space of the org they reach (only
- * its own for a space-scoped row); a governor only withdraws the current one. A refused removal
- * answers 409 `connection_pinned`. Every write sends the whole replacement set.
- */
+/** The spaces a connection is shared into (rules: `connectionRowGrants`); a write sends the whole set. */
 export function ConnectionShareEditor({
   connectionId,
   orgId,
@@ -41,9 +37,7 @@ export function ConnectionShareEditor({
   scope: "org" | "space";
   /** As read: the owner's full set, anyone else's projection of the current space. */
   sharedSpaceIds: string[];
-  /** The one space a space-scoped row lives in. */
   ownSpaceId: string | null;
-  /** The space the page acts in; null outside one. */
   hereSpaceId: string | null;
   canEditShares: boolean;
   canUnshareHere: boolean;

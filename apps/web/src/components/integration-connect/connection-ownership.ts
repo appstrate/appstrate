@@ -41,7 +41,6 @@ export function connectionRowGrants(args: {
   };
 }
 
-/** Whether the row is shared into `spaceId`. */
 export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: string | null) {
   return !!spaceId && c.shared_space_ids.includes(spaceId);
 }

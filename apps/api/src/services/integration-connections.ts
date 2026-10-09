@@ -283,10 +283,8 @@ export function displayAccountId(accountId: string | null | undefined): string |
   return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
 
-/**
- * IDOR guard on a client-supplied reconnect target: 404 unless it is the actor's own row reaching
- * the space (ownership, not usability: `block_user_connections` never stops a renewal).
- */
+// IDOR guard on a client-supplied reconnect target. Ownership, not usability:
+// `block_user_connections` never stops a renewal.
 export async function assertConnectionBelongsToActor(
   connectionId: string,
   spaceId: string,
@@ -2695,10 +2693,8 @@ async function firstFreeLabel(tx: Tx, key: ConnectionLabelKey, label: string): P
   return dedupeLabel(label, await takenLabels(tx, key), { maxLength: CONNECTION_LABEL_MAX });
 }
 
-/**
- * The space of the custom client `clientRef` names — `null` for an org client, a system client or
- * none. Read `FOR SHARE`: the client cannot change tier before the connection it mints commits.
- */
+// The space of `clientRef`'s custom client (`null`: org, system or none), read FOR SHARE: its tier
+// cannot change before the connection it mints commits.
 async function mintingClientSpace(
   tx: Tx,
   clientRef: string | null | undefined,
@@ -2714,11 +2710,7 @@ async function mintingClientSpace(
   return client.spaceId;
 }
 
-/**
- * Widen the user-owned, space-scoped rows matching `where` (over the unaliased table) to org
- * scope: `space_id` NULL, `origin_space_id` the space they leave, shares kept. A label the owner
- * already holds at org scope takes its first free ` (n)` form.
- */
+/** `where` over the unaliased table; shares kept, `origin_space_id` the space left, a taken label ` (n)`. */
 export async function widenConnectionsToOrgScope(
   tx: Tx,
   where: SQL,
@@ -3054,10 +3046,7 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/**
- * The single writer of `needs_reconnection = true` that does NOT touch the stored credentials
- * (a refresh path, an unreadable credential). Keyed by id; a no-op once the row is gone.
- */
+/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {
@@ -3233,11 +3222,9 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * List the connections the actor can *use* for an integration in this space
- * ({@link usableInSpace}) — the set the runtime resolver picks from. Projected for
- * this space unless the actor owns the row and reads with `wholeReach` (their own
- * session). `locked_by` is what a 409 would refuse: for an own row its delete (a
- * lock in any space), for another's its withdrawal from this space.
+ * The resolver's set ({@link usableInSpace}), projected for this space unless an owner reads with
+ * `wholeReach`. `locked_by`: what a 409 would refuse — an own row's delete (a lock anywhere),
+ * another's withdrawal from this space.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
@@ -3438,10 +3425,7 @@ export async function assertConnectionsUnpinned(
   }
 }
 
-/**
- * Delete one connection row the actor owns within `authority` ({@link forgetDeletedConnection}),
- * `null` when none; a credential bound to a space deletes only a row scoped to it (403).
- */
+/** Delete one own row within `authority` ({@link forgetDeletedConnection}); `null` when none. */
 export async function deleteOwnConnection(
   actor: Actor,
   connectionId: string,

@@ -482,9 +482,8 @@ export async function callerSpaceAccessById(
 }
 
 /**
- * The caller's effective set in ANY space of `orgId`, not only the request's: the org role read
- * with the space and membership as one snapshot (RBAC spec §4.4), under the credential ceiling.
- * Empty for a space outside the org or a caller outside it.
+ * The caller's effective set in ANY space of `orgId` (empty outside it), not only the request's:
+ * org role, space and membership read as one snapshot (RBAC spec §4.4), under the credential ceiling.
  */
 export async function callerPermissionsInSpace(
   c: Context<AppEnv>,

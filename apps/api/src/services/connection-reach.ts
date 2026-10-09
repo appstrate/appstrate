@@ -56,15 +56,11 @@ export function connectionInSpace(spaceId: string): SQL {
   )!;
 }
 
-/** The owner shared the row into `spaceId`. */
 function sharedInto(spaceId: string): SQL {
   return arrayContains(c.sharedSpaceIds, [spaceId]);
 }
 
-/**
- * `block_user_connections` is on for `integrationId` in `spaceId`. Read off a PLACEMENT row only:
- * an orphan `space_packages` row is nobody's decision here.
- */
+/** Read off a PLACEMENT row only: an orphan `space_packages` row is nobody's decision here. */
 export function userConnectionsBlocked(spaceId: string, integrationId: SQLWrapper | string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${spacePackages}
     INNER JOIN ${packages} ON ${packages.id} = ${spacePackages.packageId}
@@ -84,10 +80,7 @@ function ownUsableIn(spaceId: string, actor: Actor): SQL {
   )!;
 }
 
-/**
- * The actor's own rows reaching `spaceId`, blocked or not: what the owner manages (reconnect,
- * rename, delete). Use {@link usableInSpace} to decide what binds.
- */
+/** The actor's own rows reaching `spaceId`, blocked or not: what the owner manages. */
 export function ownRowInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), actorFilter(actor, c))!;
 }
@@ -97,12 +90,10 @@ export function scopedOrSharedIn(spaceId: string): SQL {
   return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), sharedInto(spaceId)))!;
 }
 
-/** Rows shared into `spaceId` that reach it. */
 export function sharedInSpace(spaceId: string): SQL {
   return and(connectionInSpace(spaceId), sharedInto(spaceId))!;
 }
 
-/** Rows the actor may bind in `spaceId`: {@link ownUsableIn} ∪ {@link sharedInSpace}. */
 export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
 }
@@ -110,11 +101,7 @@ export function usableInSpace(spaceId: string, actor: Actor): SQL {
 export type MeConnectionAuthority =
   { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
 
-/**
- * A `bound` authority's org (and space, when it pins one: the rows visible there) as a WHERE
- * conjunct — in the SQL, so a bound credential can only ever SELECT rows inside its binding.
- * Nothing for `user_global`.
- */
+/** In the SQL, so a bound credential only ever SELECTs rows inside its org (and space). */
 export function meConnectionAuthorityFilter(authority: MeConnectionAuthority): SQL | undefined {
   if (authority.kind !== "bound") return undefined;
   return and(

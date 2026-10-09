@@ -445,7 +445,6 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
   };
 }
 
-/** A connection and one space it is shared into. */
 interface ConnectionShare {
   connectionId: string;
   spaceId: string;
@@ -453,7 +452,6 @@ interface ConnectionShare {
 
 /** What an access loss unshared, and the other actors' schedules that disabled. */
 export interface ConnectionsUnshared {
-  /** The connections that lost at least one share. */
   connectionIds: string[];
   disabledScheduleIds: string[];
 }
@@ -463,7 +461,6 @@ export function nothingUnshared(): ConnectionsUnshared {
   return { connectionIds: [], disabledScheduleIds: [] };
 }
 
-/** 400 `invalid_share_target` on `shared_space_ids`. */
 export function invalidShareTarget(detail: string): ApiError {
   return new ApiError({
     status: 400,
@@ -556,10 +553,7 @@ async function lockSpaceRow(tx: Tx, spaceId: string): Promise<void> {
   await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).for("share");
 }
 
-/**
- * (user-owned connection matching `filter`, target space joined `on`) pairs whose owner does not
- * reach the target. The target must be of the connection's org.
- */
+/** (user-owned row matching `filter`, same-org target joined `on`) pairs whose owner lost the target. */
 async function sharesOfOwnersWithoutAccess(
   tx: Tx,
   on: SQL,

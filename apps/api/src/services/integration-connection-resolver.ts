@@ -9,10 +9,9 @@
  *   3. launch override — the run body's or the schedule row's `connection_overrides`
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
- *   6. fallback — the actor's ONE own connection on an auth serving the selection; several →
- *      the one OF this space (`space_id`, else `origin_space_id`), else `must_choose_connection`;
- *      none → as below. In a space blocking user connections for the integration, only a row
- *      made there (`usableInSpace`).
+ *   6. fallback — the actor's ONE own usable connection on an auth serving the selection;
+ *      several → the one OF this space (`space_id`, else `origin_space_id`), else
+ *      `must_choose_connection`; none → as below.
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;

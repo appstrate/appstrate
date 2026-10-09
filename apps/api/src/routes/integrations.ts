@@ -257,7 +257,6 @@ export const updateConnectionSchema = z
         if (problem) ctx.addIssue({ code: "custom", message: `label ${problem}` });
       })
       .optional(),
-    // The WHOLE set of spaces the connection is shared into (a replacement, not a delta).
     shared_space_ids: z
       .array(z.string().min(1).max(100))
       .max(100)
