@@ -47,7 +47,12 @@ import {
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import {
+  MCP_ACCEPT,
+  mcpHeaders,
+  mcpPath,
+  type JsonRpcEnvelope,
+} from "../../../../../test/helpers/mcp.ts";
 import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
 import { activatePackage } from "../../../../services/space-packages.ts";
@@ -67,9 +72,9 @@ async function callTool(
   args: Record<string, unknown>,
   query = "",
 ): Promise<{ isError: boolean; data: Record<string, unknown> }> {
-  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}${query}`, {
+  const res = await app.request(`${mcpPath(headers)}${query}`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,

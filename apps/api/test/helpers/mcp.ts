@@ -4,9 +4,21 @@
 
 export const MCP_ACCEPT = "application/json, text/event-stream";
 
-/** The per-org MCP endpoint for the org the headers' `X-Org-Id` names. */
+/**
+ * The MCP endpoint for the org the headers' `X-Org-Id` names. A test pins the
+ * connection the way a client does, by URL: an `X-Space-Id` in its headers
+ * names the space of `/api/mcp/o/:org/s/:space`, and {@link mcpHeaders} drops
+ * it from what is sent (the endpoint refuses the header).
+ */
 export function mcpPath(headers: Record<string, string>): string {
-  return `/api/mcp/o/${headers["X-Org-Id"]}`;
+  const space = headers["X-Space-Id"];
+  return `/api/mcp/o/${headers["X-Org-Id"]}${space ? `/s/${space}` : ""}`;
+}
+
+/** The headers a test sends to the MCP endpoint: its own, less the space {@link mcpPath} moved. */
+export function mcpHeaders(headers: Record<string, string>): Record<string, string> {
+  const { "X-Space-Id": _inUrl, ...sent } = headers;
+  return sent;
 }
 
 export interface JsonRpcEnvelope {
@@ -27,7 +39,7 @@ export function mcpRpc(app: RequestTarget) {
   ): Promise<{ status: number; envelope: JsonRpcEnvelope }> => {
     const res = await app.request(`${requestOrigin}${mcpPath(headers)}`, {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify(message),
     });
     const text = await res.text();

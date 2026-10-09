@@ -37,6 +37,7 @@ import {
 } from "../../../../../test/helpers/seed.ts";
 import {
   MCP_ACCEPT,
+  mcpHeaders,
   mcpPath,
   mcpRpc,
   type JsonRpcEnvelope,
@@ -57,7 +58,7 @@ const rpc = mcpRpc(app);
 function initializeAs(headers: Record<string, string>) {
   return app.request(mcpPath(headers), {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
   });
 }
@@ -176,7 +177,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["agents:read"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(403);
@@ -214,7 +215,7 @@ describe("mcp discovery + auth gate", () => {
     expect((listed.envelope.result?.tools as unknown[]).length).toBeGreaterThan(0);
   });
 
-  it("enters an X-Space-Id space with the middleware's refusals, byte for byte", async () => {
+  it("enters a URL-pinned space with the middleware's refusals, byte for byte", async () => {
     // `enterMcpSpace` → `enterSpaceById`, the door `requireSpaceContext` uses:
     // a malformed id is a 400 before any lookup; a missing id, a space of
     // another org and a private one the caller is not in are the SAME 404; a
@@ -261,8 +262,27 @@ describe("mcp discovery + auth gate", () => {
     const spoofed = await initializeAs({ ...headers, "X-Space-Id": sibling.id });
     expect(spoofed.status).toBe(403);
     expect(((await spoofed.json()) as { detail: string }).detail).toBe(
-      "The space in the URL, X-Space-Id and the credential's space disagree",
+      "The space in the URL is not the credential's space",
     );
+  });
+
+  it("refuses X-Space-Id, naming the URL that pins a space", async () => {
+    const owner = await createTestContext();
+    const res = await app.request(`/api/mcp/o/${owner.orgId}`, {
+      method: "POST",
+      headers: {
+        Cookie: owner.cookie,
+        "X-Org-Id": owner.orgId,
+        "X-Space-Id": owner.defaultSpaceId,
+        "content-type": "application/json",
+        Accept: MCP_ACCEPT,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { param?: string; detail: string };
+    expect(body.param).toBe("X-Space-Id");
+    expect(body.detail).toContain("/api/mcp/o/<org>/s/<space>");
   });
 
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
@@ -273,7 +293,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "GET",
-      headers: { ...headers, Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), Accept: MCP_ACCEPT },
     });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
@@ -285,7 +305,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
     });
     expect(res.status).toBe(202);
@@ -298,7 +318,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "notifications/initialized",
@@ -310,7 +330,10 @@ describe("mcp discovery + auth gate", () => {
 
   it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
-    const res = await app.request(mcpPath(headers), { method: "DELETE", headers });
+    const res = await app.request(mcpPath(headers), {
+      method: "DELETE",
+      headers: mcpHeaders(headers),
+    });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
   });
@@ -915,7 +938,7 @@ describe("mcp audit + rate limiting", () => {
     const post = () =>
       app.request(mcpPath(headers), {
         method: "POST",
-        headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+        headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
         body: JSON.stringify(init),
       });
 

@@ -82,26 +82,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING (MCP): a connection without `X-Space-Id` reaches every space the
-  caller holds a role in, and each call names its space** (#1825). Every tool
-  that acts in a space requires a `space_id` argument, reads and writes alike,
-  whose schema lists the caller's spaces and roles; a call without it is a
-  `-32602` listing them too. A `resources/read` of an `appfile://` link reads
-  the file in its own space. A
-  tool or operation allowed in only some spaces says which (`Available in: …`,
-  `createAgent [gestion]` in the operation index, `granted_in`), a refusal
-  forbids redoing the action in another space, and `get_me` lists the spaces.
-  A connection pinned by `X-Space-Id`, an API key or an end-user token is
-  unchanged, and a new URL form pins one too: `/api/mcp/o/<org>/s/<space>`,
-  for clients that cannot send headers (claude.ai), with the same OAuth token.
-  The organization settings' "MCP connection" block picks between "All my
-  spaces" and one space and builds the URL and client snippets for it. The
-  CLI's Claude Code plugin pins its MCP server the same way
-  (`…/s/<pinned space>` in `.mcp.json`, no header): Claude Code keys an MCP
-  login on the server URL and headers, so the first sync after the upgrade
-  asks for the plugin's OAuth login once, as a space switch already did. A caller who reaches no space is refused with a `403` instead of
-  landing on the default space, and no request lands on the default space by
-  omission any more: the in-process re-entry fallback is gone.
+- **BREAKING (MCP): a connection reaches every space the caller holds a role
+  in, and each call names its space; a space is pinned by the URL, never by
+  `X-Space-Id`** (#1825).
+  - Every tool that acts in a space requires a `space_id` argument, reads and
+    writes alike, whose schema lists the caller's spaces and roles; a call
+    without it is a `-32602` listing them too. A `resources/read` of an
+    `appfile://` link reads the file in its own space.
+  - A tool or operation allowed in only some spaces says which
+    (`Available in: …`, `createAgent [gestion]` in the operation index,
+    `granted_in`), a refusal forbids redoing the action in another space, and
+    `get_me` lists the spaces.
+  - To confine a connection to one space, use `/api/mcp/o/<org>/s/<space>`:
+    same OAuth token, any client (claude.ai connectors included). The endpoint
+    reads no `X-Space-Id`: a request carrying one is a `400` naming the URL
+    form, so a client configured with the header must move the space into its
+    URL. API keys and end-user tokens stay pinned to their own space; a URL
+    naming another is a `403`.
+  - The organization settings' "MCP connection" block picks between "All my
+    spaces" and one space and builds the URL and client snippets for it. The
+    CLI's Claude Code plugin pins the active space by URL (`.mcp.json`, no
+    header): Claude Code keys an MCP login on the server URL and headers, so
+    the first sync after the upgrade asks for the plugin's OAuth login once, as
+    a space switch already did.
+  - A caller who reaches no space is a `403` instead of landing on the default
+    space, and no request lands on the default space by omission any more:
+    the in-process re-entry fallback is gone.
 
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required

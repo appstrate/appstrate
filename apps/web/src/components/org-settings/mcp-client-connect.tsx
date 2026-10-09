@@ -59,7 +59,7 @@ function DeeplinkTab({ label, href, fallback }: { label: string; href: string; f
  * not just the Claude Code CLI. The scope picks the endpoint: the org's URL
  * reaches every space the caller holds a role in (each call names its space),
  * a space's URL (`…/s/<space>`) pins the connection to that one space — the
- * only way to confine a client that cannot send an `X-Space-Id` header.
+ * one way to confine a client to a space, header-less clients included.
  */
 export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
   const { t } = useTranslation("settings");

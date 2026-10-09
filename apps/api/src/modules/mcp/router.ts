@@ -57,7 +57,7 @@ import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mc
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { forbidden, methodNotAllowed, notFound } from "../../lib/errors.ts";
+import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
@@ -100,10 +100,11 @@ const MCP_PREFIX = "/api/mcp/o";
 /** The per-org POST endpoint, parameterised on the org id. */
 const MCP_PATH = `${MCP_PREFIX}/:org`;
 /**
- * The same endpoint pinned to one space by its URL — the form for a client
- * that cannot send `X-Space-Id` (a claude.ai connector). Same resource, same
- * token: the audience is the org's (`deriveOrgResourceUri` ignores sub-paths),
- * and a client accepts it since the PRM `resource` is a path prefix of the URL.
+ * The same endpoint pinned to one space by its URL — the one client-side pin,
+ * usable by any client including a header-less one (a claude.ai connector).
+ * Same resource, same token: the audience is the org's (`deriveOrgResourceUri`
+ * ignores sub-paths), and a client accepts it since the PRM `resource` is a
+ * path prefix of the URL.
  */
 const MCP_SPACE_PATH = `${MCP_PATH}/s/:space`;
 /**
@@ -321,13 +322,13 @@ function forwardAuthHeaders(src: Headers): Headers {
 
 /**
  * Enter the space of a PINNED connection (`isPinnedConnection`): the
- * strategy-pinned space (API key, end-user token) wins, then the `X-Space-Id`
- * header, validated to belong to the org. Same rule as `requireSpaceContext`.
+ * credential's (API key, end-user token) and the URL's, which must agree,
+ * validated to belong to the org.
  */
 async function enterPinnedSpace(c: Context<AppEnv>, orgId: string): Promise<void> {
   const named = pinnedSpaceIds(c);
   if (new Set(named).size > 1) {
-    throw forbidden("The space in the URL, X-Space-Id and the credential's space disagree");
+    throw forbidden("The space in the URL is not the credential's space");
   }
   await enterSpaceById(c, named[0]!, orgId);
 }
@@ -478,6 +479,15 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // param: the handler's own guard is what rejects a mismatch, and resolving
   // the caller's own space here leaves that answer unchanged.
   const enterSpace = async (c: Context<McpEnv>, next: () => Promise<void>) => {
+    // The URL is the only client-side pin: one mechanism, readable in any
+    // client's configuration, and the one a header-less client can use.
+    if (c.req.header("X-Space-Id") !== undefined) {
+      throw invalidRequest(
+        "X-Space-Id is not read by the MCP endpoint: pin the connection to a space with its " +
+          "URL, /api/mcp/o/<org>/s/<space>, or use the organization's URL to reach every space.",
+        "X-Space-Id",
+      );
+    }
     const orgId = c.get("orgId");
     if (!orgId) return next();
     if (isPinnedConnection(c)) {

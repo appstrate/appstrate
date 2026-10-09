@@ -94,7 +94,7 @@ const orgEndpoint = {
       "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
       "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
       "organizations, configure one MCP server entry per organization. Without a pinned space " +
-      "(no `X-Space-Id`, no space-bound credential, no `/s/{space}` in the URL) the connection " +
+      "(no space-bound credential, no `/s/{space}` in the URL) the connection " +
       "reaches every space where the caller holds a role, and every tool that acts in a space " +
       "requires a `space_id` argument whose schema lists them. Requires the `mcp:read` " +
       "permission (and `mcp:invoke` to call operations).",
@@ -135,7 +135,9 @@ const orgEndpoint = {
         description:
           "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON " +
           "(`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an " +
-          "unsupported `MCP-Protocol-Version` header (`-32000`).",
+          "unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: " +
+          "`invalid_request` with `param: X-Space-Id` — the endpoint reads no `X-Space-Id`; " +
+          "pin a space with `/api/mcp/o/{org}/s/{space}` instead.",
         content: {
           ...jsonRpcTransportError("").content,
           "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -244,10 +246,10 @@ export const mcpPaths = {
   "/api/mcp/o/{org}": orgEndpoint,
   "/api/mcp/o/{org}/s/{space}": pinnedToSpace(
     orgEndpoint,
-    "The per-organization MCP endpoint pinned to one space by its URL — for a client that " +
-      "cannot send `X-Space-Id`. Every call acts in `{space}`, tools take no `space_id`, and an " +
-      "`X-Space-Id` or space-bound credential naming another space is a 403. Same token as the " +
-      "organization's endpoint.",
+    "The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one " +
+      "client-side space pin, usable by any client. Every call acts in `{space}`, tools take no " +
+      "`space_id`, and a space-bound credential naming another space is a 403. Same token as " +
+      "the organization's endpoint.",
   ),
   "/.well-known/oauth-protected-resource/api/mcp/o/{org}": orgMetadata,
   "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": pinnedToSpace(

@@ -34,24 +34,29 @@ stays the rule); changing any route guard; per-space OAuth consent.
 
 ### 1. Two modes, decided once per request
 
-| Mode     | When                                                                                                                     | Behaviour                      |
-| -------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
-| pinned   | a strategy pins a space (API key, end-user token), the URL names one (`…/s/:space`), or the request carries `X-Space-Id` | one space                      |
-| org-wide | anything else                                                                                                            | every space the caller reaches |
+| Mode     | When                                                                    | Behaviour                      |
+| -------- | ----------------------------------------------------------------------- | ------------------------------ |
+| pinned   | a strategy pins a space (API key, end-user token), or the URL names one | one space                      |
+| org-wide | anything else                                                           | every space the caller reaches |
 
-An end-user token always pins its space (RBAC spec §3.6). Sources that
-disagree are a 403.
+An end-user token always pins its space (RBAC spec §3.6). A URL naming another
+space than the credential's is a 403.
 
-The URL form, `/api/mcp/o/:org/s/:space`, is for clients that send no custom
-header (claude.ai connectors): without it they could not be confined to a
-space at all. It is the same OAuth resource: `deriveOrgResourceUri` reads the
-org segment only, so the org's token is valid there, and the PRM served at
+The URL, `/api/mcp/o/:org/s/:space`, is the endpoint's one client-side pin. It
+is readable in any client's configuration and usable by a client that sends no
+custom header (a claude.ai connector), which a header pin is not. The endpoint
+therefore reads no `X-Space-Id`: a request carrying one is a `400` naming the
+URL form, never a header silently ignored (`docs/NO_TRANSITIONAL_CODE.md`). The
+CLI's Claude Code plugin and the in-process chat both pin by URL.
+
+It is the same OAuth resource: `deriveOrgResourceUri` reads the org segment
+only, so the org's token is valid there, and the PRM served at
 `/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` is the org's
 document. An MCP client accepts a PRM `resource` that is a path prefix of the
-server URL (`checkResourceAllowed` in the SDK) and requests that resource, so
-a token obtained through either URL is valid on both. A URL pin
-confines the connection, not the token: real least privilege for a delegated
-client is still a space API key.
+server URL (`checkResourceAllowed` in the SDK) and requests that resource, so a
+token obtained through either URL is valid on both. A URL pin confines the
+connection, not the token: real least privilege for a delegated client is
+still a space API key.
 
 ### 2. Discovering the spaces
 
@@ -163,16 +168,17 @@ space is a 400 whatever its origin.
 
 Per request in org-wide mode: one `listSpacesForPrincipal` statement, and per
 space one in-memory `effectiveInSpace` and `deriveMcpSurface`. Per call: one
-admission read, the same one the header costs. No new table, no cache.
+admission read, the same one a pinned URL costs. No new table, no cache.
 
 ## Compatibility
 
-- Pinned clients (`X-Space-Id`, API keys, end-user tokens): no change, except
-  the 403 detail when two sources disagree.
+- API keys and end-user tokens: no change.
+- Clients that pinned a space with `X-Space-Id` move it into the URL
+  (`…/s/<space>`); the header is a `400` that says so.
 - Unpinned clients that relied on the default space pass `space_id` on every
   call. The refusal lists the spaces, so a model recovers in one turn. No flag
   and no compatibility branch (`docs/NO_TRANSITIONAL_CODE.md`).
-- The in-process chat pins its space and stays pinned.
+- The in-process chat stays pinned, by URL.
 
 ## Open questions
 
@@ -180,5 +186,5 @@ admission read, the same one the header costs. No new table, no cache.
   tell the user to ask for access?
 - A size limit for the bracketed index: past some number of spaces, the
   brackets could give way to `granted_in` on `search_operations` only.
-- The CLI plugin pins `X-Space-Id`; dropping the pin would let skills synced
-  from several spaces act in their own space.
+- The CLI plugin pins the active space by URL; leaving it org-wide would let
+  skills synced from several spaces act in their own space.

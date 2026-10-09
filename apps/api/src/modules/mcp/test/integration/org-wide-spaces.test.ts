@@ -273,31 +273,6 @@ describe("mcp org-wide connection", () => {
     expect((named.data.space as { id: string }).id).toBe(only.id);
   });
 
-  it("keeps an X-Space-Id connection pinned: no space_id argument", async () => {
-    const pinned = { ...headers, "X-Space-Id": gestion.id };
-    const { envelope } = await rpc(pinned, {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/list",
-      params: {},
-    });
-    const invoke = (
-      envelope.result?.tools as Array<{
-        name: string;
-        inputSchema: { properties?: Record<string, unknown> };
-      }>
-    ).find((t) => t.name === "invoke_operation");
-    expect(invoke?.inputSchema.properties?.space_id).toBeUndefined();
-
-    const res = await call(
-      "invoke_operation",
-      { operation_id: "listAgents", space_id: defaultSpaceId },
-      pinned,
-    );
-    expect(res.error?.code).toBe(-32602);
-    expect(res.error?.message).toContain("Unknown argument(s): space_id");
-  });
-
   /** POST to the space-pinned URL `/api/mcp/o/:org/s/:space`. */
   const atUrl = async (space: string, message: Record<string, unknown>, h = headers) => {
     const res = await app.request(`/api/mcp/o/${h["X-Org-Id"]}/s/${space}`, {
@@ -328,6 +303,18 @@ describe("mcp org-wide connection", () => {
       params: { name: "invoke_operation", arguments: { operation_id: "createAgent", body: {} } },
     });
     expect(payload(envelope).data.status).not.toBe(403);
+
+    // The URL decides: a `space_id` is not an argument there.
+    const named = await atUrl(gestion.id, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "invoke_operation",
+        arguments: { operation_id: "listAgents", space_id: defaultSpaceId },
+      },
+    });
+    expect(named.envelope.error?.message).toContain("Unknown argument(s): space_id");
   });
 
   it("refuses a URL naming a space the caller holds no role in", async () => {
@@ -340,14 +327,7 @@ describe("mcp org-wide connection", () => {
     expect(status).toBe(403);
   });
 
-  it("refuses a URL space that disagrees with X-Space-Id or the API key's space", async () => {
-    const both = await atUrl(
-      gestion.id,
-      { jsonrpc: "2.0", id: 1, method: "tools/call", params: listAgents },
-      { ...headers, "X-Space-Id": lecture.id },
-    );
-    expect(both.status).toBe(403);
-
+  it("refuses a URL space that is not the API key's space", async () => {
     const key = await seedApiKey({
       orgId: headers["X-Org-Id"]!,
       spaceId: defaultSpaceId,

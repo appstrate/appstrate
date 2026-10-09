@@ -208,7 +208,6 @@ export const FORWARDED_AUTH_HEADERS = [
   "authorization",
   "cookie",
   "x-org-id",
-  "x-space-id",
   "appstrate-user",
   "appstrate-version",
   // A role preview narrows what the caller reaches; a dispatch that dropped it
@@ -230,6 +229,9 @@ export const FORWARDED_AUTH_HEADERS = [
 // a forgery cannot succeed; this is defence in depth.)
 const PROTECTED_HEADERS = new Set<string>([
   ...FORWARDED_AUTH_HEADERS,
+  // Set by the router to the space the request entered: the typed `space_id`
+  // argument is the only way a call changes space.
+  "x-space-id",
   "host",
   "content-length",
   // Client-source headers: the model must not be able to influence the

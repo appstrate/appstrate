@@ -5,15 +5,15 @@
  * where the caller holds a role (`docs/plans/mcp-org-wide-spaces.md`).
  *
  * A connection is PINNED when a strategy fixed its space (API key, end-user
- * token) or the request carries `X-Space-Id` — the chat does — and behaves as
- * it always did. Otherwise it is ORG-WIDE: the router lists the caller's
+ * token) or its URL names one (`/api/mcp/o/:org/s/:space` — the chat's does).
+ * Otherwise it is ORG-WIDE: the router lists the caller's
  * spaces once per request, and each tool call names the space it acts in with
  * a `space_id` argument.
  *
  * One HTTP request still enters exactly ONE space. The transport is stateless
  * and a `tools/call` request carries one call, so the router reads that call's
  * `space_id` before building the tools and enters the space through the same
- * door as the header (`enterSpaceById`). Everything downstream — the route
+ * door as `requireSpaceContext` (`enterSpaceById`). Everything downstream — the route
  * guards of dispatched calls, and the tools that call a service directly with
  * the request context (`read_skill`, files, package import) — then reads the
  * caller's role in that space and nothing else.
@@ -53,14 +53,12 @@ export interface OrgWideSpaces {
 }
 
 /**
- * The spaces a request is pinned to, in precedence order: the credential's
- * (API key, end-user token), the URL's (`/api/mcp/o/:org/s/:space`), the
- * `X-Space-Id` header. Several that disagree are refused by the caller.
+ * The spaces a request is pinned to: the credential's (API key, end-user
+ * token) and the URL's (`/api/mcp/o/:org/s/:space`). Two that disagree are
+ * refused by the caller.
  */
 export function pinnedSpaceIds(c: Context<AppEnv>): string[] {
-  return [c.get("spaceId"), c.req.param("space"), c.req.header("X-Space-Id")].filter(
-    (id): id is string => Boolean(id),
-  );
+  return [c.get("spaceId"), c.req.param("space")].filter((id): id is string => Boolean(id));
 }
 
 /** Pinned: some source fixed the space. Every other connection is org-wide. */

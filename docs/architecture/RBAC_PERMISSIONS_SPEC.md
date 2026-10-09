@@ -722,7 +722,7 @@ On the first successful org signup, membership and all assignments commit atomic
 
 ### 7.3 MCP (mcp module)
 
-A per-org MCP bearer re-enters space-scoped routes in-process with the `X-Space-Id` of the space the call names (an unpinned connection reaches every space where its subject holds a role and requires `space_id` on each call, `docs/plans/mcp-org-wide-spaces.md`). That re-entry resolves the token subject's role in that space; a space where the subject holds no role is not offered at all, and a `guest` with no row anywhere gets 403, which is correct. The chat module's loopback re-entry pins the session's space explicitly (`X-Space-Id`) and is a `user` principal, so it reaches the caller's personal space exactly as the caller's own request does.
+A per-org MCP bearer re-enters space-scoped routes in-process with the `X-Space-Id` of the space the call names (an unpinned connection reaches every space where its subject holds a role and requires `space_id` on each call, `docs/plans/mcp-org-wide-spaces.md`). That re-entry resolves the token subject's role in that space; a space where the subject holds no role is not offered at all, and a `guest` with no row anywhere gets 403, which is correct. The chat module's loopback connection pins the session's space by its URL (`/api/mcp/o/:org/s/:space`; the MCP endpoint reads no `X-Space-Id`) and is a `user` principal, so it reaches the caller's personal space exactly as the caller's own request does.
 
 ### 7.4 Module-minted loopbacks (chat module)
 

@@ -670,8 +670,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  mcpHeaders["x-space-id"] = spaceId;
-  const mcpUrl = platformMcpUrl(origin, orgId);
+  const mcpUrl = platformMcpUrl(origin, orgId, spaceId);
   try {
     const response = await finalize(
       runEngine({
@@ -692,6 +691,7 @@ export async function handleChatStream(
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,
+          spaceId,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on

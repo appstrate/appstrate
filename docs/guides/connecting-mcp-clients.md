@@ -109,14 +109,14 @@ What happens under the hood:
 > report it rather than redo the action in another space.
 >
 > To confine a client to one space, use the space's URL,
-> `/api/mcp/o/<org>/s/<spc_…>` — the form for a client that cannot send custom
-> headers (a claude.ai connector) — or send an `X-Space-Id` header. Either must
-> name a space of the org where you hold a role: the connection is then
-> pinned, `space_id` is not declared, and every call runs in that space. The
-> URL needs no other setup: it is the same OAuth resource and token as the
-> organization's endpoint. Settings → General → "MCP connection" builds both
-> URLs. An API key is always pinned to its own space, and a URL, header or key
-> naming different spaces is a 403.
+> `/api/mcp/o/<org>/s/<spc_…>`. It must name a space of the org where you hold
+> a role: the connection is then pinned, `space_id` is not declared, and every
+> call runs in that space. The URL needs no other setup — it is the same OAuth
+> resource and token as the organization's endpoint — and any client can use
+> it, a header-less one (a claude.ai connector) included. Settings → General →
+> "MCP connection" builds both URLs. The MCP endpoint reads no `X-Space-Id`: a
+> request carrying one is a `400` naming the URL form. An API key is always
+> pinned to its own space, and a URL naming another one is a `403`.
 
 ### Self-hosting requirements for Path B
 
