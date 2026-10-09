@@ -10,6 +10,10 @@ import {
 } from "../src/run-and-wait-client.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION, agentManifestSchema } from "../src/validation.ts";
 
+const STOPPED_WAITING_ERROR =
+  "run_and_wait stopped waiting before the run reached a terminal status; the run is " +
+  "still in progress. Do not launch it again — read its outcome later with `getRun` on this `id`.";
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -248,7 +252,7 @@ describe("run_and_wait client", () => {
         packageId: "@acme/writer",
         status: "pending",
         done: false,
-        error: "run_and_wait timed out before the run reached a terminal status.",
+        error: STOPPED_WAITING_ERROR,
       },
     ]);
   });
@@ -282,7 +286,7 @@ describe("run_and_wait client", () => {
         packageId: "@acme/writer",
         status: "pending",
         done: false,
-        error: "run_and_wait timed out before the run reached a terminal status.",
+        error: STOPPED_WAITING_ERROR,
       },
     ]);
     expect(calls).toEqual([

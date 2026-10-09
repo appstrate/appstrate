@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import type { Dispatch, McpToolContext } from "../../../../src/modules/mcp/tools.ts";
+import {
+  RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
+  RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+  type Dispatch,
+  type McpToolContext,
+} from "../../../../src/modules/mcp/tools.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
@@ -53,7 +58,8 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
 function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
-  getRun?: Response[];
+  /** Successive poll answers; a function answers (given the poll request) when its promise settles. */
+  getRun?: Array<Response | ((req: Request) => Promise<Response>)>;
   /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
@@ -99,7 +105,8 @@ function makeRunAndWait(opts: {
       return (opts.launch ?? (() => jsonResponse({ id: "run_1", status: "pending" })))();
     }
     if (req.method === "GET" && /\/api\/runs\/[^/]+$/.test(url.pathname)) {
-      return getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
+      const next = getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
+      return typeof next === "function" ? next(req) : next;
     }
     // Post-completion file enrichment (fetchRunFiles).
     if (req.method === "GET" && url.pathname === "/api/files") {
@@ -133,6 +140,10 @@ function makeRunAndWait(opts: {
 }
 
 describe("run_and_wait", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it("is registered as the single launch-and-wait tool", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.name).toBe("run_and_wait");
@@ -341,6 +352,8 @@ describe("run_and_wait", () => {
   });
 
   it("launches an agent run, then waits for the final result", async () => {
+    // Frozen clock: the poll's `wait` must not depend on how long the launch took.
+    jest.useFakeTimers();
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_42", packageId: "@acme/writer", status: "pending" }),
       getRun: [
@@ -366,7 +379,166 @@ describe("run_and_wait", () => {
       result: { ok: true },
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
-    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+    // No progress token: the wait is capped below the clients' 60 s timeout.
+    expect(calls.find((c) => c.method === "GET")?.search).toBe(
+      `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
+    );
+  });
+
+  describe("progress heartbeat and unstreamed wait cap", () => {
+    type SentNotification = Parameters<AppstrateRequestExtra["sendNotification"]>[0];
+
+    it("tells the model to read a `done:false` run back with getRun, not relaunch it", () => {
+      const description = makeRunAndWait({}).tool.descriptor.description;
+      expect(description).toContain("`done:false`");
+      expect(description).toContain("never call `run_and_wait` again");
+      expect(description).toContain("read its outcome with `getRun` on that `id`");
+      // The chat reuses this text with only its closing-reply margin left: no long-poll advice.
+      expect(description).not.toContain("wait: true");
+    });
+
+    function extraWith(
+      progressToken: string | number | undefined,
+      send: (n: SentNotification) => Promise<void>,
+    ): AppstrateRequestExtra {
+      return {
+        ...(progressToken === undefined ? {} : { _meta: { progressToken } }),
+        sendNotification: send,
+      } as AppstrateRequestExtra;
+    }
+
+    /**
+     * A poll answer held until `settle` is called; like a real fetch, it rejects
+     * when the request's signal aborts (the core's per-poll deadline).
+     */
+    function heldPoll(): {
+      answer: (req: Request) => Promise<Response>;
+      settle: (body: Record<string, unknown>) => void;
+    } {
+      let settle: (body: Record<string, unknown>) => void = () => {
+        throw new Error("poll not dispatched yet");
+      };
+      const answer = (req: Request) =>
+        new Promise<Response>((resolve, reject) => {
+          settle = (body) => resolve(jsonResponse(body));
+          req.signal.addEventListener("abort", () => reject(req.signal.reason), { once: true });
+        });
+      return { answer, settle: (body) => settle(body) };
+    }
+
+    /** Let pending promise chains run without moving the fake clock. */
+    async function flush(): Promise<void> {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    }
+
+    /**
+     * Start the call and return once its poll is in flight. Wrapped: an async
+     * function returning the bare promise would adopt it and wait for the result.
+     */
+    async function startCall(
+      tool: ReturnType<typeof makeRunAndWait>["tool"],
+      calls: ReturnType<typeof makeRunAndWait>["calls"],
+      extra: AppstrateRequestExtra,
+    ): Promise<{ pending: Promise<CallToolResult> }> {
+      const pending = tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, extra);
+      for (let i = 0; i < 50 && !calls.some((c) => c.method === "GET"); i++) await flush();
+      expect(calls.some((c) => c.method === "GET")).toBe(true);
+      return { pending };
+    }
+
+    it("streams strictly increasing progress under the caller's token, then stops", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const { tool, calls } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      for (let i = 0; i < 3; i++) {
+        jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+        await flush();
+      }
+      poll.settle({ id: "run_1", status: "success" });
+      const res = await pending;
+      jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS * 4);
+      await flush();
+
+      expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
+      // A streamed call keeps the full default wait.
+      expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+      // One beat at launch, then one per interval.
+      expect(sent).toEqual(
+        [
+          "Run run_1 launched",
+          ...[1, 2, 3].map(
+            (n) =>
+              `Waiting for run run_1 (${(n * RUN_AND_WAIT_PROGRESS_INTERVAL_MS) / 1000}s elapsed)`,
+          ),
+        ].map((message, i) => ({
+          method: "notifications/progress",
+          params: { progressToken: "tok_1", progress: i + 1, message },
+        })),
+      );
+    });
+
+    it("never fails the call when sending a notification throws", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      let attempts = 0;
+      const { tool, calls } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith(7, () => {
+          attempts += 1;
+          throw new Error("transport closed");
+        }),
+      );
+      for (let i = 0; i < 2; i++) {
+        jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+        await flush();
+      }
+      poll.settle({ id: "run_1", status: "success" });
+      const res = await pending;
+
+      expect(attempts).toBe(3); // the launch beat + two intervals
+      expect(res.isError).toBeFalsy();
+      expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
+    });
+
+    it("sends nothing and returns done:false with the run id once the cap passes", async () => {
+      jest.useFakeTimers();
+      const sent: SentNotification[] = [];
+      const { tool, calls } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),
+        getRun: [heldPoll().answer],
+      });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith(undefined, async (n) => {
+          sent.push(n);
+        }),
+      );
+      jest.advanceTimersByTime(RUN_AND_WAIT_UNSTREAMED_MAX_MS);
+      const res = await pending;
+
+      expect(calls.find((c) => c.method === "GET")?.search).toBe(
+        `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
+      );
+      expect(res.isError).toBeFalsy();
+      const payload = parseResult(res);
+      expect(payload).toMatchObject({ id: "run_7", status: "pending", done: false });
+      expect(payload.error).toContain("Do not launch it again");
+      expect(sent).toEqual([]);
+    });
   });
 
   it("opts the launch into connect offers, and only the launch", async () => {

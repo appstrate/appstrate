@@ -34,3 +34,11 @@ export function mcpRpc(app: RequestTarget) {
     return { status: res.status, envelope: text ? (JSON.parse(text) as JsonRpcEnvelope) : {} };
   };
 }
+
+/** The JSON-RPC messages an SSE response body carries, one per `data:` event, in order. */
+export function sseMessages(text: string): Array<JsonRpcEnvelope & { method?: string }> {
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => JSON.parse(line.slice("data:".length)) as JsonRpcEnvelope & { method?: string });
+}

@@ -277,6 +277,17 @@ export async function createInProcessPair(
   };
 }
 
+/** Fire-and-forget: a failed send (client gone) goes to `onError`, never fails the handler. */
+export function notifyDetached(
+  extra: AppstrateRequestExtra,
+  notification: ServerNotification,
+  onError: (err: unknown) => void,
+): void {
+  Promise.resolve()
+    .then(() => extra.sendNotification(notification))
+    .catch(onError);
+}
+
 // Re-export the SDK error primitives so callers don't need a second
 // dependency line just to inspect error codes thrown by the server.
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
@@ -291,6 +302,8 @@ export type {
 // over Streamable HTTP; the CLI uses the in-process pair already
 // exported above.
 export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
+
+export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible

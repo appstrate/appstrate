@@ -49,6 +49,9 @@ import type { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   createMcpServer,
+  parseMcpPost,
+  serveStatelessPost,
+  type McpPost,
   ErrorCode,
   McpError,
   API_CALL_ERROR_META_KEY,
@@ -1830,14 +1833,14 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     const hostError = validateMcpHostHeader(c.req.raw);
     if (hostError) return hostError;
 
-    // Body-size guard: the SDK transport calls `await req.json()`
-    // unconditionally on POST. We pre-read the body (bounded), then
-    // hand a fresh Request to the transport. `Content-Length`, when
+    // Body-size guard: we pre-read the body (bounded), then hand a fresh
+    // Request to the transport. `Content-Length`, when
     // declared, is enforced up-front; otherwise we stream and abort if
     // the cap is exceeded mid-read. Either way the SDK never sees a
     // body larger than MAX_MCP_REQUEST_BODY_SIZE.
     const method = c.req.method.toUpperCase();
     let forwarded: Request = c.req.raw;
+    let post: McpPost | null = null;
     if (method === "POST" || method === "PUT" || method === "PATCH") {
       const envelopeOversizeError = (actual: number | null) => ({
         jsonrpc: "2.0" as const,
@@ -1881,6 +1884,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
         headers: c.req.raw.headers,
         body: bodyBytes,
       });
+      if (method === "POST") post = parseMcpPost(bodyBytes);
     }
 
     // Wait for the integration runtime to finish its first bootstrap
@@ -1933,19 +1937,16 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // host/origin check is therefore disabled.
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+      enableJsonResponse: !post?.requestsProgress,
       enableDnsRebindingProtection: false,
       // The envelope was already bounded above; without this the SDK's own
       // 4 MB default rejects it first and the tool never answers 413 itself.
       maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
+    // Only a POST may stream; a GET's standalone stream would otherwise stay open for the run.
+    if (method === "POST") return serveStatelessPost(server, transport, forwarded, post);
     try {
       await server.connect(transport);
-      // `handleRequest` returns a `Promise<Response>` we hand straight
-      // back to Hono. Awaiting before returning ensures the `finally`
-      // teardown runs after the response has been fully composed (the
-      // SDK populates the response body synchronously into the Response
-      // object before resolving the promise).
       return await transport.handleRequest(forwarded);
     } finally {
       await transport.close();

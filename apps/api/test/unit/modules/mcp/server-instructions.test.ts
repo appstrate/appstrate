@@ -194,9 +194,35 @@ describe("MCP server instructions — run guidance", () => {
       "Connecting or reconnecting an integration before a run",
       "must_choose_connection",
       "required_integration_unbound",
+      // What a still-running run's result tells the model to do.
+      "`done:false`",
     ]) {
       expect(withRuns).toContain(marker);
       expect(without).not.toContain(marker);
+    }
+  });
+
+  it("follows a `done:false` run up by client: a long-poll outside the chat, a read inside it", () => {
+    // The chat gets `done:false` at the end of its turn budget, with less time
+    // left than a `wait: true` long-poll may block; an external client has time.
+    const shortcutOf = (contextInjected: boolean) =>
+      instructionsFor(RUNNER, contextInjected)
+        .split("\n")
+        .find((line) => line.startsWith("- Shortcut —"))!;
+    const external = shortcutOf(false);
+    expect(external).toContain(
+      "`done:false` (with an `error`) means the run is still going: never call `run_and_wait` again for it — wait for it with `getRun` (`query: { wait: true }`) on that `id`.",
+    );
+    const chat = shortcutOf(true);
+    expect(chat).toContain(
+      "never call `run_and_wait` again for it — read its outcome with `getRun` on that `id`.",
+    );
+    expect(chat).not.toContain("wait: true");
+    // The generic run bullet defers to the shortcut instead of contradicting it.
+    for (const contextInjected of [false, true]) {
+      expect(instructionsFor(RUNNER, contextInjected)).toContain(
+        "for a run `run_and_wait` returned with `done:false`, see the shortcut below",
+      );
     }
   });
 

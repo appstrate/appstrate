@@ -192,6 +192,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
   Malformed bands are dropped (and logged); the counters are kept.
 
+- **MCP `run_and_wait` without a `progressToken` returns after ~45 s**
+  (#1844). Nothing keeps such a request alive, so instead of holding it up to
+  30 min the tool answers `done:false` with the run `id` once 45 s have
+  passed, launch included, before the 60 s timeout of MCP clients. The run
+  keeps going: continue with `getRun` (`query: { wait: true }`), never with a
+  second `run_and_wait`.
+
 ### Fixed
 
 - **Saving an agent in the editor no longer drops the
@@ -199,6 +206,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#1830): `writeManifestIntegrations` merges onto the stored configuration.
 - **The agent's system prompt carries one `## Integration` section per
   integration** instead of one per bound connection (#1830).
+- **MCP `run_and_wait` no longer times out client-side on long runs**
+  (#1844). The endpoint answered every POST as one JSON body, so a call sent
+  no byte until the run ended and clients and proxies cut it after 60-100 s.
+  A request carrying `params._meta.progressToken` is now answered over SSE:
+  headers at once, `notifications/progress` every 15 s while the run is
+  waited on, then the result. Other requests keep the JSON response. The
+  sidecar relays progress the same way, and agents' calls to it now ask for
+  it.
 
 - **`appstrate api` no longer cuts a response piped into a slower reader**
   (#1824). Piped into `jq` or a script's `capture_output`, the body stopped at

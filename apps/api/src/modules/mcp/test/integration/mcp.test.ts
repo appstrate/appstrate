@@ -266,8 +266,9 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
-    // Stateless transport (no session id, JSON response mode) does not serve a
-    // standalone SSE stream, so GET is Method Not Allowed. This is the
+    // Stateless transport (no session id; a POST is answered as JSON unless it
+    // carries a progressToken, then over SSE) does not serve a standalone SSE
+    // stream, so GET is Method Not Allowed. This is the
     // behaviour the OpenAPI spec documents; assert it rather than trust it.
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {

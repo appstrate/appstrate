@@ -54,7 +54,7 @@ import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `@better-auth/core/oauth2` here.
 import { createInsufficientScopeError } from "better-auth/oauth2";
 import { APIError } from "better-auth/api";
-import { createMcpServer } from "@appstrate/mcp-transport";
+import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
@@ -225,9 +225,14 @@ export function buildServerInstructions(
   const runIntro = runs
     ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
     : "";
+  // A `done:false` run is still going. An external client waits on it; the chat
+  // gets `done:false` at the end of its turn budget, too late for a long-poll.
+  const doneFalseFollowUp = contextInjected
+    ? "read its outcome with `getRun` on that `id`"
+    : "wait for it with `getRun` (`query: { wait: true }`) on that `id`";
   const runBullets = runs
-    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that was not launched through \`run_and_wait\` in this turn.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings? }\` once the run is terminal (\`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again.${inlineShortcut}
+    ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; for a run \`run_and_wait\` returned with \`done:false\`, see the shortcut below.
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings? }\` once the run is terminal (\`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` (with an \`error\`) means the run is still going: never call \`run_and_wait\` again for it — ${doneFalseFollowUp}.${inlineShortcut}
 `
     : "";
   const authKeySource = listsIntegrations
@@ -498,7 +503,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // hard kill would have lost anyway. The insert is itself best-effort and
     // never rejects (recordAudit swallows), and `recordAuditFromContext` reads
     // the context synchronously before its first await, so nothing here
-    // depends on the request outliving the response.
+    // depends on the request outliving the response (over SSE it runs after the handler returned).
     const observe: McpObserver = (event) => {
       logger.info("mcp.tool_call", {
         requestId: c.get("requestId"),
@@ -566,9 +571,12 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         resources,
       },
     );
+    const raw = c.req.raw;
+    const body = await raw.arrayBuffer();
+    const post = parseMcpPost(body);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+      enableJsonResponse: !post?.requestsProgress,
       // Disabled deliberately: the SDK's Host-header allowlist would reject
       // legitimate reverse-proxied hosts, and the rebinding threat it guards
       // (a browser tricked into POSTing to a localhost MCP server) doesn't
@@ -580,27 +588,16 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       maxRequestBodySize: getEnv().API_BODY_LIMIT_BYTES,
     });
 
-    // Reconstruct the request so the SDK transport can read the body once.
-    const raw = c.req.raw;
-    const forwarded = new Request(raw.url, {
-      method: raw.method,
-      headers: raw.headers,
-      body: await raw.arrayBuffer(),
-    });
+    // The SDK reads these bytes only when they did not parse here.
+    const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
 
-    try {
-      await server.connect(transport);
-      // Any audit insert the tool layer triggered is already tracked (see
-      // `observe` above) and flushed at shutdown, not here.
-      return await transport.handleRequest(forwarded);
-    } finally {
-      await transport.close();
-      await server.close();
-    }
+    // Any audit insert the tool layer triggered is already tracked (see
+    // `observe` above) and flushed at shutdown, not here.
+    return serveStatelessPost(server, transport, forwarded, post);
   });
 
-  // Stateless JSON-response transport serves no standalone server→client SSE
-  // stream (GET) and has no session to terminate (DELETE), so POST is the only
+  // The stateless transport serves no standalone server→client SSE stream
+  // (GET) and has no session to terminate (DELETE), so POST is the only
   // meaningful verb. Reject everything else with 405 + `Allow: POST` rather
   // than letting the SDK open a dangling GET SSE stream that never receives a
   // message. Auth still runs first (global pipeline), so an unauthenticated
