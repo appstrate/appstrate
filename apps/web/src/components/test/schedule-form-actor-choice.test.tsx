@@ -11,10 +11,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 // Registered before the fake storage's own teardown, so it runs first.
-afterAll(async () => {
-  for (let i = 0; i < 50 && authStore.getState().loading; i++) await Bun.sleep(1);
-  getSession.mockRestore();
-});
+afterAll(() => getSession.mockRestore());
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -27,13 +24,16 @@ const { packageKeys } = await import("../../lib/query-keys.ts");
 const i18nModule = await import("../../i18n.ts");
 const { authClient } = await import("../../lib/auth-client.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
+const { startAuthBootstrap } = await import("../../hooks/use-auth.ts");
 
-// The form's `useAuth()` starts the session resync: answer it at once (no session) and let it
-// settle inside this suite, while the fake storage it clears still exists.
+// The form's `useAuth()` would start the session resync mid-suite: start it here, answered at
+// once (no session), and let it settle before any test, while the fake storage it clears exists.
 const getSession = spyOn(authClient, "getSession").mockResolvedValue({
   data: null,
   error: null,
 });
+startAuthBootstrap();
+for (let i = 0; i < 5000 && authStore.getState().loading; i++) await Bun.sleep(1);
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
