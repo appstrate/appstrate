@@ -36,6 +36,14 @@ describe("finalize body contract", () => {
     expect(issuePaths({ status: "failed", usage: { input_tokens: -1 } })).toEqual([]);
   });
 
+  it("drops malformed tier bands alone, so a success keeps its usage", () => {
+    const parsed = RunResultSchema.parse({
+      status: "success",
+      usage: { ...USAGE, tiers: [{ input_tokens_above: 0 }] },
+    });
+    expect(parsed.usage).toEqual({ usage: USAGE, tiersDropped: true });
+  });
+
   it("accepts a non-success status without usage", () => {
     for (const status of ["failed", "timeout", "cancelled"]) {
       expect(issuePaths({ status, error: { message: "x" } })).toEqual([]);

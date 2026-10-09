@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tokenUsageSchema`** (`@appstrate/core/token-usage`) validates the optional
+  `tiers` of a `TokenUsage` (`@appstrate/afps-shared` `TokenUsage.tiers`) with
+  afps-shared's `isTokenUsageTiers` (at most 16 bands, strict keys, a positive
+  integer `input_tokens_above` unique across bands, finite non-negative
+  counters). It previously stripped the field. Malformed bands are dropped and
+  the counters kept: the snapshot still parses. (#1552)
+
+- **`parseTokenUsage`** (`@appstrate/core/token-usage`): `tokenUsageSchema` at
+  an ingestion seam — `{ usage, tiersDropped }`, `usage` null when the snapshot
+  is malformed, `tiersDropped` set when bands the raw usage carried were
+  dropped, for the seam to log. (#1552)
+
+- **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
+  per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model
+  calls, so the platform prices each call at its tier instead of the base
+  rate. (#1552)
+
 - **`ModelGenerationCapabilities.reasoning.off`**, **`MODEL_REASONING_OFF_BEHAVIOURS`**
   and **`ModelReasoningOff`**
   (`@appstrate/core/model-generation`): what reasoning level `off` puts on the
@@ -18,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **`modelCostSchema`** (`@appstrate/core/module`) refuses a rate card whose
+  tiers break the rule its usage bands follow: `inputTokensAbove` must be an
+  integer (was any positive number), and `tiers` holds at most
+  `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
+  would otherwise have every band of its usage dropped and price at the base
+  rate. (#1552)
+
+- **Requires `@appstrate/afps-shared` `^0.12.1`** (was `^0.12.0`): the
+  `tiers` validation above is its `isTokenUsageTiers`. (#1552)
 
 - **`waitForRunAndWaitCompletion`** (`@appstrate/core/run-and-wait-client`): the
   `error` of a `done: false` step — the wait ended before the run reached a

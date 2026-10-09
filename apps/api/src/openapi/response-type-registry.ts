@@ -266,6 +266,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   ModelCostTier:
     "embedded model-cost value object; canonical runtime type lives in @appstrate/core",
+  TokenUsageTier:
+    "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",

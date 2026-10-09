@@ -18,10 +18,12 @@ import {
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
-import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW, piTokenCostUsd, usageCostUsd } from "../src/pi-model.ts";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
+import type { ModelCost } from "@appstrate/core/module";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import { ASSISTANT_MESSAGE_PROGRESS_EVENT } from "@appstrate/afps-runtime/runner";
 
 const RUN_ID = "run_bridge_test";
@@ -1033,6 +1035,78 @@ describe("installSessionBridge — getUsage()", () => {
       };
     };
     expect(metric.usage).toEqual(bridge.getUsage());
+  });
+});
+
+describe("installSessionBridge — price tiers", () => {
+  const COST: ModelCost = {
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    tiers: [
+      { inputTokensAbove: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 },
+    ],
+  };
+  // Prompts of 55k (base rate), 161k and 120k (the tier).
+  const UNDER = { input: 20_000, output: 1_000, cacheRead: 30_000, cacheWrite: 5_000 };
+  const OVER = { input: 10_000, output: 2_000, cacheRead: 150_000, cacheWrite: 1_000 };
+  const COMPACTION = { input: 120_000, output: 900, cacheRead: 0, cacheWrite: 0 };
+  // Pi stamps every message with its own `calculateCost`.
+  const priced = (usage: typeof UNDER) => ({
+    ...usage,
+    cost: { total: piTokenCostUsd(COST, usage) },
+  });
+
+  function runSession(options: { cost?: ModelCost }) {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, options);
+    for (const usage of [UNDER, OVER]) {
+      session.pushMessage({ role: "assistant", usage: priced(usage), content: [] });
+      session.emit({ type: "message_end" });
+    }
+    session.emit({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { usage: priced(COMPACTION) },
+    });
+    session.emit({ type: "agent_end" });
+    const metrics = sink.events.filter((e) => e.type === "appstrate.metric") as unknown as {
+      usage: TokenUsage;
+      cost?: number;
+    }[];
+    return { bridge, metrics };
+  }
+
+  it("carries the band of the requests priced at a tier, which prices Pi's own sum", () => {
+    const { bridge, metrics } = runSession({ cost: COST });
+
+    expect(metrics[0]!.usage).not.toHaveProperty("tiers");
+    const last = metrics.at(-1)!;
+    expect(last.usage).toEqual({
+      input_tokens: 150_000,
+      output_tokens: 3_900,
+      cache_creation_input_tokens: 6_000,
+      cache_read_input_tokens: 180_000,
+      tiers: [
+        {
+          input_tokens_above: 100_000,
+          input_tokens: 130_000,
+          output_tokens: 2_900,
+          cache_creation_input_tokens: 1_000,
+          cache_read_input_tokens: 150_000,
+        },
+      ],
+    });
+    expect(bridge.getUsage()).toEqual(last.usage);
+    expect(last.cost).toBeCloseTo(usageCostUsd(last.usage, COST), 12);
+  });
+
+  it("carries no band without a rate card", () => {
+    const { bridge } = runSession({});
+    expect(bridge.getUsage()).not.toHaveProperty("tiers");
   });
 });
 

@@ -37,6 +37,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   model catalog drops a record whose `off` cannot be derived or differs from
   the payload Pi builds.
 
+### Changed
+
+- **A subscription run or chat turn prices each model call at its price tier**
+  (#1552). The runner's cumulative usage and a subscription chat turn's usage
+  now carry per-tier token bands (`token_usage.tiers`, documented in OpenAPI),
+  and the `runner` / chat ledger rows price each band at its tier instead of
+  the whole sum at the base rate. The agent container keeps the `MODEL_COST`
+  tiers, so its reported cost still matches the server's. A subscription
+  provider is therefore offered tiered models too: Claude Haiku 5.5 becomes
+  selectable on `claude-code`, and `verify:system-models` no longer fails on a
+  reachable subscription price tier. Ship the runtime-pi image and the
+  Firecracker rootfs with this release: an older runner strips the
+  `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
+  Malformed bands are dropped (and logged); the counters are kept.
+
 ### Fixed
 
 - **`appstrate api` no longer cuts a response piped into a slower reader**

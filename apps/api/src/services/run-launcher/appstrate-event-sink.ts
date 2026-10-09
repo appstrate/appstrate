@@ -18,11 +18,12 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
+import { parseTokenUsage } from "@appstrate/core/token-usage";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import type { CredentialSource } from "@appstrate/db/schema";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
-import { aggregatedCostUsd } from "../token-cost.ts";
+import { cumulativeCostUsd } from "../token-cost.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, isServedByLlmProxy, updateRun } from "../state/runs.ts";
 import type { InferenceRoute } from "@appstrate/db/schema";
@@ -128,7 +129,7 @@ export async function persistRunEvent(
     }
 
     case "appstrate.metric": {
-      const usage = isPlainObject(event.usage) ? (event.usage as TokenUsage) : null;
+      const usage = parseMetricUsage(runId, event.usage);
       // Advisory on a platform run (see {@link resolveRunnerCost}); the
       // recorded cost only for a remote-origin run.
       const cost = typeof event.cost === "number" ? event.cost : null;
@@ -170,6 +171,15 @@ export async function persistRunEvent(
       // memory.added / pinned.set / third-party — no run_logs row.
       return null;
   }
+}
+
+/** The metric's usage, or null: a malformed one is logged, never thrown (replayed, #1501). */
+function parseMetricUsage(runId: string, value: unknown): TokenUsage | null {
+  if (value == null) return null;
+  const { usage, tiersDropped } = parseTokenUsage(value);
+  if (!usage) logger.warn("appstrate.metric: malformed usage dropped", { runId });
+  if (tiersDropped) logger.warn("usage: malformed tier bands dropped", { runId, seam: "metric" });
+  return usage;
 }
 
 function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {
@@ -277,7 +287,7 @@ interface RunnerCostVerdict {
  * container and is advisory: the platform holds both factors itself — the
  * kickoff snapshot `runs.model_cost` and the reported counts — and prices
  * them with Pi's `calculateCost`, as the LLM-proxy meter does. Summed counters
- * are priced at the base rate (RUN_COST.md). That also lets
+ * carry their tier bands, each priced at its tier (RUN_COST.md). That also lets
  * `MODEL_COST` be withheld from a container running an aliased model without
  * changing what the run is billed.
  *
@@ -311,7 +321,7 @@ function resolveRunnerCost(
   const rates = parsedCost.success ? parsedCost.data : null;
   const usage = row.usage ?? {};
   return {
-    costUsd: aggregatedCostUsd(usage, rates),
+    costUsd: cumulativeCostUsd(usage, rates),
     pricingStatus: resolvePricingStatus({
       orgId,
       // The run's model label is not in the sink context, so the warn line is
@@ -339,8 +349,7 @@ const REPORTED_COST_DIVERGENCE_USD = 1e-6;
  * Population: server-priced runs whose container reported a cost — in practice
  * OAuth-subscription runs, the one platform route the LLM proxy does not serve
  * (a proxy-served run writes no runner row); an aliased run gets no
- * `MODEL_COST` and reports no cost. The container prices at the base rate (`tiers` dropped from
- * `MODEL_COST`), matching the server, so a tiered model raises no divergence.
+ * `MODEL_COST` and reports no cost. Both sides price each request at its tier.
  *
  * It is the only live check that `@appstrate/runner-pi` (also the CLI's remote
  * runner) prices as the server does. `runner-cost-parity.test.ts` pins the two
