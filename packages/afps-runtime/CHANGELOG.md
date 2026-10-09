@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — a malformed `usage` band no longer drops the whole metric (#1846)
-
-- The stdout bridge reads an `appstrate.metric` line's `usage` with
-  afps-shared's `parseTokenUsage` before the canonical guard: malformed `tiers`
-  bands and unknown keys are dropped and the event and its counters kept,
-  instead of the whole metric being rejected. The guard itself stays strict.
-
 ### Added — the integrations a run starts without (#1830)
 
 - `PlatformPromptOptions.unavailableIntegrations` (`./bundle`):
@@ -31,12 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest whose `required` is not a boolean now fails validation. The L1.8
   conformance case asserts the agent schema preserves `required: true`.
 
-### Changed — `appstrate.metric` usage carries price-tier bands (#1552)
+### Changed — `appstrate.metric` usage carries price-tier bands (#1552, #1846)
 
 - `isCanonicalRunEvent` accepts an optional `usage.tiers` (`TokenUsage.tiers`),
   validated by `isTokenUsageTiers` from `@appstrate/afps-shared/token-usage`,
-  the rule `tokenUsageSchema` in core also applies. A malformed band rejects
-  the event like any other `usage` constraint.
+  the rule `tokenUsageSchema` in core also applies. The guard stays strict: a
+  malformed band rejects the event like any other `usage` constraint.
+- The stdout bridge reads an `appstrate.metric` line's `usage` with
+  afps-shared's `parseTokenUsage` before that guard: malformed `tiers` bands
+  and unknown keys are dropped, and the event and its counters are kept.
 - A negative or fractional `usage` counter now rejects the event: the four
   counters take afps-shared's `isTokenCount` (a non-negative safe integer,
   #1846), the rule core's

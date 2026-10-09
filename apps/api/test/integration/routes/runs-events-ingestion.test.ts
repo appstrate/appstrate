@@ -2154,6 +2154,47 @@ describe("remote run.started — emitted at first event, not at row insert", () 
     expect(event!.integrationsUnbound).toEqual(integrationsUnbound);
   });
 
+  it("emits run.started within the first event's request, so a finalize right after cannot overtake it", async () => {
+    const statuses: string[] = [];
+    const mod: AppstrateModule = {
+      manifest: { id: "order-spy", name: "Order Spy", version: "1.0.0" },
+      async init() {},
+      events: {
+        onRunStatusChange: async (params) => {
+          statuses.push(params.status);
+        },
+      },
+    };
+    await loadModulesFromInstances([mod], {
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
+      getOrgName: async () => null,
+      services: {} as never,
+    });
+    const runId = await seedPendingRemoteRun({
+      integrationsUnbound: [{ integrationId: "@acme/slack", code: "not_connected" }],
+    });
+
+    await firstEvent(runId);
+    // No polling: the emit is not deferred behind a read of its own.
+    expect(statuses).toEqual(["started"]);
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    expect(res.status).toBe(200);
+    for (let i = 0; i < 100 && statuses.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(statuses).toHaveLength(2);
+    expect(statuses[0]).toBe("started");
+  });
+
   it("omits integrationsUnbound when the run recorded none", async () => {
     const { started } = await captureStartedEvents();
     const runId = await seedPendingRemoteRun();

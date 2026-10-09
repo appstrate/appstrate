@@ -54,7 +54,7 @@ import {
   computeRunSpend,
   readLastEmittedOutput,
   runAgentIdentity,
-  getRunIntegrationsUnbound,
+  readIntegrationsUnbound,
 } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
@@ -157,6 +157,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       modelSource: runs.modelSource,
       inferenceRoute: runs.inferenceRoute,
       modelCost: runs.modelCost,
+      integrationsUnbound: runs.integrationsUnbound,
     })
     .from(runs)
     .where(eq(runs.id, runId))
@@ -171,9 +172,13 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
   // onRunStatusChange event params) — silently skipping finalization
   // side-effects for a deleted-agent run. `runAgentIdentity` owns the recovery
   // (and the sentinel); see `state/runs.ts`.
-  const { agentScope, agentName, ...rest } = row;
+  const { agentScope, agentName, integrationsUnbound, ...rest } = row;
   const packageId = runAgentIdentity({ ...rest, agentScope, agentName });
-  return { ...rest, packageId } as RunSinkContext;
+  return {
+    ...rest,
+    packageId,
+    integrationsUnbound: readIntegrationsUnbound(integrationsUnbound),
+  } as RunSinkContext;
 }
 
 // `assertSinkOpen` and `verifyRunSignatureHeaders` live in
@@ -1145,30 +1150,20 @@ async function persistEventAndAdvance(
   // excluded here to avoid a duplicate. Remote runs no longer emit at
   // row-insert time (run-creation.ts) — that fired before the DB
   // transition and never again when it actually happened.
-  if (firstEvent && run.runOrigin === "remote") void emitRemoteRunStarted(run);
+  if (firstEvent && run.runOrigin === "remote") {
+    void emitEvent("onRunStatusChange", {
+      orgId: run.orgId,
+      runId: run.id,
+      packageId: run.packageId,
+      spaceId: run.spaceId,
+      status: "started",
+      packageEphemeral: isInlineShadowPackageId(run.packageId),
+      ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
+      ...(run.integrationsUnbound ? { integrationsUnbound: run.integrationsUnbound } : {}),
+    });
+  }
 
   return "claimed";
-}
-
-/** Off the ingestion path: a failed read must not 500 a POST whose event is already persisted. */
-async function emitRemoteRunStarted(run: RunSinkContext): Promise<void> {
-  const integrationsUnbound = await getRunIntegrationsUnbound(run.id).catch((err) => {
-    logger.warn("run.started: integrations_unbound read failed; emitting without it", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
-    return null;
-  });
-  await emitEvent("onRunStatusChange", {
-    orgId: run.orgId,
-    runId: run.id,
-    packageId: run.packageId,
-    spaceId: run.spaceId,
-    status: "started",
-    packageEphemeral: isInlineShadowPackageId(run.packageId),
-    ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),
-    ...(integrationsUnbound ? { integrationsUnbound } : {}),
-  });
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {

@@ -19,19 +19,25 @@ export function isViewersLaunch(target: LaunchTarget, viewerId: string | undefin
   return target.kind === "run" || (target.userId !== null && target.userId === viewerId);
 }
 
-/** Who chose no connection; `fallback_auto` binds, it never chooses none. */
+/** The layers that can choose `[]`: an org default is never empty, and the fallback binds. */
+type NoneChoosingSource = Exclude<
+  ConnectionResolutionSource,
+  "org_default" | "org_default_enforced" | "fallback_auto"
+>;
+
 const NONE_CHOSEN_BY_KEYS = {
   admin_pin: "noneChosenBy.adminPin",
-  org_default_enforced: "noneChosenBy.orgDefaultEnforced",
   run_override: "noneChosenBy.runOverride",
   schedule_override: "noneChosenBy.scheduleOverride",
   member_pin: "noneChosenBy.memberPin",
-  org_default: "noneChosenBy.orgDefault",
-} as const satisfies Record<Exclude<ConnectionResolutionSource, "fallback_auto">, string>;
+} as const satisfies Record<NoneChoosingSource, string>;
+
+const choosesNone = (source: ConnectionResolutionSource): source is NoneChoosingSource =>
+  source in NONE_CHOSEN_BY_KEYS;
 
 /** The layer that chose no connection, as an `agents` phrase; `null` when none is named. */
 export function noneChosenBy(source: ConnectionResolutionSource | null | undefined): string | null {
-  if (!source || source === "fallback_auto") return null;
+  if (!source || !choosesNone(source)) return null;
   return i18n.t(NONE_CHOSEN_BY_KEYS[source], { ns: "agents" });
 }
 

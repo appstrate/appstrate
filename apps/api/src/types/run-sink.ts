@@ -14,6 +14,7 @@
 
 // Type-only (erased at emit), so the "no runtime imports" rule above holds.
 import type { ModelCost } from "@appstrate/core/module";
+import type { RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { CredentialSource, InferenceRoute } from "@appstrate/db/schema";
 
 /**
@@ -53,4 +54,6 @@ export interface RunSinkContext {
    * pricing (or, for a remote-origin run, no platform model at all).
    */
   modelCost: ModelCost | null;
+  /** `runs.integrations_unbound`, for the remote run's `started` event; null = not recorded. */
+  integrationsUnbound: RunIntegrationUnbound[] | null;
 }

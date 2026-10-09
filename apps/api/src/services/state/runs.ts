@@ -361,7 +361,7 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
 }
 
 /** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
-function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
+export function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
   return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
 }
 
@@ -373,18 +373,6 @@ function projectIntegrationsUnbound(raw: unknown): RunIntegrationUnboundWire[] |
       source: u.source ?? null,
     })) ?? null
   );
-}
-
-/** The run's `runs.integrations_unbound`, for the `started` module event of a remote run. */
-export async function getRunIntegrationsUnbound(
-  runId: string,
-): Promise<RunIntegrationUnbound[] | null> {
-  const [row] = await db
-    .select({ integrationsUnbound: runs.integrationsUnbound })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .limit(1);
-  return readIntegrationsUnbound(row?.integrationsUnbound);
 }
 
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {

@@ -7,10 +7,7 @@
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
-import {
-  CONNECTION_RESOLUTION_SOURCES,
-  CONNECTION_RESOLUTION_WARNING_CODES,
-} from "@appstrate/core/integration";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import i18n, { i18nReady } from "../../i18n.ts";
 import {
   hasLaunchWarnings,
@@ -168,7 +165,9 @@ describe("launchWarningsToast — why", () => {
       "Aucune connexion n'est choisie pour elle (choix pour ce run) ; l'agent en est informé.",
     );
     expect(toast?.connectable).toBe(false);
-    const bySource = CONNECTION_RESOLUTION_SOURCES.filter((s) => s !== "fallback_auto").map(
+    const bySource = (
+      ["admin_pin", "run_override", "schedule_override", "member_pin"] as const
+    ).map(
       (source) =>
         describeOf([warning("@acme/gmail", { code: "integration_unbound", source })])?.description,
     );

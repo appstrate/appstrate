@@ -127,7 +127,7 @@ describe("runStatusWebhookObject", () => {
     status: "started" as const,
   };
 
-  it("carries the integrations a run.started run starts without, as the module event has them", () => {
+  it("carries the integrations a run.started run starts without", () => {
     const integrationsUnbound = [
       { integrationId: "@acme/slack", code: "not_connected" as const },
       {
@@ -140,7 +140,11 @@ describe("runStatusWebhookObject", () => {
       id: "run_123",
       packageId: "@acme/agent",
       status: "started",
-      integrationsUnbound,
+      // Named as on the run resource (`integration_package_id`), camelCased.
+      integrationsUnbound: [
+        { integrationPackageId: "@acme/slack", code: "not_connected" },
+        { integrationPackageId: "@acme/notion", code: "integration_unbound", source: "admin_pin" },
+      ],
     });
   });
 

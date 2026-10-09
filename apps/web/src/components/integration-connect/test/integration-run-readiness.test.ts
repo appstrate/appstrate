@@ -10,10 +10,7 @@
  */
 
 import { afterAll, describe, it, expect } from "bun:test";
-import {
-  CONNECTION_RESOLUTION_SOURCES,
-  CONNECTION_RESOLUTION_WARNING_CODES,
-} from "@appstrate/core/integration";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import type { components } from "../../../api/schema";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { describeResolution, requiredNoneLabel, unboundLabel } from "../integration-run-readiness";
@@ -259,7 +256,7 @@ describe("unboundLabel", () => {
     expect(unboundLabel(warning("integration_unbound", { source: "admin_pin" }))).toBe(
       "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
     );
-    const phrases = CONNECTION_RESOLUTION_SOURCES.filter((s) => s !== "fallback_auto").map(
+    const phrases = (["admin_pin", "run_override", "schedule_override", "member_pin"] as const).map(
       (source) => unboundLabel(warning("integration_unbound", { source })),
     );
     expect(new Set(phrases).size).toBe(phrases.length);
@@ -281,8 +278,8 @@ describe("requiredNoneLabel", () => {
     expect(requiredNoneLabel(resolution({ ...refused, source: "admin_pin" }))).toBe(
       "Aucune connexion (choix d'un admin) alors que l'agent l'exige — lancement bloqué",
     );
-    expect(requiredNoneLabel(resolution({ ...refused, source: "org_default_enforced" }))).toBe(
-      "Aucune connexion (défaut imposé de l'espace) alors que l'agent l'exige — lancement bloqué",
+    expect(requiredNoneLabel(resolution({ ...refused, source: "member_pin" }))).toBe(
+      "Aucune connexion (votre choix) alors que l'agent l'exige — lancement bloqué",
     );
   });
 

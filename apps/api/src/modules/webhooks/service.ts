@@ -893,7 +893,15 @@ export function runStatusWebhookObject(params: RunStatusChangeParams): Record<st
     ...(params.duration != null ? { duration: params.duration } : {}),
     // Absent on classic runs: receivers treat missing as `false`.
     ...(params.packageEphemeral ? { package: { ephemeral: true } } : {}),
-    ...(params.integrationsUnbound ? { integrationsUnbound: params.integrationsUnbound } : {}),
+    // The REST item's `integration_package_id`, camelCased (Carve-out 4j).
+    ...(params.integrationsUnbound
+      ? {
+          integrationsUnbound: params.integrationsUnbound.map(({ integrationId, ...rest }) => ({
+            integrationPackageId: integrationId,
+            ...rest,
+          })),
+        }
+      : {}),
   };
 }
 

@@ -92,6 +92,7 @@ import {
 import { installSignalHandlers, onShutdown } from "./lib/shutdown.ts";
 import { asksForVersion, showVersionFlagInHelp, valueFlagsOf } from "./lib/root-version.ts";
 import { settleCommand } from "./lib/ui.ts";
+import { CommandExit } from "./lib/io.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
 // Defense in depth: restore cooked mode on exit. `@clack/prompts`
@@ -152,10 +153,11 @@ function parseSkillSource(val: string): SkillSource {
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after
 // commander's callback completes. Whatever still runs is then in an unknown
-// state, so these end the process at once.
-const settleStray = (err: unknown): never => {
+// state, so these end the process at once — except a `CommandExit`, an exit
+// already decided, which drains stdio like any other.
+const settleStray = (err: unknown): void => {
   settleCommand(err);
-  process.exit();
+  if (!(err instanceof CommandExit)) process.exit();
 };
 process.on("unhandledRejection", settleStray);
 process.on("uncaughtException", settleStray);

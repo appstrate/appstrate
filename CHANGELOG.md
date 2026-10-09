@@ -50,11 +50,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Before the deploy, run
   `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts`,
-  then again with `--apply` if it lists rows** (#1846). It rewrites each run
-  whose stored `token_usage` the strict `TokenUsage` component refuses:
-  undeclared keys and malformed `tiers` bands are dropped, and a value
-  malformed as a whole becomes NULL. Nothing is added; the cost ledger is
-  untouched.
+  then with `--apply`, and `--apply` again right after the deploy** (beta.66
+  keeps writing until the swap; the script is idempotent) (#1846). `--apply`
+  drops undeclared keys and malformed `tiers` bands from stored
+  `token_usage`, so each run matches the strict `TokenUsage` component; no
+  counter is changed. A run whose usage is malformed as a whole (not an
+  object, or a counter that is not a non-negative integer, e.g. a fraction)
+  is listed `MALFORMED` and left as is, and the script exits 1 until an
+  operator decides what each such row becomes.
 
 - **A connection whose OAuth client registration is broken
   (`invalid_client` / `unauthorized_client`) is never flagged for
@@ -64,11 +67,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Upgrade the `appstrate-runner` daemon together with this release, and pin
   its artifacts** (Firecracker only, #1852). The runner protocol goes from 2
   to 3: a daemon left on protocol 2 is refused ("daemon speaks protocol 2,
-  platform expects 3"). An unpinned runner host never refreshes the kernel and
-  rootfs it already has, so set `FIRECRACKER_ARTIFACTS_VERSION` to the
-  platform version on the runner host before or with the upgrade. Rolling
-  back the platform needs the runner daemon rolled back too: a beta.66
-  platform refuses protocol 3.
+  platform expects 3"). Upgrade the daemon with `appstrate runner update`
+  (CLI beta.67, which needs the `cli@` tag published); it also pins
+  `FIRECRACKER_ARTIFACTS_VERSION` to the new release, which an unpinned
+  runner host needs since it never refreshes the kernel and rootfs it already
+  has. Rolling back the platform needs the runner daemon rolled back too (a
+  beta.66 platform refuses protocol 3): run `appstrate runner update` from
+  the beta.66 CLI.
+
+- **Rolling back to beta.66 silently binds a connection where "No
+  connection" was chosen** (#1830). A beta.66 platform treats an empty
+  connection set (`[]`, "No connection" pins and overrides) as absent and
+  falls back to automatic resolution.
 
 ### Changed
 
@@ -173,6 +183,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `done`. The 15 s heartbeat and the 45 s unstreamed wait derive from the
   SDK's 60 s request timeout.
 
+- **BREAKING (API): one `token_usage` contract** (#1846). OpenAPI publishes a
+  `TokenUsage` component (integer counters, `tiers`, no other key) used by
+  `Run.token_usage` (a closed `TokenUsage | null`) and the finalize body's
+  `usage`. A fractional counter makes the usage invalid — a `success`
+  finalize answers `400` — and unknown keys inside `usage` and malformed
+  bands are dropped, never stored. `TokenUsageTier` documents that `input_tokens_above` is
+  compared to the whole prompt while its counters stay net of cache.
 - **`@afps-spec/schema` `^0.9.0`** (was `^0.8.0`; root, `@appstrate/core`,
   `@appstrate/afps-runtime`), which declares
   `integrations_configuration.<id>.required` as a boolean (afps-spec#28): an
@@ -195,16 +212,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
   Malformed bands are dropped (and logged); the counters are kept.
 
-- **One `token_usage` contract** (#1846). OpenAPI publishes a `TokenUsage`
-  component (integer counters, `tiers`, no other key) used by
-  `Run.token_usage` (`TokenUsage | null`) and the finalize body's `usage`. A
-  fractional counter makes the usage invalid — a `success` finalize answers
-  `400` — and unknown keys inside `usage` and malformed bands are dropped,
-  never stored. `TokenUsageTier` documents that `input_tokens_above` is
-  compared to the whole prompt while its counters stay net of cache.
-
-- **`GET /api/runs/{id}?wait` documentation names the cap from its single
-  constant** (#1851).
 - **The chat holds back a `run_and_wait` call's connect offers only while its
   live (preliminary) updates stream** (#1851).
 
@@ -229,7 +236,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `oauth_connection_needs_reconnection`; every `410`/`502` carries a `cause`.
   The sidecar reads only the status.
 - **A failed model-token refresh answers `502`** with a `cause` (was `500`)
-  (#1853).
+  (#1853). A model credential whose transient refresh failures pass the
+  threshold answers `410` with cause `refresh_failures_exhausted` right away,
+  like integrations.
 - **"No connection" works the same way on every screen** (#1855): a schedule
   run by another member, agent pins, the connection picker. Unticking the
   last connection clears the choice; only the explicit "No connection" box
@@ -242,9 +251,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration runs. The `Idempotency-Key` and `Idempotent-Replayed` docs say
   a replay re-serves the stored 2xx under current permissions, without the
   bearer connect links of its `warnings`.
-- **Every `appstrate` command ends through one handler** (#1858): it sets the
-  exit code instead of calling `process.exit`, so no command has to drain
-  stdout itself.
 
 - **`@appstrate/connect` `parseTokenResponse` returns
   `scopesReturned: string[] | null`** instead of `scopesGranted`, and no
@@ -259,6 +265,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   incoherent OAuth client configuration makes the sidecar refresh endpoint
   answer `500`, and the credential proxy logs it as an error while relaying
   the upstream `401`.
+- **One refresh decision for every credential path** (#1829). A scope shrink
+  seen by the platform credential proxy now flags `needsReconnection` too; a
+  2xx token response carrying `error: invalid_grant` is classified revoked,
+  on a refresh and on a code exchange; the `410` problem's `detail` wording
+  changed.
 - **A run's Configuration tab says why each integration started without a
   connection** (#1849): not connected, a pick needed, another auth method,
   switched off, or no connection chosen and by whom.
@@ -289,8 +300,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `runs.integrations_unbound`, migration `0085`); runs created before read
   `null`. The codes are visible to the run's actor and to `runs:read-all`
   holders (`SECURITY.md`).
-- **The `run.started` webhook and module event carry `integrationsUnbound`**
-  (#1849).
+- **The `run.started` webhook and module event carry
+  `integrationsUnbound: [{ integrationPackageId, code, source? }]`** (#1849).
 - **`appstrate run --report --json` announces the run** with an
   `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
   registration reported some), as `--remote --json` does with
@@ -410,13 +421,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent or keep a call open with repeated values. With progress,
   `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
   the call's total duration.
-
-### Removed
-
-- **The sidecar `/mcp` transport's `maxRequestBodySize` option** (#1857). It
-  had no effect: the sidecar bounds request bodies before the MCP SDK reads
-  them.
-- **The platform MCP transport's dead `maxRequestBodySize` option** (#1851).
 
 ## [1.0.0-beta.66] - 2026-10-08
 

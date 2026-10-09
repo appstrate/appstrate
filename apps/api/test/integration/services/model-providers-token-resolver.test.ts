@@ -526,11 +526,12 @@ describe("OAuth model providers — token-resolver hardening", () => {
         expiresAtMs: Date.now() - 2 * HOUR_MS,
       });
 
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 1 — below threshold
+      const record = () => recordModelCredentialRefreshFailure(orgId, id, 3, 3600);
+      expect(await record()).toEqual({ failures: 1, needsReconnection: false });
       expect((await readFailureRow(id)).needsReconnection).toBe(false);
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 2 — below threshold
+      expect(await record()).toEqual({ failures: 2, needsReconnection: false });
       expect((await readFailureRow(id)).needsReconnection).toBe(false);
-      await recordModelCredentialRefreshFailure(orgId, id, 3, 3600); // 3 — hits threshold
+      expect(await record()).toEqual({ failures: 3, needsReconnection: true });
 
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(3);
@@ -609,6 +610,38 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(1);
       expect(row.needsReconnection).toBe(false);
+    });
+
+    it("the transient failure that escalates the streak answers the 410 refresh_failures_exhausted", async () => {
+      const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+        getEnv();
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        expiresAtMs: Date.now() - (grace + 3600) * 1000,
+      });
+      await db
+        .update(modelProviderCredentials)
+        .set({ refreshFailureCount: max - 1 })
+        .where(eq(modelProviderCredentials.id, id));
+      mockFetch(
+        async () =>
+          new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      expect(await refusal(() => forceRefreshOAuthModelProviderToken(id))).toMatchObject({
+        code: NEEDS_RECONNECTION,
+        status: 410,
+        extensions: { cause: "refresh_failures_exhausted" },
+      });
+      expect(await readFailureRow(id)).toEqual({
+        refreshFailureCount: max,
+        needsReconnection: true,
+      });
     });
 
     it("invalid_grant keeps its immediate flip — no streak required", async () => {

@@ -22673,7 +22673,7 @@ export interface operations {
                      */
                     status: "success" | "failed" | "timeout" | "cancelled";
                     durationMs?: number;
-                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). A counter that is not a non-negative integer makes the whole usage invalid, which is a 400 on a success. Unknown keys inside `usage` and malformed `tiers` bands are dropped, never stored: the counters are kept and price at the base rate. */
+                    /** @description Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). The schema is the contract: it is the stored shape, and what a runner must send. A counter that breaks it makes the whole usage invalid, which is a 400 on a success. Undeclared keys and malformed `tiers` bands also break it, but the server tolerates them so that a platform and a runner of different versions still agree: it drops them, never stores them, and keeps the counters, priced at the base rate. */
                     usage?: components["schemas"]["TokenUsage"];
                     /** @description Authoritative terminal run cost in USD, written to the `runs` row. */
                     cost?: number;

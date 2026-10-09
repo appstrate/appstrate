@@ -381,6 +381,7 @@ export function isRunAndWaitTerminalStatus(status: unknown): boolean {
  * chat UI already renders live progress and metrics from the run's SSE stream,
  * and a model that sees a cost or a duration tends to quote it back at the
  * user. A caller that genuinely needs the full resource reads `getRun`.
+ * A key added here must be added to the API's closed `RunAndWaitResult` component too (parity test).
  */
 export function projectRunAndWaitPayload(
   run: Record<string, unknown> | undefined,

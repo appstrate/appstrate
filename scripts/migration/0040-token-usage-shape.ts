@@ -7,12 +7,12 @@
  *   DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts [--apply]
  *
  * A run's `token_usage` is published as the strict `TokenUsage` component, and the run read paths
- * return the column verbatim. Every row whose stored value is not what `parseTokenUsage` keeps of
- * it is listed and, with `--apply`, rewritten to that: undeclared keys and malformed `tiers` bands
- * dropped, and NULL when the value is malformed as a whole (not an object, or a counter that is not
- * a non-negative integer) — what every read of the column already treats it as. Nothing is added.
- * A row written after the scan is left alone: the update matches the value read. Dry run by
- * default (rolled back); exit 0 either way.
+ * return the column verbatim. A row `parseTokenUsage` keeps only in part is listed and, with
+ * `--apply`, rewritten to what it keeps: undeclared keys and malformed `tiers` bands dropped, the
+ * counters untouched. A row malformed as a whole (not an object, or a counter that is not a
+ * non-negative integer — a fraction the earlier rule accepted included) is listed and left as it
+ * is, for an operator to decide. A row written after the scan is left alone: the update matches the
+ * value read. Dry run by default (rolled back). Exit 1 while a malformed row remains, in both modes.
  */
 
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
@@ -25,11 +25,12 @@ class DryRunRollback extends Error {}
 export async function runTokenUsageShape(options: {
   apply: boolean;
   out: (line: string) => void;
-}): Promise<void> {
+}): Promise<0 | 1> {
   const { apply, out } = options;
   // Imported here, not at the top: `@appstrate/db/client` opens its database on import, and the
   // entry point refuses the embedded one before that.
   const { db } = await import("@appstrate/db/client");
+  let malformed = 0;
   try {
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL lock_timeout = '5s'");
@@ -47,11 +48,15 @@ export async function runTokenUsageShape(options: {
         .orderBy(asc(organizations.slug), asc(runs.id));
 
       let rewritten = 0;
-      let nulled = 0;
       for (const row of rows) {
         const raw: unknown = JSON.parse(row.stored);
         const { usage } = parseTokenUsage(raw);
-        if (usage !== null && Bun.deepEquals(usage, raw)) continue;
+        if (usage === null) {
+          malformed += 1;
+          out(`  MALFORMED ${row.org} ${row.id}: ${row.stored}`);
+          continue;
+        }
+        if (Bun.deepEquals(usage, raw)) continue;
         const [updated] = await tx
           .update(runs)
           .set({ tokenUsage: usage })
@@ -59,11 +64,13 @@ export async function runTokenUsageShape(options: {
           .returning({ id: runs.id });
         if (!updated) continue;
         rewritten += 1;
-        if (usage === null) nulled += 1;
-        out(`  rewrite ${row.org} ${row.id}: ${row.stored} → ${JSON.stringify(usage)}`);
+        out(`  rewrite   ${row.org} ${row.id}: ${row.stored} → ${JSON.stringify(usage)}`);
       }
 
-      out(`${rows.length} run(s) with a token_usage, ${rewritten} rewritten (${nulled} to NULL)`);
+      out(
+        `${rows.length} run(s) with a token_usage, ${rewritten} rewritten, ` +
+          `${malformed} malformed left as is`,
+      );
       if (!apply) throw new DryRunRollback();
     });
     out("0040: APPLIED — committed.");
@@ -71,6 +78,7 @@ export async function runTokenUsageShape(options: {
     if (!(error instanceof DryRunRollback)) throw error;
     out("0040: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
   }
+  return malformed > 0 ? 1 : 0;
 }
 
 if (import.meta.main) {
@@ -82,12 +90,11 @@ if (import.meta.main) {
     process.exit(2);
   }
   const { closeDb } = await import("@appstrate/db/client");
-  let code = 0;
+  let code = 1;
   try {
-    await runTokenUsageShape({ apply, out });
+    code = await runTokenUsageShape({ apply, out });
   } catch (error) {
     out(`0040: FAILED, nothing committed — ${getErrorMessage(error)}`);
-    code = 1;
   } finally {
     await closeDb();
   }

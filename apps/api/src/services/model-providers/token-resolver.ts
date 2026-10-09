@@ -252,13 +252,15 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
       case "transient": {
         // The streak flags the credential only once its token expired past the grace window.
         const env = getEnv();
-        await recordModelCredentialRefreshFailure(
+        const counted = await recordModelCredentialRefreshFailure(
           state.orgId,
           credentialId,
           env.INTEGRATION_REFRESH_MAX_FAILURES,
           env.INTEGRATION_REFRESH_GRACE_SECONDS,
         );
-        throw notRefreshed(credentialId, "upstream_transient", err);
+        throw counted?.needsReconnection
+          ? needsReconnection(credentialId, "refresh_failures_exhausted")
+          : notRefreshed(credentialId, "upstream_transient", err);
       }
     }
   }

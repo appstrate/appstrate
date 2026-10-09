@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Migration `0040` against the test database: every run whose stored `token_usage` is not what
- * `parseTokenUsage` keeps of it is listed, left as it is in a dry run, and rewritten to that with
- * `--apply` — NULL when malformed as a whole; a second run finds nothing.
+ * Migration `0040` against the test database: a run whose stored `token_usage` `parseTokenUsage`
+ * keeps only in part is listed, left as it is in a dry run, and rewritten to what it keeps with
+ * `--apply`; a run malformed as a whole is listed, never touched, and fails the run in both modes.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -44,43 +44,52 @@ describe("0040 — token_usage brought to the token-usage rule", () => {
     await seedPackage({ id: AGENT, orgId: ctx.orgId });
   });
 
-  it("lists in a dry run, rewrites with --apply, and finds nothing the second time", async () => {
+  it("lists in a dry run, rewrites with --apply, and leaves a malformed row alone", async () => {
     const none = await runWithUsage(null);
     const wellFormed = await runWithUsage(WELL_FORMED);
     const extraKey = await runWithUsage('{"input_tokens":10,"cost":0.2}');
     const badBand = await runWithUsage('{"output_tokens":3,"tiers":[{"input_tokens_above":0}]}');
-    const jsonNull = await runWithUsage("null");
-    const array = await runWithUsage("[1]");
     const fractional = await runWithUsage('{"input_tokens":1.5,"output_tokens":2}');
 
-    await run(false);
-    expect(lines.filter((l) => l.startsWith("  rewrite ")).length).toBe(5);
-    expect(lines.at(-2)).toBe("6 run(s) with a token_usage, 5 rewritten (3 to NULL)");
+    expect(await run(false)).toBe(1);
+    expect(lines.filter((l) => l.startsWith("  rewrite ")).length).toBe(2);
+    expect(lines.filter((l) => l.startsWith("  MALFORMED "))).toEqual([
+      `  MALFORMED mig0040 ${fractional}: {"input_tokens": 1.5, "output_tokens": 2}`,
+    ]);
+    expect(lines.at(-2)).toBe("4 run(s) with a token_usage, 2 rewritten, 1 malformed left as is");
     expect(await stored(extraKey)).toEqual({ input_tokens: 10, cost: 0.2 });
 
     lines.length = 0;
-    await run(true);
+    expect(await run(true)).toBe(1);
     expect(lines.at(-1)).toBe("0040: APPLIED — committed.");
     expect({
       none: await stored(none),
       wellFormed: await stored(wellFormed),
       extraKey: await stored(extraKey),
       badBand: await stored(badBand),
-      jsonNull: await stored(jsonNull),
-      array: await stored(array),
       fractional: await stored(fractional),
     }).toEqual({
       none: null,
       wellFormed: JSON.parse(WELL_FORMED),
       extraKey: { input_tokens: 10 },
       badBand: { output_tokens: 3 },
-      jsonNull: null,
-      array: null,
-      fractional: null,
+      fractional: { input_tokens: 1.5, output_tokens: 2 },
     });
 
     lines.length = 0;
-    await run(true);
-    expect(lines.at(-2)).toBe("3 run(s) with a token_usage, 0 rewritten (0 to NULL)");
+    expect(await run(true)).toBe(1);
+    expect(lines.at(-2)).toBe("4 run(s) with a token_usage, 0 rewritten, 1 malformed left as is");
+  });
+
+  it("counts a value that is not an object as malformed", async () => {
+    await runWithUsage("null");
+    await runWithUsage("[1]");
+    expect(await run(false)).toBe(1);
+    expect(lines.at(-2)).toBe("2 run(s) with a token_usage, 0 rewritten, 2 malformed left as is");
+  });
+
+  it("exits 0 when every row conforms", async () => {
+    await runWithUsage(WELL_FORMED);
+    expect(await run(true)).toBe(0);
   });
 });

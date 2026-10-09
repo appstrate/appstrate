@@ -108,9 +108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipe over afps-shared's `parseTokenUsage` (`z.unknown().transform(...)`), no
   longer a `z.object`: `.shape`, `.extend()` and `.strict()` are gone, and a
   fractional counter now fails the parse. (#1846)
-- **`parseTokenUsage`** lives in `@appstrate/afps-shared/token-usage`;
-  `@appstrate/core/token-usage` does not re-export it (`tokenUsageSchema`
-  wraps it). (#1846)
 
 - **BREAKING: `modelCostSchema`** (`@appstrate/core/module`) refuses a rate
   card whose tiers break the rule its usage bands follow: `inputTokensAbove` must be an
