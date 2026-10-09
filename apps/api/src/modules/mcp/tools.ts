@@ -27,32 +27,43 @@
  * — the org comes from the URL/token, and the org-context middleware pins it.
  */
 
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  AppstrateRequestExtra,
-  AppstrateResourceProvider,
-  AppstrateToolDefinition,
-  ReadResourceResult,
+import {
+  notifyDetached,
+  type AppstrateRequestExtra,
+  type AppstrateResourceProvider,
+  type AppstrateToolDefinition,
+  type ReadResourceResult,
 } from "@appstrate/mcp-transport";
 import {
+  enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
-  fetchRunFiles,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
+  type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
+import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
   collectReferencedSchemas,
+  getRunAndWaitOutputSchema,
   operationGranted,
   operationIdGranted,
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
@@ -265,12 +276,9 @@ function fileResourceLink(doc: RunAndWaitFile): {
   };
 }
 
-/**
- * Map a run's terminal status to an HTTP-shaped code for telemetry, so a
- * failed / timed-out / cancelled run is reported distinctly rather than always
- * as 200 (the polling GET's status).
- */
+/** A run's status as an HTTP-shaped telemetry code; a failed poll's `status` already is one. */
 function runStatusToHttp(status: unknown): number {
+  if (typeof status === "number") return status;
   switch (status) {
     case "success":
       return 200;
@@ -281,7 +289,7 @@ function runStatusToHttp(status: unknown): number {
     case "cancelled":
       return 499;
     default:
-      return 200;
+      return 202;
   }
 }
 
@@ -874,6 +882,45 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
+/** Well under the SDK client's request timeout, which each progress notification resets. */
+export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 4;
+/** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
+export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
+  DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
+
+export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
+  ", ",
+);
+
+/** The resume instruction for a caller with time to wait (not the chat). */
+export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
+
+function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return null;
+  const startedAt = performance.now();
+  let progress = 0;
+  const beat = (message: string) =>
+    notifyDetached(
+      extra,
+      {
+        method: "notifications/progress",
+        params: { progressToken, progress: ++progress, message },
+      },
+      (err) =>
+        logger.debug("mcp: run_and_wait progress notification failed", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+  beat(`Run ${runId} launched`);
+  const timer = setInterval(() => {
+    const elapsedS = Math.round((performance.now() - startedAt) / 1000);
+    beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
+  }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
+
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -968,9 +1015,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
-      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings }` when the run reaches a " +
+      "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
+      "integrations the run started without, each with the code that state raises as an error " +
+      `on a required integration (${WARNING_CODES_PHRASE}; ` +
+      "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
+      `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
+      "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
@@ -1046,15 +1097,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: {
             type: "array",
             items: { type: "string" },
-            minItems: 1,
+            minItems: 0,
             maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
           },
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
-            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "`[]` runs without that integration — only for one the agent does not mark " +
+            "`required` (a 400 otherwise). " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
@@ -1074,6 +1127,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       required: ["kind"],
       additionalProperties: false,
     },
+    outputSchema: getRunAndWaitOutputSchema(),
   };
 
   const handler = async (
@@ -1117,7 +1171,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // readable with `runs:read-all`. Not a new exposure class —
       // `initiateIntegrationConnect` already returns a bearer `connect_url` on
       // this very path — but any change to how these links are scoped or
-      // expired has to account for run logs, not only IDE transcripts.
+      // expired has to account for run logs, not only IDE transcripts. Only the
+      // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
     if (!launched.ok) {
@@ -1144,7 +1199,11 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return jsonResult(launched.step.payload, true);
     }
 
-    const runId = launched.launch.runId;
+    // Any caller of this handler (an agent run included) may persist what it returns; the
+    // in-app chat launches through its own extension instead. A mint writes nothing, so the
+    // stripped links leave nothing behind.
+    const launch = withoutWarningOffers(launched.launch);
+    const runId = launch.runId;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
@@ -1153,50 +1212,52 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const final = await waitForRunAndWaitCompletion(launched.launch, {
+    const stopHeartbeat = startProgressHeartbeat(extra, runId);
+    const waitOpts = {
       origin: ctx.origin,
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
-    });
+    };
+    const waited = await waitForRunAndWaitCompletion(launch, {
+      ...waitOpts,
+      maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+    }).finally(() => stopHeartbeat?.());
 
-    // Report the REAL run outcome, not the polling GET's HTTP status (which is
-    // always 200 for a completed run). Map the run's terminal status to an
-    // HTTP-shaped code so a failed/timed-out/cancelled run is distinguishable
-    // in telemetry.
-    const runStatus = (final.payload as { status?: unknown }).status;
+    // The run's outcome, not the polling GET's HTTP status (200 for any run read).
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: "getRun",
       method: "GET",
-      status: typeof runStatus === "number" ? runStatus : runStatusToHttp(runStatus),
+      status: runStatusToHttp(waited.payload.status),
       outcome: "invoked",
     });
 
-    // Enrich the terminal result with the run's published files (D6). The
-    // SAME enrichment the chat gets from `runAndWaitStepsWithFiles`, reused
-    // via `fetchRunFiles` (best-effort, empty on any failure). Beyond echoing
-    // them in the text payload, each is returned as an MCP `resource_link`
-    // content block (spec 2025-06-18) so an external client (claude.ai, …)
-    // consumes them natively — read one with `resources/read`, or chain its
-    // `appfile://` URI into a follow-up run's input file field.
-    if (!final.isError) {
-      const files = await fetchRunFiles(runId, {
-        origin: ctx.origin,
-        headers: dispatchHeaders,
-        fetch: dispatchFetch,
-        signal,
-      });
-      if (files.length > 0) {
-        const result = jsonResult({ ...final.payload, files });
-        return { ...result, content: [...result.content, ...files.map(fileResourceLink)] };
-      }
-    }
-    return jsonResult(final.payload, final.isError);
+    const { step: final, files } = await enrichTerminalRunAndWaitStep(waited, waitOpts);
+    const result = jsonResult(final.payload, final.isError);
+    // Each published file is also an MCP `resource_link` block (spec 2025-06-18), read with
+    // `resources/read` or chained by URI; a run still going gets its next step as text.
+    const blocks =
+      final.payload.done === false
+        ? [{ type: "text" as const, text: RUN_AND_WAIT_LONG_POLL_RESUME }]
+        : files.map(fileResourceLink);
+    return blocks.length > 0 ? { ...result, content: [...result.content, ...blocks] } : result;
   };
 
   return { descriptor, handler };
+}
+
+function withoutWarningOffers(launch: RunAndWaitLaunch): RunAndWaitLaunch {
+  const strip = (record: Record<string, unknown>) =>
+    Array.isArray(record.warnings)
+      ? { ...record, warnings: withoutConnectOffers(record.warnings as ResolutionFieldError[]) }
+      : record;
+  return {
+    ...launch,
+    launchRecord: strip(launch.launchRecord),
+    preliminary: strip(launch.preliminary),
+  };
 }
 
 // --- list_files --------------------------------------------------------

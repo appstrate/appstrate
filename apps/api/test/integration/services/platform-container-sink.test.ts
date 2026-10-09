@@ -57,6 +57,10 @@ import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../../../src/types/index.ts";
 import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import type { AppstrateModule, RunStatusChangeParams } from "@appstrate/core/module";
+import type { RunIntegrationUnbound } from "@appstrate/core/integration";
 
 // ---------------------------------------------------------------------------
 // Fake orchestrator
@@ -401,6 +405,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     exitDelayMs?: number;
     timeoutSeconds?: number;
     timeoutBootGraceMs?: number;
+    integrationsUnbound?: RunIntegrationUnbound[];
   }): Promise<{ runId: string; packageId: string }> {
     const pkg = await seedPackage({
       id: `@${ctx.orgId.slice(0, 6)}/agent-${crypto.randomUUID().slice(0, 6)}`,
@@ -444,6 +449,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
       ...(input.timeoutBootGraceMs !== undefined
         ? { timeoutBootGraceMs: input.timeoutBootGraceMs }
         : {}),
+      integrationsUnbound: input.integrationsUnbound,
     };
 
     await executeAgentInBackground(execInput);
@@ -470,6 +476,38 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     expect(row!.type).toBe("progress");
     expect(row!.event).toBe("progress");
     expect(row!.level).toBe("info");
+  });
+
+  it("forwards the run's recorded integrationsUnbound on the `started` module event", async () => {
+    const seen: RunStatusChangeParams[] = [];
+    const spy: AppstrateModule = {
+      manifest: { id: "started-spy", name: "Started Spy", version: "1.0.0" },
+      async init() {},
+      events: {
+        onRunStatusChange: (params) => {
+          if (params.status === "started") seen.push(params);
+        },
+      },
+    };
+    resetModules();
+    await loadModulesFromInstances([spy], {
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
+      getOrgName: async () => null,
+      services: {} as never,
+    });
+    try {
+      const integrationsUnbound: RunIntegrationUnbound[] = [
+        { integrationId: "@acme/slack", code: "not_connected" },
+      ];
+      await runWithFakeOrchestrator({ exitCode: 137, integrationsUnbound });
+      expect(seen.map((p) => p.integrationsUnbound)).toEqual([integrationsUnbound]);
+    } finally {
+      await restoreDiscoveredModules();
+    }
   });
 
   it("synthesises a success finalize when the container exits 0 without posting one itself", async () => {

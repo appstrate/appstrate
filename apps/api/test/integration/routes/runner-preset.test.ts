@@ -438,12 +438,13 @@ describe("runner preset", () => {
       headers: authHeaders(runner),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const text = await res.text();
+    const body = JSON.parse(text) as {
       blocks_run: boolean;
       integrations: { integration_package_id: string }[];
     };
     expect(body.integrations.map((i) => i.integration_package_id)).toEqual([INTEGRATION_ID]);
-    expect(await res.clone().text()).not.toContain(SKILL_ID);
+    expect(text).not.toContain(SKILL_ID);
   });
 
   it("keeps a runner's persistence read on its own actor, explicit actor_id or not", async () => {

@@ -33,12 +33,13 @@ import {
   piReasoningLevels,
   usableRecordMaxTokens,
 } from "@appstrate/runner-pi/pi-model";
+import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import { findOverlayModelsById, listOverlayModels } from "./model-catalog-overlay.ts";
 import { hasLiveModelSearch } from "./model-search.ts";
 
 type CatalogProvider = Pick<
   ModelProviderDefinition,
-  "providerId" | "catalogProviderId" | "apiShape" | "authMode"
+  "providerId" | "catalogProviderId" | "apiShape"
 >;
 
 /**
@@ -64,26 +65,6 @@ export function restrictsToOffer(def: CatalogProvider): boolean {
   return piProviderOf(def) !== null && !hasLiveModelSearch(def.providerId);
 }
 
-/**
- * The price tiers one request can cross. A subscription (`oauth2`) model is
- * priced from usage summed over requests, where a tier cannot apply (#1552).
- */
-export function reachablePriceTiers<T extends { inputTokensAbove: number }>(
-  tiers: readonly T[] | undefined,
-  contextWindow: number,
-): T[] {
-  return (tiers ?? []).filter((tier) => tier.inputTokensAbove < contextWindow);
-}
-
-function overlayRecords(def: CatalogProvider, provider: string): Model<Api>[] {
-  const records = listOverlayModels(provider, def.apiShape);
-  if (def.authMode !== "oauth2") return records;
-  // `verify:system-models` holds the bundled registry to the same rule at release time.
-  return records.filter(
-    (record) => reachablePriceTiers(record.cost.tiers, record.contextWindow).length === 0,
-  );
-}
-
 function catalogRecord(
   def: CatalogProvider,
   modelId: string,
@@ -93,7 +74,7 @@ function catalogRecord(
   if (!provider) return undefined;
   const bundled = getPiModel(provider, modelId, def.apiShape);
   if (bundled || scope === "bundled") return bundled;
-  return overlayRecords(def, provider).find((record) => record.id === modelId);
+  return listOverlayModels(provider, def.apiShape).find((record) => record.id === modelId);
 }
 
 export function listCatalogModels(
@@ -104,7 +85,7 @@ export function listCatalogModels(
   if (!provider) return [];
   return [
     ...listPiModels(provider, def.apiShape),
-    ...(scope === "all" ? overlayRecords(def, provider) : []),
+    ...(scope === "all" ? listOverlayModels(provider, def.apiShape) : []),
   ].map((record) => ({ id: record.id, ...toCatalogEntry(record) }));
 }
 
@@ -180,6 +161,7 @@ interface AnthropicCompat {
  * Anthropic: the temperature Pi sends (`supportsTemperature`, never with
  * mid-conversation effort, never while thinking) and adaptive thinking.
  * Responses APIs: a reasoning model takes no temperature.
+ * `off`: what Pi puts on the wire for level `off` on this record.
  */
 function generationOf(record: Model<Api>): ModelGenerationCapabilities {
   const anthropic = record.api === "anthropic-messages";
@@ -189,6 +171,7 @@ function generationOf(record: Model<Api>): ModelGenerationCapabilities {
     : !(record.reasoning && RESPONSES_APIS.has(record.api));
   const levels = new Set<string>(piReasoningLevels(record));
   const support = (on: boolean): ModelCapabilitySupport => (on ? "supported" : "unsupported");
+  const off = piReasoningOff(record);
   return {
     temperature: support(temperatureSupported),
     reasoning: {
@@ -200,6 +183,7 @@ function generationOf(record: Model<Api>): ModelGenerationCapabilities {
       levels: Object.fromEntries(
         MODEL_REASONING_LEVELS.map((level) => [level, support(levels.has(level))]),
       ),
+      ...(off ? { off } : {}),
     },
   };
 }

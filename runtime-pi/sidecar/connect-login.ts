@@ -97,9 +97,25 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
   try {
     // The secret is delivered ONLY via proxy-side substitution — the tool
     // is called with empty arguments (security contract).
-    const result = await opts.client.callTool({ name: opts.toolName, arguments: {} }, {});
-
-    const parsed = parseLoginToolResult(result);
+    // An input the listener refused to send outranks whatever the tool made of that refusal: it
+    // is the submitter's own value, so it travels as a login-tool error (a 400 on `credentials`).
+    const refusedInput = () => {
+      const field = opts.source.refusedActiveInput(opts.authKey);
+      return field === undefined
+        ? null
+        : new Error(
+            `${CONNECT_LOGIN_TOOL_ERROR_PREFIX}: the value of '${field}' contains a character this request cannot carry where it is placed.`,
+          );
+    };
+    let parsed: LoginToolResult;
+    try {
+      const result = await opts.client.callTool({ name: opts.toolName, arguments: {} }, {});
+      parsed = parseLoginToolResult(result);
+    } catch (err) {
+      throw refusedInput() ?? err;
+    }
+    const refused = refusedInput();
+    if (refused) throw refused;
 
     // Validate the outputs against the declared `produces` allowlist.
     if (Object.keys(parsed.outputs).length === 0) {

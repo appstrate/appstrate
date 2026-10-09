@@ -4,9 +4,9 @@
  * Spawn resolver — runner egress policy (#543, #1458).
  *
  * Every local-source runner whose auth declares an outbound surface gets
- * `spec.egress`: the connection's RENDERED `authorized_uris` plus
- * `allow_all_uris`. It is set whatever the delivery channel (env, http, mtls
- * files) — the sidecar's listener for that runner enforces it. A templated
+ * `spec.egress`: the connection's RENDERED `authorized_uris`, the declared
+ * ones and `allow_all_uris`. It is set whatever the delivery channel (env,
+ * http, mtls files) — the sidecar's listener for that runner enforces it. A templated
  * entry that cannot be rendered is dropped, never passed raw (deny-all).
  */
 
@@ -55,9 +55,10 @@ const sessionAuth = (opts: { allowAllUris?: boolean } = {}): Auth => ({
 });
 
 // SSH-like: the reachable host is whatever the USER entered on the connection.
+const SSH_DECLARED = ["ssh://{$credential.host}:{$credential.port}"];
 const sshAuth: Auth = {
   type: "custom",
-  authorizedUris: ["ssh://{$credential.host}:{$credential.port}"],
+  authorizedUris: SSH_DECLARED,
   credentialFields: ["host", "port", "password"],
   requiredCredentialFields: ["host", "port", "password"],
   delivery: envDelivery({ SSH_HOST: "host", SSH_PORT: "port", SSH_PASSWORD: "password" }),
@@ -154,6 +155,7 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
     });
     expect(spec.egress).toEqual({
       authorizedUris: ["https://crm.example.com/**"],
+      declaredUris: ["https://crm.example.com/**"],
       allowAllUris: false,
     });
     expect(spec.httpDeliveryAuths).toBeUndefined();
@@ -177,6 +179,7 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
     );
     expect(spec.egress).toEqual({
       authorizedUris: ["https://api.example.com/**"],
+      declaredUris: ["https://api.example.com/**"],
       allowAllUris: false,
     });
     expect(spec.httpDeliveryAuths?.main?.authorizedUris).toEqual(["https://api.example.com/**"]);
@@ -199,6 +202,7 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
     expect(spec.fileMounts).toBeDefined();
     expect(spec.egress).toEqual({
       authorizedUris: ["https://mtls.example.com/**"],
+      declaredUris: ["https://mtls.example.com/**"],
       allowAllUris: false,
     });
   });
@@ -219,6 +223,7 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
     expect(spec.connectLogin?.authorizedUris).toEqual(["https://saas.example.com/**"]);
     expect(spec.egress).toEqual({
       authorizedUris: ["https://saas.example.com/**"],
+      declaredUris: ["https://saas.example.com/**"],
       allowAllUris: false,
     });
   });
@@ -229,12 +234,20 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
       port: "22",
       password: "pw",
     });
-    expect(spec.egress).toEqual({ authorizedUris: ["ssh://h:22"], allowAllUris: false });
+    expect(spec.egress).toEqual({
+      authorizedUris: ["ssh://h:22"],
+      declaredUris: SSH_DECLARED,
+      allowAllUris: false,
+    });
   });
 
   it("a missing field drops the entry (deny-all), never the raw template", async () => {
     const spec = await resolveWith(ctx, integManifest(sshAuth), { host: "h", password: "pw" });
-    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: false });
+    expect(spec.egress).toEqual({
+      authorizedUris: [],
+      declaredUris: SSH_DECLARED,
+      allowAllUris: false,
+    });
   });
 
   it("a field that is not a literal host drops the entry", async () => {
@@ -243,6 +256,10 @@ describe("resolveIntegrationSpawns — runner egress policy (#543, #1458)", () =
       port: "22",
       password: "pw",
     });
-    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: false });
+    expect(spec.egress).toEqual({
+      authorizedUris: [],
+      declaredUris: SSH_DECLARED,
+      allowAllUris: false,
+    });
   });
 });

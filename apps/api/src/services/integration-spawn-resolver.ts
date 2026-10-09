@@ -48,7 +48,7 @@ import {
 } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
 
-import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { BundleError, UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
@@ -57,11 +57,8 @@ import {
   EncryptionKeyUnavailableError,
 } from "../lib/stored-credential.ts";
 import type { Actor } from "../lib/actor.ts";
-import {
-  displayAccountId,
-  isIntegrationActive,
-  loadAccessibleConnectionById,
-} from "./integration-connections.ts";
+import { isIntegrationActive, loadAccessibleConnectionById } from "./integration-connections.ts";
+import { displayAccountId } from "../lib/connection-identity.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,
@@ -115,22 +112,10 @@ interface ResolveIntegrationsInput {
  * Machine-readable reason a declared integration did NOT make it into the
  * run's spawn set. One value per drop site in {@link resolveOne} — the run
  * marker persists it verbatim, so an operator reading `run_logs` gets the
- * same discrimination the server-side log has instead of a prose blob.
+ * same discrimination the server-side log has instead of a prose blob. The
+ * keys of the agent-facing table, so a reason cannot lack its text, nor a text its reason.
  */
-export type IntegrationDropReason =
-  | "not_found"
-  | "not_integration"
-  | "invalid_manifest"
-  | "not_active"
-  | "remote_source_invalid"
-  | "remote_url_unrenderable"
-  | "remote_url_blocked"
-  | "local_server_ref_missing"
-  | "mcp_server_unresolved"
-  | "mcp_server_not_runnable"
-  | "no_delivery"
-  | "bound_set_incomplete"
-  | "resolve_error";
+export type IntegrationDropReason = keyof typeof UNAVAILABLE_INTEGRATION_REASONS;
 
 /** One declared integration the run will start WITHOUT, plus why. */
 export interface DroppedIntegration {
@@ -227,8 +212,8 @@ async function renderConnectionRemoteUrl(
  * agent whose integrations are only partly connected (the pre-flight picker
  * models it explicitly via the readiness verdict's `error_code`), so this must not throw.
  * But the caller MUST carry `dropped` somewhere the user can see it;
- * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a
- * `warn` run log. This function itself stays pure of DB writes so it remains
+ * `run-context-builder.ts` → `run-pipeline.ts` turns each entry into a run
+ * log (`warn`, `info` for an unbound one). This function itself stays pure of DB writes so it remains
  * unit-testable without a run row.
  */
 export async function resolveIntegrationSpawns(
@@ -351,15 +336,21 @@ async function resolveOne(
   // api_call filter (below) and the sidecar `toolAllowlist` (Phase 3) so the
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
+  const wildcardSelection = isToolsWildcard(effectiveSelection);
+  const exposesTools = wildcardSelection || !!effectiveSelection?.length;
 
   // (b) Active in the space
   if (!(await isIntegrationActive(integrationId, spaceId))) {
+    // Inert (no verdict, no tool): nothing would start, switched on or off.
+    if (!boundConnections && !exposesTools) return { specs: [], drops: [] };
     logger.info("integration not active in space; skipping", {
       integrationId,
       spaceId,
     });
     return drop("not_active");
   }
+  // `[]`: the cascade bound none on purpose — the run starts without it, tools or none.
+  if (boundConnections?.length === 0) return drop("unbound");
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
   // AND httpDeliveryAuths from delivery.http (Phase 1.5).
@@ -377,7 +368,6 @@ async function resolveOne(
   // privilege: the catch-all tool is never auto-granted). `authorized_uris`
   // come from each api_call auth. Each api_call belongs to ONE auth: a spec
   // keeps only its connection's (below).
-  const wildcardSelection = isToolsWildcard(effectiveSelection);
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
     (cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -547,9 +537,9 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
-  if (!boundConnections?.length) {
+  if (!boundConnections) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
-    if (!wildcardSelection && !effectiveSelection?.length) return { specs: [], drops: [] };
+    if (!exposesTools) return { specs: [], drops: [] };
     throw new Error(
       `integration '${integrationId}' exposes tools but the run's connection snapshot binds no connection to it`,
     );

@@ -300,9 +300,31 @@ An agent that declares `dependencies.integrations["@me/svc"].scopes: ["read"]` a
 connection granted only `["admin"]` is treated as satisfying the requirement — `admin`
 implies `read`. Useful when an IdP exposes umbrella scopes that subsume finer ones.
 
-The agent-install scope union is computed from `default_scopes ∪ per-agent scopes
-∪ tools_policy[t].required_scopes` over the agent's selected tools. The platform's
-incremental-consent flow re-requests the union when an installed agent grows.
+An agent requires its own `scopes ∪ tools_policy[t].required_scopes` over its
+selected tools (the auth's `default_scopes` under `tools: "*"`). A new connection
+requests that set plus `default_scopes`. An existing connection is never widened
+on its own when an agent asks for more: the run answers `insufficient_scopes`, and
+the remedy is a new connection (below).
+
+### Least privilege with connections
+
+An integration (Gmail, GitHub, …) is the generic connector. A **connection**
+is one consent to it: one account, with its own granted scopes. An integration
+holds as many connections as you need.
+
+- Every connection of an auth gets its `default_scopes`: the identity, refresh
+  and least-capability baseline. The scopes you request widen it.
+- Manifest authors: keep `default_scopes` to identity, refresh and the
+  least-privileged capability, because every connection requests it. Declare
+  write scopes in `scope_catalog` and let the agents that need them ask.
+- An agent declares what it needs, through the tools it selects or
+  `integrations_configuration.<id>.scopes`. Pick a connection whose granted
+  scopes cover them, or create one with exactly those scopes.
+- Upgrading a connection widens every agent that uses it. To give one agent
+  more rights, create a new connection for it instead of upgrading a shared
+  one.
+- Never duplicate an integration to vary its scopes: create another connection
+  of the same integration.
 
 ---
 
@@ -481,6 +503,68 @@ import, as is a runtime expression or selector `context` the login engine cannot
 evaluate. That includes `{$variable.<name>}`: a login request takes no connection
 variable, so a declarative login cannot target a per-connection upstream.
 
+Each `{{name}}` value is encoded for the place it takes, so a value never adds a
+parameter, a member, a part or a header line (the sidecar does the same for the
+`{{name}}` a `connect.tool` login tool writes into its own requests, by their
+`Content-Type`):
+
+- `url` — a placeholder that starts the template is a base URL, inserted as is; the
+  resulting URL must still match `authorized_uris`. Every other value is percent-encoded
+  as one component wherever it sits — a path segment, a query component, a fragment, but
+  also a port, a userinfo or a value right after the host or the base. Write the `/` a
+  URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
+  never `https://example.com{{path}}`, whose `/` would be encoded. A URL refused for its
+  host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request` naming
+  the inputs in its authority.
+- `body` — by the media type of the `Content-Type` header, else of `content_type`:
+  - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
+  - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
+    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
+    type: the submitted credentials are first typed by `credentials.schema`, so a field
+    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
+    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
+    tool's inputs are strings: a bare position takes them as JSON strings;
+  - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
+    in a CDATA section;
+  - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
+    inside a part's own headers (a `Content-Disposition` `filename="{{name}}"`) is not
+    escaped: keep placeholders in part bodies;
+  - any other body takes the value as is.
+- header values — the value as is; one carrying a line break, another control character
+  or a character above U+00FF is refused, and in a `Cookie` header any character outside
+  RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).
+
+A value refused where it is placed is a `400 invalid_request` naming `credentials.<name>`.
+
+A login the service refuses is a `400 invalid_request` on `credentials` whose detail
+starts `Login failed:`, as for a `connect.tool` login: the declared `success_criteria`
+failed on an answer below 500, or, with none declared, the service answered 400, 401,
+403 or 422. A 404, 405 or 410 (whatever the criteria) and any other answer below 500
+that no criterion judges (a 302) are a defect of the integration, a `500`. A service
+that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
+does not answer within `request_timeout_ms` a `504 timeout`.
+
+**A form login should declare `success_criteria`.** AFPS makes them optional, and without
+them any 2xx counts as success — but most web apps answer a wrong password with `200` and
+the login page again, so the connection is stored with a dead session. Declare what only
+the logged-in answer has: the session cookie set, the redirect target, a marker in the
+body. The import warns on a form login with none.
+
+```jsonc
+"request": {
+  "method": "POST",
+  "url": "https://app.example.com/login",
+  "content_type": "application/x-www-form-urlencoded",
+  "body": "username={{username}}&password={{password}}"
+},
+// The app redirects a successful login to /home and a failed one back to /login.
+"success_criteria": [
+  { "condition": "$statusCode == 302" },
+  { "condition": "/home", "type": "regex", "context": "$response.header.Location" }
+],
+"outputs": { "sid": { "from": "cookie", "name": "JSESSIONID" } }
+```
+
 `success_criteria` is an array of Arazzo Criterion objects (`{ condition, context?, type? }`).
 When omitted, success defaults to HTTP 2xx (AFPS-defined; Arazzo leaves HTTP success
 undefined). Appstrate evaluates exactly the AFPS §7.7 evaluation profile. Every other form
@@ -518,6 +602,11 @@ allows — none when the auth's upstream is fixed.
 Referencing a bootstrap login secret like `{$credential.password}` directly in
 `delivery.http.value` is a manifest error — the platform decouples acquisition from
 delivery.
+
+A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
+like a pasted credential, by the one required string field of `credentials.schema` that
+is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
+`Connexion N`. Mark the password field as a secret so the username names the connection.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
@@ -564,9 +653,9 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
     },
     "delivery": {
       "http": {
-        "in": "cookie",
-        "name": "JSESSIONID",
-        "value": "{$credential.JSESSIONID}"
+        "in": "header",
+        "name": "Cookie",
+        "value": "JSESSIONID={$credential.JSESSIONID}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]
@@ -586,6 +675,9 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
 - `outputs` (array of strings) — the authoritative set of injectable names the tool
   produces. These are the names you can reference in `delivery.*.value` as
   `{$credential.<name>}`.
+- `delivery.http` — a session cookie is sent as a `Cookie` header whose value names the
+  cookie. AFPS also defines `in: "cookie"` and `in: "query"`; the import refuses both,
+  only `in: "header"` is implemented.
 
 > **Either-or form — but only one of the two is executed today.** The
 > spec-natural location `connect.tool.name` is where the name BELONGS, and it is
@@ -640,9 +732,9 @@ down.
     },
     "delivery": {
       "http": {
-        "in": "cookie",
-        "name": "session",
-        "value": "{$credential.session_cookie}"
+        "in": "header",
+        "name": "Cookie",
+        "value": "session={$credential.session_cookie}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]

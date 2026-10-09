@@ -38,7 +38,7 @@ const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
 
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 interface Responders {
@@ -170,7 +170,7 @@ describe("org list", () => {
 
   it("errors out when the profile is not logged in", async () => {
     const { io, stderr } = createMemoryIO();
-    await expect(orgListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(orgListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("not configured");
   });
 });
@@ -188,13 +188,13 @@ describe("org current", () => {
   it("exits 1 with a hint when no org is pinned", async () => {
     const { io, stderr } = createMemoryIO();
     await seedLoggedIn();
-    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("No organization pinned");
   });
 
   it("exits 1 when the profile is unconfigured", async () => {
     const { io, stderr } = createMemoryIO();
-    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain('Profile "default" not configured');
   });
 });
@@ -273,7 +273,7 @@ describe("org switch", () => {
     });
 
     await expect(orgSwitchCommand({ profile: "default" }, {}, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(stderr()).toContain("No organizations");
   });
@@ -291,7 +291,7 @@ describe("org switch", () => {
 
     await expect(
       orgSwitchCommand({ profile: "default", ref: "gamma" }, {}, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(await pinnedOrgId()).toBe("org_1"); // unchanged
   });
 });
@@ -386,7 +386,7 @@ describe("org create", () => {
     const { io, stderr } = createMemoryIO();
     await expect(
       orgCreateCommand({ profile: "default", name: "X" }, {}, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("not configured");
   });
 });

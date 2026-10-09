@@ -34,6 +34,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -162,6 +164,37 @@ export interface CreateMcpServerOptions {
   instructions?: string;
 }
 
+const outputValidator = new AjvJsonSchemaValidator();
+/** Compiled once per schema object: a server is built per request, its tools' schemas are not. */
+const compiledOutputSchemas = new WeakMap<object, JsonSchemaValidator<unknown>>();
+
+/**
+ * A tool's successful result must match its `outputSchema` (MCP 2025-06-18). A mismatch is a
+ * server bug: a JSON-RPC internal error, never a tool result the model could take for an outcome.
+ */
+function assertToolOutput(descriptor: Tool, result: CallToolResult): void {
+  const schema = descriptor.outputSchema;
+  if (!schema || result.isError) return;
+  if (!result.structuredContent) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Tool ${descriptor.name} declares an outputSchema but returned no structuredContent`,
+    );
+  }
+  let validate = compiledOutputSchemas.get(schema);
+  if (!validate) {
+    validate = outputValidator.getValidator(schema as JsonSchemaType);
+    compiledOutputSchemas.set(schema, validate);
+  }
+  const verdict = validate(result.structuredContent);
+  if (!verdict.valid) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Tool ${descriptor.name} returned structuredContent outside its outputSchema: ${verdict.errorMessage}`,
+    );
+  }
+}
+
 /**
  * Build an MCP `Server` that exposes the supplied tool definitions via
  * `tools/list` and `tools/call`. The server is *not* yet connected to a
@@ -206,7 +239,9 @@ export function createMcpServer(
       // MethodNotFound (-32601) would mislabel it.
       throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
     }
-    return reg.handler(request.params.arguments ?? {}, extra);
+    const result = await reg.handler(request.params.arguments ?? {}, extra);
+    assertToolOutput(reg.descriptor, result);
+    return result;
   });
 
   if (options.resources) {
@@ -277,6 +312,17 @@ export async function createInProcessPair(
   };
 }
 
+/** Fire-and-forget: a failed send (client gone) goes to `onError`, never fails the handler. */
+export function notifyDetached(
+  extra: AppstrateRequestExtra,
+  notification: ServerNotification,
+  onError: (err: unknown) => void,
+): void {
+  Promise.resolve()
+    .then(() => extra.sendNotification(notification))
+    .catch(onError);
+}
+
 // Re-export the SDK error primitives so callers don't need a second
 // dependency line just to inspect error codes thrown by the server.
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
@@ -291,6 +337,8 @@ export type {
 // over Streamable HTTP; the CLI uses the in-process pair already
 // exported above.
 export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
+
+export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible

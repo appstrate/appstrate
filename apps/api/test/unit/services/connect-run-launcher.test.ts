@@ -272,6 +272,7 @@ describe("buildConnectLoginSpec", () => {
     // The login runner's MITM enforces the auth's allowlist (#1458).
     expect(spec.egress).toEqual({
       authorizedUris: ["https://api.example.test/**"],
+      declaredUris: ["https://api.example.test/**"],
       allowAllUris: false,
     });
   });
@@ -284,7 +285,7 @@ describe("buildConnectLoginSpec", () => {
     auth.allow_all_uris = true;
     ex.manifest = allowAll;
     const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
-    expect(spec.egress).toEqual({ authorizedUris: [], allowAllUris: true });
+    expect(spec.egress).toEqual({ authorizedUris: [], declaredUris: [], allowAllUris: true });
   });
 
   it("throws when the auth has no delivery.http", async () => {

@@ -53,4 +53,9 @@ export interface RunSinkContext {
    * pricing (or, for a remote-origin run, no platform model at all).
    */
   modelCost: ModelCost | null;
+  /**
+   * Raw `runs.integrations_unbound`, parsed only where the remote run's `started` event reads it:
+   * this context is also the auth path, which a drifted row must never fail.
+   */
+  integrationsUnbound: unknown;
 }

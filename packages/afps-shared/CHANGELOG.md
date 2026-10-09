@@ -14,6 +14,49 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
+  `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
+  a counter fails `isTokenCount`; keys other than the four counters and `tiers`
+  are dropped; bands failing `isTokenUsageTiers` are dropped and flagged with
+  `tiersDropped`. (#1846)
+- **`isLoopbackHost`** (`./ssrf`): whether a host, in any form `isBlockedHost`
+  parses, is treated as this machine (loopback, `0.0.0.0/8`, `::`,
+  `localhost`, `*.localhost`, or an IPv6 address embedding one of those
+  IPv4s); an unparseable host counts as loopback. Both predicates share one
+  classifier, so `isBlockedHost` is unchanged. (#1819)
+- **`GuardedFetchOptions.blockedHost`** (`./guarded-fetch`): a predicate that
+  replaces the host blocklist on both the literal and the resolved-address
+  layer of every hop, keeping resolution and the address pin (`allowHost`
+  skips both). (#1819)
+
+### Changed
+
+- **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
+  safe integer (was any finite non-negative number), the `integer` the AFPS
+  spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band
+  with a fractional counter is malformed. (#1846)
+
+## [0.12.1] — 2026-10-09
+
+### Added
+
+- **`TokenUsage.tiers`** (`./token-usage`) and **`TokenUsageTier`**: usage
+  summed over several requests carries, per price-tier threshold, the tokens of
+  the requests priced at that tier (a subset of the totals), so the sum can be
+  priced exactly. Optional; absent when no request reached a tier. (#1552)
+- **`isTokenUsageTiers`**: the one validation rule for `tiers` — at most
+  `MAX_TOKEN_USAGE_TIERS` bands, strict keys (`input_tokens_above` and the four
+  counters), a positive integer `input_tokens_above` unique across bands, and
+  counters finite and non-negative (`isTokenCount`). Shared by core's
+  `tokenUsageSchema` and the AFPS event guard.
+- **`MAX_TOKEN_USAGE_TIERS`** (16): the band cap.
+- **`isTokenCount`**: a finite, non-negative counter — the rule for every
+  `usage` counter, top-level and in a band.
+- **`TOKEN_USAGE_COUNTERS`**: the four counters, declared once; `TokenUsage`
+  and `TokenUsageTier` are typed from it.
+
 ## [0.12.0] — 2026-10-08
 
 Breaking (0.x minor): `parseUrlFormPattern` and `unrenderableAuthorizedUriFields`

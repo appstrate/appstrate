@@ -127,9 +127,11 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
-  it("rejects an EMPTY connection_overrides set with 400", async () => {
+  it("lets an EMPTY connection_overrides set (explicit none) past the schema", async () => {
+    // Refusing it on a `required` integration needs the manifest, so it happens after the
+    // lookup (run-launch-override-source.test.ts); here it dies at version resolution.
     const res = await post({ input: {}, connection_overrides: { "@acme/gmail": [] } });
-    await expectRejectedField(res, "connection_overrides.@acme/gmail");
+    expect(res.status).toBe(404);
   });
 
   it("rejects a repeated connection id in a set, in either case", async () => {

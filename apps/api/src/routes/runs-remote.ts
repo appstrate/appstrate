@@ -31,7 +31,13 @@ import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
 import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
-import { invalidRequest, notFound, forbidden, ApiError } from "../lib/errors.ts";
+import {
+  invalidRequest,
+  notFound,
+  forbidden,
+  ApiError,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -54,6 +60,7 @@ import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { versionRefOf } from "../services/agent-version-resolver.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
@@ -234,6 +241,7 @@ export function createRunsRemoteRouter() {
       // Attribution path counter — emitted once per request so we can
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
+      let warnings: ResolutionFieldError[];
       // Seeded by the inline preflight only — the registry branch resolves no
       // pins of its own, so `createRun` creates its own Map there.
       let manifestCache: IntegrationManifestCache | undefined;
@@ -324,8 +332,9 @@ export function createRunsRemoteRouter() {
         }
 
         // Readiness gate — same checks the inline preflight ends with.
-        await validateAgentReadiness({
+        warnings = await validateAgentReadiness({
           agent: agentForRun,
+          versionRef: versionRefOf(overrideVersionLabel),
           orgId,
           spaceId,
           actor,
@@ -362,6 +371,7 @@ export function createRunsRemoteRouter() {
         attributionPath = "inline_shadow";
 
         effectiveInput = preflight.effectiveInput;
+        warnings = preflight.warnings;
         // Already seeded with the PINNED integration manifests — `createRun`
         // reuses it instead of resolving every pin a second time.
         manifestCache = preflight.manifestCache;
@@ -437,6 +447,7 @@ export function createRunsRemoteRouter() {
       return c.json({
         id: result.runId,
         ...result.sinkCredentials,
+        warnings,
       });
     },
   );

@@ -35,7 +35,7 @@ import {
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -445,7 +445,7 @@ describe("packages pull", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPullCommand({ package: "@acme/pdf", dir }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain('"A.md" and "a.md"');
@@ -545,7 +545,7 @@ describe("packages pull", () => {
 
       await expect(
         packagesPullCommand({ package: "@acme/pdf@draft", dir }, io),
-      ).rejects.toBeInstanceOf(ExitError);
+      ).rejects.toBeInstanceOf(CommandExit);
 
       expect(stderr()).toContain("The draft of @acme/pdf is the author's working copy.");
       expect(stderr()).toContain("appstrate packages pull @acme/pdf@latest");
@@ -560,7 +560,7 @@ describe("packages pull", () => {
 
       await expect(
         packagesPullCommand({ package: "@acme/pdf@9.9.9", dir }, io),
-      ).rejects.toBeInstanceOf(ExitError);
+      ).rejects.toBeInstanceOf(CommandExit);
 
       expect(stderr()).toContain("No such version");
       expect(stderr().split("No such version").length - 1).toBe(1);
@@ -573,7 +573,7 @@ describe("packages pull", () => {
 
       await expect(
         packagesPullCommand({ package: "@acme/pdf@", dir: join(root, "pdf") }, io),
-      ).rejects.toBeInstanceOf(ExitError);
+      ).rejects.toBeInstanceOf(CommandExit);
 
       expect(stderr()).toContain('@acme/pdf@: nothing after "@"');
       expect(server.seen.some((s) => s.path.startsWith("/api/packages"))).toBe(false);
@@ -608,7 +608,7 @@ describe("packages pull", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPullCommand({ package: "@acme/pdf", dir }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(stderr()).toContain("--force");
     expect(await text(join(dir, "mine.md"))).toBe("keep");
@@ -642,7 +642,7 @@ describe("working copies found by name", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesStatusCommand({ dir: "pdf" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesStatusCommand({ dir: "pdf" }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain("holds @other/pdf, not @acme/pdf");
   });
@@ -742,7 +742,7 @@ describe("packages push", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nMine.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain("was edited elsewhere since this folder last saw it.");
     expect(stderr()).toContain("push --force");
@@ -775,7 +775,7 @@ describe("packages push", () => {
     edited[0] = 1;
     await writeFile(join(dir, "big.bin"), edited);
     const { io, stderr } = createMemoryIO();
-    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toMatch(/big\.bin: 2097152 bytes, over the 1 MiB limit/);
     expect(server.seen.filter((s) => s.method === "PATCH")).toHaveLength(1);
   });
@@ -809,7 +809,7 @@ describe("packages push", () => {
 
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nNext.\n");
     const next = createMemoryIO();
-    await expect(packagesPushCommand({ dir }, next.io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, next.io)).rejects.toBeInstanceOf(CommandExit);
     expect(next.stderr()).toContain("edited elsewhere since this folder last saw it.");
   });
 
@@ -821,7 +821,7 @@ describe("packages push", () => {
     await writeFile(table, JSON.stringify({ [dir]: { packageId: "@acme/pdf" } }));
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain(`${table} is not a valid packages lock table. Delete it`);
     expect(stderr()).toContain("appstrate packages pull <package> <folder> --force");
@@ -836,7 +836,7 @@ describe("packages push", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nMine.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain(
       "Push of @acme/pdf refused: Refused by the stand-in (path_conflict)",
@@ -851,7 +851,7 @@ describe("packages push", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPushCommand({ dir, space: "spc_x" }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("--space only applies with --create");
@@ -865,7 +865,7 @@ describe("packages push", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nMine.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     // `pull --force` would overwrite the very edits this push is about.
     expect(stderr()).toContain(`appstrate packages push ${dir} --force`);
@@ -904,7 +904,9 @@ describe("packages push", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: fresh\ndescription: New.\n---\nBody.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(
+      CommandExit,
+    );
 
     expect(stderr()).toContain("older than this CLI");
     expect(stderr()).not.toContain("API endpoint not found");
@@ -918,7 +920,9 @@ describe("packages push", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: fresh\ndescription: New.\n---\nBody.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir, create: true }, io)).rejects.toBeInstanceOf(
+      CommandExit,
+    );
 
     expect(stderr()).toContain("Space 'spc_gone' not found");
     expect(stderr()).not.toContain("older than this CLI");
@@ -933,7 +937,7 @@ describe("packages push", () => {
     await writeFile(join(dir, ".env"), "SECRET=1");
 
     const refused = createMemoryIO();
-    await expect(packagesPushCommand({ dir }, refused.io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPushCommand({ dir }, refused.io)).rejects.toBeInstanceOf(CommandExit);
     expect(refused.stderr()).toContain("--create");
     expect(refused.stderr()).not.toContain("Not sent");
 
@@ -1039,7 +1043,7 @@ describe("packages publish", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("changed while this command read it");
@@ -1053,7 +1057,7 @@ describe("packages publish", () => {
     await writeFile(join(dir, "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\nUnpushed.\n");
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain(`${dir} has changes the draft does not have: push them first`);
     expect(server.seen.some((s) => s.path.endsWith("/versions") && s.method === "POST")).toBe(
@@ -1068,7 +1072,7 @@ describe("packages publish", () => {
     pkg.draft.lock = 7;
     const { io, stderr } = createMemoryIO();
 
-    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(packagesPublishCommand({ package: dir }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain("has changes the draft does not have");
   });
@@ -1098,7 +1102,7 @@ describe("packages publish", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("0.9.0");
@@ -1116,7 +1120,7 @@ describe("packages publish", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("there is nothing to publish");
@@ -1132,7 +1136,7 @@ describe("packages publish", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("no valid `version`");
@@ -1149,7 +1153,7 @@ describe("packages publish", () => {
       const { io, stderr } = createMemoryIO();
 
       await expect(packagesPublishCommand({ package: "@acme/pdf" }, io)).rejects.toBeInstanceOf(
-        ExitError,
+        CommandExit,
       );
 
       expect(stderr()).toContain(message);

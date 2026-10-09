@@ -67,6 +67,11 @@ export const VERSION_SELECTOR_DRAFT = "draft";
 /** Keyword selecting the latest published version. */
 export const VERSION_SELECTOR_PUBLISHED = "published";
 
+/** `runs.version_ref` of a resolved definition: its concrete semver, else `"draft"`. */
+export function versionRefOf(overrideVersionLabel: string | undefined): string {
+  return overrideVersionLabel ?? VERSION_SELECTOR_DRAFT;
+}
+
 interface ResolvedRunAgent {
   /** The agent definition the run will execute (draft or version snapshot). */
   agent: LoadedPackage;

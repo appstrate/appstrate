@@ -90,8 +90,6 @@ Catalog lookups take a scope, `all` (bundled plus live) or `bundled`.
   `SYSTEM_PROVIDER_KEYS` models), `verify:system-models`, and a system model's
   price, limits and dialect at run time. Remote data decides neither whether an
   instance starts nor what a model the platform pays for costs.
-- A **subscription provider** (`authMode: "oauth2"`) is offered no live record
-  with a price tier one request can reach (#1552).
 
 ## Sync
 
@@ -131,6 +129,9 @@ will serve it.
    bundled record of its API shape has, its endpoint is one a bundled record of
    its provider uses, and the pinned code builds its request at every thinking
    level, with no network (`capturePayload`, the harness the parity tests use).
+   A reasoning record of a served API shape that takes `off` must also have
+   what `off` sends, as an instance derives it (`piReasoningOff`), agree with
+   the payload the pinned code builds (`observedReasoningOff`).
 4. The file is signed with `MODEL_CATALOG_SIGNING_KEY`, then read back exactly
    as an instance will: a seed that is not the pinned key's publishes nothing.
 5. Nothing is published when the published file already lists the same records

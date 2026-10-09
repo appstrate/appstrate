@@ -26,6 +26,7 @@ import {
   arrayOverlaps,
   asc,
   eq,
+  getTableColumns,
   gt,
   inArray,
   isNotNull,
@@ -127,6 +128,12 @@ import {
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
+import {
+  PLACEHOLDER_ACCOUNT_ID,
+  connectionVariablesOf,
+  displayAccountId,
+  sameConnectionVariables,
+} from "../lib/connection-identity.ts";
 import {
   getLocalServerRef,
   getRemoteSource,
@@ -243,21 +250,6 @@ interface ActorConnectionRow {
   oauthResource: string | null;
 }
 
-/** Whether two connections name the same upstream: the same variables, the same values. */
-function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
-  const entries = Object.entries(a);
-  return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
-}
-
-/** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-function connectionVariablesOf(value: unknown): ConnectionVariables {
-  const out: Record<string, string> = {};
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
-  }
-  return Object.freeze(out);
-}
-
 /**
  * Spawn-side connection row — carries the `authKey` so the spawn
  * resolver can pick the right `manifest.auths[authKey].delivery`
@@ -265,13 +257,8 @@ function connectionVariablesOf(value: unknown): ConnectionVariables {
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
-}
-
-/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
-const PLACEHOLDER_ACCOUNT_ID = "default";
-
-export function displayAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
+  /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
+  credentialRevision: string;
 }
 
 /**
@@ -327,7 +314,7 @@ export async function loadAccessibleConnectionById(
   integrationId: string,
   expectedAuthKey: string | null,
   context: { spaceId: string; actor: Actor },
-): Promise<(ResolvedConnectionRow & { credentialRevision: string }) | null> {
+): Promise<ResolvedConnectionRow | null> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -429,7 +416,8 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required.
+    // No agent selection: every declared auth serves, no scope is required. `required`: a proxy
+    // call cannot proceed without a connection, so nothing usable is an error (→ null below).
     requirements: [
       {
         integrationId: packageId,
@@ -437,6 +425,8 @@ export async function selectAccessibleConnection(
         hasSelectedTools: true,
         agentTools: [],
         agentScopes: [],
+        required: true,
+        noAgentSelection: true,
       },
     ],
     accessibleConnections: rows,
@@ -476,7 +466,7 @@ export async function selectAccessibleConnection(
 /** The actor's accessible rows (own + shared) of `packageId` in the space, in a stable order. */
 function loadSelectableRows(packageId: string, context: { spaceId: string; actor: Actor }) {
   return db
-    .select()
+    .select({ ...getTableColumns(integrationConnections), credentialRevision })
     .from(integrationConnections)
     .where(
       and(
@@ -488,13 +478,14 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
     .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
 }
 
-type SelectableRow = typeof integrationConnections.$inferSelect;
+type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
@@ -506,6 +497,7 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
@@ -2661,12 +2653,13 @@ async function firstFreeLabel(
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
  * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
- * integration-detail ConnectionRow reconnect), and the run-kickoff
- * MissingConnectionsModal reconnect button. The latter two consume the
- * `connection_id` field smuggled on `needs_reconnection` / `insufficient_scopes`
- * ProblemDetails by `integration-connection-resolver.ts:translateResolutionError`
- * and forward it through the OAuth state record so the callback lands here on
- * the `update-owned` path.
+ * integration-detail ConnectionRow reconnect), the run-kickoff
+ * MissingConnectionsModal reconnect button, and an upgrade the user chose. The
+ * latter consume the `connection_id` field carried on `needs_reconnection` /
+ * `insufficient_scopes` ProblemDetails by
+ * `integration-connection-resolver.ts:translateResolutionError` and forward it
+ * through the OAuth state record so the callback lands here on the
+ * `update-owned` path.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,
@@ -2914,13 +2907,14 @@ type RefreshFailureGate =
  * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
  * of an unrefreshable credential. Increment and escalation are one statement,
  * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
- * never cleared, and a credential write resets the count.
+ * never cleared, and a credential write resets the count. `null` when no row
+ * was counted (gone, or outside `reachable`).
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
   gate: RefreshFailureGate,
-): Promise<{ failures: number; needsReconnection: boolean }> {
+): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
   const escalates =
     "reachable" in gate
@@ -2943,23 +2937,28 @@ export async function recordIntegrationRefreshFailure(
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
     });
-  return row ?? { failures: 0, needsReconnection: false };
+  return row ?? null;
 }
 
 /**
  * Count an upstream rejection of a credential nothing can refresh toward
- * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection.
+ * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection and it still holds
+ * the rejected credential `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
-): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
+  revision: string,
+): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean } | null> {
   const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
-    reachable: reachableConnection(connectionId, integrationId, reach),
+    reachable: and(
+      reachableConnection(connectionId, integrationId, reach),
+      eq(credentialRevision, revision),
+    )!,
   });
-  return { ...counted, maxFailures };
+  return counted && { ...counted, maxFailures };
 }
 
 /**
@@ -3062,7 +3061,7 @@ export async function saveIntegrationConnection(
 
 /**
  * List the connections the actor can *use* for an integration in this
- * space: their own rows, plus every row opted into org-wide sharing
+ * space: their own rows, plus every row shared in its space
  * (`sharedWithOrg`) whoever owns it.
  *
  * The union — not the actor's own rows — is the correct set here because
@@ -3143,7 +3142,7 @@ interface UsableIntegration {
 /**
  * Integrations the actor could use when building an agent manually in the
  * current space: any integration for which a connection exists that is
- * either the actor's own (`actorFilter`) OR opted into org-wide sharing
+ * either the actor's own (`actorFilter`) OR shared in its space
  * (`sharedWithOrg`) — `actorOrSharedFilter`, the resolver's access predicate.
  *
  * Deduped to the integration level (the agent picks an integration; the
@@ -3172,7 +3171,7 @@ export async function listUsableIntegrationsForActor(
     );
   if (rows.length === 0) return [];
 
-  // own = row owned by this actor; shared = row opted into org-wide sharing.
+  // own = row owned by this actor; shared = row shared in its space.
   // A single integration can have both kinds across multiple connection rows.
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {
@@ -3349,7 +3348,7 @@ async function forgetDeletedConnection(
   const owner = actorFromIds(row.userId, row.endUserId)!;
   const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
   for (const pin of plan.pins) {
-    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
     } else {
@@ -3469,6 +3468,7 @@ export async function planConnectionForget(
     schedules: ownRows.map((row) => {
       const overrides = row.connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        if (!ids.includes(id)) return [[integrationId, ids] as const]; // `[]` (none) included
         const rest = ids.filter((c) => c !== id);
         return rest.length > 0 ? [[integrationId, rest] as const] : [];
       });
@@ -3663,7 +3663,7 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
     // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
-    // under `_meta["dev.appstrate/auth"].required`.
+    // under `_meta["dev.appstrate/auth"].required` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       { required?: boolean } | undefined;
@@ -3672,7 +3672,7 @@ export async function getIntegrationAuthStatuses(
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required ?? true,
+      required: authMeta?.required === true,
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,

@@ -28,7 +28,8 @@
  * Layout invariant: the card is mounted from the FIRST frame of the initiate
  * tool call (before the auth url exists) and keeps the SAME two-row geometry
  * across every state — preparing (no `authUrl` yet), idle, pending, error
- * (including `errorText` when the initiate call itself failed), and connected.
+ * (including `errorText` when the initiate call itself failed), expired (the
+ * link lapsed unused: no button), and connected.
  * No state may change the card's height: the transcript must never jump.
  */
 
@@ -50,7 +51,14 @@ import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders, useChatHost } from "./runtime-context.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { orgSpaceFromHeaders } from "./run-events.ts";
-import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
+import {
+  claimResume,
+  encodeResume,
+  isOfferExpired,
+  resumeInstruction,
+  type CompletionDetail,
+  type ResumeMeta,
+} from "./auth-offer.ts";
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
@@ -124,6 +132,8 @@ export function OAuthConnectCard({
   packageId,
   toolCallId,
   errorText,
+  runStarted = false,
+  expiresAt,
 }: {
   /** Absent while the initiate call is still streaming — renders the preparing state. */
   authUrl?: string;
@@ -137,6 +147,10 @@ export function OAuthConnectCard({
   toolCallId?: string;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
+  /** The offer came from a run that started without the integration. */
+  runStarted?: boolean;
+  /** RFC 3339 expiry of the connect session behind `authUrl`. */
+  expiresAt?: string;
 }) {
   const aui = useAui();
   const getHeaders = useChatHeaders();
@@ -147,6 +161,7 @@ export function OAuthConnectCard({
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [meta, setMeta] = useState<ResumeMeta | null>(null);
+  const [expired, setExpired] = useState(() => isOfferExpired(expiresAt));
   const resumed = useRef(false);
   const label = meta?.name ?? packageId ?? t("connect.integrationFallback");
 
@@ -217,13 +232,13 @@ export function OAuthConnectCard({
             // raw user bubble; the human sentence is what the model acts on.
             text: encodeResume(
               meta ?? { packageId: packageId ?? "" },
-              `L'intégration ${label} est maintenant connectée. Continue la tâche.`,
+              resumeInstruction(label, runStarted),
             ),
           },
         ],
       });
     },
-    [aui, label, meta, packageId, t, toolCallId],
+    [aui, label, meta, packageId, runStarted, t, toolCallId],
   );
 
   // One waiter for the card's lifetime: an SSE hit parked until the popup
@@ -285,8 +300,21 @@ export function OAuthConnectCard({
     };
   }, [phase, state, packageId, getHeaders, waiter, complete]);
 
+  // Flip to the expired state when the session lapses, so the button never
+  // outlives its link; `start` re-checks for anything the timer misses.
+  useEffect(() => {
+    if (expired || !expiresAt) return;
+    const delay = Math.max(Date.parse(expiresAt) - Date.now(), 0);
+    const timer = setTimeout(() => setExpired(isOfferExpired(expiresAt)), delay);
+    return () => clearTimeout(timer);
+  }, [expired, expiresAt]);
+
   const start = () => {
     if (!authUrl) return;
+    if (isOfferExpired(expiresAt)) {
+      setExpired(true);
+      return;
+    }
     setErrMsg(null);
     setPhase("pending");
     // Keep the opener (no `noopener`) so the callback can postMessage us back.
@@ -304,6 +332,9 @@ export function OAuthConnectCard({
   const connected = phase === "done" || phase === "connected";
   const initiateFailed = !authUrl && !!errorText;
   const preparing = !authUrl && !initiateFailed;
+  // A flow already opened has consumed the link; only an unused one can lapse.
+  // Completion listeners stay mounted, so connecting elsewhere still resumes.
+  const showExpired = expired && !connected && phase !== "pending";
 
   // One shell for every state: row 1 (h-5, sentence) + row 2 (h-9, action or
   // outcome). Fixed row heights so state transitions — preparing → idle →
@@ -330,10 +361,10 @@ export function OAuthConnectCard({
             <CheckIcon className="size-3.5 shrink-0" />
             {t("connect.active")}
           </span>
-        ) : initiateFailed ? (
+        ) : initiateFailed || showExpired ? (
           <span className="text-destructive flex min-w-0 items-center gap-1 text-xs">
             <AlertTriangleIcon className="size-3.5 shrink-0" />
-            <span className="truncate">{errorText}</span>
+            <span className="truncate">{initiateFailed ? errorText : t("connect.expired")}</span>
           </span>
         ) : (
           <>

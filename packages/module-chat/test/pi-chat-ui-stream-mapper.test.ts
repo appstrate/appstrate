@@ -4,6 +4,8 @@ import { describe, expect, it } from "bun:test";
 import { PiChatUiStreamMapper, stripMcpToolPrefix } from "../src/pi-chat/ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
 
+const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+
 /** Feed a list of pi session events through one mapper, collect all UI chunks. */
 function run(events: AgentSessionEvent[]) {
   const mapper = new PiChatUiStreamMapper();
@@ -202,7 +204,7 @@ describe("PiChatUiStreamMapper", () => {
     ]);
   });
 
-  it("accumulates usage + cost and reports the finish reason", () => {
+  it("accumulates usage and reports the finish reason", () => {
     const { mapper } = run([
       {
         type: "message_end",
@@ -221,16 +223,50 @@ describe("PiChatUiStreamMapper", () => {
       },
     ]);
     const meta = mapper.result();
-    expect(meta.usage.input).toBe(100);
-    expect(meta.usage.output).toBe(50);
-    expect(meta.usage.cacheRead).toBe(10);
-    expect(meta.usage.cacheWrite).toBe(5);
-    // pi-ai's own per-bucket cost rides through on `usage.cost` (informational).
+    expect(meta.usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+      cache_read_input_tokens: 10,
+      cache_creation_input_tokens: 5,
+    });
     // The terminal meta exposes NO `costUsd`: billing is computed by the ledger
     // writer from these token counts + the model's catalog rates.
-    expect(meta.usage.cost.total).toBeCloseTo(0.3, 6);
     expect(meta).not.toHaveProperty("costUsd");
     expect(meta.finishReason).toBe("tool-calls");
+  });
+
+  it("bands each model call at the tier of the rate card it reaches", () => {
+    const cost = {
+      input: 1,
+      output: 2,
+      tiers: [{ inputTokensAbove: 1_000, input: 2, output: 4, cacheRead: 0, cacheWrite: 0 }],
+    };
+    const mapper = new PiChatUiStreamMapper({ cost });
+    const end = (input: number, cacheRead: number) => ({
+      type: "message_end" as const,
+      message: {
+        role: "assistant",
+        stopReason: "stop",
+        usage: { input, output: 7, cacheRead, cacheWrite: 0, totalTokens: 0, cost: ZERO_COST },
+      },
+    });
+    // 600 + 500 = 1100 crosses the tier; 900 does not.
+    for (const e of [end(900, 0), end(600, 500)]) mapper.map(e);
+    expect(mapper.result().usage).toEqual({
+      input_tokens: 1_500,
+      output_tokens: 14,
+      cache_read_input_tokens: 500,
+      cache_creation_input_tokens: 0,
+      tiers: [
+        {
+          input_tokens_above: 1_000,
+          input_tokens: 600,
+          output_tokens: 7,
+          cache_read_input_tokens: 500,
+          cache_creation_input_tokens: 0,
+        },
+      ],
+    });
   });
 
   it("captures a terminal error turn's message + error finish reason", () => {

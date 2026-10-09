@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, integration) default connection SET — the org-wide baseline
+ * Per-(space, integration) default connection SET — the space-wide baseline
  * the resolver uses for EVERY agent that consumes the integration, unless a
  * more specific layer overrides it.
  *
@@ -17,7 +17,7 @@
  *     for the common case while still letting a member express a personal
  *     preference (a member pin wins over a soft default).
  *
- *   - `enforce = true` — **org-wide force**. Sits just below the per-agent
+ *   - `enforce = true` — **space-wide force**. Sits just below the per-agent
  *     admin pin: it locks the choice for every actor on every agent,
  *     beating the launch override (run or schedule) and member pins. A per-agent admin pin
  *     still wins (the agent-specific exception).

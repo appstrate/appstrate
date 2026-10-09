@@ -10,7 +10,8 @@
  *   body.blocks_run === true  ⇔  POST /api/agents/:scope/:name/run → 409
  *
  * plus per-integration `run_blocking` flags and the management `resolution`
- * DTO for every declared integration (even inert ones).
+ * DTO for every declared integration (even inert ones). Only an integration the
+ * agent marks `required` blocks on absence; an optional one is reported unbound.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -37,12 +38,20 @@ const AGENT = "@rdyorg/agent";
 const INTEGRATION = "@rdyorg/svc";
 const MCP_SERVER = "@rdyorg/svc-server";
 
-function buildAgentManifest(integrations: string[], withTools: boolean): Record<string, unknown> {
+function buildAgentManifest(
+  integrations: string[],
+  withTools: boolean,
+  required = false,
+): Record<string, unknown> {
   const deps: Record<string, string> = {};
-  const config: Record<string, { tools: string[] }> = {};
+  const config: Record<string, { tools?: string[]; required?: boolean }> = {};
   for (const id of integrations) {
     deps[id] = "^1.0.0";
-    if (withTools) config[id] = { tools: ["search"] };
+    const entry = {
+      ...(withTools ? { tools: ["search"] } : {}),
+      ...(required ? { required } : {}),
+    };
+    if (Object.keys(entry).length > 0) config[id] = entry;
   }
   return {
     name: AGENT,
@@ -98,6 +107,7 @@ interface ReadinessBody {
   }>;
   integrations: Array<{
     integration_package_id: string;
+    required: boolean;
     run_blocking: boolean;
     resolution: ReadinessResolution;
   }>;
@@ -179,8 +189,8 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     });
   }
 
-  it("active integration with no connection → blocks_run + run_blocking, and run 409s (parity)", async () => {
-    await seedAgentWith(buildAgentManifest([INTEGRATION], true));
+  it("required integration with no connection → blocks_run + run_blocking, and run 409s (parity)", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], true, true));
     await seedIntegration(false);
 
     const res = await getReadiness();
@@ -193,11 +203,42 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.errors[0]!.code).toBe("not_connected");
 
     const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
+    expect(integ?.required).toBe(true);
     expect(integ?.run_blocking).toBe(true);
     expect(integ?.resolution).toMatchObject({ source: null, error_code: "not_connected" });
 
     // Parity: the run gate rejects with 409.
     expect((await postRun()).status).toBe(409);
+  });
+
+  // Absence degrades: no error, no block, and the entry reads as unbound.
+  it("optional integration with no connection → unbound, not blocking, and run passes the gate (parity)", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], true));
+    await seedIntegration(false);
+    // Published so the launch clears the version freeze that follows the connection gate.
+    await seedPackageVersion({
+      packageId: INTEGRATION,
+      version: "1.0.0",
+      manifest: buildIntegrationManifest(INTEGRATION, false) as unknown as Record<string, unknown>,
+    });
+
+    const body = (await (await getReadiness()).json()) as ReadinessBody;
+    expect(body.blocks_run).toBe(false);
+    expect(body.errors).toEqual([]);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION)!;
+    expect(integ.required).toBe(false);
+    expect(integ.run_blocking).toBe(false);
+    expect(integ.resolution).toMatchObject({
+      source: null,
+      error_code: null,
+      resolved_connection_ids: [],
+    });
+
+    // The launch clears the connection gate and dies at the next one (no model is seeded),
+    // before any run row exists.
+    const run = await postRun();
+    expect(run.status).not.toBe(409);
+    expect(((await run.json()) as { code?: string }).code).toBe("model_not_configured");
   });
 
   it("inert OPTIONAL integration (no tools, not required) → present but not blocking", async () => {
@@ -212,8 +253,10 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(integ!.run_blocking).toBe(false);
   });
 
-  it("inert REQUIRED integration (no tools, required auth) → blocks_run + run 409s (parity)", async () => {
-    await seedAgentWith(buildAgentManifest([INTEGRATION], false));
+  // A required auth keeps the integration active with no tools; whether its absence blocks is
+  // still the agent's `required`.
+  it("no tools, required auth, agent requires it → blocks_run + run 409s (parity)", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], false, true));
     await seedIntegration(true);
 
     const body = (await (await getReadiness()).json()) as ReadinessBody;
@@ -222,6 +265,18 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(integ!.run_blocking).toBe(true);
 
     expect((await postRun()).status).toBe(409);
+  });
+
+  it("no tools, required auth, agent does not require it → unbound, not blocking", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], false));
+    await seedIntegration(true);
+
+    const body = (await (await getReadiness()).json()) as ReadinessBody;
+    expect(body.blocks_run).toBe(false);
+    const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION)!;
+    expect(integ.required).toBe(false);
+    expect(integ.run_blocking).toBe(false);
+    expect(integ.resolution.error_code).toBeNull();
   });
 
   it("active integration with one healthy connection → not blocking", async () => {
@@ -251,11 +306,11 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     });
     expect("version" in published && published.version).toBe("1.0.0");
 
-    // Dirty the draft: add an ACTIVE integration with no connection → draft blocks.
+    // Dirty the draft: add a REQUIRED integration with no connection → draft blocks.
     await db
       .update(packages)
       .set({
-        draftManifest: buildAgentManifest([INTEGRATION], true),
+        draftManifest: buildAgentManifest([INTEGRATION], true, true),
         updatedAt: new Date(Date.now() + 5_000),
       })
       .where(eq(packages.id, AGENT));
@@ -341,8 +396,8 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(item!.code).toBe("auth_serves_no_selected_tool");
   });
 
-  it("fallback with only a non-serving connection → not_connected, and no candidate", async () => {
-    await seedTwoAuthIntegration();
+  it("required, fallback with only a non-serving connection → not_connected, and no candidate", async () => {
+    await seedTwoAuthIntegration({ required: true });
     await db.insert(integrationConnections).values({
       integrationId: INTEGRATION,
       authKey: "backup",
@@ -417,7 +472,6 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
   const GOOGLE_GRANT = [
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.compose",
     "openid",
   ];
 
@@ -516,8 +570,8 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
   });
 
   it("still blocks when a real non-email scope is missing (discriminating control)", async () => {
-    const compose = "https://www.googleapis.com/auth/gmail.compose";
-    await seedWildcardGmailAgent(GOOGLE_GRANT.filter((s) => s !== compose));
+    const readonly = "https://www.googleapis.com/auth/gmail.readonly";
+    await seedWildcardGmailAgent(GOOGLE_GRANT.filter((s) => s !== readonly));
 
     const body = await readiness();
     expect(body.blocks_run).toBe(true);
@@ -525,7 +579,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
       { code: string; missing_scopes?: string[] } | undefined;
     expect(err?.code).toBe("insufficient_scopes");
     // Only the genuinely absent scope — `email` must not ride along.
-    expect(err?.missing_scopes).toEqual([compose]);
+    expect(err?.missing_scopes).toEqual([readonly]);
 
     expect((await launch()).status).toBe(409);
   });

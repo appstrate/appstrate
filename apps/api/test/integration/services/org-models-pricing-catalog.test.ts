@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { loadModel } from "../../../src/services/org-models.ts";
+import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
@@ -132,6 +132,49 @@ describe("loadModel — catalog fallback", () => {
     };
     expect(await piProviderOf("moonshot", "kimi-k2.6")).toBe("moonshotai");
     expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
+  });
+
+  const OPENROUTER_URL = "https://openrouter.ai/api/v1";
+
+  it("says what `off` sends for a model outside the registry", async () => {
+    const offOf = async (
+      providerId: string,
+      modelId: string,
+      reasoning: boolean,
+      baseUrl?: string,
+    ) => {
+      const cred = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        providerId,
+        apiKey: "sk-test",
+        ...(baseUrl ? { baseUrl } : {}),
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        modelId,
+        reasoning,
+      });
+      const resolved = (await loadModel(ctx.orgId, model.id))!;
+      if (baseUrl) expect(resolved.baseUrl).toBe(baseUrl);
+      const generation = resolved.generation?.reasoning;
+      const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
+        ?.reasoning;
+      expect(listed).toEqual(generation!);
+      return generation;
+    };
+    // A gateway's openai-completions sends no reasoning parameter at `off`;
+    // Anthropic disables thinking.
+    expect((await offOf("openai-compatible", "my-model", true))?.off).toBe("unsent");
+    expect((await offOf("anthropic-compatible", "my-model", true))?.off).toBe("disables");
+    expect(await offOf("openai-compatible", "my-model", false)).not.toHaveProperty("off");
+    // A non-aliased model's Pi never sees the gateway's upstream host, so
+    // OpenRouter's endpoint alone does not switch it to OpenRouter's dialect.
+    const viaOpenRouter = await offOf("openai-compatible", "my-model", true, OPENROUTER_URL);
+    expect(viaOpenRouter?.off).toBe("unsent");
+    // OpenRouter is searched live, so it serves ids its registry lacks: Pi still
+    // speaks its dialect there, which sends `reasoning: { effort: "none" }`.
+    expect((await offOf("openrouter", "vendor/unlisted-model", true))?.off).toBe("disables");
   });
 
   // Regression for #544: `org_models.id` is a uuid column. A non-UUID id (e.g.

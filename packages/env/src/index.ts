@@ -532,16 +532,6 @@ export const envSchema = z
     // error listing the registered backends.
     RUN_ADAPTER: z.string().default("process"),
 
-    // Integration runtime backend the Docker orchestrator pins onto the
-    // sidecar (operator override; same value set as core RUN_ADAPTER
-    // backends). The process orchestrator deliberately reads the raw
-    // environment instead — it must distinguish "unset" (pin to "process")
-    // from an explicit operator override, which a schema default would
-    // erase. The firecracker orchestrator always pins "process": the
-    // sidecar runs INSIDE the guest, so its integration runners are guest
-    // subprocesses.
-    INTEGRATION_RUNTIME_ADAPTER: z.enum(["docker", "process"]).default("docker"),
-
     // Docker images (override for GHCR / custom registries)
     PI_IMAGE: z.string().default("appstrate-pi:latest"),
     SIDECAR_IMAGE: z.string().default("appstrate-sidecar:latest"),

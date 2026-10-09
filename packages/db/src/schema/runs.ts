@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
@@ -211,6 +211,9 @@ export const runs = pgTable(
     // back through this column even after pins/connections are mutated.
     // Read back through `resolvedConnectionMapSchema` (the `$type` is an assertion).
     resolvedConnections: jsonb("resolved_connections").$type<ResolvedConnectionMap>(),
+    // Why the run started without each `[]` integration of that snapshot, without candidate
+    // detail. NULL = not recorded. Read back through `runIntegrationsUnboundSchema`.
+    integrationsUnbound: jsonb("integrations_unbound").$type<RunIntegrationUnbound[]>(),
     // Snapshot of the integration manifest VERSION resolved per declared
     // integration at run kickoff (#686). Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.

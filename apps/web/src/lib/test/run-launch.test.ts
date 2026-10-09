@@ -11,7 +11,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { inheritedEntry, launchFromOptions, launchFlight, retryLaunch } from "../run-launch.ts";
+import { ApiError } from "../../api/errors.ts";
+import {
+  inheritedEntry,
+  launchFromOptions,
+  launchRefusal,
+  launchFlight,
+  retryLaunch,
+} from "../run-launch.ts";
 
 describe("launchFlight", () => {
   /** A launch whose request the test settles by hand. */
@@ -89,6 +96,29 @@ describe("launchFlight", () => {
     const next = pendingLaunch();
     flight.run(next.start, {});
     expect(next.started()).toBe(1);
+  });
+});
+
+describe("launchRefusal", () => {
+  const ITEM = { field: "integrations.@acme/crm", code: "not_connected", message: "connect" };
+  const refusal = (extensions?: Record<string, unknown>) =>
+    new ApiError("missing_integration_connection", "refused", 409, [ITEM], extensions);
+
+  it("reads the version the 409 judged, so recovery reads that version's readiness", () => {
+    expect(launchRefusal(refusal({ version_ref: "1.2.0" }))).toEqual({
+      errors: [ITEM],
+      version: "1.2.0",
+    });
+    expect(launchRefusal(refusal({ version_ref: "draft" }))?.version).toBe("draft");
+  });
+
+  it("names no version the server did not", () => {
+    expect(launchRefusal(refusal())).toEqual({ errors: [ITEM], version: undefined });
+  });
+
+  it("is null for any other failure", () => {
+    expect(launchRefusal(new ApiError("not_found", "gone", 404))).toBeNull();
+    expect(launchRefusal(new Error("network"))).toBeNull();
   });
 });
 
@@ -190,6 +220,12 @@ describe("retryLaunch", () => {
     ).toEqual(connectionOverrides);
   });
 
+  it("carries a recovery pick of 'no connection' as `[]`", () => {
+    expect(retryLaunch({}, { "@acme/crm": [] }, []).connectionOverrides).toEqual({
+      "@acme/crm": [],
+    });
+  });
+
   it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
     // The launcher keeps each retried launch, so the next retry starts from it.
     const first = retryLaunch(
@@ -211,6 +247,12 @@ describe("launchFromOptions", () => {
 
   it("sends only the version when nothing was set, like plain Lancer", () => {
     expect(launchFromOptions(untouched)).toEqual({ version: "draft" });
+  });
+
+  it("sends an override of 'no connection' as an empty set", () => {
+    expect(
+      launchFromOptions({ ...untouched, overrides: { connection_overrides: { "@acme/crm": [] } } }),
+    ).toEqual({ version: "draft", connectionOverrides: { "@acme/crm": [] } });
   });
 
   it("maps every set option onto its launch field", () => {

@@ -23,27 +23,11 @@ import type {
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 
-// Spec-pinned narrowings for the two integration read endpoints. They take the
+// Spec-pinned narrowing for the integration detail endpoint. It takes the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
-// non-`manifest` field breaks compilation) and narrow only the freeform AFPS
+// non-`manifest` field breaks compilation) and narrows only the freeform AFPS
 // `manifest` JSON to IntegrationManifestView — the single trust boundary the
-// legacy `api<IntegrationSummary>()` cast drew. This replaces a blind
-// `as IntegrationSummary[]` that erased the spec type and could hide drift on
-// every non-manifest field.
-type RawIntegrationSummary = NonNullable<
-  paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
->[number];
-type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
-  // `/api/integrations` supports `?fields=` projection, so the spec marks these
-  // optional; this hook never projects, so re-require what consumers read.
-  // `active` is in that list because both management readers sort the space's
-  // placements on it — the agent editor's connection block tells an active
-  // dependency from a placed-but-off one, and the detail page drives the
-  // switch. Were the field to leave the response, an optional type would make
-  // both read `undefined` in silence instead of failing to compile.
-  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source" | "active">> & {
-    manifest: IntegrationManifestView;
-  };
+// legacy `api<IntegrationSummary>()` cast drew.
 type RawIntegrationDetail =
   paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"];
 type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
@@ -65,10 +49,10 @@ import { invalidateSchedules } from "./use-schedules";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
-// NB: the integration list/detail READ shapes are NOT re-exported from
-// shared-types — consumers must use the spec-derived IntegrationSummaryWire /
-// IntegrationDetailWire (above), the exact shape the hooks return, so a spec
-// rename/removal of any non-`manifest` field breaks compilation.
+// NB: the integration detail READ shape is NOT re-exported from shared-types —
+// consumers must use the spec-derived IntegrationDetailWire (above), the exact
+// shape the hook returns, so a spec rename/removal of any non-`manifest` field
+// breaks compilation.
 export type {
   AgentIntegrationEntry,
   IntegrationAuthStatus,
@@ -124,18 +108,41 @@ function useIntegrationsReadScope() {
   return { header: scope.header, enabled: scope.enabled && can("integrations:read") };
 }
 
-export function useIntegrations() {
-  const scope = useIntegrationsReadScope();
-  return $api.useQuery(
-    "get",
-    "/api/integrations",
-    { params: { header: scope.header } },
-    {
-      enabled: scope.enabled,
-      // Spec-pinned (see IntegrationSummaryWire): only `manifest` is narrowed.
-      select: (envelope) => envelope.data as IntegrationSummaryWire[],
-    },
+type IntegrationNameOf = (integrationId: string) => string;
+
+/**
+ * Display names of `integrationIds`, each from its own detail query — the one
+ * {@link useIntegrationDetail} caches — fetched when uncached and readable. The
+ * id stands in for any name that cannot be read.
+ */
+export async function loadIntegrationNames(
+  qc: QueryClient,
+  scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
+  integrationIds: readonly string[],
+): Promise<IntegrationNameOf> {
+  const names = new Map<string, string>();
+  await Promise.all(
+    integrationIds.map(async (packageId) => {
+      const options = $api.queryOptions("get", "/api/integrations/{packageId}", {
+        params: { path: { packageId }, header: scope.header },
+      });
+      const detail = scope.enabled
+        ? await qc.ensureQueryData(options).catch(() => undefined)
+        : qc.getQueryData<RawIntegrationDetail>(options.queryKey);
+      const name = (detail as IntegrationDetailWire | undefined)?.manifest.display_name;
+      if (name) names.set(packageId, name);
+    }),
   );
+  return (integrationId) => names.get(integrationId) ?? integrationId;
+}
+
+/** {@link loadIntegrationNames} in the current org/space scope. */
+export function useIntegrationNames(): (
+  integrationIds: readonly string[],
+) => Promise<IntegrationNameOf> {
+  const qc = useQueryClient();
+  const scope = useIntegrationsReadScope();
+  return (integrationIds) => loadIntegrationNames(qc, scope, integrationIds);
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {
@@ -171,7 +178,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
 
 /**
  * Query options for an (integration, agent) resolution verdict, shared by the
- * picker ({@link useIntegrationAgentResolution}) and the launch-badge readiness
+ * picker ({@link useIntegrationReadinessEntry}) and the launch-badge readiness
  * hook: one key, so the badge and the Connexions tab cannot disagree.
  */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
@@ -212,25 +219,6 @@ export function useAgentConnectionReadiness(agentPackageId: string | undefined) 
   return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
 }
 
-/**
- * Server-side picker verdict for a (agent, integration) on the agent page:
- * which connection the next run resolves to + the annotated candidate list
- * + pin/blocked state. Selected out of the single bulk readiness query so the
- * picker, badge, and modal all share one cache entry per agent.
- */
-export function useIntegrationAgentResolution(
-  integrationId: string | undefined,
-  agentPackageId: string | undefined,
-  version?: string,
-) {
-  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
-  return useQuery({
-    ...options,
-    enabled: options.enabled && !!integrationId,
-    select: (data) => resolutionOf(data, integrationId),
-  });
-}
-
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
 
@@ -242,7 +230,7 @@ function resolutionOf(data: AgentConnectionReadiness, integrationId: string | un
 }
 
 /**
- * Reader of the {@link useIntegrationAgentResolution} verdict as the cache holds
+ * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
  * it NOW, for a handler running after something already awaited the readiness
  * refetch (the connect popup does): the fresh value, without a second request.
  * Throws when that refetch failed — the cache then still holds the old verdict.
@@ -262,11 +250,10 @@ export function useReadIntegrationResolution(
 }
 
 /**
- * Whether a given integration would block the next run (run semantics — inert
- * optional integrations are NOT blocking, inert required ones ARE). Selected
- * from the same bulk readiness query the picker uses.
+ * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
+ * out of the single bulk readiness query so the picker, badge, and modal share one cache entry.
  */
-export function useIntegrationRunBlocking(
+export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
   version?: string,
@@ -276,8 +263,7 @@ export function useIntegrationRunBlocking(
     ...options,
     enabled: options.enabled && !!integrationId,
     select: (data) =>
-      data.integrations.find((i) => i.integration_package_id === integrationId)?.run_blocking ??
-      false,
+      data.integrations.find((i) => i.integration_package_id === integrationId) ?? null,
   });
 }
 

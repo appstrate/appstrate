@@ -95,13 +95,20 @@ export function createFakeOrchestrator(): RunOrchestrator {
   };
 }
 
-/** Inline agent manifest declaring one integration dependency per id. */
-export function inlineAgentManifest(integrations: string[] = []): Record<string, unknown> {
+/**
+ * Inline agent manifest declaring one integration dependency per id. An id in
+ * `opts.required` is marked `required`: no connection is then a 409, not a run
+ * started without it.
+ */
+export function inlineAgentManifest(
+  integrations: string[] = [],
+  opts: { required?: readonly string[] } = {},
+): Record<string, unknown> {
   const deps: Record<string, string> = {};
-  const config: Record<string, { tools: string[] }> = {};
+  const config: Record<string, { tools: string[]; required?: true }> = {};
   for (const id of integrations) {
     deps[id] = "^1.0.0";
-    config[id] = { tools: ["search"] };
+    config[id] = { tools: ["search"], ...(opts.required?.includes(id) ? { required: true } : {}) };
   }
   return {
     name: "@inline/ignored", // overridden by the platform

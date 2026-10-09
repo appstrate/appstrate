@@ -7,6 +7,8 @@
  * readiness check answers — `errors[]` included — and no `runs` row exists.
  *
  * `createRun` is called directly, which is the race: no readiness pass ran.
+ * The integration is `required`; a non-required one with nothing to bind
+ * snapshots as `[]` and the run is created.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -32,13 +34,11 @@ describe("createRun — connection cascade", () => {
   let ctx: TestContext;
   let agent: LoadedPackage;
 
-  beforeEach(async () => {
-    await truncateAll();
-    // This file never boots the app; the preflight gates read the limits registry.
-    initRunLimits();
-    ctx = await createTestContext({ orgSlug: "remoteorg" });
-    await seedConnectionTestIntegration(ctx, INTEG);
-    const manifest = { ...inlineAgentManifest([INTEG]), name: AGENT };
+  async function seedAgentRow(opts: { required: boolean }): Promise<void> {
+    const manifest = {
+      ...inlineAgentManifest([INTEG], opts.required ? { required: [INTEG] } : {}),
+      name: AGENT,
+    };
     await seedPackage({
       id: AGENT,
       orgId: ctx.orgId,
@@ -52,6 +52,14 @@ describe("createRun — connection cascade", () => {
       prompt: "x",
       source: "local",
     };
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    // This file never boots the app; the preflight gates read the limits registry.
+    initRunLimits();
+    ctx = await createTestContext({ orgSlug: "remoteorg" });
+    await seedConnectionTestIntegration(ctx, INTEG);
   });
 
   function create(runId: string) {
@@ -66,6 +74,7 @@ describe("createRun — connection cascade", () => {
   }
 
   it("throws the structured 409 missing_integration_connection and inserts no row", async () => {
+    await seedAgentRow({ required: true });
     const err = await create("run_missing_connection").catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(ApiError);
@@ -77,11 +86,21 @@ describe("createRun — connection cascade", () => {
   });
 
   it("creates the pending row once the connection exists (control)", async () => {
+    await seedAgentRow({ required: true });
     await seedIntegrationConnection(ctx, INTEG);
 
     const result = await create("run_with_connection");
 
     expect(result.runId).toBe("run_with_connection");
     expect(await db.select().from(runs).where(eq(runs.packageId, AGENT))).toHaveLength(1);
+  });
+
+  it("creates the row with an empty set for a non-required integration nobody connected", async () => {
+    await seedAgentRow({ required: false });
+
+    await create("run_unbound");
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, "run_unbound"));
+    expect(row!.resolvedConnections).toEqual({ [INTEG]: [] });
   });
 });

@@ -232,6 +232,9 @@ try {
     // content, so a 2xx would be a lie — the same shape as POST /activate
     // above. Scoped to GET /api/integrations/connect/start only.
     "operation-2xx-response@#/paths/~1api~1integrations~1connect~1start/get/responses",
+    // RunAndWaitResult is the MCP `run_and_wait` tool's `outputSchema` (`modules/mcp/catalog.ts`),
+    // which no HTTP path references. Scoped to that component only.
+    "no-unused-components@#/components/schemas/RunAndWaitResult",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";
@@ -2252,6 +2255,9 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   "POST /activate/approve": "text/html",
   "POST /activate/deny": "text/html",
   "GET /api/integrations/connect/start": "text/html",
+  // The MCP SDK transport's own refusals: a JSON-RPC 2.0 error envelope, not an `ApiError`.
+  "POST /api/mcp/o/{org} 406": "application/json",
+  "POST /api/mcp/o/{org} 415": "application/json",
   // The health report: the 503 is the 200's document with `status: unhealthy`.
   "GET /health 503": "application/json",
   // Upstream responses the proxies relay verbatim; their own refusals stay ProblemDetail.

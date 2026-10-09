@@ -6,7 +6,7 @@
  * (label, sharedWithOrg). Consumed by the routes in `routes/integrations.ts`.
  *
  * Pin model (flat): one row per (space, agent, integration, scope), carrying
- * the bound set in `connection_ids`.
+ * the bound set in `connection_ids` — `[]` pins to no connection, no row is no pin.
  * Scope = admin (`user_id IS NULL`) OR member (`user_id = caller.id`).
  *
  * All governance operations — the route layer enforces
@@ -64,7 +64,10 @@ import {
   requirementOf,
   servingCandidates,
 } from "./integration-connection-resolver.ts";
-import type { ConnectionResolutionResult } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionResult,
+  ConnectionResolutionWarning,
+} from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 
@@ -230,6 +233,7 @@ interface SetPinInput {
  *   2. references the integration this pin governs,
  *   3. is `sharedWithOrg=true` (pinning a personal connection would
  *      leak the admin's identity to other members at run time).
+ * An empty set pins to none; the resolver refuses it where the running version requires the integration.
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -371,6 +375,7 @@ export async function validatePinTargets(
   connectionIds: string[],
   opts: { allowOwnedBy?: string } = {},
 ): Promise<void> {
+  if (connectionIds.length === 0) return;
   const c = integrationConnections;
   const reachable = await db
     .select({ id: c.id })
@@ -624,7 +629,7 @@ async function attachOwnerNames(rows: ConnectionRow[]): Promise<AccessibleIntegr
  * plus the candidate list and pin/blocked state the dropdown renders.
  *
  * The decision is {@link resolveConnectionsForRun}'s, never re-implemented:
- * `source` and `error_code` are its verdict verbatim, and per-candidate
+ * `source`, `error_code` and `warning` are its verdict verbatim, and per-candidate
  * `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
@@ -649,6 +654,8 @@ async function resolveAgentIntegrationPick(args: {
   agentManifest: Record<string, unknown>;
   /** Agent-level `includeInert: true` cascade, resolved once for every integration. */
   resolution: ConnectionResolutionResult;
+  /** The run cascade's warnings: why a run would start without an integration. */
+  runWarnings: ConnectionResolutionWarning[];
   /** Agent-level member pins, fetched once. */
   memberPins: MemberPinSummary[];
   /** Shared integration-manifest memo, so N integrations cost N fetches, not N². */
@@ -685,12 +692,11 @@ async function resolveAgentIntegrationPick(args: {
     getOrgDefault(scope, integrationId),
   ]);
 
+  // `null` = no pin; `[]` = a pin to no connection.
   const adminPinnedConnectionIds =
-    adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? [];
+    adminPins.find((p) => p.agent_package_id === agentPackageId)?.connection_ids ?? null;
   const memberPinnedConnectionIds =
-    memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? [];
-  const orgDefaultConnectionIds = orgDefault?.connection_ids ?? [];
-  const orgDefaultEnforced = orgDefault?.enforce ?? false;
+    memberPins.find((p) => p.integration_package_id === integrationId)?.connection_ids ?? null;
 
   // The resolver's own candidate universe (orphaned-auth guard, the dep's pinned
   // `auth_key`, auths serving the selection), so the picker offers exactly the
@@ -713,15 +719,18 @@ async function resolveAgentIntegrationPick(args: {
     is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
   }));
 
+  // `[]` (bound to none, or switched off here) has no member to name a source.
   const resolved = resolution.resolved[integrationId] ?? null;
-  // Neither a set nor an error: the integration manifest could not be fetched
-  // (buildRequirement returned null, `includeInert` notwithstanding), so there
-  // is no verdict to report — both fields stay null rather than guessed.
+  // Neither a set nor an error only when the integration manifest could not be
+  // fetched (buildRequirement returned null, `includeInert` notwithstanding):
+  // no verdict to report, so both fields stay null rather than guessed.
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
+  const warning = args.runWarnings.find((w) => w.integrationId === integrationId) ?? null;
 
   return {
-    source: resolved ? resolved[0]!.source : (err?.source ?? null),
+    source: resolved?.[0]?.source ?? err?.source ?? null,
     error_code: err?.code ?? null,
+    warning: warning ? translateResolutionError(warning) : null,
     // A set that failed its health check is still the set the layer binds.
     resolved_connection_ids: resolved
       ? resolved.map((r) => r.connectionId)
@@ -729,8 +738,8 @@ async function resolveAgentIntegrationPick(args: {
     resolved_missing_scopes: err?.missingScopes ?? [],
     admin_pinned_connection_ids: adminPinnedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
-    org_default_connection_ids: orgDefaultConnectionIds,
-    org_default_enforced: orgDefaultEnforced,
+    org_default_connection_ids: orgDefault?.connection_ids ?? null,
+    org_default_enforced: orgDefault?.enforce ?? false,
     can_add_connection: canConnect && (canConfigureIntegrations || !blocked),
     candidates,
   };
@@ -751,6 +760,8 @@ interface AgentConnectionReadiness {
   /** Every declared integration with its management verdict (includeInert) + run-blocking flag. */
   integrations: Array<{
     integration_package_id: string;
+    /** The agent's `integrations_configuration.<id>.required`. */
+    required: boolean;
     run_blocking: boolean;
     resolution: IntegrationAgentResolution;
   }>;
@@ -873,6 +884,7 @@ export async function resolveAgentConnectionReadiness(args: {
         canConfigureIntegrations,
         agentManifest,
         resolution: pickResolution,
+        runWarnings: runResolution.warnings,
         memberPins,
         manifestCache,
       }),
@@ -896,6 +908,7 @@ export async function resolveAgentConnectionReadiness(args: {
     errors,
     integrations: declared.map((e, i) => ({
       integration_package_id: e.id,
+      required: e.required === true,
       run_blocking: blockingIds.has(e.id),
       resolution: resolutions[i]!,
     })),

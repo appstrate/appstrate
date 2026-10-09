@@ -253,6 +253,49 @@ describe("Agents API", () => {
       expect(body.id).toBe("@myorg/custom-installed");
     });
 
+    it("projects each integration's configuration, auth_key and required included", async () => {
+      const ID = "@myorg/configured-detail";
+      await seedActiveAgent({
+        id: ID,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+        draftManifest: {
+          name: ID,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          dependencies: {
+            integrations: { "@myorg/int-a": "^1.0.0", "@myorg/int-b": "^2.0.0" },
+          },
+          integrations_configuration: {
+            "@myorg/int-a": {
+              tools: ["search"],
+              scopes: ["read"],
+              auth_key: "oauth",
+              required: true,
+            },
+            "@myorg/int-b": { required: false },
+          },
+        },
+      });
+
+      const res = await app.request(`/api/packages/agents/${ID}`, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.dependencies.integrations).toEqual([
+        {
+          id: "@myorg/int-a",
+          version: "^1.0.0",
+          tools: ["search"],
+          scopes: ["read"],
+          auth_key: "oauth",
+          required: true,
+        },
+        { id: "@myorg/int-b", version: "^2.0.0", required: false },
+      ]);
+    });
+
     // #770 — the detail projection must follow `?version=`, not always the
     // draft. Publish 1.0.0 from one manifest, then dirty the draft with a
     // different input / skills / integrations set. `?version=1.0.0` must return

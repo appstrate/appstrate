@@ -13,7 +13,7 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
-import { ConnectionSetChecklist } from "./connection-set-checklist";
+import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
  * Org-wide default connection for this integration — the cross-agent
@@ -102,9 +102,12 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               {t("integration.admin.orgDefault.connections")}
             </Label>
             <ConnectionSetChecklist
-              connections={shared}
+              options={shared.map((c) => ({
+                id: c.id,
+                label: <ConnectionOptionLabel connection={c} />,
+              }))}
               value={connectionIds}
-              onChange={setConnectionIds}
+              onChange={(next) => setConnectionIds(next ?? [])}
               idPrefix="org-default-connection"
               unavailableIds={unavailableIds}
             />

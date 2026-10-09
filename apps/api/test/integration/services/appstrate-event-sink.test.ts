@@ -487,9 +487,9 @@ describe("persistRunEvent", () => {
       expect((await runnerRow())!.costUsd).toBeCloseTo(2.7, 9);
     });
 
-    it("a tiered rate card prices the run at the BASE rate, even past the tier threshold", async () => {
-      // The counters are summed over the run's requests; a tier keys on ONE
-      // request's input, which a sum no longer carries. Pi's `openai/gpt-5.4`
+    it("a tiered rate card prices each tier band at its tier, the rest at the base rate", async () => {
+      // A tier keys on ONE request's input, so the summed usage carries the
+      // tokens of the requests that reached it (`tiers`). Pi's `openai/gpt-5.4`
       // rate card, copied by hand.
       const tiered: ModelCost = {
         input: 2.5,
@@ -502,22 +502,28 @@ describe("persistRunEvent", () => {
       };
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        // The container prices each request with the tiers stripped too
-        // (`runtime-pi/env.ts`), so its figure is the same 4.0: no divergence line.
+        // The container prices each request at its tier too, so its figure is
+        // the same 8.25: no divergence line.
         await writeRunnerLedgerRow(
           { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
           runId,
           {
-            cost: 4,
-            usage: { input_tokens: 1_000_000, output_tokens: 100_000 },
+            cost: 8.25,
+            usage: {
+              input_tokens: 1_100_000,
+              output_tokens: 150_000,
+              tiers: [
+                { input_tokens_above: 272_000, input_tokens: 1_000_000, output_tokens: 100_000 },
+              ],
+            },
             modelSource: "org",
             inferenceRoute: null,
             modelCost: tiered,
           },
           { required: true },
         );
-        // 1M×2.5 + 0.1M×15 = 2.5 + 1.5 — never the tier's 5 + 2.25.
-        expect((await runnerRow())!.costUsd).toBeCloseTo(4, 9);
+        // Band: 1M×5 + 0.1M×22.5 = 7.25. Rest: 0.1M×2.5 + 0.05M×15 = 1.
+        expect((await runnerRow())!.costUsd).toBeCloseTo(8.25, 9);
         expect(
           warnSpy.mock.calls.filter(([message]) =>
             message.includes("runner-reported cost diverges"),
@@ -585,6 +591,55 @@ describe("persistRunEvent", () => {
       expect(row!.costUsd).toBeCloseTo(0.02, 9);
       expect(row!.credentialSource).toBeNull();
       expect(row!.pricingStatus).toBeNull();
+    });
+
+    it("a malformed usage snapshot is dropped, never thrown on nor priced as NaN", async () => {
+      // A throw would roll the ingestion back and the runner would replay the
+      // same snapshot forever (#1501).
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await persistLedger(
+          event("appstrate.metric", {
+            usage: { input_tokens: "lots", output_tokens: 300 },
+            cost: 0.5,
+          }),
+          { modelSource: "org", modelCost: rates },
+        );
+        expect(await runnerRow()).toBeUndefined();
+        const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+        expect(runRow?.tokenUsage).toBeNull();
+        expect(
+          warnSpy.mock.calls.filter(([message]) => message.includes("malformed usage dropped")),
+        ).toHaveLength(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("malformed tier bands are dropped and logged, the counters kept", async () => {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await persistLedger(
+          event("appstrate.metric", {
+            usage: {
+              input_tokens: 900,
+              output_tokens: 300,
+              tiers: [{ input_tokens_above: 0, input_tokens: 900 }],
+            },
+          }),
+          { modelSource: "org", modelCost: rates },
+        );
+        const row = await runnerRow();
+        expect(row!.inputTokens).toBe(900);
+        expect(row!.outputTokens).toBe(300);
+        const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+        expect(runRow?.tokenUsage).toEqual({ input_tokens: 900, output_tokens: 300 });
+        expect(
+          warnSpy.mock.calls.filter(([message]) => message.includes("tier bands dropped")),
+        ).toHaveLength(1);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     it("a cost-only metric on a platform run mints no row", async () => {

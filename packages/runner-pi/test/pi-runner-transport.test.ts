@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PiRunner, type PiModelConfig } from "../src/index.ts";
+import type { PiModelConfig } from "../src/index.ts";
 // `Transport` is an in-package type: the barrel stopped re-exporting it when
 // #1173 removed its only out-of-package consumer, so this test reads it from
 // the SDK import surface directly (the `no-restricted-imports` guard allows
 // `pi-sdk.ts`, not the vendor package).
 import type { Transport } from "../src/pi-sdk.ts";
-import { createCaptureSink, makeBundlePackage, makeContext, makeTestBundle } from "./helpers.ts";
+import { runAgainstStub } from "./helpers.ts";
 
 const TEST_JWT = [
   encodeJwtSegment({ alg: "none", typ: "JWT" }),
@@ -19,10 +16,6 @@ const TEST_JWT = [
   }),
   "placeholder",
 ].join(".");
-
-const TEST_BUNDLE = makeTestBundle(
-  makeBundlePackage("@test/codex-transport", "0.0.0", "agent", {}),
-);
 
 function encodeJwtSegment(value: unknown): string {
   return btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
@@ -55,71 +48,34 @@ async function runAgainstLocalCodex(transport?: Transport): Promise<{
   accepts: Array<string | null>;
   status: string | undefined;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "runner-pi-transport-"));
-  const agentDir = join(root, "agent");
-  const methods: string[] = [];
-  const paths: string[] = [];
-  const upgrades: Array<string | null> = [];
-  const accepts: Array<string | null> = [];
-  let server: ReturnType<typeof Bun.serve> | undefined;
-
-  try {
-    await mkdir(agentDir, { recursive: true });
-    server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(request) {
-        methods.push(request.method);
-        paths.push(new URL(request.url).pathname);
-        upgrades.push(request.headers.get("upgrade"));
-        accepts.push(request.headers.get("accept"));
-        if (request.method === "POST") return completedResponse();
-        return new Response("Method Not Allowed", { status: 405 });
-      },
-    });
-
-    const model: PiModelConfig = {
+  const { requests, sink } = await runAgainstStub({
+    model: (origin): PiModelConfig => ({
       id: "gpt-5-codex",
       name: "gpt-5-codex",
       api: "openai-codex-responses",
       provider: "openai-codex",
-      baseUrl: server.url.origin,
+      baseUrl: origin,
       reasoning: false,
       input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 128_000,
       maxTokens: 4_096,
-    };
-    const sink = createCaptureSink();
-    const runner = new PiRunner({
-      model,
-      apiKey: TEST_JWT,
-      systemPrompt: "Answer briefly.",
-      startMessage: "Say done.",
-      cwd: root,
-      agentDir,
-      authStoragePath: join(root, "auth.json"),
-      ...(transport ? { transport } : {}),
-    });
+    }),
+    respond: (request) =>
+      request.method === "POST"
+        ? completedResponse()
+        : new Response("Method Not Allowed", { status: 405 }),
+    runner: { apiKey: TEST_JWT, ...(transport ? { transport } : {}) },
+  });
 
-    await runner.run({
-      bundle: TEST_BUNDLE,
-      context: makeContext(),
-      eventSink: sink,
-    });
-
-    expect(sink.finalizeCalls).toBe(1);
-    return {
-      methods,
-      paths,
-      upgrades,
-      accepts,
-      status: sink.finalized?.status,
-    };
-  } finally {
-    if (server) await server.stop(true);
-    await rm(root, { recursive: true, force: true });
-  }
+  expect(sink.finalizeCalls).toBe(1);
+  return {
+    methods: requests.map((request) => request.method),
+    paths: requests.map((request) => request.path),
+    upgrades: requests.map((request) => request.headers.get("upgrade")),
+    accepts: requests.map((request) => request.headers.get("accept")),
+    status: sink.finalized?.status,
+  };
 }
 
 describe("PiRunner provider transport", () => {

@@ -2,8 +2,8 @@
 
 /**
  * Set composition shared by every connection-composing surface: the write cap,
- * the pin-vs-override asymmetry of "no explicit pick", and which ids may reach
- * a `connection_ids` body.
+ * the pin-vs-override asymmetry of "no explicit pick", "no pick" (`null`) versus
+ * "no connection" (`[]`), and which ids may reach a `connection_ids` body.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -55,23 +55,37 @@ describe("canApplyConnectionSet", () => {
 
   it("refuses the empty set and the stored pick, in any order", () => {
     // Control: a touched set that differs from the stored pick is writable.
-    expect(canApplyConnectionSet([a, b], [], true)).toBe(true);
-    expect(canApplyConnectionSet([], [], true)).toBe(false);
+    expect(canApplyConnectionSet([a, b], null, true)).toBe(true);
+    expect(canApplyConnectionSet([], null, true)).toBe(false);
     expect(canApplyConnectionSet([b, a], ["conn_a", "conn_b"], true)).toBe(false);
+  });
+
+  it("never writes [] — 'no connection' is its own entry — but replaces a stored one", () => {
+    expect(canApplyConnectionSet([], [], true)).toBe(false);
+    expect(canApplyConnectionSet([a], [], true)).toBe(true);
+    // Untouched over a stored "none", nothing is ticked: nothing to write.
+    const untouched = checkedConnectionIds({
+      draft: null,
+      explicitIds: [],
+      resolvedIds: candidateIds,
+      candidateIds,
+    });
+    expect(untouched).toEqual([]);
+    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
   });
 
   it("refuses an untouched menu ticked from the cascade's resolved default", () => {
     // Writing it would pin {a, b} and detach the member from later org-default
     // changes. Control: the same ticks after an actual edit are writable.
-    const input = { explicitIds: [], resolvedIds: candidateIds, candidateIds };
+    const input = { explicitIds: null, resolvedIds: candidateIds, candidateIds };
     const untouched = checkedConnectionIds({ ...input, draft: null });
     expect(untouched).toEqual(candidateIds);
-    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
-    expect(canApplyConnectionSet(conns(untouched), [], true)).toBe(true);
+    expect(canApplyConnectionSet(conns(untouched), null, false)).toBe(false);
+    expect(canApplyConnectionSet(conns(untouched), null, true)).toBe(true);
   });
 
   it("refuses an untouched override that inherits — it would freeze the cascade", () => {
-    const explicitIds: string[] = [];
+    const explicitIds = null;
     expect(
       displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds: ["conn_a"] }),
     ).toEqual([]);
@@ -118,11 +132,17 @@ describe("displayedConnectionIds", () => {
     // Same inputs, only the mode differs: pin mode has no "inherit" state, so
     // an unpinned agent page still displays the connection a run would use;
     // an override with no pick IS inherit and must display nothing.
-    const explicitIds: string[] = [];
+    const explicitIds = null;
     expect(displayedConnectionIds({ overrideMode: false, explicitIds, resolvedIds })).toEqual(
       resolvedIds,
     );
     expect(displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds })).toEqual([]);
+  });
+
+  it("shows a stored 'no connection' as nothing bound in both modes, never the cascade", () => {
+    for (const overrideMode of [false, true]) {
+      expect(displayedConnectionIds({ overrideMode, explicitIds: [], resolvedIds })).toEqual([]);
+    }
   });
 });
 
@@ -146,7 +166,9 @@ describe("checkedConnectionIds", () => {
     const base = { explicitIds: ["conn_a"], resolvedIds: ["conn_b"], candidateIds };
     expect(checkedConnectionIds({ ...base, draft: ["conn_b"] })).toEqual(["conn_b"]);
     expect(checkedConnectionIds({ ...base, draft: null })).toEqual(["conn_a"]);
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual(["conn_b"]);
+    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual(["conn_b"]);
+    // A stored "no connection" ticks nothing, rather than the cascade.
+    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual([]);
   });
 });
 
@@ -157,16 +179,22 @@ describe("placeCreatedConnection", () => {
     // member pin and silently detach the member from later org-default changes.
     const shown = displayedConnectionIds({
       overrideMode: false,
-      explicitIds: [],
+      explicitIds: null,
       resolvedIds: ["conn_org_default"],
     });
     expect(shown).toEqual(["conn_org_default"]);
     expect(
       placeCreatedConnection({
-        explicitIds: [],
+        explicitIds: null,
         checkedIds: shown,
         createdId: "conn_new",
       }),
+    ).toEqual({ persist: ["conn_new"] });
+  });
+
+  it("replaces a stored 'no connection' with the created connection", () => {
+    expect(
+      placeCreatedConnection({ explicitIds: [], checkedIds: [], createdId: "conn_new" }),
     ).toEqual({ persist: ["conn_new"] });
   });
 
@@ -195,6 +223,52 @@ describe("placeCreatedConnection", () => {
     expect(
       placeCreatedConnection({ explicitIds: ["c0"], checkedIds: full, createdId: "conn_new" }),
     ).toEqual({ draft: full });
+  });
+
+  describe("replacing an under-scoped member", () => {
+    it("binds only the created connection when the member was the cascade's fallback", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: null,
+          checkedIds: ["conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_new"] });
+    });
+
+    it("writes the swap of a sole pin straight away, so the fix outlives the closed menu", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_old"],
+          checkedIds: ["conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_new"] });
+    });
+
+    it("swaps it in place within a pinned set, which keeps its size", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_a", "conn_old", "conn_b"],
+          checkedIds: ["conn_a", "conn_old", "conn_b"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ persist: ["conn_a", "conn_new", "conn_b"] });
+    });
+
+    it("swaps an unsaved tick in the draft when the pin does not hold it", () => {
+      expect(
+        placeCreatedConnection({
+          explicitIds: ["conn_mine"],
+          checkedIds: ["conn_mine", "conn_old"],
+          createdId: "conn_new",
+          replacing: "conn_old",
+        }),
+      ).toEqual({ draft: ["conn_mine", "conn_new"] });
+    });
   });
 });
 
@@ -242,17 +316,24 @@ describe("withConnectionPick", () => {
     expect(picks["@acme/a"]).toEqual(["1"]);
   });
 
-  it("drops the key for an empty set — the wire refuses one", () => {
-    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", [])).toEqual({});
+  it("drops the key for no pick, and keeps an explicit 'no connection'", () => {
+    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", null)).toEqual({});
+    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", [])).toEqual({ "@acme/a": [] });
   });
 });
 
 describe("withConnectionOverride", () => {
   it("drops `connection_overrides` once its last pick is cleared", () => {
     const overrides = { model_id_override: "m", connection_overrides: { "@acme/a": ["1"] } };
-    expect(withConnectionOverride(overrides, "@acme/a", [])).toEqual({ model_id_override: "m" });
+    expect(withConnectionOverride(overrides, "@acme/a", null)).toEqual({ model_id_override: "m" });
     expect(withConnectionOverride({}, "@acme/a", ["1"])).toEqual({
       connection_overrides: { "@acme/a": ["1"] },
+    });
+  });
+
+  it("sends an override of 'no connection' as `[]` — the run starts without the integration", () => {
+    expect(withConnectionOverride({}, "@acme/a", [])).toEqual({
+      connection_overrides: { "@acme/a": [] },
     });
   });
 });

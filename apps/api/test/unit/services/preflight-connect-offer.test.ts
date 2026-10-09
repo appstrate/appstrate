@@ -80,9 +80,7 @@ function notConnected(integrationId = INTEGRATION): ResolutionFieldError {
   };
 }
 
-/** The two codes whose remedy re-consents an EXISTING connection in place. */
-const IN_PLACE_CODES = ["insufficient_scopes", "needs_reconnection"] as const;
-
+/** An item about an EXISTING connection: `needs_reconnection` or `insufficient_scopes`. */
 function inPlace(code: string, ownedByActor: boolean): ResolutionFieldError {
   return {
     field: `integrations.${INTEGRATION}`,
@@ -104,49 +102,50 @@ function claimsOf(item: ResolutionFieldError) {
 }
 
 describe("connectOfferTarget", () => {
-  it("accepts not_connected and carries the relayed scopes with no connection id", () => {
-    expect(connectOfferTarget(notConnected())).toEqual({
-      integrationId: INTEGRATION,
-      authKey: "primary",
-      scopes: ["mail.read", "mail.send"],
-    });
-  });
-
-  it("accepts an in-place code on the actor's OWN connection — upgrade or reconnect", () => {
-    // Both codes end at the same consent screen on the same row; ownership is
-    // what makes signing claims against it safe.
-    for (const code of IN_PLACE_CODES) {
-      expect(connectOfferTarget(inPlace(code, true)), code).toEqual({
+  it("accepts a fresh-connect code — not_connected, auth_key_mismatch — with no connection id", () => {
+    for (const code of ["not_connected", "auth_key_mismatch"]) {
+      expect(connectOfferTarget({ ...notConnected(), code }), code).toEqual({
         integrationId: INTEGRATION,
         authKey: "primary",
         scopes: ["mail.read", "mail.send"],
-        connectionId: "conn-9",
       });
     }
   });
 
-  it("refuses an in-place code on a foreign-owned connection", () => {
-    for (const code of IN_PLACE_CODES) {
-      expect(connectOfferTarget(inPlace(code, false)), code).toBeNull();
-      // Absent (a resolver that could not decide) is not "mine".
-      const unknownOwner = { ...inPlace(code, true) };
-      delete unknownOwner.owned_by_actor;
-      expect(connectOfferTarget(unknownOwner), code).toBeNull();
-    }
+  it("accepts needs_reconnection on the actor's OWN connection, re-consented in place", () => {
+    // Ownership is what makes signing claims against the row safe. No scopes even
+    // when relayed: a reconnect re-consents what the row holds (#1871).
+    expect(connectOfferTarget(inPlace("needs_reconnection", true))).toEqual({
+      integrationId: INTEGRATION,
+      authKey: "primary",
+      scopes: [],
+      connectionId: "conn-9",
+    });
   });
 
-  it("refuses an owned in-place code with no connection id to re-consent", () => {
-    for (const code of IN_PLACE_CODES) {
-      const noTarget = { ...inPlace(code, true) };
-      delete noTarget.connection_id;
-      expect(connectOfferTarget(noTarget), code).toBeNull();
-    }
+  // #1871: an in-place upgrade widens every agent bound to the connection, and a
+  // fresh connection leaves the binding on the under-scoped one — the remedy is a choice.
+  it("refuses insufficient_scopes, even on the actor's own connection", () => {
+    expect(connectOfferTarget(inPlace("insufficient_scopes", true))).toBeNull();
+  });
+
+  it("refuses needs_reconnection on a foreign-owned connection", () => {
+    expect(connectOfferTarget(inPlace("needs_reconnection", false))).toBeNull();
+    // Absent (a resolver that could not decide) is not "mine".
+    const unknownOwner = { ...inPlace("needs_reconnection", true) };
+    delete unknownOwner.owned_by_actor;
+    expect(connectOfferTarget(unknownOwner)).toBeNull();
+  });
+
+  it("refuses an owned needs_reconnection with no connection id to re-consent", () => {
+    const noTarget = { ...inPlace("needs_reconnection", true) };
+    delete noTarget.connection_id;
+    expect(connectOfferTarget(noTarget)).toBeNull();
   });
 
   it("refuses every other resolution code, connect-flow relay or not", () => {
     for (const code of [
       "must_choose_connection",
-      "auth_key_mismatch",
       "auth_serves_no_selected_tool",
       // The agent's own auth_key serves no selected tool: no consent clears it.
       "auth_key_serves_no_selected_tool",
@@ -154,6 +153,8 @@ describe("connectOfferTarget", () => {
       "override_connection_unavailable",
       "integration_not_active",
       "integration_invalid_manifest",
+      // A layer chose `[]`: nothing to connect.
+      "integration_unbound",
     ]) {
       expect(connectOfferTarget({ ...notConnected(), code })).toBeNull();
     }
@@ -272,23 +273,25 @@ describe("attachConnectOffers", () => {
     expect(item!.connect_url).toStartWith("http");
   });
 
-  it("carries the connection id on an owned in-place re-consent", async () => {
-    for (const code of IN_PLACE_CODES) {
-      const [item] = await attachConnectOffers({
-        errors: [inPlace(code, true)],
-        scope: SCOPE,
-        actor: ACTOR,
-        policy: CONNECT,
-        manifestCache: cache,
-      });
-      expect(item!.connect_url, code).toStartWith("http");
-      expect(claimsOf(item!)).toMatchObject({ connection_id: "conn-9" });
-    }
+  it("carries the connection id on an owned needs_reconnection re-consent", async () => {
+    const [item] = await attachConnectOffers({
+      errors: [inPlace("needs_reconnection", true)],
+      scope: SCOPE,
+      actor: ACTOR,
+      policy: CONNECT,
+      manifestCache: cache,
+    });
+    expect(item!.connect_url).toStartWith("http");
+    const claims = claimsOf(item!);
+    expect(claims).toMatchObject({ connection_id: "conn-9" });
+    expect(claims!.scopes).toBeUndefined();
   });
 
-  it("leaves a foreign-owned in-place item untouched", async () => {
-    for (const code of IN_PLACE_CODES) {
-      const errors = [inPlace(code, false)];
+  it("leaves insufficient_scopes on an owned connection, and a foreign-owned item, untouched", async () => {
+    for (const errors of [
+      [inPlace("insufficient_scopes", true)],
+      [inPlace("needs_reconnection", false)],
+    ]) {
       expect(
         await attachConnectOffers({
           errors,
@@ -297,7 +300,7 @@ describe("attachConnectOffers", () => {
           policy: CONNECT,
           manifestCache: cache,
         }),
-        code,
+        errors[0]!.code,
       ).toEqual(errors);
     }
   });
@@ -318,9 +321,11 @@ describe("attachConnectOffers", () => {
   it("leaves the item alone when the auth is not oauth2, or the manifest is gone", async () => {
     const others = manifestCache({
       "@offers/keyed": authManifest("api_key"),
+      "@offers/basic": authManifest("basic"),
+      "@offers/custom": authManifest("custom"),
       "@offers/gone": "missing",
     });
-    for (const id of ["@offers/keyed", "@offers/gone"]) {
+    for (const id of ["@offers/keyed", "@offers/basic", "@offers/custom", "@offers/gone"]) {
       const errors = [notConnected(id)];
       expect(
         await attachConnectOffers({
@@ -330,6 +335,7 @@ describe("attachConnectOffers", () => {
           policy: CONNECT,
           manifestCache: others,
         }),
+        id,
       ).toEqual(errors);
     }
   });

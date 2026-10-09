@@ -3,10 +3,10 @@
 import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Badge } from "@appstrate/ui/components/badge";
 import {
-  useIntegrations,
   useIntegrationDetail,
-  useIntegrationAgentResolution,
+  useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationAuthStatus,
@@ -14,11 +14,19 @@ import {
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { useSetPackageActive } from "../../hooks/use-library";
+import { ApiError } from "../../api/errors";
+import { errorMessage } from "../../lib/mutation-error";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { describeResolution } from "../integration-connect/integration-run-readiness";
+import {
+  describeResolution,
+  requiredNoneLabel,
+  unboundLabel,
+  UNBOUND_LABEL_KEYS,
+} from "../integration-connect/integration-run-readiness";
+import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 
 interface AgentIntegrationsBlockProps {
   entries: AgentIntegrationEntry[];
@@ -47,15 +55,6 @@ interface AgentIntegrationsBlockProps {
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
-  // The list carries `active` (placed here and switched on). An agent can
-  // declare an integration that was never activated here (or got disabled);
-  // those cards render a read-only "not active" state instead of a connect
-  // affordance, mirroring the run-time `integration_not_active` gate.
-  const { data: integrations } = useIntegrations();
-  const activeIds = integrations
-    ? new Set(integrations.filter((i) => i.active).map((i) => i.id))
-    : null;
-
   if (entries.length === 0) return null;
 
   return (
@@ -66,9 +65,7 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           packageId={entry.id}
           agentTools={entry.tools}
           agentScopes={entry.scopes}
-          // Optimistic while the list loads (null) so the card doesn't flash
-          // a "not active" state; once loaded, gate strictly on membership.
-          appActive={activeIds ? activeIds.has(entry.id) : true}
+          required={entry.required === true}
           {...(agentPackageId ? { agentPackageId } : {})}
         />
       ))}
@@ -80,8 +77,8 @@ interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
-  /** Whether the integration is active — placed in this space and switched on. */
-  appActive: boolean;
+  /** The agent's `required` flag: an inactive required integration refuses the run. */
+  required: boolean;
   agentPackageId?: string;
 }
 
@@ -89,65 +86,54 @@ function IntegrationConnectionCard({
   packageId,
   agentTools,
   agentScopes,
-  appActive,
+  required,
   agentPackageId,
 }: IntegrationConnectionCardProps) {
-  const { t } = useTranslation(["agents", "common"]);
-  const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
-  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+  const { data: detail, isLoading, error } = useIntegrationDetail(packageId);
   const displayName = detail?.manifest.display_name ?? packageId;
 
-  if (detailPending || !detail) {
+  if (!detail) {
+    // A spinner only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
+    if (isLoading) {
+      return (
+        <CardShell
+          icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
+          title={displayName}
+          subtitle={packageId}
+        />
+      );
+    }
+    // 404: the integration is not placed in this space, which is what activating it fixes.
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        <InactiveIntegrationCard
+          packageId={packageId}
+          displayName={displayName}
+          required={required}
+        />
+      );
+    }
+    // Any other failure is named; a disabled read has none to name.
     return (
       <CardShell
-        icon={<Loader2 className="text-muted-foreground size-4 animate-spin" />}
         title={displayName}
         subtitle={packageId}
+        extraSubtitle={error ? errorMessage(error) : null}
+        extraSubtitleTone="warning"
       />
     );
   }
 
-  // Not active in this space → no connection is possible. Show a
-  // disabled, explanatory control rather than a picker the run-time gate would
-  // reject with `integration_not_active`.
-  if (!appActive) {
+  // Not active in this space (the integration's own detail says so) → no
+  // connection is possible. Show a disabled, explanatory control rather than a
+  // picker the run-time gate would reject with `integration_not_active`.
+  if (!detail.active) {
     return (
-      <CardShell title={displayName} subtitle={packageId}>
-        <span className="flex items-center gap-3">
-          <span
-            className="text-destructive max-w-[18rem] text-right text-xs"
-            data-testid={`integration-inactive-${packageId}`}
-          >
-            {t("detail.integrationInactive")}
-          </span>
-          {/* The sentence asks for an activation; without this the reader had to
-              go find the integration page to perform it. Somebody the route
-              would refuse gets the button DEAD with the reason on it, rather
-              than a click that ends in a toast. */}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={setActive.isPending || !currentSpaceId || !canActivate}
-            title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-            onClick={() => {
-              if (!currentSpaceId || !canActivate) return;
-              setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-            }}
-            data-testid={`integration-activate-${packageId}`}
-          >
-            {setActive.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              t("editor.activateIntegration")
-            )}
-          </Button>
-        </span>
-      </CardShell>
+      <InactiveIntegrationCard
+        packageId={packageId}
+        displayName={displayName}
+        required={required}
+      />
     );
   }
 
@@ -194,7 +180,8 @@ function ManagedIntegrationCard({
   agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
+  const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
+  const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
   // R5 — reuse hint: the resolved connections are shared across every agent in
@@ -209,9 +196,24 @@ function ManagedIntegrationCard({
     resolution && describeResolution(resolution).resolved
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
+  const requiredNone = resolution ? requiredNoneLabel(resolution) : null;
+
+  // The verdict can know it is off when the detail did not; an `inactive` verdict is a warning,
+  // so the run starts without it.
+  if (resolution?.warning?.code === "integration_not_active") {
+    return (
+      <InactiveIntegrationCard packageId={packageId} displayName={displayName} required={false} />
+    );
+  }
 
   return (
-    <CardShell title={displayName} subtitle={packageId} extraSubtitle={reuseInfo}>
+    <CardShell
+      title={displayName}
+      subtitle={packageId}
+      extraSubtitle={requiredNone ?? unboundLabel(resolution?.warning ?? null) ?? reuseInfo}
+      extraSubtitleTone={requiredNone !== null ? "warning" : "muted"}
+      badge={entry?.required ? <RequiredBadge packageId={packageId} /> : null}
+    >
       <IntegrationConnectionPicker
         integrationId={packageId}
         agentPackageId={agentPackageId}
@@ -221,6 +223,76 @@ function ManagedIntegrationCard({
         agentScopes={agentScopes}
       />
     </CardShell>
+  );
+}
+
+/** Switched off in this space: the reason and the activation button. Only a required one blocks. */
+function InactiveIntegrationCard({
+  packageId,
+  displayName,
+  required,
+}: {
+  packageId: string;
+  displayName: string;
+  required: boolean;
+}) {
+  const { t } = useTranslation(["agents", "common"]);
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
+  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+
+  return (
+    <CardShell
+      title={displayName}
+      subtitle={packageId}
+      badge={required ? <RequiredBadge packageId={packageId} /> : null}
+    >
+      <span className="flex items-center gap-3">
+        <span
+          className={`${required ? "text-destructive" : "text-muted-foreground"} max-w-[18rem] text-xs sm:text-right`}
+          data-testid={`integration-inactive-${packageId}`}
+        >
+          {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
+        </span>
+        {/* The sentence asks for an activation; without this the reader had to
+            go find the integration page to perform it. Somebody the route
+            would refuse gets the button DEAD with the reason on it, rather
+            than a click that ends in a toast. */}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={setActive.isPending || !currentSpaceId || !canActivate}
+          title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+          onClick={() => {
+            if (!currentSpaceId || !canActivate) return;
+            setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+          }}
+          data-testid={`integration-activate-${packageId}`}
+        >
+          {setActive.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            t("editor.activateIntegration")
+          )}
+        </Button>
+      </span>
+    </CardShell>
+  );
+}
+
+function RequiredBadge({ packageId }: { packageId: string }) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <Badge
+      variant="secondary"
+      className="text-[0.6rem]"
+      data-testid={`integration-required-${packageId}`}
+    >
+      {t("detail.integrationRequiredBadge")}
+    </Badge>
   );
 }
 
@@ -238,33 +310,50 @@ function buildReuseInfo(
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
 
+type SubtitleTone = "muted" | "warning";
+
+const SUBTITLE_TONE_CLASS: Record<SubtitleTone, string> = {
+  muted: "text-muted-foreground/80",
+  warning: AMBER_TEXT,
+};
+
 function CardShell({
   icon,
   title,
+  badge,
   subtitle,
   extraSubtitle,
+  extraSubtitleTone = "muted",
   children,
 }: {
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
   icon?: React.ReactNode;
   title: string;
+  badge?: React.ReactNode;
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
   extraSubtitle?: string | null;
+  /** `warning` when the second line explains a refused run, in the picker's warning tone. */
+  extraSubtitleTone?: SubtitleTone;
   children?: React.ReactNode;
 }) {
   return (
-    <div className="border-border bg-card flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <div className="flex min-w-0 items-center gap-2">
         <Puzzle className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{title}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{title}</span>
+            {badge}
+          </div>
           <div className="text-muted-foreground flex items-center gap-1.5 truncate text-xs">
             {icon}
             <span className="truncate font-mono">{subtitle}</span>
           </div>
           {extraSubtitle && (
-            <div className="text-muted-foreground/80 mt-0.5 truncate text-[0.65rem]">
+            <div
+              className={`${SUBTITLE_TONE_CLASS[extraSubtitleTone]} mt-0.5 text-[0.65rem] break-words`}
+            >
               {extraSubtitle}
             </div>
           )}

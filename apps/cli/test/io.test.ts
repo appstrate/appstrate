@@ -14,10 +14,9 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { CommandIO } from "../src/lib/io.ts";
+import { CommandExit, DEFAULT_IO, type CommandIO } from "../src/lib/io.ts";
 import { exitWithError } from "../src/lib/ui.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
 import { runIsolated } from "./helpers/isolated-process.ts";
 
 const IO_MODULE = JSON.stringify(`${import.meta.dir}/../src/lib/io.ts`);
@@ -27,32 +26,60 @@ describe("DEFAULT_IO", () => {
   it("writes to the real process streams and exits with the given code", async () => {
     const { stdout, stderr, exitCode } = await runIsolated(`
       const { DEFAULT_IO } = await import(${IO_MODULE});
+      const { settleCommand } = await import(${UI_MODULE});
       DEFAULT_IO.stdout.write("to-stdout");
       DEFAULT_IO.stderr.write("to-stderr");
       DEFAULT_IO.stdout.write(new TextEncoder().encode("-bytes"));
-      DEFAULT_IO.exit(3);
+      try {
+        DEFAULT_IO.exit(3);
+      } catch (err) {
+        settleCommand(err);
+      }
     `);
     expect(stdout).toBe("to-stdout-bytes");
     expect(stderr).toBe("to-stderr");
     expect(exitCode).toBe(3);
   });
 
+  it("exits by throwing CommandExit, so nothing after it runs", () => {
+    let after = false;
+    try {
+      DEFAULT_IO.exit(4);
+      after = true;
+    } catch (err) {
+      expect(err).toBeInstanceOf(CommandExit);
+      expect((err as CommandExit).code).toBe(4);
+    }
+    expect(after).toBe(false);
+  });
+
   it("renders errors byte-for-byte as `clack.cancel` did before the seam", async () => {
     // The guard on the "flake fix, not a UX change" constraint: the default
     // path must keep clack's styling *and* its stdout destination.
-    const [before, after] = await Promise.all([
+    const [before, after, settled] = await Promise.all([
       runIsolated(`
         const clack = await import("@clack/prompts");
         clack.cancel("boom");
       `),
       runIsolated(`
-        const { exitWithError } = await import(${UI_MODULE});
-        exitWithError(new Error("boom"));
+        const { exitWithError, settleCommand } = await import(${UI_MODULE});
+        try {
+          exitWithError(new Error("boom"));
+        } catch (err) {
+          settleCommand(err);
+        }
+      `),
+      // An error no command rendered reaches `cli.ts`'s handler as-is.
+      runIsolated(`
+        const { settleCommand } = await import(${UI_MODULE});
+        settleCommand(new Error("boom"));
       `),
     ]);
-    expect(after.stdout).toBe(before.stdout);
-    expect(after.stderr).toBe("");
-    expect(after.exitCode).toBe(1);
+    for (const run of [after, settled]) {
+      expect(run.stdout).toBe(before.stdout);
+      expect(run.stderr).toBe("");
+      expect(run.exitCode).toBe(1);
+    }
   });
 });
 
@@ -78,14 +105,14 @@ describe("createMemoryIO", () => {
     expect(stderr()).toBe("");
   });
 
-  it("throws ExitError carrying the code instead of terminating the runner", () => {
+  it("throws CommandExit carrying the code instead of terminating the runner", () => {
     const { io } = createMemoryIO();
-    expect(() => io.exit(7)).toThrow(ExitError);
+    expect(() => io.exit(7)).toThrow(CommandExit);
     try {
       io.exit(7);
     } catch (err) {
-      expect(err).toBeInstanceOf(ExitError);
-      expect((err as ExitError).code).toBe(7);
+      expect(err).toBeInstanceOf(CommandExit);
+      expect((err as CommandExit).code).toBe(7);
     }
   });
 });
@@ -93,7 +120,7 @@ describe("createMemoryIO", () => {
 describe("exitWithError", () => {
   it("routes the formatted message to the injected io and exits with the code", () => {
     const { io, stdout, stderr } = createMemoryIO();
-    expect(() => exitWithError(new Error("nope"), io, 4)).toThrow(ExitError);
+    expect(() => exitWithError(new Error("nope"), io, 4)).toThrow(CommandExit);
     // `createMemoryIO` renders through `cancel`, and production `cancel` is
     // `clack.cancel` — a stdout writer. The sink keeps that channel.
     expect(stdout()).toBe("nope\n");
@@ -106,8 +133,8 @@ describe("exitWithError", () => {
       exitWithError(new Error("nope"), io);
       throw new Error("expected exitWithError to throw");
     } catch (err) {
-      expect(err).toBeInstanceOf(ExitError);
-      expect((err as ExitError).code).toBe(1);
+      expect(err).toBeInstanceOf(CommandExit);
+      expect((err as CommandExit).code).toBe(1);
     }
   });
 
@@ -121,21 +148,28 @@ describe("exitWithError", () => {
         },
       },
       exit: (code) => {
-        throw new ExitError(code);
+        throw new CommandExit(code);
       },
       cancel: (message) => {
         rendered.push(message);
       },
     };
-    expect(() => exitWithError(new Error("styled"), io)).toThrow(ExitError);
+    expect(() => exitWithError(new Error("styled"), io)).toThrow(CommandExit);
     // `cancel` owns its own framing, so the message arrives without a newline.
     expect(rendered).toEqual(["styled"]);
+  });
+
+  it("passes a CommandExit through unrendered", () => {
+    const { io, stdout } = createMemoryIO();
+    const exit = new CommandExit(3);
+    expect(() => exitWithError(exit, io)).toThrow(exit);
+    expect(stdout()).toBe("");
   });
 
   it("applies `formatError` before handing the message to the io", () => {
     const { io, stdout } = createMemoryIO();
     const err = Object.assign(new Error("bad input"), { hint: "pass --force" });
-    expect(() => exitWithError(err, io)).toThrow(ExitError);
+    expect(() => exitWithError(err, io)).toThrow(CommandExit);
     expect(stdout()).toBe("bad input — pass --force\n");
   });
 });

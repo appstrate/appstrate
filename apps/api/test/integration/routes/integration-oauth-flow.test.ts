@@ -44,11 +44,11 @@ import {
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
+import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
-  buildIntegrationOAuthRefreshContext,
-  forceRefreshIntegrationConnection,
-} from "../../../src/services/integration-token-refresh.ts";
-import { readIntegrationAuth } from "../../../src/services/integration-connections.ts";
+  readCredentialRevision,
+  readIntegrationAuth,
+} from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -138,18 +138,21 @@ async function setup(
 }
 
 /** Kick the OAuth flow off and return the authorize URL the SPA would open. */
-async function beginConnect(ctx: TestContext): Promise<string> {
+async function beginConnect(
+  ctx: TestContext,
+  body: { connection_id?: string; scopes?: string[] } = {},
+): Promise<string> {
   const res = await app.request(
     `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
     {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify(body),
     },
   );
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { auth_url: string };
-  return body.auth_url;
+  const json = (await res.json()) as { auth_url: string };
+  return json.auth_url;
 }
 
 /**
@@ -175,10 +178,10 @@ async function consentAndCallback(authUrl: string): Promise<string> {
 }
 
 /**
- * Refresh the connection the way the live resolvers do: resolve the pinned
- * minting client from the DB, build the refresh context off the manifest, then
- * POST the `refresh_token` grant. Exercises the same client/auth-method
- * resolution the initial exchange used.
+ * Refresh the connection the way the live resolvers do after an upstream 401: resolve the pinned
+ * minting client from the DB, build the refresh context off the manifest, then POST the
+ * `refresh_token` grant. Exercises the same client/auth-method resolution the initial exchange
+ * used.
  */
 async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
   const row = (
@@ -188,20 +191,18 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .where(eq(integrationConnections.id, connectionId))
       .limit(1)
   )[0]!;
-  const { auth } = await readIntegrationAuth(
-    { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-    INTEGRATION,
-    AUTH_KEY,
-  );
-  const context = await buildIntegrationOAuthRefreshContext(
-    INTEGRATION,
-    AUTH_KEY,
-    auth as AfpsManifestAuth,
-    ctx.defaultSpaceId,
-    row,
-  );
-  expect(context).not.toBeNull();
-  await forceRefreshIntegrationConnection(row, INTEGRATION, AUTH_KEY, context!);
+  const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+  const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+  const outcome = await refreshConnectionCredential({
+    connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
+    integrationId: INTEGRATION,
+    manifest,
+    authDef: auth as AfpsManifestAuth,
+    scope,
+    actor: { type: "user", id: ctx.user.id },
+    trigger: { kind: "rejected", revision: null },
+  });
+  expect(outcome.status).toBe("refreshed");
 }
 
 /** The single connection row, or null. */
@@ -346,6 +347,58 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
     ]);
     expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
+  });
+
+  // #1871: scopes added in place reach every agent bound to the connection.
+  it("audits the scopes a reconnect adds, before and after", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+
+    // The control: a reconnect that changes no scope records none.
+    await consentAndCallback(await beginConnect(ctx, { connection_id: connection!.id }));
+    await consentAndCallback(
+      await beginConnect(ctx, { connection_id: connection!.id, scopes: ["files.write"] }),
+    );
+
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION));
+    expect(rows.map((r) => r.id)).toEqual([connection!.id]);
+    expect([...rows[0]!.scopesGranted].sort()).toEqual(["files.read", "files.write"]);
+
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.spaceId])).toEqual([
+      ["integration.connection.created", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
+    ]);
+    const [, unchanged, widened] = trail;
+    // The control carries no scopes; the widening carries them before and after.
+    expect(unchanged!.before).toBeNull();
+    expect(unchanged!.after).not.toHaveProperty("scopesGranted");
+    expect(widened!.before).toEqual({ scopesGranted: ["files.read"] });
+    expect(widened!.after).toMatchObject({
+      packageId: INTEGRATION,
+      authKey: AUTH_KEY,
+      scopesGranted: ["files.read", "files.write"],
+    });
   });
 
   it("keeps the client secret out of the stored state and resolves an org client at callback", async () => {

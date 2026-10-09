@@ -33,7 +33,23 @@ describe("finalize body contract", () => {
 
   it("drops a malformed usage, so a success without valid usage is refused", () => {
     expect(issuePaths({ status: "success", usage: { input_tokens: -1 } })).toEqual(["usage"]);
+    expect(issuePaths({ status: "success", usage: { ...USAGE, output_tokens: 4.5 } })).toEqual([
+      "usage",
+    ]);
     expect(issuePaths({ status: "failed", usage: { input_tokens: -1 } })).toEqual([]);
+  });
+
+  it("drops malformed tier bands alone, so a success keeps its usage", () => {
+    const parsed = RunResultSchema.parse({
+      status: "success",
+      usage: { ...USAGE, tiers: [{ input_tokens_above: 0 }] },
+    });
+    expect(parsed.usage).toEqual({ usage: USAGE, tiersDropped: true });
+  });
+
+  it("drops unknown keys inside usage instead of refusing the body", () => {
+    const parsed = RunResultSchema.parse({ status: "success", usage: { ...USAGE, vendor: 1 } });
+    expect(parsed.usage).toEqual({ usage: USAGE, tiersDropped: false });
   });
 
   it("accepts a non-success status without usage", () => {

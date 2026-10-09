@@ -96,4 +96,17 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     expect(resolved!.id).toBe(connBId);
     expect(resolved!.authKey).toBe("oauth");
   });
+
+  // Outside a run the proxy asks the resolver for a usable connection, never for an optional
+  // binding: no connection is `null` (not an empty set), one own connection is that one.
+  it("without a named id: the actor's single connection, and null when the integration has none", async () => {
+    const INTEG_C = "@bindorg/notion";
+    await seedPackage({ id: INTEG_C, orgId: ctx.orgId, type: "integration", source: "local" });
+    const context = { spaceId: ctx.defaultSpaceId, actor };
+
+    const none = await selectAccessibleConnection(INTEG_C, manifestOf(INTEG_C), null, context);
+    expect(none).toBeNull();
+    const only = await selectAccessibleConnection(INTEG_A, manifestOf(INTEG_A), null, context);
+    expect(only!.id).toBe(connAId);
+  });
 });

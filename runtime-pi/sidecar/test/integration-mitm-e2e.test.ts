@@ -120,7 +120,12 @@ describe("MITM listener — subprocess end-to-end", () => {
         // resolver to a public TEST-NET-3 address so the tunnel opens.
         resolveHostFn: async () => ["203.0.113.10"],
         fetch: stubFetch,
-        egressPolicy: { allowsAuthority: () => true, allowsUrl: () => true },
+        egressPolicy: {
+          allowsAuthority: () => true,
+          allowsUrl: () => true,
+          skipsSsrfFloor: () => false,
+          isSelf: () => false,
+        },
         isPeerAllowed: async () => true,
       });
       await listener.ready;

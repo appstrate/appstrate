@@ -23,11 +23,11 @@ import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import {
   waitForRunTerminal,
   parseWaitQuery,
-  MAX_WAIT_SECONDS,
   MAX_CONCURRENT_WAITERS_PER_IDENTITY,
   activeWaiterCount,
   activePollLoopCount,
 } from "../../../src/services/run-wait.ts";
+import { MAX_WAIT_SECONDS } from "../../../src/lib/run-wait-limits.ts";
 
 describe("waitForRunTerminal", () => {
   let ctx: TestContext;

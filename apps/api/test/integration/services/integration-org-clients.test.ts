@@ -13,7 +13,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
@@ -582,5 +582,21 @@ describe("org-level integration OAuth clients", () => {
     });
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
+  });
+
+  // Read as `manifestHasRequiredAuth` reads it: absent means false.
+  it("auths[].required is the auth's dev.appstrate/auth flag, false when absent", async () => {
+    const manifest = probeManifest(INTEGRATION) as unknown as {
+      auths: Record<string, Record<string, unknown>>;
+    };
+    manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
+    await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
+
+    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, {
+      type: "user",
+      id: ctx.user.id,
+    });
+    expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
+    expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });
 });

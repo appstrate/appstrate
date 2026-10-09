@@ -70,7 +70,7 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { usePermissions, useHomeSpaceName, useCurrentSpaceGrant } from "../hooks/use-permissions";
 import { maySetPackageActive } from "../lib/package-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
-import { useIntegrationDetail, useIntegrations } from "../hooks/use-integrations";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
@@ -115,8 +115,10 @@ export function IntegrationDetailPage() {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
-  const { data: pkg } = usePackageDetail("integration", packageId || undefined);
-  const { data: integrations } = useIntegrations();
+  const { data: pkg, isLoading: pkgLoading } = usePackageDetail(
+    "integration",
+    packageId || undefined,
+  );
   // ONE pair of doors for every package family: an integration is activated in
   // a space by `POST /api/spaces/{id}/packages` and switched off by its
   // `DELETE`, exactly like an agent or a skill. The row and its settings
@@ -152,7 +154,8 @@ export function IntegrationDetailPage() {
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  if (isLoading) return <LoadingState />;
+  // `source` (system or local) comes from the package detail only: wait for it.
+  if (isLoading || pkgLoading) return <LoadingState />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
@@ -168,14 +171,14 @@ export function IntegrationDetailPage() {
   }
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
-  const summary = integrations?.find((i) => i.id === packageId);
-  const active = Boolean(summary?.active);
+  const active = detail.active;
   const m = detail.manifest;
-  const source = pkg?.source ?? summary?.source ?? "local";
+  // Only the package detail knows the source. Unknown (read refused or failed) is not owned.
+  const source = pkg?.source;
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
-  const isOwned = !isBuiltIn;
+  const isOwned = source === "local";
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
     setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
@@ -189,7 +192,7 @@ export function IntegrationDetailPage() {
           id: packageId,
           displayName: m.display_name ?? packageId,
           description: m.description ?? "",
-          source,
+          source: source ?? "",
           type: "integration",
           version,
           icon: typeof m.icon === "string" ? m.icon : undefined,
@@ -289,7 +292,7 @@ export function IntegrationDetailPage() {
             <TabsTrigger value="content" data-testid="tab-content">
               {t("detail.tabFiles", { ns: "agents" })}
             </TabsTrigger>
-            {!isBuiltIn && (
+            {isOwned && (
               <TabsTrigger value="versions" data-testid="tab-versions">
                 {t("integration.tabs.versions")}
               </TabsTrigger>
@@ -313,7 +316,8 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
-                personalConnectionsBlocked={summary?.block_user_connections ?? false}
+                manifest={detail.manifest}
+                personalConnectionsBlocked={detail.block_user_connections}
               />
             ))
           )}
@@ -368,7 +372,7 @@ export function IntegrationDetailPage() {
                 )}
                 <AccessRulesSection
                   packageId={packageId}
-                  blockUserConnections={summary?.block_user_connections ?? false}
+                  blockUserConnections={detail.block_user_connections}
                 />
               </>
             )}
@@ -458,7 +462,7 @@ export function IntegrationDetailPage() {
         </TabsContent>
 
         {/* ─── Versions (read-only history; non-system only) ─── */}
-        {!isBuiltIn && (
+        {isOwned && (
           <TabsContent value="versions" className="mt-4">
             <VersionHistory
               packageId={packageId}

@@ -8,6 +8,21 @@ export const problemContent = {
 } as const;
 
 /**
+ * The `content` of a 409 that may be `missing_integration_connection`: `anyOf`, since that problem
+ * IS a `ProblemDetail` (a `oneOf` would match both), and only it types its `errors[].code`.
+ */
+export const connectionConflictContent = {
+  "application/problem+json": {
+    schema: {
+      anyOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { $ref: "#/components/schemas/MissingIntegrationConnectionProblem" },
+      ],
+    },
+  },
+} as const;
+
+/**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
 export const responses = {
@@ -222,13 +237,14 @@ export const responses = {
       "`idempotency_in_progress` — a request with the same `Idempotency-Key` is already being " +
       "processed; wait and retry. Or `org_deleting` — the organization's deletion is reserved, " +
       "so no new work is admitted and a retry will not succeed. Or `missing_integration_connection` — " +
-      "a declared integration has no usable connection for the caller: `errors[]` carries one item " +
-      "per integration (`field: integrations.<id>`), and a `must_choose_connection` item lists " +
-      "`candidate_connections` to pick from via `connection_overrides`.",
+      "a declared integration blocks the launch: `errors[]` carries one item per integration " +
+      "(`field: integrations.<id>`), and a `must_choose_connection` item lists " +
+      "`candidate_connections` to pick from via `connection_overrides`. What does not block is " +
+      "a `warnings[]` item of the success response (see LaunchWarnings).",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
-        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        ...connectionConflictContent["application/problem+json"],
         examples: {
           idempotencyInProgress: {
             summary: "Same Idempotency-Key still in flight",
@@ -254,7 +270,7 @@ export const responses = {
             },
           },
           missingIntegrationConnection: {
-            summary: "A declared integration has no usable connection",
+            summary: "A required integration has no usable connection",
             value: {
               type: "https://docs.appstrate.dev/errors/missing-integration-connection",
               title: "Missing Integration Connection",

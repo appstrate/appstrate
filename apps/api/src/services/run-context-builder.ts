@@ -28,7 +28,7 @@ import {
   resolveAgentResources,
 } from "./run-limits.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import { getAgentResourceHints } from "@appstrate/core/validation";
 import { getExecutionMode } from "../infra/mode.ts";
@@ -166,7 +166,7 @@ export async function buildRunContext(params: {
   // agent-page picker models unconnected integrations explicitly) — but it is
   // not silent either: the resolver returns every drop and this function
   // hands it back as `droppedIntegrations`, which the pipeline persists as a
-  // `warn` run log once the run row exists. The resolver reads the version
+  // run log (`warn`, `info` for an unbound one) once the run row exists. The resolver reads the version
   // from `dependencies.integrations[id]` (§4.1) and the tool/scope selection
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
@@ -349,6 +349,7 @@ export async function buildRunContext(params: {
     resources,
     files,
     ...(integrationSpawns.length > 0 ? { integrations: integrationSpawns } : {}),
+    ...(droppedIntegrations.length > 0 ? { droppedIntegrations } : {}),
   };
 
   return {
@@ -385,7 +386,8 @@ export const INTEGRATION_DROPPED_EVENT = "integration_dropped";
 
 /**
  * Persist the degradation marker for each integration the run starts
- * without: one `warn` `run_logs` row per drop, on the same
+ * without: one `run_logs` row per drop (`warn`; `info` when a cascade layer chose
+ * no connection — `integration_unbound` in `unbound`, the run's resolver warnings), on the same
  * pg_notify → SSE path the container's own breadcrumbs use, so the gap is
  * visible on the run page instead of living only in server-side logs.
  *
@@ -403,23 +405,34 @@ export async function recordDroppedIntegrations(
   scope: OrgScope,
   runId: string,
   dropped: readonly DroppedIntegration[],
+  unbound: readonly RunIntegrationUnbound[] = [],
 ): Promise<void> {
   for (const entry of dropped) {
+    const code =
+      entry.reason === "unbound"
+        ? unbound.find((u) => u.integrationId === entry.integrationId)?.code
+        : undefined;
+    const cause =
+      entry.reason === "unbound"
+        ? `has no connection bound to this run${code ? ` (${code})` : ""}`
+        : `is declared by this agent but was not started (${entry.reason})` +
+          (entry.detail ? `: ${entry.detail}` : "");
     await appendDropMarker(
       scope,
       runId,
       INTEGRATION_DROPPED_EVENT,
       `integration '${entry.integrationId}'` +
         (entry.connectionLabel ? ` (connection '${entry.connectionLabel}')` : "") +
-        ` is declared by this agent but was not started (${entry.reason})` +
-        (entry.detail ? `: ${entry.detail}` : "") +
-        " — its tools are unavailable to this run",
+        ` ${cause} — its tools are unavailable to this run`,
       {
         integrationId: entry.integrationId,
         reason: entry.reason,
+        ...(code !== undefined ? { code } : {}),
         ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
         ...(entry.connectionLabel !== undefined ? { connectionLabel: entry.connectionLabel } : {}),
       },
+      // A chosen absence, not a failure to start.
+      code === "integration_unbound" ? "info" : "warn",
     );
   }
 }
@@ -488,9 +501,10 @@ async function appendDropMarker(
   event: string,
   message: string,
   data: Record<string, unknown>,
+  level: "info" | "warn" = "warn",
 ): Promise<void> {
   try {
-    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, "warn");
+    await appendRunLog(scope, runId, "system", event, message, { platform: true, ...data }, level);
   } catch (err) {
     logger.warn("failed to append drop marker run log", {
       runId,

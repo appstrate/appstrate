@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import {
   fetchRunFiles,
   launchRunAndWait,
+  RUN_AND_WAIT_MAX_MS,
   RUN_CONNECT_OFFERS_HEADER,
   runAndWaitSteps,
   runAndWaitStepsWithFiles,
@@ -66,8 +67,8 @@ describe("run_and_wait client", () => {
         input: { topic: "x" },
       }),
     ).resolves.toEqual([
-      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
-      { id: "run_1", packageId: "@acme/writer", status: "success", done: true },
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
+      { id: "run_1", packageId: "@acme/writer", status: "success", done: true, warnings: [] },
     ]);
     expect(calls).toMatchObject([
       {
@@ -75,8 +76,12 @@ describe("run_and_wait client", () => {
         method: "POST",
         body: { input: { topic: "x" } },
       },
-      { url: "https://test.local/api/runs/run_1?wait=55", method: "GET" },
+      { method: "GET" },
     ]);
+    // The whole remaining budget is asked for; the server clamps it to its own ceiling.
+    const wait = Number(new URL(calls[1]!.url).searchParams.get("wait"));
+    expect(wait).toBeGreaterThan(RUN_AND_WAIT_MAX_MS / 1000 - 5);
+    expect(wait).toBeLessThanOrEqual(RUN_AND_WAIT_MAX_MS / 1000);
   });
 
   it("projects the terminal run onto the documented payload (no metrics leak)", async () => {
@@ -104,7 +109,7 @@ describe("run_and_wait client", () => {
     await expect(
       collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }),
     ).resolves.toEqual([
-      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
       {
         id: "run_1",
         packageId: "@acme/writer",
@@ -112,8 +117,88 @@ describe("run_and_wait client", () => {
         done: true,
         result: { summary: "partial" },
         error: "Gmail token expired",
+        warnings: [],
       },
     ]);
+  });
+
+  // #1830: the run resource the poll reads does not repeat the launch warnings,
+  // so the client carries them from the 201 onto every step.
+  it("carries the launch warnings onto the preliminary and terminal steps", async () => {
+    const warning = {
+      field: "integrations.@appstrate/gmail",
+      code: "integration_unbound",
+      message: "not connected",
+      auth_key: "primary",
+    };
+    const responses = [
+      jsonResponse({
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "pending",
+        warnings: [warning],
+      }),
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }),
+    ).resolves.toEqual([
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "pending",
+        done: false,
+        warnings: [warning],
+      },
+      {
+        id: "run_1",
+        packageId: "@acme/writer",
+        status: "success",
+        done: true,
+        warnings: [warning],
+      },
+    ]);
+  });
+
+  it("keeps the launch warnings on a timed-out wait", async () => {
+    const warnings = [{ field: "integrations.@appstrate/gmail", code: "integration_unbound" }];
+    const fetchImpl = fakeFetch(async () =>
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending", warnings }),
+    );
+
+    const steps = await collectSteps(
+      fetchImpl,
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { maxMs: 0 },
+    );
+    expect(steps.at(-1)).toEqual({
+      id: "run_1",
+      packageId: "@acme/writer",
+      status: "pending",
+      done: false,
+      warnings,
+    });
+  });
+
+  it("carries an empty warnings list, like REST's required `warnings`", async () => {
+    const responses = [
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending", warnings: [] }),
+      jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" }),
+    ];
+    const fetchImpl = fakeFetch(async () => {
+      const res = responses.shift();
+      if (!res) throw new Error("unexpected fetch");
+      return res;
+    });
+
+    const steps = await collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" });
+    expect(steps.map((step) => step.warnings)).toEqual([[], []]);
   });
 
   it("validates before dispatching", async () => {
@@ -169,14 +254,9 @@ describe("run_and_wait client", () => {
     await expect(
       collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }, { maxMs: 0 }),
     ).resolves.toEqual([
-      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
-      {
-        id: "run_1",
-        packageId: "@acme/writer",
-        status: "pending",
-        done: false,
-        error: "run_and_wait timed out before the run reached a terminal status.",
-      },
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
+      // `done` alone says the wait ended: no `error`, which only ever reports the run's failure.
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
     ]);
   });
 
@@ -203,14 +283,9 @@ describe("run_and_wait client", () => {
         { maxMs: 5, backoffMs: 0 },
       ),
     ).resolves.toEqual([
-      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false },
-      {
-        id: "run_1",
-        packageId: "@acme/writer",
-        status: "pending",
-        done: false,
-        error: "run_and_wait timed out before the run reached a terminal status.",
-      },
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
+      // `done` alone says the wait ended: no `error`, which only ever reports the run's failure.
+      { id: "run_1", packageId: "@acme/writer", status: "pending", done: false, warnings: [] },
     ]);
     expect(calls).toEqual([
       "https://test.local/api/agents/@acme/writer/run",
@@ -258,12 +333,14 @@ describe("run_and_wait client", () => {
       packageId: "@acme/writer",
       status: "pending",
       done: false,
+      warnings: [],
     });
     expect(steps[1]).toEqual({
       id: "run_1",
       packageId: "@acme/writer",
       status: "success",
       done: true,
+      warnings: [],
       files: [
         {
           id: "file_1",
@@ -296,6 +373,31 @@ describe("run_and_wait client", () => {
       steps.push(step.payload);
     }
     expect(steps[1]).not.toHaveProperty("files");
+  });
+
+  it("reads no files and keeps no outcome for a run still going", async () => {
+    const urls: string[] = [];
+    const fetchImpl = fakeFetch(async (input) => {
+      urls.push(String(input));
+      if (String(input).includes("/api/files")) throw new Error("no file read before done");
+      return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "running" });
+    });
+
+    const steps: Record<string, unknown>[] = [];
+    for await (const step of runAndWaitStepsWithFiles(
+      { kind: "agent", scope: "@acme", name: "writer" },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl, maxMs: 0 },
+    )) {
+      steps.push(step.payload);
+    }
+    expect(steps.at(-1)).toEqual({
+      id: "run_1",
+      packageId: "@acme/writer",
+      status: "running",
+      done: false,
+      warnings: [],
+    });
+    expect(urls.some((url) => url.includes("/api/files"))).toBe(false);
   });
 
   it("fetchRunFiles keeps only files this run produced", async () => {

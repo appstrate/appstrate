@@ -22,10 +22,11 @@
 
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
+import { parseTokenUsage, type TokenUsage } from "@appstrate/afps-shared/token-usage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
-import { aggregatedCostUsd } from "./token-cost.ts";
+import { cumulativeCostUsd } from "./token-cost.ts";
 import { loadModel, modelNeedsReconnection } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
@@ -127,7 +128,7 @@ export async function resolveChatModel(
  * (oauth2 claude-code/codex), so the row is always stamped
  * `credentialSource="org"`. Cost is derived here from the token counts + the
  * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
- * Priced at the base rate, like the runner row (RUN_COST.md).
+ * Its tier bands (`record.tiers`) price each model call at its tier.
  *
  * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
  * turn runs on the IN-PROCESS Pi engine and never traverses `/api/llm-proxy/*`,
@@ -154,14 +155,25 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
     record.cacheWriteTokens === undefined || record.cacheWriteTokens === null
       ? null
       : Math.max(0, record.cacheWriteTokens);
+  // Malformed bands price at base rather than fail a turn that already streamed.
+  const { usage: banded, tiersDropped } = parseTokenUsage({ tiers: record.tiers });
+  if (tiersDropped) {
+    logger.warn("usage: malformed tier bands dropped", {
+      orgId: record.orgId,
+      presetId: record.presetId,
+      seam: "chat",
+    });
+  }
+  const tiers = banded?.tiers;
   // The four buckets as the shared helpers consume them — built once and reused
   // for both the cost and its provenance so the two can never describe
   // different numbers.
-  const usage = {
+  const usage: TokenUsage = {
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     cache_read_input_tokens: cacheReadTokens ?? 0,
     cache_creation_input_tokens: cacheWriteTokens ?? 0,
+    ...(tiers?.length ? { tiers } : {}),
   };
   // NOT a "subscription models are free" carve-out: a subscription preset
   // (codex → openai, claude-code → anthropic) resolves its rates through
@@ -192,7 +204,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         outputTokens,
         cacheReadTokens,
         cacheWriteTokens,
-        costUsd: aggregatedCostUsd(usage, record.cost),
+        costUsd: cumulativeCostUsd(usage, record.cost),
         pricingStatus,
         durationMs: record.durationMs,
         // Stable across durable retries; the partial unique index makes an

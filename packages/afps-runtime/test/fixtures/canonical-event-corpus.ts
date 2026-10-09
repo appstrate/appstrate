@@ -285,6 +285,31 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
     valid: true,
   },
   {
+    label: "appstrate.metric — usage with tier bands",
+    event: {
+      ...base,
+      type: "appstrate.metric",
+      usage: {
+        input_tokens: 300_000,
+        output_tokens: 10,
+        tiers: [{ input_tokens_above: 200_000, input_tokens: 250_000, output_tokens: 4 }],
+      },
+    },
+    valid: true,
+  },
+  {
+    label: "appstrate.metric — tier bands repeating a threshold",
+    event: {
+      ...base,
+      type: "appstrate.metric",
+      usage: {
+        input_tokens: 300_000,
+        tiers: [{ input_tokens_above: 200_000 }, { input_tokens_above: 200_000 }],
+      },
+    },
+    valid: false,
+  },
+  {
     label: "appstrate.metric — scalar usage",
     event: { ...base, type: "appstrate.metric", usage: 42 },
     valid: false,
@@ -297,6 +322,11 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
   {
     label: "appstrate.metric — string input_tokens",
     event: { ...base, type: "appstrate.metric", usage: { input_tokens: "5" } },
+    valid: false,
+  },
+  {
+    label: "appstrate.metric — negative input_tokens",
+    event: { ...base, type: "appstrate.metric", usage: { input_tokens: -1 } },
     valid: false,
   },
   {

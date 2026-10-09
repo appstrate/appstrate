@@ -21,7 +21,7 @@ import { loadTokens, _setKeyringFactoryForTesting } from "../src/lib/keyring.ts"
 import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { credentialsLockHeld, holdCredentialsLock, jumpClock } from "./helpers/credentials-lock.ts";
 import {
   installFakeKeyring,
@@ -219,7 +219,7 @@ it("removes credentials even when the synchronization lock cannot be opened", as
  *
  * It IS a reason to fail: a token the store would not release is still a
  * usable credential, so the command ends non-zero (`io.exit(1)`, surfacing
- * here as `ExitError`) once the cleanup and the report are done. The opt-in
+ * here as `CommandExit`) once the cleanup and the report are done. The opt-in
  * case is the control — `deleteTokens` does not throw there, so that logout
  * is a completed one and exits 0.
  */
@@ -271,7 +271,7 @@ describe("logout (keyring refuses the delete)", () => {
     const { io, stdout, stderr } = createMemoryIO();
 
     // Resolving is the assertion: a non-zero exit would reach here as an
-    // `ExitError` thrown by the sink's `io.exit`.
+    // `CommandExit` thrown by the sink's `io.exit`.
     await logoutCommand({ profile: "default" }, io);
 
     expect(stderr()).not.toContain("could not be removed");
@@ -294,8 +294,8 @@ describe("logout (keyring refuses the delete)", () => {
       (err: unknown) => err,
     );
 
-    expect(failure).toBeInstanceOf(ExitError);
-    expect((failure as ExitError).code).toBe(1);
+    expect(failure).toBeInstanceOf(CommandExit);
+    expect((failure as CommandExit).code).toBe(1);
     expect(stderr()).toContain("the OS keyring entry could not be removed");
     expect(stderr()).toContain(KEYRING_LOCKED);
     expect(stderr()).not.toContain("could not complete skills cleanup");

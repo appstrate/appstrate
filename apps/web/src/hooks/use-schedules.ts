@@ -13,7 +13,8 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
-import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
+import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
+import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
 // `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
 // runs purely to count active/unread/last-number, once per card. Those three
@@ -102,59 +103,46 @@ type UpdateScheduleBody =
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (data: {
-      name?: string;
-      cron_expression: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-      model_id_override?: string | null;
-      generation_config_override?: ModelGenerationSettings | null;
-      proxy_id_override?: string | null;
-      version_override?: string | null;
-      connection_overrides?: Record<string, string[]> | null;
-      actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto> => {
+    mutationFn: async (body: CreateScheduleBody) => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
-        // Spec body types `input` as a bare object.
-        body: data as CreateScheduleBody,
+        body,
       });
       return created!;
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: (created) => {
+      invalidateSchedules(qc);
+      if (created.warnings) {
+        toastWarnings({ kind: "schedule", userId: created.userId }, packageId, created.warnings);
+      }
+    },
   });
 }
 
 export function useUpdateSchedule() {
   const qc = useQueryClient();
+  const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async ({
-      id,
-      ...data
-    }: {
-      id: string;
-      name?: string;
-      cron_expression?: string;
-      timezone?: string;
-      input?: Record<string, unknown>;
-      enabled?: boolean;
-      model_id_override?: string | null;
-      generation_config_override?: ModelGenerationSettings | null;
-      proxy_id_override?: string | null;
-      version_override?: string | null;
-      connection_overrides?: Record<string, string[]> | null;
-      actor?: { userId?: string; endUserId?: string };
-    }): Promise<ScheduleWireDto> => {
+    mutationFn: async ({ id, ...body }: UpdateScheduleBody & { id: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
-        // Spec body types `input` as a bare object.
-        body: data as UpdateScheduleBody,
+        body,
       });
       return updated!;
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: (updated) => {
+      invalidateSchedules(qc);
+      if (updated.warnings) {
+        toastWarnings(
+          { kind: "schedule", userId: updated.userId },
+          updated.packageId,
+          updated.warnings,
+        );
+      }
+    },
   });
 }
 
@@ -193,7 +181,7 @@ interface ScheduleFormDeps {
    * connection-overrides picker. Empty when the agent has no
    * integrations.
    */
-  agentIntegrations: Array<{ id: string; tools?: string[] | "*" }>;
+  agentIntegrations: Array<{ id: string; tools?: string[] | "*"; scopes?: string[] }>;
   /**
    * Agent's declared skill dependencies — drives the per-skill dependency
    * override picker. Version-pinned when `version` is passed (#770).
@@ -245,6 +233,7 @@ export function useScheduleFormDeps(
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
     id: d.id,
     ...(d.tools ? { tools: d.tools } : {}),
+    ...(d.scopes ? { scopes: d.scopes } : {}),
   }));
   // `skills` is the one optional group — a summary read (`agents:run` without
   // `agents:read`) omits it rather than emptying it.

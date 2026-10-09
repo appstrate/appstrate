@@ -7,7 +7,7 @@
  * `renderToStaticMarkup` (the web runner has no DOM), asserted on the label.
  */
 
-import { describe, it, expect } from "bun:test";
+import { afterAll, describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -15,6 +15,10 @@ import { SourceBadge } from "../source-badge.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("en");
+// The i18n instance is shared by every suite of the run, and they expect French.
+afterAll(async () => {
+  await i18n.changeLanguage("fr");
+});
 
 const label = (element: Parameters<typeof SourceBadge>[0]) =>
   renderToStaticMarkup(

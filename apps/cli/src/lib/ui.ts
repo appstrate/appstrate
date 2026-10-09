@@ -7,7 +7,7 @@
  */
 
 import * as clack from "@clack/prompts";
-import { DEFAULT_IO, type CommandIO } from "./io.ts";
+import { CommandExit, DEFAULT_IO, type CommandIO } from "./io.ts";
 import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
@@ -367,14 +367,25 @@ export function formatError(err: unknown): string {
 }
 
 /**
- * Render `err` and stop the process. `io` defaults to `DEFAULT_IO`, whose
+ * Render `err` and end the command. `io` defaults to `DEFAULT_IO`, whose
  * `cancel` is `clack.cancel` — so the production rendering is byte-for-byte
  * what it has always been, on the same stream. Tests inject a sink instead of
- * swapping the global streams (issue #1180).
+ * swapping the global streams. A `CommandExit` (an exit already decided) passes through.
  */
 export function exitWithError(err: unknown, io: CommandIO = DEFAULT_IO, code = 1): never {
+  if (err instanceof CommandExit) throw err;
   io.cancel(formatError(err));
   io.exit(code);
+}
+
+/** `cli.ts`'s one terminal handler: sets only `process.exitCode`, so pending output is drained. */
+export function settleCommand(err: unknown): void {
+  if (err instanceof CommandExit) {
+    process.exitCode = err.code;
+    return;
+  }
+  DEFAULT_IO.cancel(formatError(err));
+  process.exitCode = 1;
 }
 
 /**

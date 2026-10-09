@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Org-wide default connection set per (space, integration) — admin CRUD +
+ * Space-wide default connection set per (space, integration) — admin CRUD +
  * the resolver-facing aggregator.
  *
  * The default is the cross-agent governance baseline: one row covers every

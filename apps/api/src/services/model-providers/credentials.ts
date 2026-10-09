@@ -647,13 +647,15 @@ export async function markCredentialNeedsReconnection(orgId: string, id: string)
  * recovers (clearing the streak via {@link updateOAuthCredentialTokens}). Only
  * a token that is expired-past-grace AND repeatedly unrefreshable — the
  * silent-death case — gets flipped.
+ *
+ * Returns the streak and whether this failure flagged the credential; `null` when no row matched.
  */
 export async function recordModelCredentialRefreshFailure(
   orgId: string,
   id: string,
   maxFailures: number,
   graceSeconds: number,
-): Promise<void> {
+): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const updated = await db
     .update(modelProviderCredentials)
     .set({
@@ -671,17 +673,18 @@ export async function recordModelCredentialRefreshFailure(
       expiresAt: modelProviderCredentials.expiresAt,
     });
   const row = updated[0];
-  if (!row) return;
+  if (!row) return null;
+  const failures = row.refreshFailureCount;
   const expiredPastGrace =
     row.expiresAt !== null && row.expiresAt.getTime() < Date.now() - graceSeconds * 1000;
-  if (row.refreshFailureCount >= maxFailures && expiredPastGrace) {
-    logger.warn("oauth model provider: escalating to needsReconnection after repeated failures", {
-      credentialId: id,
-      refreshFailureCount: row.refreshFailureCount,
-      expiresAt: row.expiresAt?.toISOString() ?? null,
-    });
-    await markCredentialNeedsReconnection(orgId, id);
-  }
+  if (failures < maxFailures || !expiredPastGrace) return { failures, needsReconnection: false };
+  logger.warn("oauth model provider: escalating to needsReconnection after repeated failures", {
+    credentialId: id,
+    refreshFailureCount: failures,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  });
+  await markCredentialNeedsReconnection(orgId, id);
+  return { failures, needsReconnection: true };
 }
 
 /**

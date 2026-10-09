@@ -251,11 +251,17 @@ describe("runnerEgressFor", () => {
     expect(runnerEgressFor({ authorized_uris: [] }, [])).toBeUndefined();
   });
 
-  it("carries the rendered list, even when rendering emptied it (deny-all)", () => {
-    const auth = { authorized_uris: ["ssh://{$credential.host}:22"] };
-    expect(runnerEgressFor(auth, [])).toEqual({ authorizedUris: [], allowAllUris: false });
+  it("carries the rendered list, even when rendering emptied it (deny-all), and the declared one", () => {
+    const declaredUris = ["ssh://{$credential.host}:22"];
+    const auth = { authorized_uris: declaredUris };
+    expect(runnerEgressFor(auth, [])).toEqual({
+      authorizedUris: [],
+      declaredUris,
+      allowAllUris: false,
+    });
     expect(runnerEgressFor(auth, ["ssh://h:22"])).toEqual({
       authorizedUris: ["ssh://h:22"],
+      declaredUris,
       allowAllUris: false,
     });
   });
@@ -263,6 +269,7 @@ describe("runnerEgressFor", () => {
   it("carries allow_all_uris", () => {
     expect(runnerEgressFor({ allow_all_uris: true }, [])).toEqual({
       authorizedUris: [],
+      declaredUris: [],
       allowAllUris: true,
     });
   });

@@ -78,7 +78,7 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
-import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
+import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
   assertIsIntegration,
@@ -100,6 +100,11 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
+import type {
+  ConnectCompleteInput,
+  ConnectContext,
+  IntegrationConnectStrategy,
+} from "../services/connect/strategy.ts";
 import {
   authWithoutMintedCredentials,
   handoffStepsFor,
@@ -116,7 +121,7 @@ import {
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
-import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deletePin,
@@ -238,7 +243,7 @@ export const setPinSchema = z
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_ids: connectionIdSetSchema,
+    connection_ids: nonEmptyConnectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();
@@ -512,7 +517,7 @@ async function assertConnectionCreationAllowed(
       status: 403,
       code: "connection_blocked_by_admin",
       title: "Connection Blocked by Admin",
-      detail: `Creation of personal connections to '${integrationId}' is disabled by the organization admin. Use the shared connection instead.`,
+      detail: `Creation of personal connections to '${integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
     });
   }
 }
@@ -574,21 +579,30 @@ function assertScopesInAuthCatalog(
 }
 
 /**
- * Audit fields for a connection written by a connect door. A `connection_id`
- * target means the credential was renewed in place, not a new connection.
+ * Complete a connect door's write and build its audit event. A reconnect renews the credential in
+ * place and records the granted scopes when it changed them, since they reach every agent the
+ * connection serves; the scopes before are a best-effort read ahead of the write.
  */
-function connectionPersistedAudit(
-  conn: { id: string; account_id: string },
-  packageId: string,
-  authKey: string,
-  reconnected: boolean,
+async function completeConnect(
+  strategy: IntegrationConnectStrategy,
+  ctx: ConnectContext,
+  input: ConnectCompleteInput,
 ) {
-  return {
-    action: reconnected ? "integration.connection.reconnected" : "integration.connection.created",
+  const scopesBefore = ctx.connectionId
+    ? await getCurrentScopesGranted({ ...ctx, connectionId: ctx.connectionId })
+    : null;
+  const conn = await strategy.complete(ctx, input);
+  const after = { packageId: ctx.integrationId, authKey: ctx.authKey, accountId: conn.account_id };
+  const scopes =
+    scopesBefore &&
+    auditDiff({ scopesGranted: [[...scopesBefore].sort(), [...conn.scopes_granted].sort()] });
+  const audit = {
+    action: scopesBefore ? "integration.connection.reconnected" : "integration.connection.created",
     resourceType: "integration_connection",
     resourceId: conn.id,
-    after: { packageId, authKey, accountId: conn.account_id },
+    ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
   };
+  return { conn, audit };
 }
 
 /** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
@@ -614,6 +628,8 @@ type ConnectSessionClaims = NonNullable<ReturnType<typeof readConnectToken>>;
 /**
  * The scopes a connect requests: the manifest's `default_scopes`, the caller's, and — on a reconnect
  * — those already granted on the target connection, so an upgrade never silently shrinks.
+ * `default_scopes` is the baseline of every connection of the auth (identity, refresh, least
+ * capability); `requested` only widens it (afps-spec/afps-spec#34).
  */
 async function connectScopes(
   input: { scope: SpaceScope; actor: Actor; integrationId: string; authKey: string },
@@ -785,6 +801,8 @@ export function createIntegrationsRouter() {
             "The authorization expired before it could be exchanged. Please retry the connection.",
           client_unavailable:
             "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
+          client_rejected:
+            "The provider rejected this integration's OAuth client. Ask an administrator to check the client's registration, then connect again.",
           transient: "Could not complete the connection. Please try again in a moment.",
           issuer_mismatch:
             "The authorization response did not come from the authorization server this connection was started with. Please retry the connection.",
@@ -818,21 +836,19 @@ export function createIntegrationsRouter() {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
-      const conn = await strategy.complete(
-        {
-          scope,
-          actor: result.actor,
-          integrationId: result.packageId,
-          authKey: result.authKey,
-          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-          ...(result.variables ? { variables: result.variables } : {}),
-        },
-        { kind: "oauth2-result", result },
-      );
+      const ctx: ConnectContext = {
+        scope,
+        actor: result.actor,
+        integrationId: result.packageId,
+        authKey: result.authKey,
+        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        ...(result.variables ? { variables: result.variables } : {}),
+      };
+      const { audit } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
       await recordAuditAs(
         c,
         { ...scope, actorType: result.actor.type, actorId: result.actor.id },
-        connectionPersistedAudit(conn, result.packageId, result.authKey, !!result.connectionId),
+        audit,
       );
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
@@ -959,23 +975,20 @@ export function createIntegrationsRouter() {
         // OrchestratedStrategy, which needs the connect-run substrate to run
         // the untrusted login tool. Supply it lazily so the plain
         // paste-the-bag / declarative paths don't construct an executor.
-        const conn = await resolveStrategy(auth, {
-          connectToolExecutor: createConnectRunExecutor(),
-        }).complete(
-          {
-            scope,
-            actor,
-            integrationId: packageId,
-            authKey,
-            ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-            ...(body.variables ? { variables: body.variables } : {}),
-          },
-          { kind: "fields", credentials: body.credentials },
-        );
-        await recordAuditFromContext(
-          c,
-          connectionPersistedAudit(conn, packageId, authKey, !!body.connection_id),
-        );
+        const ctx: ConnectContext = {
+          scope,
+          actor,
+          integrationId: packageId,
+          authKey,
+          ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          ...(body.variables ? { variables: body.variables } : {}),
+        };
+        const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
+        const { conn, audit } = await completeConnect(strategy, ctx, {
+          kind: "fields",
+          credentials: body.credentials,
+        });
+        await recordAuditFromContext(c, audit);
         return c.json(conn);
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -1278,24 +1291,17 @@ export function createIntegrationsRouter() {
         ? { ...submittedCredentials, ...provisioned }
         : submittedCredentials;
 
-      const conn = await resolveStrategy(auth, {
-        connectToolExecutor: createConnectRunExecutor(),
-      }).complete(
-        {
-          scope,
-          actor,
-          integrationId: claims.package_id,
-          authKey: claims.auth_key,
-          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
-          ...(body.variables ? { variables: body.variables } : {}),
-        },
-        { kind: "fields", credentials },
-      );
-      await recordAuditAs(
-        c,
-        { ...scope, actorType: actor.type, actorId: actor.id },
-        connectionPersistedAudit(conn, claims.package_id, claims.auth_key, !!claims.connection_id),
-      );
+      const ctx: ConnectContext = {
+        scope,
+        actor,
+        integrationId: claims.package_id,
+        authKey: claims.auth_key,
+        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(body.variables ? { variables: body.variables } : {}),
+      };
+      const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
+      const { conn, audit } = await completeConnect(strategy, ctx, { kind: "fields", credentials });
+      await recordAuditAs(c, { ...scope, actorType: actor.type, actorId: actor.id }, audit);
       clearConnectPageCookie(c);
       // Carried on the response, not fetched: the page cookie that authenticates
       // the portal was just cleared, and the end-user may hold no session.

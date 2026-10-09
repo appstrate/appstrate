@@ -176,9 +176,6 @@ What the signature does not settle, on purpose:
   system model, so one could name an id only the overlay records: the platform
   pays for it, and remote data prices nothing the platform pays for. The offer
   snapshot test stays bundled-only and deterministic.
-- **Subscription providers** (`authMode: "oauth2"`) are offered no overlay
-  record with a price tier one request can reach, the rule
-  `verify:system-models` holds the bundled registry to (#1552).
 - **Env:** `MODEL_CATALOG_URL` (`http`/`https`). `off` starts nothing.
 - **A model whose record is absent** — withdrawn, channel switched off, a Pi
   bump whose file is not published yet, or a process that restarted and has

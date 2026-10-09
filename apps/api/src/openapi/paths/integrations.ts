@@ -102,16 +102,30 @@ export const integrationPackageIdParam = {
   name: "integrationPackageId",
 } as const;
 
-/** A connection set as every write takes it and every pin or default returns it. */
+/** A connection set as pins and launch overrides take and return it. */
 export const connectionIdSetJsonSchema = {
   type: "array",
   items: { type: "string", format: "uuid" },
-  minItems: 1,
+  minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+  uniqueItems: true,
+  description:
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
+} as const;
+
+/** The org default's set: never empty — none for every agent of the space is deactivation. */
+const orgDefaultConnectionIdSetJsonSchema = {
+  ...connectionIdSetJsonSchema,
+  minItems: 1,
+  description:
+    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
-export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+/** {@link connectionSetRefusals} on an org-default write. */
+const orgDefaultSetRefusals = `an empty set, ${connectionSetRefusals}`;
 
 export const lockedBySchema = {
   type: ["string", "null"],
@@ -128,7 +142,7 @@ const integrationOrgDefaultSchema = {
   required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_ids: connectionIdSetJsonSchema,
+    connection_ids: orgDefaultConnectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -406,7 +420,11 @@ const authStatusSchema = {
       description:
         "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
     },
-    required: { type: "boolean" },
+    required: {
+      type: "boolean",
+      description:
+        "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`.",
+    },
     scopes: { type: "array", items: { type: "string" } },
     resource: {
       type: ["string", "null"],
@@ -529,13 +547,13 @@ const connectKickoffRelayProperties = {
     type: "array",
     items: { type: "string" },
     description:
-      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+      "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
   connection_id: {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -559,7 +577,8 @@ const connectRunResponses = {
     },
   },
   "504": {
-    description: "The connect-run login did not complete within the timeout",
+    description:
+      "The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -577,6 +596,15 @@ const connectRunResponses = {
   },
 } as const;
 
+/** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
+const CONNECT_LOGIN_400 =
+  "A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+const CONNECT_LOGIN_502 =
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
+const problemJson = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
 export const integrationsPaths = {
   "/api/integrations": {
     get: {
@@ -584,7 +612,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -933,7 +961,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
+                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -948,9 +976,13 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": { description: CONNECT_LOGIN_502, content: problemJson },
         ...connectRunResponses,
       },
     },
@@ -1249,8 +1281,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail.",
+          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives: the form can be submitted again.`,
         },
         "403": {
           description:
@@ -1265,11 +1296,8 @@ export const integrationsPaths = {
             "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
         },
         "502": {
-          description:
-            "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,
@@ -1282,7 +1310,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1330,7 +1358,9 @@ export const integrationsPaths = {
         "schedules are untouched. " +
         "A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
-        "with 409 `connection_label_taken`.",
+        "with 409 `connection_label_taken`. " +
+        "Scopes are not edited here: for an agent that needs more scopes, create a new connection " +
+        "with them rather than reconnecting a shared one, which widens every agent that uses it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1518,6 +1548,8 @@ export const integrationsPaths = {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
       summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
+      description:
+        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1535,7 +1567,7 @@ export const integrationsPaths = {
                 connection_ids: {
                   ...connectionIdSetJsonSchema,
                   description:
-                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
                 },
               },
               additionalProperties: false,
@@ -1586,7 +1618,7 @@ export const integrationsPaths = {
     get: {
       operationId: "getIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Get the org-wide default connection for this integration",
+      summary: "Get the space default connection for this integration",
       description:
         "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
@@ -1618,12 +1650,15 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Set the org-wide default connection for this integration (admin)",
+      summary: "Set the space default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
         "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
         "`enforce` included. Selecting connections of a different auth type replaces " +
-        "the current default rather than adding a second one.",
+        "the current default rather than adding a second one. Every consuming agent gets the " +
+        "default's scopes: bind an agent that needs more to its own connection rather than " +
+        "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
+        "overrides an enforced one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1640,8 +1675,8 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  ...connectionIdSetJsonSchema,
-                  description: "The WHOLE default set — this write replaces it.",
+                  ...orgDefaultConnectionIdSetJsonSchema,
+                  description: "The WHOLE default set (1 or more ids) — this write replaces it.",
                 },
                 enforce: { type: "boolean", default: false },
               },
@@ -1658,7 +1693,7 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${orgDefaultSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1671,7 +1706,7 @@ export const integrationsPaths = {
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Remove the org-wide default connection (admin)",
+      summary: "Remove the space default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
