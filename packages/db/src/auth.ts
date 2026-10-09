@@ -229,7 +229,8 @@ async function readUserRealm(userId: string): Promise<string | undefined> {
 }
 
 // A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
-// `readRealm` runs only on the verify leg, so other callers pay no query.
+// `readRealm` runs only on the verify leg with a resolver installed, so `account.delete`
+// queries nothing elsewhere.
 async function assertMagicLinkAudience(
   readRealm: () => Promise<string | undefined>,
   context: GenericEndpointContext | null,
