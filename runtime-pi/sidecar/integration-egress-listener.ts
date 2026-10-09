@@ -67,16 +67,18 @@ function collectTunnelHead(socket: Socket, seed: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let buf = seed;
     if (headComplete(buf)) return resolve(buf);
-    const onClose = () => reject(new Error("socket closed before tunnel bytes"));
+    const onClose = () => reject(new Error("socket ended before tunnel bytes"));
     const onData = (chunk: Buffer) => {
       buf = Buffer.concat([buf, chunk]);
       if (!headComplete(buf)) return;
       socket.off("data", onData);
+      socket.off("end", onClose);
       socket.off("close", onClose);
       socket.pause(); // buffer until pipe() resumes
       resolve(buf);
     };
     socket.on("data", onData);
+    socket.once("end", onClose);
     socket.once("close", onClose);
   });
 }
@@ -159,15 +161,12 @@ export function createIntegrationEgressListener(
   const preambleTimeoutMs = options.preambleTimeoutMs ?? PREAMBLE_TIMEOUT_MS;
 
   // Peer gate, settled once per connection at accept: nothing a refused peer sends is acted upon.
+  // A promise, as attribution is asynchronous; a socket never seen at accept is refused.
   const admissions = new WeakMap<Socket, Promise<boolean>>();
-  const admitted = (socket: Socket): Promise<boolean> => {
-    let admission = admissions.get(socket);
-    if (!admission) {
-      admission = peerAdmitted(socket, options.isPeerAllowed);
-      admissions.set(socket, admission);
-    }
-    return admission;
-  };
+  const admitted = (socket: Socket) => admissions.get(socket) ?? Promise.resolve(false);
+  // Requests pipelined on a connection are settled in order: once one is refused (its answer
+  // closes the connection), the later ones are dropped unvetted. `false` = the connection closes.
+  const turns = new WeakMap<Socket, Promise<boolean>>();
 
   // Floor and allowlist before any DNS lookup, then the rebind layer: the PINNED address, or why.
   const vet = async (
@@ -195,11 +194,12 @@ export function createIntegrationEgressListener(
     destroy();
   };
 
-  const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
     const reply = (status: number) => {
       req.resume();
       res.writeHead(status, { connection: "close", "content-length": "0" });
       res.end();
+      return false;
     };
     if (!(await admitted(req.socket))) {
       refused("<unknown>", "peer-not-allowed", peerAddress(req.socket));
@@ -209,7 +209,7 @@ export function createIntegrationEgressListener(
     if (target === undefined) return reply(405);
     if (target === null) return reply(400);
     const vetted = await vet(target.host, target.port);
-    if (req.socket.destroyed) return; // client gave up during resolution
+    if (req.socket.destroyed) return false; // client gave up during resolution
     if ("refused" in vetted) {
       refused(target.authority, vetted.refused);
       return reply(403);
@@ -230,6 +230,7 @@ export function createIntegrationEgressListener(
       (err) => emit({ kind: "tunnel-error", target: target.authority, reason: err.message }),
       options.upstreamTimeoutMs,
     );
+    return true;
   };
 
   const handleConnect = async (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
@@ -288,9 +289,14 @@ export function createIntegrationEgressListener(
   };
 
   const server = createHttpServer();
-  server.on("connection", (socket: Socket) => void admitted(socket));
+  server.on("connection", (socket: Socket) => {
+    admissions.set(socket, peerAdmitted(socket, options.isPeerAllowed));
+  });
   server.on("request", (req: IncomingMessage, res: ServerResponse) => {
-    handleRequest(req, res).catch(crashed(() => res.destroy()));
+    const turn = (turns.get(req.socket) ?? Promise.resolve(true))
+      .then((open) => (open ? handleRequest(req, res) : (req.resume(), false)))
+      .catch((err: unknown) => (crashed(() => res.destroy())(err), false));
+    turns.set(req.socket, turn);
   });
   server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
     clientSocket.on("error", () => clientSocket.destroy());

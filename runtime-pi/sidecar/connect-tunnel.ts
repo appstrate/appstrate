@@ -49,7 +49,8 @@ export function parseConnectTarget(target: string): { host: string; port: number
 
 /**
  * `net.connect` with a connect-establishment timeout — destroys the socket
- * (surfacing an error) if the TCP handshake doesn't complete in time.
+ * (surfacing an error) if the TCP handshake doesn't complete in time. Half-open
+ * allowed: the peer's FIN leaves this side writable.
  */
 export function netConnectWithTimeout(
   port: number,
@@ -57,7 +58,7 @@ export function netConnectWithTimeout(
   onConnect: () => void,
   timeoutMs = TUNNEL_CONNECT_TIMEOUT_MS,
 ): Socket {
-  const socket = netConnect(port, host, () => {
+  const socket = netConnect({ port, host, allowHalfOpen: true }, () => {
     clearTimeout(timer);
     onConnect();
   });
@@ -86,20 +87,24 @@ export function tieSockets(s1: Socket, s2: Socket): void {
   closeWith(s2, s1);
 }
 
-export function destroyBothWhenIdle(s1: Socket, s2: Socket): void {
+/** Destroy both sockets once either has been idle for `idleMs`, half-open or not. */
+export function destroyBothWhenIdle(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
   const destroyBoth = () => {
     s1.destroy();
     s2.destroy();
   };
-  s1.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, destroyBoth);
-  s2.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, destroyBoth);
+  s1.setTimeout(idleMs, destroyBoth);
+  s2.setTimeout(idleMs, destroyBoth);
 }
 
-/** Blind bidirectional relay with an idle timeout; teardown is {@link tieSockets}' job. */
-export function relaySockets(s1: Socket, s2: Socket): void {
+/**
+ * Blind bidirectional relay with an idle timeout. A FIN is relayed as a FIN (`pipe()` ends the
+ * other side), so each direction closes on its own; teardown is {@link tieSockets}' job.
+ */
+export function relaySockets(s1: Socket, s2: Socket, idleMs?: number): void {
   s1.pipe(s2);
   s2.pipe(s1);
-  destroyBothWhenIdle(s1, s2);
+  destroyBothWhenIdle(s1, s2, idleMs);
 }
 
 /** Message headers minus the hop-by-hop set and the names `Connection` lists (RFC 9110 §7.6.1). */
@@ -150,7 +155,10 @@ export function forwardHttpRequest(
     fail(new Error("upstream switched protocols"));
   });
   req.on("error", () => proxyReq.destroy());
-  res.on("error", () => proxyReq.destroy());
+  // The client left before the whole answer: cancel the upstream request.
+  res.on("close", () => {
+    if (!res.writableFinished) proxyReq.destroy();
+  });
   proxyReq.on("error", fail);
   req.pipe(proxyReq);
 }

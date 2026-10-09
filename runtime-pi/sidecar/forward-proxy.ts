@@ -303,6 +303,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         }
       };
       proxySocket.on("data", onData);
+      // Half-open allowed: an upstream proxy that hangs up without answering must still fail.
+      proxySocket.once("end", () => {
+        if (!established) proxySocket.destroy(new Error("upstream proxy closed before answering"));
+      });
       proxySocket.on("error", (err) => {
         logger.error("CONNECT upstream error", { target, error: err.message });
         if (!established && !clientSocket.destroyed) {
