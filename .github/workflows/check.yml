@@ -77,11 +77,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
-
-      # rationale: see .github/actions/bun-setup/action.yml
-      - name: Verify lockfile is up to date
-        run: git diff --exit-code bun.lock
+        run: bun install --frozen-lockfile
 
       # Incremental state for `bun run check`: the turbo task cache plus the
       # ESLint and Prettier file caches. Both file caches use the `content`
@@ -232,9 +228,8 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/bun-setup
 
-      # rationale for a plain install: see .github/actions/bun-setup/action.yml
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build the schema from the migration chain alone
         run: bun packages/db/src/migrate.ts

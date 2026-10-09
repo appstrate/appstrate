@@ -49,7 +49,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Unit tests need PostgreSQL + Redis because bunfig.toml preload starts
       # docker-compose unconditionally. Services start fast with tmpfs + fsync=off.
@@ -275,7 +275,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
@@ -376,7 +376,7 @@ jobs:
       # the default MODULES set off the env schema rather than restating it, and
       # `packages/env` imports zod.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Same image, same compose topology, booted with @appstrate/module-ee on
       # top of the schema's default MODULES — so the single image is proven to
@@ -435,7 +435,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Build the agent runtime image the e2e launches, on the runner's native
       # platform — the test gates on the image matching the engine's platform
@@ -481,7 +481,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build frontend
         run: cd apps/web && bun run build

@@ -98,7 +98,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.key.outputs.configured == 'true'
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Fetch the latest Pi registry data
         if: steps.key.outputs.configured == 'true'
