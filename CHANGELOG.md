@@ -80,23 +80,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
+- **Before the deploy, on `RUN_ADAPTER=process`, remove
+  `INTEGRATION_RUNTIME_ADAPTER=docker`, or move the instance to
+  `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`** (#1819). The platform
+  now refuses to boot with that combination: the docker runners it spawned
+  had no per-run network, so proxy-aware clients had no egress and the
+  others had unfiltered egress.
+
+- **Before the deploy, review `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The
+  local integration runners of every organization can now reach a listed
+  host, over raw TCP, on any port one of their declared `authorized_uris`
+  entries names literally. Keep only hosts every organization may reach, a
+  loopback name or `host.docker.internal` listed for a local model included
+  (`docs/ENV.md`).
+
 ### Changed
 
-- **A local integration runner reaches an internal host the operator lists
-  in `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819), under the rule an `api_call`
-  already follows: the auth's declared `authorized_uris` must name that host
-  literally, and `allow_all_uris` must be off. The sidecar's CONNECT, MITM and
-  transparent listeners used to refuse every private, loopback or link-local
-  address whatever the list said. A host taken from a connection value (the
-  `@appstrate/ssh` host included) or matched by a wildcard stays refused, and
-  the runner's allowlist still bounds host and port. Never list a loopback
-  name (`localhost`, `127.0.0.1`) outside tests: it opens the sidecar's own
-  ports to the integrations that name it.
+- **A local integration runner can reach a host listed in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
+  transparent listeners refused every private, loopback or link-local
+  address whatever the list said. They now exempt a host and port when the
+  operator lists the host, `allow_all_uris` is off, and a declared
+  `authorized_uris` entry with no `{` or `*` in its authority names that host
+  and allows that port (`https://intranet.corp/**` → 443 only; a port glob
+  exempts nothing). A host from a
+  connection value (the `@appstrate/ssh` host included) or a wildcard stays
+  refused, and the runner's allowlist still applies. An `api_call` keeps its
+  per-host rule.
 - **BREAKING (operators): `RUN_ADAPTER=process` with
-  `INTEGRATION_RUNTIME_ADAPTER=docker` is now refused at boot** (#1819). The
-  docker runners had no per-run network there: no egress for proxy-aware
-  clients, unfiltered egress for the others. Run local integrations under
-  `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`.
+  `INTEGRATION_RUNTIME_ADAPTER=docker` is refused at boot** (#1819); see
+  Operators.
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
   integration binds 0..N connections and never blocks for lack of one; the
@@ -365,19 +378,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **A proxy-aware local runner reaches `http://` targets through its egress
-  listener** (#1819). Every such client sends a plain `http://` request to
-  `HTTP_PROXY` in absolute-form, and the listener of a runner with nothing to
-  inject answered 405 to anything but `CONNECT`, so an internal web app on
-  `http://10.0.0.5:8080` stayed out of reach even once allowed. The listener
-  now relays one such request per connection, origin-form with
+  listener** (#1819). Such a client usually sends an `http://` request to
+  `HTTP_PROXY` in absolute-form, which the listener of a runner with nothing
+  to inject answered with 405. It now forwards that request origin-form with
   `Connection: close`, under the same allowlist and SSRF checks as a
-  `CONNECT`. The listener that injects credentials still answers 405, since
-  they would travel in cleartext.
-- **A download through a sidecar tunnel no longer loses its end when the
-  server closes first** (#1819). The runner egress listeners and the agent's
-  forward proxy destroyed the client side as soon as the upstream closed,
-  dropping the bytes a slower client had not read yet; they now end it, so
-  those bytes are delivered before the connection closes.
+  `CONNECT`: one request per connection, any later bytes on it going only to
+  the same upstream. The listener that injects credentials still answers
+  405, since they would travel in cleartext.
+- **A sidecar tunnel no longer discards bytes queued for one side when the
+  other side closes first** (#1819). The runner egress listeners and the
+  agent's forward proxy now flush those bytes, then close.
+- **A `CONNECT` to a port outside 1–65535 answers `400`** on the runner egress
+  listener and the agent's forward proxy, and a failing connection on either
+  no longer crashes the sidecar (#1819).
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each

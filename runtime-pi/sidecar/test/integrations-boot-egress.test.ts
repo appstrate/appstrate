@@ -274,7 +274,7 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
       const egress = { ...EGRESS, authorizedUris: rendered, declaredUris };
       const result = await boot(spec({ egress }), []);
       try {
-        return spawnedWith.at(-1)!.egress!.policy.skipsSsrfFloor("intranet.corp");
+        return spawnedWith.at(-1)!.egress!.policy.skipsSsrfFloor("intranet.corp", 443);
       } finally {
         await result.shutdown();
       }

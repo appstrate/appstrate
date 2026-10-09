@@ -453,20 +453,16 @@ describe("transparent egress listener — internal hosts: the api_call rule (#18
     expect(upstream.received.length).toBe(0);
   });
 
-  it("keeps the floor for a listed host a glob, a connection or allow_all chose", async () => {
+  it("keeps the floor for a listed host a connection chose", async () => {
     const upstream = await startTcpEcho();
-    const rendered = [`https://internal.test:${upstream.port}`];
-    const cases: RunnerEgress[] = [
-      literal([`https://*.test:${upstream.port}`]),
-      { ...literal(rendered), declaredUris: [`https://{$credential.host}:${upstream.port}`] },
-      { ...literal([]), declaredUris: rendered, allowAllUris: true },
-    ];
-    for (const egress of cases) {
-      const { port, events } = await runnerListener(upstream.port, egress);
-      const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
-      expect(closed).toBe(true);
-      expect(events[0]?.reason).toBe("ssrf");
-    }
+    const egress = {
+      ...literal([`https://internal.test:${upstream.port}`]),
+      declaredUris: [`https://{$credential.host}:${upstream.port}`],
+    };
+    const { port, events } = await runnerListener(upstream.port, egress);
+    const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("ssrf");
     expect(upstream.received.length).toBe(0);
   });
 

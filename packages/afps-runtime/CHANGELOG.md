@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — `skipsSsrfFloor` (`./resolvers`, #1819)
 
-- The internal-host rule of `fetchApiCall`, exported so the sidecar's runner
-  egress listeners apply the same one: a host skips the SSRF floor only when
-  the declared `authorized_uris` names it literally, the operator accepts it
-  (`internalHost`) and `allowAllUris` is false.
+- The internal-host rule of `fetchApiCall`: a host skips the SSRF floor only
+  when the declared `authorized_uris` names it literally, the operator accepts
+  it (`internalHost`) and `allowAllUris` is false. Exported for the sidecar's
+  runner egress listeners, which add a literal host-and-port check on top of
+  it (a runner gets raw TCP).
 
 ### Added — the integrations a run starts without (#1830)
 

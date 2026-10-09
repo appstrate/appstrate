@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 /** Far beyond what the kernel buffers for a reader that is not reading. */
-const PAYLOAD_BYTES = 32 * 1024 * 1024;
+const PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 /** A server on an ephemeral 127.0.0.1 port; resolves with the port. */
 function listen(onAccept: (socket: Socket) => void = () => {}): Promise<number> {
@@ -85,7 +85,7 @@ describe("closeWith", () => {
 
     if (!to.destroyed) await new Promise<void>((res) => to.once("close", () => res()));
     expect(to.destroyed).toBe(true);
-  }, 30_000);
+  }, 15_000);
 
   it("destroys `to` at once, queued bytes and all, on an error on `from`", async () => {
     const { to } = await backedUpSocket();

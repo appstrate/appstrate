@@ -15,7 +15,10 @@
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
-import { compileEgressPolicy } from "@appstrate/afps-shared/authorized-uris";
+import {
+  compileEgressPolicy,
+  parseAuthorizedUriPattern,
+} from "@appstrate/afps-shared/authorized-uris";
 import { skipsSsrfFloor } from "@appstrate/afps-runtime/resolvers";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { RunnerEgressPolicy } from "./helpers.ts";
@@ -29,15 +32,9 @@ import type { RunnerEgressPolicy } from "./helpers.ts";
  * platform-side checks and then fails opaquely here at run time. Empty / unset
  * ⇒ nothing is exempt (the secure default).
  *
- * Scope: it relaxes egress for operator-configured upstreams — the LLM
- * baseUrl gate (`/llm/*`) and the remote-MCP client boot
- * (`integrations-boot.ts`) — and, for an `api_call` (`credential-proxy.ts`) or
- * a local runner's egress listeners (MITM, CONNECT, transparent:
- * {@link compileRunnerEgressPolicy}), only for a host the integration's
- * declared `authorized_uris` also names literally, never under
- * `allow_all_uris` (`skipsSsrfFloor`). Neither side alone opens the operator's
- * network: a manifest cannot name an internal host the operator did not list,
- * and a host a glob or a connection value chose is never exempt.
+ * Scope: operator-configured upstreams (LLM baseUrl, remote-MCP boot), and an
+ * `api_call` or a runner listener only for a target the integration's declared
+ * `authorized_uris` names literally ({@link compileRunnerEgressPolicy}).
  */
 const trustedEgressHosts: ReadonlySet<string> = new Set(
   (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
@@ -64,8 +61,18 @@ export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,
   internalHost: (host: string) => boolean = isOperatorTrustedEgressHost,
 ): RunnerEgressPolicy {
+  // A runner gets raw TCP, so the exemption is per (host, port): a port a connection value or a
+  // glob chose must not open an internal host's other services.
+  const literal = compileEgressPolicy({
+    authorizedUris: egress.declaredUris.filter((uri) => {
+      const parsed = parseAuthorizedUriPattern(uri);
+      return parsed.kind === "url" && !/[{*]/.test(parsed.authority);
+    }),
+    allowAllUris: false,
+  });
   return {
     ...compileEgressPolicy(egress),
-    skipsSsrfFloor: (host) => skipsSsrfFloor(host, { ...egress, internalHost }),
+    skipsSsrfFloor: (host, port) =>
+      literal.allowsAuthority(host, port) && skipsSsrfFloor(host, { ...egress, internalHost }),
   };
 }

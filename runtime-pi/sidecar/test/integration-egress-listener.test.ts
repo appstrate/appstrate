@@ -320,6 +320,29 @@ describe("integration-egress-listener (#543)", () => {
     expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
   });
 
+  it("answers 400 to a CONNECT port out of range, and keeps serving", async () => {
+    const echo = await startTcpEcho();
+    const { handle } = await makeListener();
+    const port = handle.address().port;
+
+    expect((await connectAndProbe(port, "example.com:70000")).statusCode).toBe(400);
+    const res = await connectAndProbe(port, `127.0.0.1:${echo.port}`, "ping");
+    expect(res.statusCode).toBe(200);
+    expect(res.echoed).toBe("ping");
+  });
+
+  it("tunnels past the preamble deadline when DNS is slow: it bounds the head only", async () => {
+    const echo = await startTcpEcho();
+    const { handle } = await makeListener({
+      preambleTimeoutMs: 300,
+      resolveHostFn: () =>
+        new Promise<string[]>((res) => setTimeout(() => res(["127.0.0.1"]), 600)),
+    });
+    const res = await connectAndProbe(handle.address().port, `slow.example:${echo.port}`, "ping");
+    expect(res.statusCode).toBe(200);
+    expect(res.echoed).toBe("ping");
+  });
+
   it("refuses a host the egress policy does not grant, before resolving it", async () => {
     const echo = await startTcpEcho();
     let resolved = false;
@@ -597,11 +620,10 @@ describe("integration-egress-listener (#543)", () => {
     });
   });
 
-  describe("internal hosts: the api_call rule (#1819)", () => {
+  describe("internal hosts: the api_call rule, per port (#1819)", () => {
     type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
-    const LISTED = ["internal.test", "127.0.0.1"];
     /** The real SSRF floor, every name resolving to loopback, `operatorList` as the operator's. */
-    const runnerListener = (egress: RunnerEgress, operatorList = LISTED) => {
+    const runnerListener = (egress: RunnerEgress, operatorList = ["internal.test"]) => {
       const internalHost = (h: string) => operatorList.includes(h);
       return makeListener({
         isBlockedHostFn: undefined,
@@ -614,69 +636,84 @@ describe("integration-egress-listener (#543)", () => {
       declaredUris: uris,
       allowAllUris: false,
     });
+    /** CONNECT to `internal.test:<port>` through a listener over `egress`. */
+    const connectInternal = async (egress: RunnerEgress, port: number, operatorList?: string[]) => {
+      const { handle, events } = await runnerListener(egress, operatorList);
+      const res = await connectAndProbe(handle.address().port, `internal.test:${port}`, "ping");
+      return { ...res, events };
+    };
 
-    it("relays to a private address behind a listed declared literal host", async () => {
+    it("exempts only the port a literal entry declares, the scheme's default when none", () => {
+      const policy = (uri: string) =>
+        compileRunnerEgressPolicy(literal([uri]), (h) => h === "intranet.corp");
+      const table: Array<[string, number, boolean]> = [
+        ["https://intranet.corp/**", 443, true],
+        ["https://intranet.corp/**", 8443, false],
+        ["http://intranet.corp:8080/**", 8080, true],
+        ["http://intranet.corp:8080/**", 80, false],
+        ["tcp://intranet.corp:5432", 5432, true],
+        ["tcp://intranet.corp:5432", 5433, false],
+        ["https://intranet.corp:*/**", 5432, false],
+      ];
+      const actual = table.map(([uri, port]) => [
+        uri,
+        port,
+        policy(uri).skipsSsrfFloor("intranet.corp", port),
+      ]);
+      expect(actual).toEqual(table);
+    });
+
+    it("relays to a private address behind a listed declared host:port", async () => {
       const echo = await startTcpEcho();
-      for (const host of ["internal.test", "127.0.0.1"]) {
-        const { handle } = await runnerListener(literal([`https://${host}:${echo.port}`]));
-        const res = await connectAndProbe(handle.address().port, `${host}:${echo.port}`, "ping");
-        expect(res.statusCode).toBe(200);
-        expect(res.echoed).toBe("ping");
-      }
+      const res = await connectInternal(literal([`tcp://internal.test:${echo.port}`]), echo.port);
+      expect(res.statusCode).toBe(200);
+      expect(res.echoed).toBe("ping");
     });
 
     it("keeps the floor for a declared literal host the operator does not list", async () => {
       const echo = await startTcpEcho();
-      for (const host of ["internal.test", "127.0.0.1"]) {
-        const egress = literal([`https://${host}:${echo.port}`]);
-        const { handle, events } = await runnerListener(egress, []);
-        const res = await connectAndProbe(handle.address().port, `${host}:${echo.port}`);
-        expect(res.statusCode).toBe(403);
-        expect(events.some((e) => e.reason === "ssrf")).toBe(true);
-      }
+      const egress = literal([`https://internal.test:${echo.port}`]);
+      const res = await connectInternal(egress, echo.port, []);
+      expect(res.statusCode).toBe(403);
+      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
     });
 
-    it("keeps the floor for a listed host a glob, a connection or allow_all chose", async () => {
+    it("keeps the floor for a listed host a connection chose", async () => {
       const echo = await startTcpEcho();
-      const port = echo.port;
-      const rendered = [`https://internal.test:${port}`];
-      const cases: RunnerEgress[] = [
-        literal([`https://*.test:${port}`]),
-        { ...literal(rendered), declaredUris: [`https://{$credential.host}:${port}`] },
-        { ...literal(rendered), declaredUris: [`https://{$variable.host}:${port}`] },
-        { ...literal([]), declaredUris: rendered, allowAllUris: true },
-      ];
-      for (const egress of cases) {
-        const { handle, events } = await runnerListener(egress);
-        const res = await connectAndProbe(handle.address().port, `internal.test:${port}`);
-        expect(res.statusCode).toBe(403);
-        expect(events.some((e) => e.reason === "ssrf")).toBe(true);
-      }
+      const egress = {
+        ...literal([`https://internal.test:${echo.port}`]),
+        declaredUris: [`https://{$credential.host}:${echo.port}`],
+      };
+      const res = await connectInternal(egress, echo.port);
+      expect(res.statusCode).toBe(403);
+      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
     });
 
-    it("relays an http:// request to a listed declared literal host, and only a listed one", async () => {
-      const upstream = await startHttpUpstream();
-      for (const host of ["internal.test", "127.0.0.1"]) {
-        const authority = `${host}:${upstream.port}`;
-        const request = `GET http://${authority}/ HTTP/1.1\r\nHost: ${authority}\r\n\r\n`;
-        const egress = literal([`http://${authority}`]);
+    it("keeps the floor on a port a connection chose for a declared literal host", async () => {
+      const echo = await startTcpEcho();
+      const egress = {
+        ...literal([`https://internal.test:${echo.port}/**`]),
+        declaredUris: ["https://internal.test:{$variable.port}/**"],
+      };
+      const res = await connectInternal(egress, echo.port);
+      expect(res.statusCode).toBe(403);
+      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
+    });
 
-        const listed = await runnerListener(egress);
-        expect(statusOf(await exchange(listed.handle.address().port, [request]))).toBe(200);
-
-        const unlisted = await runnerListener(egress, []);
-        expect(statusOf(await exchange(unlisted.handle.address().port, [request]))).toBe(403);
-        expect(unlisted.events.some((e) => e.reason === "ssrf")).toBe(true);
-      }
-      expect(upstream.connections).toHaveLength(2);
+    it("keeps the floor on a port only another entry grants", async () => {
+      // The allowlist lets `internal.test:<port>` through the glob; only :443 is declared with it.
+      const echo = await startTcpEcho();
+      const egress = literal(["https://internal.test/**", `https://*.test:${echo.port}/**`]);
+      const res = await connectInternal(egress, echo.port);
+      expect(res.statusCode).toBe(403);
+      expect(res.events.some((e) => e.reason === "ssrf")).toBe(true);
     });
 
     it("still enforces the allowlist on an exempt host (another port)", async () => {
       const echo = await startTcpEcho();
-      const { handle, events } = await runnerListener(literal(["https://internal.test/**"]));
-      const res = await connectAndProbe(handle.address().port, `internal.test:${echo.port}`);
+      const res = await connectInternal(literal(["https://internal.test/**"]), echo.port);
       expect(res.statusCode).toBe(403);
-      expect(events.some((e) => e.reason === "not-authorized")).toBe(true);
+      expect(res.events.some((e) => e.reason === "not-authorized")).toBe(true);
     });
   });
 

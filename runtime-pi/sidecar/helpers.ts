@@ -378,20 +378,19 @@ export type PeerCheck = (peer: Peer) => Promise<boolean>;
 
 /** TCP-level half of the egress policy — all a blind tunnel can check. */
 export type AuthorityPolicy = Pick<EgressPolicy, "allowsAuthority"> & {
-  /** Whether `host` skips the SSRF floor: the `api_call` internal-host rule (#1819). */
-  skipsSsrfFloor(host: string): boolean;
+  skipsSsrfFloor(host: string, port: number): boolean;
 };
 
-/** A local runner's compiled egress policy (`compileRunnerEgressPolicy`). */
 export type RunnerEgressPolicy = EgressPolicy & AuthorityPolicy;
 
-/** The SSRF predicate a runner listener applies to `host`: none when its policy exempts it. */
+/** The SSRF predicate a runner listener applies to `host:port`: none when its policy exempts it. */
 export function ssrfFloorFor(
   policy: AuthorityPolicy,
   host: string,
+  port: number,
   isBlockedHostFn: (host: string) => boolean,
 ): (host: string) => boolean {
-  return policy.skipsSsrfFloor(host) ? () => false : isBlockedHostFn;
+  return policy.skipsSsrfFloor(host, port) ? () => false : isBlockedHostFn;
 }
 
 /** `address` with an IPv4-mapped `::ffff:a.b.c.d` unwrapped. */

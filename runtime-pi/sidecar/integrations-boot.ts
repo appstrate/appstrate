@@ -1272,14 +1272,10 @@ export async function bootIntegrations(
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
 
-  // The sidecar receives RUN_TOKEN but not always RUN_ID directly — we
-  // need a stable identifier for labelling integration containers
-  // (lets the orphan reaper match containers back to their run if the
-  // sidecar dies mid-shutdown). NEVER derive this from RUN_TOKEN: even
-  // a 12-char slice of the signed token would leak ~72 bits of secret
-  // entropy via `docker inspect` (labels are visible to anyone who can
-  // talk to the daemon). Fall back to an opaque random id when RUN_ID
-  // isn't available — orphan-cleanup is best-effort either way.
+  // Docker and Firecracker sidecars get RUN_ID (docker labels runner containers
+  // with it for the orphan reaper); a process-mode sidecar does not, and only
+  // names its local scratch and CA material with it. NEVER derive it from
+  // RUN_TOKEN: a container label is readable by anyone who can reach the daemon.
   const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
   // Pick the runtime backend deterministically from `INTEGRATION_RUNTIME_ADAPTER`

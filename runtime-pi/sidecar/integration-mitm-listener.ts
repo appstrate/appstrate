@@ -254,13 +254,16 @@ export function createIntegrationMitmListener(
   const maxRequestBytes = 10 * 1024 * 1024; // 10 MiB inner-request body cap.
   // Each upstream request connects to the address the guard validated for it, the name kept on
   // `Host` and the TLS identity. An injected `fetch` (tests) owns its transport: checked, not pinned.
-  const fetchFn: UpstreamFetch = (url, init) =>
-    guardedFetch(url, init, {
+  const fetchFn: UpstreamFetch = (url, init) => {
+    // No redirect is followed, so `url` is the only hop the guard judges: its port is the hop's.
+    const port = Number(URL.parse(url)?.port) || 443;
+    return guardedFetch(url, init, {
       followRedirects: false,
       fetchImpl: options.fetch,
       resolve: options.resolveHostFn,
-      allowHost: (h) => options.egressPolicy.skipsSsrfFloor(h),
+      allowHost: (h) => options.egressPolicy.skipsSsrfFloor(h, port),
     });
+  };
   const emit = options.onEvent ?? (() => {});
 
   // Inner servers keyed by upstream authority: the inner request carries no
@@ -539,8 +542,8 @@ async function handleInboundConnection(
   // Mirrors the credential-proxy SSRF guard.
   //
   // Literal layer first (cheap, no DNS) … Skipped with the rebind layer for a
-  // host the policy exempts (#1819).
-  const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, isBlockedHost);
+  // target the policy exempts (#1819).
+  const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, result.port, isBlockedHost);
   if (ssrfFloor(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
     rawSocket.destroy();

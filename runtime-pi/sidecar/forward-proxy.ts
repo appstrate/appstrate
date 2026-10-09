@@ -19,6 +19,7 @@ import {
   type SidecarConfig,
 } from "./helpers.ts";
 import {
+  hopByHopHeaders,
   parseConnectTarget,
   netConnectWithTimeout,
   relaySockets,
@@ -26,7 +27,6 @@ import {
 } from "./connect-tunnel.ts";
 import { logger } from "./logger.ts";
 import { redactUrlForLog } from "./redact.ts";
-import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
 
 interface ForwardProxyDeps {
   config: SidecarConfig;
@@ -109,18 +109,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
   function forwardHeaders(
     raw: IncomingMessage["headers"],
   ): Record<string, string | string[] | undefined> {
-    // Collect any extra hop-by-hop names declared in the Connection header
-    const connectionExtra = new Set(
-      (typeof raw.connection === "string" ? raw.connection : "")
-        .split(",")
-        .map((h) => h.trim().toLowerCase())
-        .filter(Boolean),
-    );
-
+    const hopByHop = hopByHopHeaders(raw.connection);
     const out: Record<string, string | string[] | undefined> = {};
     for (const [key, value] of Object.entries(raw)) {
-      const lower = key.toLowerCase();
-      if (HOP_BY_HOP_HEADERS.has(lower) || connectionExtra.has(lower)) continue;
+      if (hopByHop.has(key.toLowerCase())) continue;
       out[key] = value;
     }
     return out;
@@ -250,20 +242,22 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
     // Direct: resolve-and-pin to close the DNS-rebind gap — the literal
     // isAllowedTarget() check above does not resolve names. The Host header
     // keeps the original name; only the TCP target is pinned.
-    void pinDirectTarget(parsed.hostname, targetPort).then((pinned) => {
-      if (pinned === null) {
-        res.writeHead(403);
-        res.end("Blocked: internal network");
-        return;
-      }
-      forward({
-        hostname: pinned,
-        port: targetPort,
-        path: parsed.pathname + parsed.search,
-        method: req.method,
-        headers: { ...cleaned, host: parsed.host },
-      });
-    });
+    void pinDirectTarget(parsed.hostname, targetPort)
+      .then((pinned) => {
+        if (pinned === null) {
+          res.writeHead(403);
+          res.end("Blocked: internal network");
+          return;
+        }
+        forward({
+          hostname: pinned,
+          port: targetPort,
+          path: parsed.pathname + parsed.search,
+          method: req.method,
+          headers: { ...cleaned, host: parsed.host },
+        });
+      })
+      .catch(() => res.destroy());
   }
 
   function handleConnect(req: IncomingMessage, clientSocket: Socket, head: Buffer) {
@@ -355,32 +349,34 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
       // resolve names. Pinning is safe: this is a blind CONNECT tunnel (no
       // TLS termination here), the client's own handshake carries SNI/Host
       // for the original name. The platform endpoint keeps a name-based connect.
-      void pinDirectTarget(host, port).then((pinned) => {
-        if (clientSocket.destroyed) return; // client gave up during resolution
-        if (pinned === null) {
-          clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-          clientSocket.destroy();
-          return;
-        }
-        let established = false;
-        const targetSocket = netConnectWithTimeout(port, pinned, () => {
-          established = true;
-          clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          if (head.length) targetSocket.write(head);
-          relay(clientSocket, targetSocket);
-        });
-        targetSocket.on("error", (err) => {
-          logger.error("CONNECT direct error", { target, error: err.message });
-          // Surface a 502 to the waiting client before tearing down — but only
-          // pre-tunnel. Once established, writing into the relayed stream would
-          // corrupt it, so just destroy.
-          if (!established && !clientSocket.destroyed) {
-            clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      void pinDirectTarget(host, port)
+        .then((pinned) => {
+          if (clientSocket.destroyed) return; // client gave up during resolution
+          if (pinned === null) {
+            clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            clientSocket.destroy();
+            return;
           }
-          clientSocket.destroy();
-        });
-        clientSocket.on("error", () => targetSocket.destroy());
-      });
+          let established = false;
+          const targetSocket = netConnectWithTimeout(port, pinned, () => {
+            established = true;
+            clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            if (head.length) targetSocket.write(head);
+            relay(clientSocket, targetSocket);
+          });
+          targetSocket.on("error", (err) => {
+            logger.error("CONNECT direct error", { target, error: err.message });
+            // Surface a 502 to the waiting client before tearing down — but only
+            // pre-tunnel. Once established, writing into the relayed stream would
+            // corrupt it, so just destroy.
+            if (!established && !clientSocket.destroyed) {
+              clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+            }
+            clientSocket.destroy();
+          });
+          clientSocket.on("error", () => targetSocket.destroy());
+        })
+        .catch(() => clientSocket.destroy());
     }
   }
 

@@ -26,8 +26,8 @@ _setDataDirForTesting(DATA_DIR);
 
 let orchestrator: ProcessOrchestrator;
 
-// The constructor refuses INTEGRATION_RUNTIME_ADAPTER=docker, which a Tier-3 `.env`
-// (auto-loaded by Bun) sets. Only the #1819 describe below sets it, per test.
+// The constructor refuses INTEGRATION_RUNTIME_ADAPTER=docker, which a developer `.env`
+// (auto-loaded by Bun) may set. Only the #1819 describe below sets it, per test.
 const operatorIntegrationAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
 beforeAll(() => {
   delete process.env.INTEGRATION_RUNTIME_ADAPTER;
@@ -358,9 +358,6 @@ describe("ProcessOrchestrator", () => {
       withAdapterEnv("docker", () => {
         expect(() => new ProcessOrchestrator()).toThrow(
           /INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process/,
-        );
-        expect(() => new ProcessOrchestrator()).toThrow(
-          /RUN_ADAPTER=docker or RUN_ADAPTER=firecracker/,
         );
       });
     });

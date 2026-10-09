@@ -134,7 +134,7 @@ The runtime-side parser at [`runtime-pi/mcp/upstream-meta.ts`](../mcp/upstream-m
 
 The CLI's local resolver and the platform credential proxy call the same `fetchApiCall`, so an AFPS package behaves the same on the three paths. They differ only in who the operator is: `EGRESS_ALLOW_INTERNAL_HOSTS` for the sidecar and the platform proxy; the caller, whose own machine and network it is, for `appstrate run --integrations=local`, which therefore exempts every host a declared entry names literally.
 
-A local runner's egress listeners (CONNECT, MITM, transparent plane) apply the same rule (`skipsSsrfFloor`, #1819) to the host they dial: it skips the SSRF floor only when the auth's DECLARED `authorized_uris` names it literally (`IntegrationSpawnSpec.egress.declaredUris`), `EGRESS_ALLOW_INTERNAL_HOSTS` lists it, and `allow_all_uris` is off. The runner's allowlist check still applies. Never list a loopback name (`localhost`, `127.0.0.1`) outside tests: an `api_call` or a runner whose manifest names it would reach the sidecar's own ports.
+A local runner's egress listeners (CONNECT, MITM, transparent plane) apply the same rule per authority (#1819): a `(host, port)` skips the SSRF floor only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists the host, `allow_all_uris` is off, and a DECLARED `authorized_uris` entry (`IntegrationSpawnSpec.egress.declaredUris`) with no `{` or `*` in its authority names that host and allows that port (`https://intranet.corp/**` → 443 only; a templated port or a port glob exempts nothing). The runner's allowlist check still applies. See `docs/architecture/SIDECAR.md` → "Runner egress allowlist".
 
 ## Redirect handling
 

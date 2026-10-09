@@ -15,6 +15,8 @@
 import { connect as netConnect } from "node:net";
 import type { Socket } from "node:net";
 
+import { HOP_BY_HOP_HEADERS } from "@appstrate/afps-runtime/resolvers";
+
 /** Idle window after which a relayed tunnel is torn down (no data flowing). */
 export const TUNNEL_IDLE_TIMEOUT_MS = 120_000; // 2 min
 /** Max time to wait for the upstream TCP connection to establish. */
@@ -44,7 +46,7 @@ export function parseConnectTarget(target: string): { host: string; port: number
       port = parseInt(target.slice(colonIdx + 1)) || 443;
     }
   }
-  if (!host) return null;
+  if (!host || port < 1 || port > 65535) return null;
   return { host, port };
 }
 
@@ -69,14 +71,7 @@ export function netConnectWithTimeout(
   return socket;
 }
 
-/**
- * Tie `to` to `from`: an error on `from` destroys `to` at once; when `from`
- * ends or closes cleanly, `to` is ended and destroyed once its queued bytes are
- * flushed (`finish`) — destroying at once would drop the tail of a response
- * its peer has not read yet, and waiting for that peer's FIN would leave the
- * socket half-open for as long as the peer keeps it. A `to` still connecting
- * is destroyed; one whose peer never drains dies at its idle timeout.
- */
+/** Tie `to` to `from`: destroyed on error, else ended and destroyed once flushed (no tail lost). */
 export function closeWith(from: Socket, to: Socket): void {
   const release = () => {
     if (to.connecting) to.destroy();
@@ -87,20 +82,29 @@ export function closeWith(from: Socket, to: Socket): void {
   from.once("close", release);
 }
 
+/** The hop-by-hop header names of a request: the fixed set plus those its `Connection` lists. */
+export function hopByHopHeaders(connection: string | undefined): Set<string> {
+  const named = (connection ?? "").split(",").map((h) => h.trim().toLowerCase());
+  return new Set([...HOP_BY_HOP_HEADERS, ...named.filter(Boolean)]);
+}
+
 /**
- * Blind bidirectional relay between two sockets: an idle timeout destroys
- * both, otherwise each side's teardown follows {@link closeWith}. Used after a
- * CONNECT tunnel is established.
+ * Blind bidirectional relay between two sockets, with an idle timeout and
+ * mutual teardown on error/close. Used after a CONNECT tunnel is established.
  */
 export function relaySockets(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
   s1.pipe(s2);
   s2.pipe(s1);
+  destroyBothWhenIdle(s1, s2, idleMs);
+  closeWith(s1, s2);
+  closeWith(s2, s1);
+}
+
+export function destroyBothWhenIdle(s1: Socket, s2: Socket, idleMs = TUNNEL_IDLE_TIMEOUT_MS): void {
   const destroyBoth = () => {
     s1.destroy();
     s2.destroy();
   };
   s1.setTimeout(idleMs, destroyBoth);
   s2.setTimeout(idleMs, destroyBoth);
-  closeWith(s1, s2);
-  closeWith(s2, s1);
 }

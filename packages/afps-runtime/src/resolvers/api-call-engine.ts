@@ -224,12 +224,8 @@ export interface FetchApiCallOptions {
   logger?: ApiCallLogger;
 }
 
-/**
- * Whether `hostname` skips the SSRF floor: the operator accepts it (`internalHost`) AND
- * `declaredUris` names it literally, never under `allowAllUris`. The operator vouches for the
- * host, the manifest for the traffic; a host only a glob or a rendered entry matches is always
- * gated. One rule for `api_call` and the runner egress listeners (#1819).
- */
+/** Whether `hostname` skips the SSRF floor: the operator vouches for the host (`internalHost`), the
+ * manifest for the traffic (`declaredUris` names it literally, never under `allowAllUris`). */
 export function skipsSsrfFloor(
   hostname: string,
   opts: Pick<FetchApiCallOptions, "declaredUris" | "allowAllUris" | "internalHost">,

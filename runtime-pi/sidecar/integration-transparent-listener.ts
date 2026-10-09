@@ -223,7 +223,7 @@ export function createTransparentEgressListener(
           return;
         }
         const target = `${targetHost}:${upstreamPort}`;
-        const ssrfFloor = ssrfFloorFor(policy, targetHost, isBlockedHostFn);
+        const ssrfFloor = ssrfFloorFor(policy, targetHost, upstreamPort, isBlockedHostFn);
 
         // SSRF floor, literal layer — identical to the CONNECT path.
         if (ssrfFloor(targetHost)) {

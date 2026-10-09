@@ -270,9 +270,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private pendingSpecs = new Map<string, PendingSpec>();
 
   constructor() {
-    // A host-subprocess sidecar cannot attach Docker runners to a per-run network,
-    // so their egress would escape the allowlist and the SSRF floor. Raw env: an
-    // unset value means "process" here, not the schema's "docker" default.
+    // Docker runners would get no per-run network here, so their egress would bypass the
+    // sidecar. Raw env: unset must not read as the schema's "docker" default.
     if (process.env.INTEGRATION_RUNTIME_ADAPTER === "docker") {
       throw new Error(
         "INTEGRATION_RUNTIME_ADAPTER=docker is not supported with RUN_ADAPTER=process: " +
@@ -474,8 +473,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    // No `runId`: RUN_ID names the per-run Docker network and labels runner
-    // containers, and this topology spawns no containers.
+    // No `runId`: RUN_ID only names Docker runner resources, and this topology spawns none.
     const env = buildBaseSidecarEnv({
       spec,
       baseEnv: cleanProcessEnv(),
@@ -484,8 +482,6 @@ export class ProcessOrchestrator implements RunOrchestrator {
       platformApiUrl,
       workspace: boundary.workspace,
     });
-    // This run is NOT containerized, so its integrations spawn as host
-    // subprocesses too (the constructor refuses the docker override).
     env.INTEGRATION_RUNTIME_ADAPTER = "process";
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
