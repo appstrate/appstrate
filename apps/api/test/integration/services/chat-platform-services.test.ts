@@ -299,7 +299,7 @@ describe("recordChatUsage — pricing provenance", () => {
           tiers: [{ ...TIER_BAND, input_tokens: -30_000 }],
         }),
       );
-      expect(warn.mock.calls.map(([msg]) => msg)).toContain("chat: dropped invalid usage tiers");
+      expect(warn.mock.calls.map(([msg]) => msg)).toContain("usage: malformed tier bands dropped");
     } finally {
       warn.mockRestore();
     }

@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import { MODEL_REASONING_LEVELS } from "@appstrate/core/model-generation";
-import { modelInputModalitySchema } from "@appstrate/core/module";
+import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
 import type { Api, Model } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { findPiModelsById, listPiModels, listPiModelsOfApi } from "@appstrate/runner-pi/pi-model";
@@ -36,9 +36,8 @@ const recordSchema = z.strictObject({
   input: z.array(modelInputModalitySchema).min(1),
   cost: z.strictObject({
     ...rateSchema,
-    tiers: z
-      .array(z.strictObject({ ...rateSchema, inputTokensAbove: z.number().int().positive() }))
-      .optional(),
+    // The platform's rate-card rule, so an accepted tier can price usage bands.
+    tiers: modelCostSchema.shape.tiers,
   }),
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive(),

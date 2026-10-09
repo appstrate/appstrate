@@ -67,7 +67,7 @@ interface RuntimeEnv {
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<ModelInputModality>;
   /**
-   * Per-token cost (input/output/cacheRead/cacheWrite USD, price tiers), or ABSENT when the
+   * Per-token cost (USD rates and price tiers), or ABSENT when the
    * platform resolved no rates — unpriced, or aliased (the published rate card
    * names the vendor). Absent means the run reports no cost, never a fake 0.
    */
@@ -261,7 +261,7 @@ function parseModelCost(
     issues.push(`MODEL_COST: malformed JSON — ${getErrorMessage(err)}`);
     return fallback;
   }
-  // The platform's own rule: tiers included, so Pi's per-request cost matches the runner row.
+  // Tiers kept: Pi prices each request at its tier, as the runner row does.
   const cost = modelCostSchema.safeParse(parsed);
   if (!cost.success) {
     for (const issue of cost.error.issues) {

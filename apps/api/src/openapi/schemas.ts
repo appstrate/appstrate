@@ -299,9 +299,9 @@ export const schemas = {
     type: "object",
     required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
     description:
-      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card.",
     properties: {
-      inputTokensAbove: { type: "number" },
+      inputTokensAbove: { type: "integer", minimum: 1 },
       input: { type: "number" },
       output: { type: "number" },
       cacheRead: { type: "number" },
@@ -1167,11 +1167,7 @@ export const schemas = {
             items: { $ref: "#/components/schemas/TokenUsageTier" },
           },
         },
-        // Both writers (the metric and finalize ingestion paths) parse with
-        // `tokenUsageSchema`, which strips unknown keys; a row the metric path
-        // wrote verbatim before it parsed may still carry a runner's extra
-        // keys, and the column is served as stored — so this stays `true`.
-        additionalProperties: true,
+        additionalProperties: false,
       },
       started_at: { type: ["string", "null"], format: "date-time" },
       completed_at: { type: ["string", "null"], format: "date-time" },
@@ -1801,7 +1797,11 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
-          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
+          tiers: {
+            type: "array",
+            maxItems: MAX_TOKEN_USAGE_TIERS,
+            items: { $ref: "#/components/schemas/ModelCostTier" },
+          },
         },
       },
       created_by: { type: ["string", "null"] },

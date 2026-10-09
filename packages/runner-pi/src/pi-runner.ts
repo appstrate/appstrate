@@ -1394,10 +1394,7 @@ interface SessionBridgeOptions {
   contextWindow?: number;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
-  /**
-   * The session model's rate card. Its tiers decide which band of the
-   * cumulative usage (`TokenUsage.tiers`) each request lands in.
-   */
+  /** The session model's rate card: its tiers band the cumulative usage. */
   cost?: ModelCost;
   /** See {@link PiRunnerOptions.toolResultByteLimit}. */
   toolResultByteLimit?: number;
@@ -1430,9 +1427,8 @@ export function installSessionBridge(
   const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**
-   * Fold one Pi `Usage` into the run totals (its tier band included) and report
-   * its deltas. `cost` is Pi's own (`calculateCost` against the model's rates) —
-   * never recomputed; the bands let the platform's recompute land on the same sum.
+   * Fold one Pi `Usage` into the run totals (tier band included) and report its
+   * deltas. `cost` is Pi's own (`calculateCost` against the model's rates) — never recomputed.
    */
   const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
     totalUsage = addRequestUsage(totalUsage, usage, options.cost);

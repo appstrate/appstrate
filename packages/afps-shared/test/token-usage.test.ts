@@ -9,6 +9,7 @@ describe("isTokenUsageTiers", () => {
     expect(
       isTokenUsageTiers([
         { input_tokens_above: 100_000, input_tokens: 5, cache_read_input_tokens: 0 },
+        { input_tokens_above: 200_000, output_tokens: 0.5 },
         { input_tokens_above: 272_000 },
       ]),
     ).toBe(true);
@@ -32,7 +33,7 @@ describe("isTokenUsageTiers", () => {
       [{ input_tokens_above: Number.POSITIVE_INFINITY }],
       [{ input_tokens_above: 1 }, { input_tokens_above: 1 }],
       [{ input_tokens_above: 1, output_tokens: -1 }],
-      [{ input_tokens_above: 1, output_tokens: 0.5 }],
+      [{ input_tokens_above: 1, output_tokens: Number.POSITIVE_INFINITY }],
       [{ input_tokens_above: 1, cache_creation_input_tokens: null }],
       [{ input_tokens_above: 1, input_tokens: Number.NaN }],
       [{ input_tokens_above: 1, cost: 0.2 }],

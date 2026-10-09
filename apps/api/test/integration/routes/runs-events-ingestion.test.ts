@@ -1122,7 +1122,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       expect(row?.status).toBe("success");
       expect(row?.tokenUsage).toEqual({ input_tokens: 12, output_tokens: 3 });
       expect(
-        warnSpy.mock.calls.filter(([message]) => message.includes("malformed usage tiers")),
+        warnSpy.mock.calls.filter(([message]) => message.includes("tier bands dropped")),
       ).toHaveLength(1);
     } finally {
       warnSpy.mockRestore();

@@ -41,7 +41,7 @@ describe("finalize body contract", () => {
       status: "success",
       usage: { ...USAGE, tiers: [{ input_tokens_above: 0 }] },
     });
-    expect(parsed.usage).toEqual(USAGE);
+    expect(parsed.usage).toEqual({ usage: USAGE, tiersDropped: true });
   });
 
   it("accepts a non-success status without usage", () => {

@@ -5850,7 +5850,7 @@ export interface components {
             /** @description Where this package is PLACED, restricted to spaces the caller reads this type in. Empty when the package is placed nowhere the caller can see — which the space form still lists when the caller could place it there in one click (a package whose home grants them `<type>:share`). */
             placements: components["schemas"]["PackagePlacement"][];
         }[];
-        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. */
+        /** @description A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card. */
         ModelCostTier: {
             inputTokensAbove: number;
             input: number;
@@ -6450,16 +6450,14 @@ export interface components {
             } | null;
             error: string | null;
             /** @description Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action), parsed on ingestion before it is stored in JSONB. */
-            token_usage: ({
+            token_usage: {
                 input_tokens?: number;
                 output_tokens?: number;
                 cache_creation_input_tokens?: number;
                 cache_read_input_tokens?: number;
                 /** @description Per price tier, the share of the counters priced at it. Absent when no request reached a tier. */
                 tiers?: components["schemas"]["TokenUsageTier"][];
-            } & {
-                [key: string]: unknown;
-            }) | null;
+            } | null;
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */

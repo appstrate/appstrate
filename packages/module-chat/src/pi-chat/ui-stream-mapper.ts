@@ -63,8 +63,7 @@ interface OpenBlock {
  * rates and lets it apply the shared ledger price (Pi's `calculateCost`), so the
  * chat, proxy, and runner producers can't drift (see `ChatUsageRecord.cost` in
  * `@appstrate/core/chat-contract` and `engine.ts`'s `recordUsage` call).
- * `usage` is summed per model call with its tier band (`TokenUsage.tiers`), so
- * the sum still prices exactly.
+ * `usage` carries the tier bands of its model calls (`TokenUsage.tiers`).
  */
 interface PiChatResultMeta {
   usage: TokenUsage;

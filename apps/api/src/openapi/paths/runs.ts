@@ -1496,6 +1496,7 @@ const canonicalRunsPaths = {
                       items: { $ref: "#/components/schemas/TokenUsageTier" },
                     },
                   },
+                  additionalProperties: false,
                 },
                 cost: {
                   type: "number",

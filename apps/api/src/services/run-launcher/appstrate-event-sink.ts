@@ -18,7 +18,7 @@ import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import { tokenUsageSchema, tokenUsageTiersDropped } from "@appstrate/core/token-usage";
+import { parseTokenUsage } from "@appstrate/core/token-usage";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import type { CredentialSource } from "@appstrate/db/schema";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -173,26 +173,13 @@ export async function persistRunEvent(
   }
 }
 
-/**
- * The metric's usage snapshot, or null. A malformed one (a non-numeric counter
- * would price as NaN) is dropped and logged, never thrown: a throw rolls the
- * ingestion back and the runner replays it forever (#1501). Malformed tier
- * bands alone drop only the bands.
- */
+/** The metric's usage, or null: a malformed one is logged, never thrown (replayed, #1501). */
 function parseMetricUsage(runId: string, value: unknown): TokenUsage | null {
   if (value == null) return null;
-  const parsed = tokenUsageSchema.safeParse(value);
-  if (parsed.success) {
-    if (tokenUsageTiersDropped(value, parsed.data)) {
-      logger.warn("appstrate.metric: malformed usage tiers dropped", { runId });
-    }
-    return parsed.data;
-  }
-  logger.warn("appstrate.metric: malformed usage dropped", {
-    runId,
-    error: parsed.error.message,
-  });
-  return null;
+  const { usage, tiersDropped } = parseTokenUsage(value);
+  if (!usage) logger.warn("appstrate.metric: malformed usage dropped", { runId });
+  if (tiersDropped) logger.warn("usage: malformed tier bands dropped", { runId, seam: "metric" });
+  return usage;
 }
 
 function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {
@@ -362,8 +349,7 @@ const REPORTED_COST_DIVERGENCE_USD = 1e-6;
  * Population: server-priced runs whose container reported a cost — in practice
  * OAuth-subscription runs, the one platform route the LLM proxy does not serve
  * (a proxy-served run writes no runner row); an aliased run gets no
- * `MODEL_COST` and reports no cost. Both sides price each request at its tier:
- * the container per request, the server from the tier bands of the summed usage.
+ * `MODEL_COST` and reports no cost. Both sides price each request at its tier.
  *
  * It is the only live check that `@appstrate/runner-pi` (also the CLI's remote
  * runner) prices as the server does. `runner-cost-parity.test.ts` pins the two

@@ -635,7 +635,7 @@ describe("persistRunEvent", () => {
         const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
         expect(runRow?.tokenUsage).toEqual({ input_tokens: 900, output_tokens: 300 });
         expect(
-          warnSpy.mock.calls.filter(([message]) => message.includes("malformed usage tiers")),
+          warnSpy.mock.calls.filter(([message]) => message.includes("tier bands dropped")),
         ).toHaveLength(1);
       } finally {
         warnSpy.mockRestore();

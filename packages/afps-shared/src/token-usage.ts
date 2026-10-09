@@ -1,7 +1,7 @@
 // Copyright 2025-2026 Appstrate
 // SPDX-License-Identifier: Apache-2.0
 
-/** The token counters of a {@link TokenUsage} — declared once, the types derive from it. */
+/** The token counters of a {@link TokenUsage}; the types derive from it. */
 export const TOKEN_USAGE_COUNTERS = [
   "input_tokens",
   "output_tokens",
@@ -11,7 +11,6 @@ export const TOKEN_USAGE_COUNTERS = [
 
 type TokenUsageCounter = (typeof TOKEN_USAGE_COUNTERS)[number];
 
-/** Every token counter, each optional. */
 type TokenUsageCounters = { [K in TokenUsageCounter]?: number };
 
 /**
@@ -26,13 +25,7 @@ type TokenUsageCounters = { [K in TokenUsageCounter]?: number };
  * web realtime hooks, and the CLI runner.
  */
 export interface TokenUsage extends TokenUsageCounters {
-  /**
-   * Usage summed over several requests keeps what a price tier needs: one
-   * entry per tier threshold, holding the tokens of the requests priced at
-   * that tier (input + cache-read + cache-write above `input_tokens_above`).
-   * A subset of the counters above, which still count every request. Absent
-   * when no request reached a tier. Validated by {@link isTokenUsageTiers}.
-   */
+  /** Summed usage, per tier threshold: the tokens of the requests priced at that tier. */
   tiers?: TokenUsageTier[];
 }
 
@@ -41,10 +34,7 @@ export interface TokenUsageTier extends TokenUsageCounters {
   input_tokens_above: number;
 }
 
-/**
- * Most bands a {@link TokenUsage.tiers} may hold. A Pi model card carries one
- * or two tiers; the cap bounds what is stored verbatim from untrusted runners.
- */
+/** Bounds what is stored verbatim from untrusted runners; a Pi card has one or two tiers. */
 export const MAX_TOKEN_USAGE_TIERS = 16;
 
 /** A {@link TokenUsage} counter the wire can carry: finite and non-negative. */
@@ -52,17 +42,9 @@ export function isTokenCount(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-const isWholeCount = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && (value as number) >= 0;
-
 const TIER_KEYS = new Set<string>(["input_tokens_above", ...TOKEN_USAGE_COUNTERS]);
 
-/**
- * The rule for {@link TokenUsage.tiers}, shared by every validator of the wire
- * shape: at most {@link MAX_TOKEN_USAGE_TIERS} objects, each holding only a
- * positive integer `input_tokens_above` unique across entries and non-negative
- * integer counters (Pi thresholds and token counts are integers).
- */
+/** The {@link TokenUsage.tiers} rule: capped, strict keys, unique positive integer thresholds. */
 export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
   if (!Array.isArray(value) || value.length > MAX_TOKEN_USAGE_TIERS) return false;
   const thresholds = new Set<number>();
@@ -71,9 +53,10 @@ export function isTokenUsageTiers(value: unknown): value is TokenUsageTier[] {
     const tier = entry as Record<string, unknown>;
     if (Object.keys(tier).some((key) => !TIER_KEYS.has(key))) return false;
     const threshold = tier.input_tokens_above;
-    if (!isWholeCount(threshold) || threshold === 0 || thresholds.has(threshold)) return false;
+    if (typeof threshold !== "number" || !Number.isSafeInteger(threshold)) return false;
+    if (threshold < 1 || thresholds.has(threshold)) return false;
     thresholds.add(threshold);
-    if (TOKEN_USAGE_COUNTERS.some((c) => tier[c] !== undefined && !isWholeCount(tier[c]))) {
+    if (TOKEN_USAGE_COUNTERS.some((c) => tier[c] !== undefined && !isTokenCount(tier[c]))) {
       return false;
     }
   }

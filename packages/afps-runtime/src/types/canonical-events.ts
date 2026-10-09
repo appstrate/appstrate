@@ -260,9 +260,7 @@ export const CANONICAL_CONSTRAINTS = {
   ],
   "appstrate.metric": [
     { path: "usage", holds: optional(isJsonObject) },
-    // Derived from TOKEN_USAGE_COUNTERS, which `TokenUsage`'s counters are
-    // typed from (`keyof TokenUsage` is pinned below): a counter added grows
-    // this table on its own, and the coverage guard then demands a fixture.
+    // Derived from TOKEN_USAGE_COUNTERS; parity with `keyof TokenUsage` is pinned below.
     ...TOKEN_USAGE_COUNTERS.map((counter) => ({
       path: `usage.${counter}`,
       holds: optional(isTokenCount),
@@ -352,10 +350,8 @@ export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent
 type Assert<T extends true> = T;
 
 /**
- * The keys of `TokenUsage` are exactly the `usage.*` entries of
- * {@link CANONICAL_CONSTRAINTS}, in both directions: the counters through
- * `TOKEN_USAGE_COUNTERS` (which they are typed from), plus `tiers`. A field
- * added to the interface without a constraint would be accepted unchecked.
+ * `keyof TokenUsage` is exactly the `usage.*` entries of
+ * {@link CANONICAL_CONSTRAINTS}: a field added without a constraint would go unchecked.
  *
  * A module-private annotation rather than an exported type alias: tsc checks
  * `Assert<>` constraints identically either way, but a *type alias* nothing

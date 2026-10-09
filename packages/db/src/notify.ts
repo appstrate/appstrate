@@ -59,9 +59,8 @@ export interface RunMetricNotifyPayload {
  *
  * The payload is JSON-encoded inline; postgres truncates NOTIFY
  * payloads at 8 KB but ours is bounded by the four `token_usage`
- * integers (plus at most `MAX_TOKEN_USAGE_TIERS` bands of five integers each,
- * `@appstrate/afps-shared/token-usage`), a float and a one-word status, well
- * under that ceiling.
+ * integers (plus at most `MAX_TOKEN_USAGE_TIERS` five-number tier bands), a
+ * float and a one-word status, well under that ceiling.
  */
 export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): Promise<void> {
   await db.execute(drizzleSql`SELECT pg_notify('run_metric', ${JSON.stringify(payload)})`);

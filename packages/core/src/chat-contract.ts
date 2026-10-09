@@ -132,13 +132,7 @@ export interface ChatUsageRecord {
   outputTokens: number;
   cacheReadTokens?: number | null;
   cacheWriteTokens?: number | null;
-  /**
-   * The turn sums several model calls (the tool loop), so a price tier — keyed
-   * on ONE call's prompt — cannot be read off the four counters: per tier
-   * threshold, the tokens of the calls priced at that tier (`TokenUsage.tiers`,
-   * a subset of the counters). Absent when no call reached a tier. Invalid
-   * bands are dropped by the platform seam, which then prices at the base rate.
-   */
+  /** The turn's tier bands (`TokenUsage.tiers`): its summed counters lose which call hit a tier. */
   tiers?: TokenUsageTier[];
   /**
    * Model's catalog per-1M-token rates, or null when the catalog has none. The

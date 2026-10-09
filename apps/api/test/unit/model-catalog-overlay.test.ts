@@ -103,6 +103,16 @@ describe("readModelCatalog — the file", () => {
     );
     await expect(read("{")).rejects.toThrow(/not JSON/);
   });
+
+  it("refuses price tiers the platform's rate-card rule refuses", async () => {
+    const { cost } = next() as { cost: Record<string, number> };
+    const tier = { ...cost, inputTokensAbove: 1_000 };
+    for (const tiers of [[tier, tier], [{ ...tier, inputTokensAbove: 1.5 }]]) {
+      await expect(read(catalogFile([next({ cost: { ...cost, tiers } })]))).rejects.toThrow(
+        /unexpected shape at records\.0\.cost\.tiers/,
+      );
+    }
+  });
 });
 
 describe("readModelCatalog — the records", () => {

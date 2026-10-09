@@ -112,7 +112,7 @@ export interface PiTokenCounts {
   cacheWrite: number;
 }
 
-/** The {@link PiTokenCounts} of a wire {@link TokenUsage} (or one of its tiers); absent → 0. */
+/** The {@link PiTokenCounts} of a wire {@link TokenUsage} or band; absent → 0. */
 export function piTokenCounts(usage: Omit<TokenUsage, "tiers">): PiTokenCounts {
   return {
     input: usage.input_tokens ?? 0,
@@ -141,12 +141,7 @@ export function piTokenCostUsd(cost: ModelCost, usage: PiTokenCounts): number {
   return calculateCost({ cost: rates } as Model<Api>, tokens).total;
 }
 
-/**
- * The threshold of the tier `calculateCost` prices `request` at, or null for
- * the base rate. Pi exports no selector; this mirrors the loop in pi-ai's
- * `calculateCost` (`dist/models.js`): the highest `inputTokensAbove` that
- * input + cache-read + cache-write strictly exceeds.
- */
+/** The tier threshold `calculateCost` prices `request` at (null: base): pi-ai's private loop. */
 function pricedTierThreshold(cost: ModelCost, request: PiTokenCounts): number | null {
   const prompt = request.input + request.cacheRead + request.cacheWrite;
   let matched: number | null = null;
@@ -168,12 +163,7 @@ function addCounts(
   };
 }
 
-/**
- * `total` with one more request added: the totals, and the band of the tier
- * the request is priced at (`TokenUsage.tiers`) so {@link usageCostUsd} can
- * price the sum exactly. `usage` is Pi's per-message usage, an absent bucket
- * counting 0. Inputs are not mutated.
- */
+/** `total` plus one request, added to the counters and to the band of its tier. Pure. */
 export function addRequestUsage(
   total: TokenUsage,
   usage: Partial<PiTokenCounts>,
@@ -197,10 +187,8 @@ export function addRequestUsage(
 }
 
 /**
- * USD cost of usage summed by {@link addRequestUsage}: each band at its tier's
- * rates, the rest at the base rate — the sum of {@link piTokenCostUsd} over the
- * requests. A band naming no tier of `cost` prices at the base rate, and bands
- * are clamped to the totals: stored or reported usage must never throw here.
+ * USD cost of usage summed by {@link addRequestUsage}: each band at its tier, the
+ * rest at base. Unknown tiers price at base and bands are clamped: never throws.
  */
 export function usageCostUsd(usage: TokenUsage, cost: ModelCost): number {
   const base: ModelCost = { ...cost, tiers: [] };
@@ -214,7 +202,6 @@ export function usageCostUsd(usage: TokenUsage, cost: ModelCost): number {
       rest[key] -= share[key];
     }
     const tier = cost.tiers?.find((t) => t.inputTokensAbove === band.input_tokens_above);
-    // A tier is a flat card of its own: its rates apply to the band whatever its size.
     total += piTokenCostUsd(tier ? { ...tier, tiers: [] } : base, share);
   }
   return total + piTokenCostUsd(base, rest);
