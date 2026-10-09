@@ -245,13 +245,13 @@ interface ActorConnectionRow {
 }
 
 /** Whether two connections name the same upstream: the same variables, the same values. */
-function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
+export function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
   const entries = Object.entries(a);
   return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
 }
 
 /** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-function connectionVariablesOf(value: unknown): ConnectionVariables {
+export function connectionVariablesOf(value: unknown): ConnectionVariables {
   const out: Record<string, string> = {};
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
@@ -442,6 +442,7 @@ export async function selectAccessibleConnection(
         agentTools: [],
         agentScopes: [],
         required: true,
+        outOfRun: true,
       },
     ],
     accessibleConnections: rows,

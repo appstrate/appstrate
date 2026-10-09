@@ -94,13 +94,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent selecting `create_draft` gets `gmail.compose` from its tool; one with
   `tools: "*"` declares it the same way. Existing connections keep what they
   were granted.
-- **The fallback binds among your own connections of one account** (#1871),
-  for an agent that declares scopes: when every own connection serving an
-  integration belongs to the same known account, the run binds the
-  least-privileged one that covers the agent (else
-  the closest, which answers `insufficient_scopes`) instead of answering
-  `must_choose_connection`. A new connection made for one agent no longer
-  breaks the others. Several accounts, or an unknown identity, still ask.
+- **The fallback binds among your own connections of one account** (#1871):
+  when every own connection serving an integration is an `oauth2` one of the
+  same known account, auth and instance (connection variables), the run binds
+  the least-privileged one covering the agent's scopes plus the auth's
+  `default_scopes` (else the closest, which answers `insufficient_scopes`)
+  instead of answering `must_choose_connection`, whether or not the agent
+  declares scopes. A new connection made for one agent no longer breaks the
+  others. Several accounts, auths or instances, an unknown identity, and an
+  out-of-run credential-proxy call still ask.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in

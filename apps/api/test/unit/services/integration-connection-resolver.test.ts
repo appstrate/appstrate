@@ -433,8 +433,6 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   const shared = (over: Partial<ConnectionRow> = {}) =>
     conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
   const DEAD = { needsReconnection: true };
-  /** `conn()` rows share `acc_x`; two accounts are a real choice. */
-  const OTHER_ACCOUNT = "acc_y";
 
   /**
    * Bind `rows[bind]`, raise `error` — on `rows[on]` when the error names a connection — or
@@ -483,18 +481,18 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       verdict: { error: "needs_reconnection", on: 1 },
     },
     {
-      name: "own 2 accounts (any auth shape)",
-      rows: () => [own(), own({ authKey: "pat", accountId: OTHER_ACCOUNT })],
+      name: "own 2 (any auth shape)",
+      rows: () => [own(), own({ authKey: "pat" })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2 accounts, one dead (the dead one counts)",
-      rows: () => [own(DEAD), own({ authKey: "pat", accountId: OTHER_ACCOUNT })],
+      name: "own 2, one dead (the dead one counts)",
+      rows: () => [own(DEAD), own({ authKey: "pat" })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2 accounts, both dead",
-      rows: () => [own(DEAD), own({ authKey: "pat", accountId: OTHER_ACCOUNT, ...DEAD })],
+      name: "own 2, both dead",
+      rows: () => [own(DEAD), own({ authKey: "pat", ...DEAD })],
       verdict: { error: "must_choose_connection" },
     },
   ];
@@ -573,7 +571,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
 
   it("my second account expiring is a choice, never a silent switch to the first", () => {
     const first = own({ label: "Boulot" });
-    const second = own({ authKey: "pat", label: "Perso", accountId: OTHER_ACCOUNT, ...DEAD });
+    const second = own({ authKey: "pat", label: "Perso", ...DEAD });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [first, second],
@@ -961,8 +959,65 @@ describe("resolveConnections — fallback among own connections of one account",
     });
   });
 
-  it("still asks when the agent requires no scope", () => {
-    expect(fallback([narrow(), broad()], []).errors[0]!.code).toBe("must_choose_connection");
+  it("binds the narrow one for an agent declaring no scope (the auth's default_scopes)", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([b, n], []);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: n.id }]);
+  });
+
+  it("still asks on an out-of-run proxy call, which names no scope", () => {
+    const result = resolveConnections({
+      requirements: [{ ...req(oauth2Manifest()), outOfRun: true }],
+      accessibleConnections: [narrow(), broad()],
+      pins: [],
+    });
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks across auths of one account", () => {
+    const result = fallback([narrow(), conn({ authKey: "pat" })], ["read"]);
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks across instances of one account (connection variables)", () => {
+    const result = fallback(
+      [
+        conn({ scopesGranted: ["read"], variables: { host: "gitlab.com" } }),
+        conn({ scopesGranted: ["read"], variables: { host: "gitlab.corp" } }),
+      ],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("judges breadth on catalog scopes, not on the IdP's echoed ones", () => {
+    const manifest = oauth2Manifest() as unknown as {
+      auths: { oauth: Record<string, unknown> };
+    };
+    manifest.auths.oauth.scope_catalog = [
+      { value: "read", label: "Read" },
+      { value: "write", label: "Write" },
+    ];
+    const echoed = conn({ scopesGranted: ["read", "openid", "profile", "email"] });
+    const wide = conn({ scopesGranted: ["read", "write"] });
+    const result = resolveConnections({
+      requirements: [req(manifest as unknown as IntegrationManifest, [], ["read"])],
+      accessibleConnections: [wide, echoed],
+      pins: [],
+    });
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: echoed.id }]);
+  });
+
+  it("breaks a tie on the live row, whatever the input order", () => {
+    const dead = conn({ scopesGranted: ["read"], needsReconnection: true });
+    const live = conn({ scopesGranted: ["read"] });
+    for (const rows of [
+      [dead, live],
+      [live, dead],
+    ]) {
+      expect(fallback(rows, ["read"]).resolved[INTEG]).toMatchObject([{ connectionId: live.id }]);
+    }
   });
 
   it("still asks across two accounts", () => {
@@ -1274,7 +1329,7 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
 
   it("falls back to existing cascade when no `auth_key` is pinned (parity with prior behavior)", () => {
     const oauthConn = conn({ authKey: "oauth" });
-    const patConn = conn({ authKey: "pat", accountId: "acc_y" });
+    const patConn = conn({ authKey: "pat" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [oauthConn, patConn],

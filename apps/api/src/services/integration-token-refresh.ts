@@ -422,6 +422,7 @@ async function flagScopeShrinkBelowFloor(
   // the children it implies (`public_repo`).
   const missing = scopesNotCovered(required, granted, manifest, authKey);
   if (missing.length > 0) {
+    // Recovery is two steps: the reconnect re-consents the shrunk grant, then `insufficient_scopes`.
     await markIntegrationConnectionNeedsReconnection(connection.id);
     logger.warn("Integration scope shrink dropped below required floor", {
       integrationId,

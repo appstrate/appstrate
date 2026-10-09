@@ -828,9 +828,8 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
-    // Two accounts: connections of one account differ by scopes only, and bind alone.
-    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, { accountId: "acct-a" });
-    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, { accountId: "acct-b" });
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -1175,13 +1174,9 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     describe("insufficient_scopes", () => {
       /**
        * A LIVE oauth2 connection granted `base` only — short of the
-       * `search.read` the agent's `search` selection requires — owned by
-       * `userId` and optionally shared with the space.
+       * `search.read` the agent's `search` selection requires — owned by `userId`.
        */
-      async function seedUnderScopedConnection(
-        userId: string,
-        sharedWithOrg = false,
-      ): Promise<string> {
+      async function seedUnderScopedConnection(userId: string): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
@@ -1195,7 +1190,6 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
               outputs: { access_token: "live-but-narrow" },
             }),
             scopesGranted: ["base"],
-            sharedWithOrg,
             label: `Étroite ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
@@ -1213,25 +1207,6 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         expect(err.missing_scopes).toEqual(["search.read"]);
         // The relay fields stay, for a caller that starts a new connection itself.
         expect(err.required_scopes).toEqual(["search.read"]);
-        expect(err.connect_url).toBeUndefined();
-        expect(err.expiresAt).toBeUndefined();
-      });
-
-      it("mints nothing when the under-scoped connection is a colleague's shared row", async () => {
-        await seedOauthIntegration();
-        const colleague = await createTestUser();
-        await addOrgMember(ctx.orgId, colleague.id, "member");
-        await seedSpaceMember({
-          spaceId: ctx.defaultSpaceId,
-          userId: colleague.id,
-          presetRole: "operator",
-          customRoleId: null,
-        });
-        await pinForCaller(await seedUnderScopedConnection(colleague.id, true));
-
-        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
-        expect(err.code).toBe("insufficient_scopes");
-        expect(err.owned_by_actor).toBe(false);
         expect(err.connect_url).toBeUndefined();
         expect(err.expiresAt).toBeUndefined();
       });

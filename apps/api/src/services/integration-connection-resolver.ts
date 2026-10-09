@@ -10,8 +10,8 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      several of one known account, for an agent requiring scopes → the least-privileged
- *      covering it; otherwise several → `must_choose_connection`; none → as below
+ *      several oauth2 rows of one known account, auth and instance → the least-privileged covering
+ *      the agent (never out of run); otherwise several → `must_choose_connection`; none → below
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -43,6 +43,7 @@ import {
 import {
   resolveEffectiveToolSelection,
   missingScopesForConnection,
+  partitionScopesByAuthCatalog,
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
@@ -73,7 +74,12 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { displayAccountId, listActiveIntegrationIds } from "./integration-connections.ts";
+import {
+  connectionVariablesOf,
+  displayAccountId,
+  listActiveIntegrationIds,
+  sameConnectionVariables,
+} from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -107,6 +113,8 @@ export interface IntegrationRequirement {
   requiredAuthKey?: string;
   /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
   effectiveTools?: readonly string[] | "*";
+  /** An out-of-run credential-proxy call: no selection, so no scope tells own rows apart. */
+  outOfRun?: boolean;
 }
 
 interface ResolveConnectionsInput {
@@ -228,6 +236,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       actorEndUserId: input.actorEndUserId ?? null,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
+      ...(req.outOfRun ? { outOfRun: true } : {}),
     });
 
     record(req.integrationId, result);
@@ -267,6 +276,7 @@ interface ResolveOneArgs {
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
   availableAuthKeys?: string[];
+  outOfRun?: boolean;
 }
 
 type ResolveOneResult =
@@ -455,32 +465,49 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 }
 
 /**
- * Own connections of ONE known account differ only by scopes, so no account is chosen: the one
- * covering the agent with the fewest grants, else the one missing the fewest (its
- * `insufficient_scopes` carries the remedy). `null` across accounts, for an unknown identity, or
- * when the selection requires no scope (an out-of-run proxy call): nothing then tells them apart.
+ * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
+ * scopes, so no account is chosen: the narrowest covering the agent's scopes plus the auth's
+ * `default_scopes`, else the one missing the fewest (its `insufficient_scopes` carries the
+ * remedy). `null` otherwise, and for an out-of-run proxy call, whose requirement names no scope.
  */
 function leastPrivilegedOfOneAccount(
   args: ResolveOneArgs,
   own: ConnectionRow[],
 ): ConnectionRow | null {
-  const account = displayAccountId(own[0]!.accountId);
-  if (account === null || own.some((c) => c.accountId !== account)) return null;
-  if (own.every((c) => oauthScopesForAuth(args, c.authKey).length === 0)) return null;
-  const missing = (c: ConnectionRow) =>
-    missingScopesForConnection({
+  if (args.outOfRun) return null;
+  const [first] = own;
+  const auth = args.manifest.auths?.[first!.authKey];
+  const account = displayAccountId(first!.accountId);
+  const variables = connectionVariablesOf(first!.variables);
+  if (auth?.type !== "oauth2" || account === null) return null;
+  const sameUpstream = (c: ConnectionRow) =>
+    c.authKey === first!.authKey &&
+    c.accountId === account &&
+    sameConnectionVariables(connectionVariablesOf(c.variables), variables);
+  if (!own.every(sameUpstream)) return null;
+  const agentScopes = [...args.agentScopes, ...(auth.default_scopes ?? [])];
+  const ranked = own.map((c) => ({
+    c,
+    missing: missingScopesForConnection({
       manifest: args.manifest,
       authKey: c.authKey,
       granted: c.scopesGranted,
       agentTools: args.agentTools,
-      agentScopes: args.agentScopes,
-    }).length;
-  // A stable sort: ties keep the candidates' order.
-  return own
-    .map((c) => ({ c, missing: missing(c) }))
-    .sort(
-      (a, b) => a.missing - b.missing || a.c.scopesGranted.length - b.c.scopesGranted.length,
-    )[0]!.c;
+      agentScopes,
+    }).length,
+    // Breadth on catalog scopes only (IdP echoes aside), as the picker judges it.
+    breadth: partitionScopesByAuthCatalog(auth, c.scopesGranted).declared.length,
+  }));
+  // Ties: live first, fewer grants, then the older row — never the load order.
+  ranked.sort(
+    (a, b) =>
+      a.missing - b.missing ||
+      Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||
+      a.breadth - b.breadth ||
+      a.c.createdAt.getTime() - b.c.createdAt.getTime() ||
+      a.c.id.localeCompare(b.c.id),
+  );
+  return ranked[0]!.c;
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {

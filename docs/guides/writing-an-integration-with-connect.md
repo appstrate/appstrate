@@ -300,9 +300,11 @@ An agent that declares `dependencies.integrations["@me/svc"].scopes: ["read"]` a
 connection granted only `["admin"]` is treated as satisfying the requirement — `admin`
 implies `read`. Useful when an IdP exposes umbrella scopes that subsume finer ones.
 
-The agent-install scope union is computed from `default_scopes ∪ per-agent scopes
-∪ tools_policy[t].required_scopes` over the agent's selected tools. The platform's
-incremental-consent flow re-requests the union when an installed agent grows.
+An agent requires its own `scopes ∪ tools_policy[t].required_scopes` over its
+selected tools (the auth's `default_scopes` under `tools: "*"`). A new connection
+requests that set plus `default_scopes`. An existing connection is never widened
+on its own when an agent asks for more: the run answers `insufficient_scopes`, and
+the remedy is a new connection (below).
 
 ### Least privilege with connections
 

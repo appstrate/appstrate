@@ -91,10 +91,12 @@ describe("MCP server instructions — connect bullet", () => {
       const bullet = connectBullet(contextInjected);
       expect(bullet).toMatch(/An `insufficient_scopes` item carries no `connect_url`/);
       expect(bullet).toMatch(/Create a NEW connection \(as above, WITHOUT `connection_id`\)/);
-      expect(bullet).toMatch(/`fallback_auto` — the next run picks it/);
-      expect(bullet).toMatch(/`member_pin` — then replace the old id in that pin/);
+      expect(bullet).toMatch(/`fallback_auto` — the next run picks it when it is the same account/);
+      expect(bullet).toMatch(/`member_pin` or `org_default` \(a member pin beats a soft default\)/);
       expect(bullet).toMatch(/`run_override` — then retry with `connection_overrides`/);
-      expect(bullet).toMatch(/`schedule_override` — create nothing/);
+      expect(bullet).toMatch(
+        /`admin_pin`, `org_default_enforced` or `schedule_override` — create nothing/,
+      );
       expect(bullet).toMatch(
         /only when `owned_by_actor` is true and the user explicitly chooses it/,
       );
