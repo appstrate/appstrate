@@ -94,7 +94,7 @@ export interface RefreshExchangeResult {
  * integration (`integration_connections`) refresh path: build the request,
  * POST it, classify failures into {@link RefreshError} (`revoked` vs
  * `transient`), and parse the success body. Table-specific concerns — which
- * row to write back, scope-shrink detection, `needsReconnection` flips —
+ * row to write back, `needsReconnection` flips —
  * stay in the caller so the wire mechanics stay isolated and reusable.
  */
 export async function performRefreshTokenExchange(

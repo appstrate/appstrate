@@ -18,10 +18,10 @@
  * So the lowest injectable boundary is the **token endpoint URL itself**:
  * each test stands up a controllable `Bun.serve` and points
  * `manifest.auths.primary.tokenUrl` at it. The server's response shape drives
- * the `RefreshError` taxonomy and the scope-shrink path:
+ * the `RefreshError` taxonomy and the narrowed-grant path:
  *   - HTTP 400 + `{ "error": "invalid_grant" }` → RefreshError(kind="revoked") → 410
  *   - HTTP 500 (or any non-400)                 → RefreshError(kind="transient") → 502
- *   - HTTP 200 + narrowed `scope`               → shrinkDetected → scope-floor check
+ *   - HTTP 200 + narrowed `scope`               → stored grant narrowed, connection unflagged
  *
  * Refresh is triggered deterministically by a rejection trigger ({@link REJECTED}),
  * with no clock games for the lead window.
@@ -36,6 +36,7 @@ import { integrationConnections, integrationOauthClients, packages } from "@apps
 import { eq, sql } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import {
   clearUpstreamRejections,
   readCredentialRevision,
@@ -987,19 +988,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     }
   });
 
-  it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
-    // Agent requires `delete`; the refresh narrows the grant to read+send only.
-    await seedPackage({
-      id: "@creds/agent-deleter",
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "agent",
-      draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
-    });
-    await activatePackage(
-      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      "@creds/agent-deleter",
-    );
+  it("stores a narrowed grant unflagged; resolution refuses only the agent needing the dropped scope", async () => {
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -1011,36 +1000,30 @@ describe("resolveLiveIntegrationCredentials", () => {
       resolverContext(connId),
       REJECTED,
     );
-    // Credentials still resolve (the refresh succeeded) ...
-    expect(out.auths.length).toBe(1);
-    // ... but the connection is flagged because `delete` is now missing.
-    expect(await needsReconnection(connId)).toBe(true);
-  });
+    expect(out.auths.find((a) => a.authKey === "primary")?.fields.access_token).toBe("new-access");
+    const [row] = await db
+      .select({
+        scopesGranted: integrationConnections.scopesGranted,
+        needsReconnection: integrationConnections.needsReconnection,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row).toEqual({ scopesGranted: ["read", "send"], needsReconnection: false });
 
-  it("absorbs a scope shrink silently when it still covers the required floor", async () => {
-    // Agent requires only `read`; the refresh shrinks delete away but keeps read.
-    await seedPackage({
-      id: "@creds/agent-reader",
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "agent",
-      draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
-    const connId = await seedConnection({
-      userId: ctx.user.id,
-      scopes: ["read", "send", "delete"],
-    });
-    // Shrinks delete+send away but keeps read (the required floor).
-    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read" });
-
-    const out = await resolveLiveIntegrationCredentials(
-      INTEGRATION_ID,
-      resolverContext(connId),
-      REJECTED,
-    );
-    expect(out.auths.length).toBe(1);
-    expect(await needsReconnection(connId)).toBe(false);
+    const resolveFor = (name: string, tools: string[]) =>
+      resolveConnectionsForRun({
+        agentManifest: agentManifest(name, tools),
+        packageId: name,
+        actor: { type: "user", id: ctx.user.id },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      });
+    const deleter = await resolveFor("@creds/agent-deleter", ["delete_message"]);
+    expect(deleter.errors).toMatchObject([
+      { code: "insufficient_scopes", connectionId: connId, missingScopes: ["delete"] },
+    ]);
+    const sender = await resolveFor("@creds/agent-sender", ["send_message"]);
+    expect(sender.errors).toEqual([]);
+    expect(sender.resolved[INTEGRATION_ID]?.map((c) => c.connectionId)).toEqual([connId]);
   });
 
   it("does not resolve another actor's connection — 404, never a silent empty payload", async () => {

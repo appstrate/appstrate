@@ -223,8 +223,8 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   // slice.
   const selectsNothing = !wildcardSelected && arrayTools.length === 0;
 
-  // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
-  // will union into the OAuth kickoff. Contributes the union of
+  // Inferred OAuth scopes — what run resolution checks the connection's
+  // grant against. Contributes the union of
   // selected tools' requiredScopes only (`undefined`/`[]` selection
   // contributes nothing). Map keeps attribution for "required by: …".
   // Policy lookup goes through the resolved catalog: a tool without

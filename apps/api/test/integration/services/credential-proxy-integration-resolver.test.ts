@@ -39,6 +39,7 @@ import {
   runBoundSelection,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
@@ -539,9 +540,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(false);
   });
 
-  describe("a forced refresh that narrows the grant is checked against the space's scope floor", () => {
-    // The refresh that narrows `scopes_granted` is the only one that can see the shrink — it
-    // rewrites the column the shrink is measured against — so the proxy must check it too.
+  describe("a forced refresh that narrows the grant stores it; resolution judges each agent", () => {
     beforeEach(async () => {
       const base = gmailManifest(token.url);
       const primary = (base["auths"] as Record<string, Record<string, unknown>>)["primary"];
@@ -563,7 +562,7 @@ describe("credential-proxy integration-resolver", () => {
           delete_message: { required_scopes: { primary: ["delete"] } },
         },
       };
-      // The floor reads the draft; the proxy reads the latest published version.
+      // Resolution reads the draft; the proxy reads the latest published version.
       await db
         .update(packages)
         .set({ draftManifest: scoped })
@@ -571,13 +570,9 @@ describe("credential-proxy integration-resolver", () => {
       await seedPublishedVersion(INTEGRATION_ID, "1.0.1", { manifest: scoped });
     });
 
-    async function activateAgent(name: string, tools: string[]) {
-      await seedPackage({
-        id: name,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        type: "agent",
-        draftManifest: {
+    const resolveFor = (name: string, tools: string[]) =>
+      resolveConnectionsForRun({
+        agentManifest: {
           name,
           version: "1.0.0",
           type: "agent",
@@ -586,12 +581,12 @@ describe("credential-proxy integration-resolver", () => {
           dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
           integrations_configuration: { [INTEGRATION_ID]: { tools } },
         },
+        packageId: name,
+        actor: { type: "user", id: ctx.user.id },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       });
-      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, name);
-    }
 
-    it("flags needsReconnection when the shrink drops below the floor, still serving the refreshed token", async () => {
-      await activateAgent("@cproxy/deleter", ["delete_message"]);
+    it("keeps the connection usable and refuses only the agent needing the dropped scope", async () => {
       const connId = await seedConnection({
         userId: ctx.user.id,
         scopes: ["read", "send", "delete"],
@@ -600,20 +595,22 @@ describe("credential-proxy integration-resolver", () => {
 
       const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
       expect(JSON.stringify(refreshed)).toContain("narrowed-access");
-      expect(await flaggedConnection(connId)).toBe(true);
-    });
+      const [row] = await db
+        .select({
+          scopesGranted: integrationConnections.scopesGranted,
+          needsReconnection: integrationConnections.needsReconnection,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(row).toEqual({ scopesGranted: ["read", "send"], needsReconnection: false });
 
-    it("does not flag a shrink that still covers the floor", async () => {
-      await activateAgent("@cproxy/reader", ["list_messages"]);
-      const connId = await seedConnection({
-        userId: ctx.user.id,
-        scopes: ["read", "send", "delete"],
-      });
-      token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read" });
-
-      const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
-      expect(JSON.stringify(refreshed)).toContain("narrowed-access");
-      expect(await flaggedConnection(connId)).toBe(false);
+      const deleter = await resolveFor("@cproxy/deleter", ["delete_message"]);
+      expect(deleter.errors).toMatchObject([
+        { code: "insufficient_scopes", connectionId: connId, missingScopes: ["delete"] },
+      ]);
+      const reader = await resolveFor("@cproxy/reader", ["list_messages"]);
+      expect(reader.errors).toEqual([]);
+      expect(reader.resolved[INTEGRATION_ID]?.map((c) => c.connectionId)).toEqual([connId]);
     });
   });
 

@@ -2849,8 +2849,8 @@ export async function persistCredentialBundle(
   // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
   // Monotonic clear: the proactive refresh write-back always passes
   // `needsReconnection: false`, which would race-clobber a `true` set
-  // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
-  // revoke). When this write CLEARS the flag, gate the row on
+  // concurrently by `markIntegrationConnectionNeedsReconnection` (revoked grant,
+  // missing refresh token, unreadable credential). When this write CLEARS the flag, gate the row on
   // `needs_reconnection = false` so a concurrently-set `true` is preserved — the
   // refresh simply no-ops on that row (a flagged connection's cached credentials
   // are stale anyway, so skipping the write-back is harmless). An explicit
@@ -2868,12 +2868,6 @@ export async function persistCredentialBundle(
   return row ? serializeIntegrationConnection(row) : null;
 }
 
-/**
- * The single writer of `needs_reconnection = true` that does NOT touch the
- * stored credentials. Flips a row to "re-connect required" — used by the
- * refresh paths (no refresh_token / revoked grant) and the scope-shrink-
- * below-floor guard. Keyed by id (system write); no-ops when the row is gone.
- */
 /**
  * Read and decrypt the stored credential fields for one connection by id.
  * Returns `null` when the row is gone or its blob cannot be read (logged): every
@@ -2899,6 +2893,12 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
+/**
+ * The single writer of `needs_reconnection = true` that does NOT touch the
+ * stored credentials. Flips a row to "re-connect required" — used by the
+ * refresh paths (no refresh_token / revoked grant) and an unreadable stored
+ * credential. Keyed by id (system write); no-ops when the row is gone.
+ */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {

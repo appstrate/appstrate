@@ -1849,12 +1849,12 @@ describe("the table has no other reader", () => {
     // question of one package. `integration-service.ts` joins it for that
     // reason and no other: the Integrations page's own two routes narrow on
     // `placementReadFilter`, which needs this LEFT JOIN or an offered
-    // integration drops out of its own page. The four integration surfaces
+    // integration drops out of its own page. The three integration surfaces
     // beside it ask the same rule rather than a bare `space_packages` row —
     // `integration-connection-resolver.ts` conjoins `placementReadFilter`,
-    // `integration-pins-service.ts`, `integration-scope-resolver.ts` and
-    // `me-connections.ts` conjoin `activeHereSql`, both of which need this
-    // join, so a row nothing places counts for nothing there either.
+    // `integration-pins-service.ts` and `me-connections.ts` conjoin
+    // `activeHereSql`, both of which need this join, so a row nothing places
+    // counts for nothing there either.
     // `package-catalog.ts` is the newest entry and the one that had to be
     // added rather than avoided: `resolveDeclaredSkills` judges an agent's
     // declared closure from the DECLARING package's home, so it needs the
@@ -1870,7 +1870,6 @@ describe("the table has no other reader", () => {
       "apps/api/src/services/integration-connection-resolver.ts",
       "apps/api/src/services/integration-connections.ts",
       "apps/api/src/services/integration-pins-service.ts",
-      "apps/api/src/services/integration-scope-resolver.ts",
       "apps/api/src/services/integration-service.ts",
       "apps/api/src/services/me-connections.ts",
       "apps/api/src/services/package-activation.ts",

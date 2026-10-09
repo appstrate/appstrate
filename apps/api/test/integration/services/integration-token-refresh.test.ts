@@ -188,12 +188,10 @@ function refreshOf(
   target: Target,
   trigger: RefreshTrigger = REJECTED,
 ) {
-  const manifest = gmailManifest(token.url);
   return refreshConnectionCredential({
     connection: { ...target, authKey: "primary" },
     integrationId: PACKAGE_ID,
-    manifest,
-    authDef: manifest.auths!.primary as AfpsManifestAuth,
+    authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
     scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     actor: { type: "user", id: ctx.user.id },
     trigger,
@@ -277,7 +275,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.setResponse({ access_token: "new-access", expires_in: 3600 });
 
     expect(refreshedFields(await refresh(connId)).access_token).toBe("new-access");
-    // Untouched — `scope` was absent on the wire so the high-water-mark stays.
+    // Untouched — `scope` was absent on the wire so the stored grant stays.
     expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
@@ -334,7 +332,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
-  it("persists a narrowed grant, and leaves the connection usable when no agent needs the lost scope", async () => {
+  it("persists a narrowed grant and leaves the connection unflagged", async () => {
     const connId = await seedConnection(["read", "send", "delete"]);
     // User went to their Google account and revoked `delete`.
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
@@ -348,7 +346,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(row!.needsReconnection).toBe(false);
   });
 
-  it("persists a widened grant (scope creep): the high-water-mark moves up", async () => {
+  it("persists a widened grant (scope creep)", async () => {
     const connId = await seedConnection(["read"]);
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 

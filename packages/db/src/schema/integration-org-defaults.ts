@@ -25,8 +25,8 @@
  * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.
  *
  * Same invariants as admin pins: every referenced connection MUST be
- * `shared_with_org = true` (validation in the org-defaults service — an
- * admin can't coerce a member's personal connection), and `connection_ids`
+ * shared with this space (`shared_space_ids`, validated in the org-defaults
+ * service — an admin can't coerce a member's personal connection), and `connection_ids`
  * carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id

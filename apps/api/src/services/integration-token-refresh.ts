@@ -22,7 +22,6 @@ import type {
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
-import { scopesNotCovered, type IntegrationManifest } from "@appstrate/core/integration";
 import type { Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
@@ -36,7 +35,6 @@ import {
   recordUnrefreshableRejection,
   resolveIntegrationClientById,
 } from "./integration-connections.ts";
-import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -46,10 +44,6 @@ interface IntegrationRefreshResult {
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
-  /** `null`: `scope` omitted, i.e. unchanged (RFC 6749 §5.1), never "none granted". */
-  scopesGranted: string[] | null;
-  /** {@link scopesGranted} is strictly narrower than the stored grant. */
-  shrinkDetected: boolean;
 }
 
 /** A refresh's verdict, thrown out of `dedupedRefresh`. `flaggedBefore`: before the lock. */
@@ -125,8 +119,6 @@ async function refreshUnderLock(
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
-          scopesGranted: null,
-          shrinkDetected: false,
         };
       }
       return null;
@@ -204,20 +196,9 @@ async function doRefresh(
     ...(responseScopes !== null ? { scope: responseScopes.join(" ") } : {}),
   };
 
-  // Read the existing `scopes_granted` so we can detect shrinkage. One
-  // extra SELECT per refresh is acceptable — refresh is the slow path.
-  const [prevRow] = await db
-    .select({ scopesGranted: integrationConnections.scopesGranted })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  const prevScopes = prevRow?.scopesGranted ?? [];
-  const shrinkDetected =
-    responseScopes !== null && prevScopes.some((s) => !responseScopes.includes(s));
-
   // Converged write — the single credential writer. `scopesGranted` is passed
-  // only when the IdP authoritatively echoed a `scope` field; otherwise it is
-  // omitted so persistCredentialBundle leaves the high-water-mark untouched.
+  // only when the IdP authoritatively echoed a `scope` field (RFC 6749 §5.1: an
+  // omitted `scope` means unchanged), so persistCredentialBundle keeps the stored grant.
   // accountId/identityClaims are likewise omitted → never clobbered by refresh.
   // Compare-and-set: a row reconnected (or flagged) meanwhile keeps what it holds.
   const written = await persistCredentialBundle(
@@ -240,7 +221,7 @@ async function doRefresh(
       : new RefreshVerdictError("retry", "connection_changed");
   }
 
-  return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
+  return { fields: newCreds, expiresAt };
 }
 
 async function exchangeFailureVerdict(
@@ -273,8 +254,8 @@ async function exchangeFailureVerdict(
 
 /**
  * What {@link refreshConnectionCredential} concluded; callers only translate it, the row is
- * already written. `refreshed` is served even when a narrowed grant got the connection flagged;
- * `kept`: the stored one stands; `retry`: still usable; `dead`: flagged. `detail` is for logs.
+ * already written. `refreshed`: the new credential; `kept`: the stored one stands; `retry`: still
+ * usable; `dead`: flagged. `detail` is for logs.
  */
 type ConnectionRefreshOutcome =
   | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
@@ -295,8 +276,7 @@ export type RefreshTrigger =
 /**
  * The one decision over a connection's credential. A rejection is evidence only against the
  * credential it names: one the connection no longer holds is treated as a read, nothing counted.
- * A narrowed grant is checked against the space's scope floor on every path, since the refresh
- * that narrows `scopes_granted` is the only one that can see the shrink.
+ * A narrowed grant is stored as is: run resolution refuses an agent it no longer covers.
  *
  * Throws only what is not a verdict on the connection (missing key id → 503, a database fault).
  */
@@ -307,8 +287,7 @@ export async function refreshConnectionCredential(input: {
     credentialRevision: string;
   };
   integrationId: string;
-  /** The manifest the caller reads the connection's auth from, and `authDef` its declaration. */
-  manifest: IntegrationManifest;
+  /** The declaration of the connection's auth in the caller's manifest. */
   authDef: AfpsManifestAuth;
   scope: SpaceScope;
   actor: Actor;
@@ -380,66 +359,11 @@ export async function refreshConnectionCredential(input: {
     }
     throw err;
   }
-
-  if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
-    // The new token is already stored: a failed floor check must not turn it into a failure.
-    try {
-      await flagScopeShrinkBelowFloor(input, refreshed.scopesGranted);
-    } catch (err) {
-      logger.error("Integration scope-floor check failed after a refresh", {
-        integrationId,
-        authKey,
-        connectionId: connection.id,
-        error: getErrorMessage(err),
-      });
-    }
-  }
   return { status: "refreshed", fields: refreshed.fields, expiresAt: refreshed.expiresAt };
 }
 
 function expiresWithinLeadWindow(expiresAt: Date | null): boolean {
   return expiresAt !== null && expiresAt.getTime() - Date.now() < OAUTH_REFRESH_LEAD_MS;
-}
-
-/**
- * IdP-side scope shrink (the user revoked some permissions upstream between issuance and
- * refresh): flags `needsReconnection` when what remains no longer covers the union of
- * `requiredScopes` across the space's active agents.
- */
-async function flagScopeShrinkBelowFloor(
-  input: {
-    connection: { id: string; authKey: string };
-    integrationId: string;
-    manifest: IntegrationManifest;
-    scope: SpaceScope;
-  },
-  granted: string[],
-): Promise<void> {
-  const { connection, integrationId, manifest, scope } = input;
-  const { authKey } = connection;
-  const { required } = await computeRequiredScopes({ scope, integrationId, authKey });
-  // Diff through the manifest `implies` hierarchy: a parent grant (e.g. GitHub `repo`) covers
-  // the children it implies (`public_repo`).
-  const missing = scopesNotCovered(required, granted, manifest, authKey);
-  if (missing.length > 0) {
-    await markIntegrationConnectionNeedsReconnection(connection.id);
-    logger.warn("Integration scope shrink dropped below required floor", {
-      integrationId,
-      authKey,
-      connectionId: connection.id,
-      granted,
-      required,
-      missing,
-    });
-  } else {
-    logger.info("Integration scope shrink absorbed (still covers required)", {
-      integrationId,
-      authKey,
-      connectionId: connection.id,
-      granted,
-      required,
-    });
-  }
 }
 
 /**

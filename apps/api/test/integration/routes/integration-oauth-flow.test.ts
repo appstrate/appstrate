@@ -189,11 +189,10 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .limit(1)
   )[0]!;
   const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-  const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+  const { auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
   const outcome = await refreshConnectionCredential({
     connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
     integrationId: INTEGRATION,
-    manifest,
     authDef: auth as AfpsManifestAuth,
     scope,
     actor: { type: "user", id: ctx.user.id },

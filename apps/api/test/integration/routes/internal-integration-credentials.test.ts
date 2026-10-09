@@ -15,7 +15,7 @@
  *
  * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
- * scope-shrink behaviour) live in the service-level test
+ * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
  * the HTTP route boundary: auth, dep, install, the `connection_id` selector,
  * response shape.
@@ -815,7 +815,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       const connectionId = conn!.id;
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
       const held = await heldRevision(connectionId);
-      // Flagged after kickoff — a scope shrink seen by another caller, a peer's invalid_grant.
+      // Flagged after kickoff — a peer's invalid_grant.
       await db
         .update(integrationConnections)
         .set({ needsReconnection: true })
