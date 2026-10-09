@@ -547,15 +547,19 @@ const connectKickoffRelayProperties = {
     type: "array",
     items: { type: "string" },
     description:
-      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+      "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
   connection_id: {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`.",
   },
 } as const;
+
+/** The scope rules every connect kickoff states, so a caller widens by adding a connection. */
+const CONNECT_SCOPE_RULES =
+  "\n\nScopes: omitting `scopes` requests the auth's `default_scopes`; `default_scopes` is always requested, and `scopes` widens it. Passing `connection_id` reconnects that connection in place: added scopes then apply to every agent that uses it. To give one agent more rights without widening the others, start a NEW connection (no `connection_id`) with the required scopes. Do not duplicate an integration to change its scopes; create another connection.";
 
 const connectRunResponses = {
   "503": {
@@ -938,7 +942,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Import a connection by submitting credentials directly (programmatic)",
       description:
-        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
+        "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).\n\nPassing `connection_id` renews that connection in place, for every agent that uses it; to give one agent a different credential, create a new connection instead. Do not duplicate an integration to change its credential or scopes; create another connection.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -961,7 +965,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
+                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -993,7 +997,8 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
       description:
-        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
+        "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead." +
+        CONNECT_SCOPE_RULES,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1048,7 +1053,8 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
       description:
-        "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
+        "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`)." +
+        CONNECT_SCOPE_RULES,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1310,7 +1316,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the caller's own connections **plus** every connection shared in the space (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1358,7 +1364,9 @@ export const integrationsPaths = {
         "schedules are untouched. " +
         "A label is unique per " +
         "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
-        "with 409 `connection_label_taken`.",
+        "with 409 `connection_label_taken`. " +
+        "Scopes are not edited here: for an agent that needs more scopes, create a new connection " +
+        "with them rather than reconnecting a shared one, which widens every agent that uses it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1546,6 +1554,8 @@ export const integrationsPaths = {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
       summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
+      description:
+        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create a new connection with those scopes rather than upgrading one other agents use.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1614,7 +1624,7 @@ export const integrationsPaths = {
     get: {
       operationId: "getIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Get the org-wide default connection for this integration",
+      summary: "Get the space default connection for this integration",
       description:
         "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
@@ -1646,12 +1656,14 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Set the org-wide default connection for this integration (admin)",
+      summary: "Set the space default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
         "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
         "`enforce` included. Selecting connections of a different auth type replaces " +
-        "the current default rather than adding a second one.",
+        "the current default rather than adding a second one. Every consuming agent gets the " +
+        "default's scopes: give an agent that needs more its own connection (a pin) rather than " +
+        "upgrading a default one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1699,7 +1711,7 @@ export const integrationsPaths = {
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Remove the org-wide default connection (admin)",
+      summary: "Remove the space default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

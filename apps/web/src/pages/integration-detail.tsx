@@ -311,6 +311,7 @@ export function IntegrationDetailPage() {
                 key={authStatus.auth_key}
                 packageId={packageId}
                 status={authStatus}
+                manifest={detail.manifest}
                 personalConnectionsBlocked={detail.block_user_connections}
               />
             ))
