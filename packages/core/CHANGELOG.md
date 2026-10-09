@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`ModelGenerationCapabilities.reasoning.off`**, **`modelReasoningOffSchema`**,
-  **`MODEL_REASONING_OFF_BEHAVIOURS`** and **`ModelReasoningOff`**
+- **`ModelGenerationCapabilities.reasoning.off`**, **`MODEL_REASONING_OFF_BEHAVIOURS`**
+  and **`ModelReasoningOff`**
   (`@appstrate/core/model-generation`): what reasoning level `off` puts on the
   wire — `disables` (an explicit reasoning-off parameter) or `unsent` (no
   reasoning parameter; the server keeps its own default, and some models still

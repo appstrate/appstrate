@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What level `off` puts on the wire, restating the `off` branches of the pinned
- * `@earendil-works/pi-ai` for the API shapes the platform serves, so the catalog
- * answers without building a request. A run reaches the provider through the
- * sidecar or the llm-proxy, so only the provider and `compat` decide. A branch
- * not restated answers `undefined` ("not known"); `test/pi-reasoning-off-parity.test.ts`
- * pins parity with Pi's payloads and fails when a Pi bump reaches one.
+ * What level `off` puts on the wire, restating the pinned `@earendil-works/pi-ai`
+ * for the shapes a provider can declare. Runs reach the provider through the
+ * sidecar or the llm-proxy, so only the provider and `compat` decide. Anything
+ * production does not build is `undefined`: the parity test pins the bundled
+ * set, and the catalog build refuses a record whose derived `off` is not observed.
  */
 
 import type { ModelReasoningOff } from "@appstrate/core/model-generation";
@@ -34,8 +33,6 @@ function sendsOffParameter(model: Model<Api>): boolean | undefined {
       return model.provider !== "github-copilot";
     case "mistral-conversations":
       return Boolean(model.thinkingLevelMap?.off);
-    case "pi-messages":
-      return false;
     case "openai-completions":
       return completionsSendsOff(model);
     default:
@@ -44,53 +41,29 @@ function sendsOffParameter(model: Model<Api>): boolean | undefined {
 }
 
 function completionsSendsOff(model: Model<Api>): boolean | undefined {
-  const compat = (model.compat ?? {}) as CompletionsCompat;
-  const detected = detectedCompletionsDialect(model);
-  switch (compat.thinkingFormat ?? detected.thinkingFormat) {
+  switch (
+    (model.compat as CompletionsCompat | undefined)?.thinkingFormat ??
+    detectedFormat(model)
+  ) {
     case "zai":
     case "qwen":
     case "deepseek":
     case "openrouter":
     case "together":
-      return true;
     case "baseten":
-      return onlyThinkingEnabled(compat.chatTemplateArgs) ? true : undefined;
+      return true;
     case "openai":
-    case "ant-ling":
-      return (
-        (compat.supportsReasoningEffort ?? detected.supportsReasoningEffort) &&
-        typeof model.thinkingLevelMap?.off === "string"
-      );
+      return typeof model.thinkingLevelMap?.off === "string";
     default:
       return undefined;
   }
 }
 
-function onlyThinkingEnabled(values: Record<string, unknown> = {}): boolean {
-  const entries = Object.values(values);
-  return (
-    entries.length > 0 &&
-    entries.every((value) => Bun.deepEquals(value, { $var: "thinking.enabled" }))
-  );
-}
-
-/** Pi's `detectCompat`, provider half, reduced to the two fields that decide `off`. */
-function detectedCompletionsDialect({ provider }: Model<Api>) {
-  const is = (...providers: string[]) => providers.includes(provider);
-  const zai = is("zai", "zai-coding-cn");
-  const noEffort =
-    zai ||
-    is("together", "ant-ling", "moonshotai", "moonshotai-cn", "cloudflare-ai-gateway", "nvidia");
-  const thinkingFormat = is("deepseek")
-    ? "deepseek"
-    : zai
-      ? "zai"
-      : is("together")
-        ? "together"
-        : is("ant-ling")
-          ? "ant-ling"
-          : is("openrouter")
-            ? "openrouter"
-            : "openai";
-  return { thinkingFormat, supportsReasoningEffort: !noEffort };
+/** Pi's `detectCompat` thinking format, by provider. */
+function detectedFormat({ provider }: Model<Api>): string {
+  if (provider === "deepseek") return "deepseek";
+  if (provider === "zai" || provider === "zai-coding-cn") return "zai";
+  if (provider === "together") return "together";
+  if (provider === "openrouter") return "openrouter";
+  return "openai";
 }

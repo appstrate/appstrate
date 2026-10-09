@@ -135,10 +135,9 @@ describe("build-model-catalog", () => {
     ]);
   });
 
-  // A record that takes `off` on a branch the rule does not restate would be
-  // served with no `off` at all: Baseten's thinking format without its
-  // chat-template arguments, each a word bundled records already speak.
-  it("drops a record that takes `off` when what it sends cannot be derived", async () => {
+  // The rule reads Baseten's format as a disable without looking at its
+  // chat-template arguments: a record without them sends nothing and is dropped.
+  it("drops a Baseten record whose `off` sends nothing the rule expects", async () => {
     const kimi = getPiModel("baseten", "moonshotai/Kimi-K2.5", "openai-completions")!;
     const { chatTemplateArgs: _args, ...compat } = kimi.compat as Record<string, unknown>;
     expect(kimi.thinkingLevelMap?.off).toBe("off");
@@ -154,7 +153,7 @@ describe("build-model-catalog", () => {
       {
         provider: "baseten",
         id: "moonshotai/Kimi-No-Args",
-        reason: "reasoning off: not derivable",
+        reason: 'reasoning off: derived "disables", observed "unsent"',
       },
     ]);
   });

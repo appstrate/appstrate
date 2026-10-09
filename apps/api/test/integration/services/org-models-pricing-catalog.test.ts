@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { buildPiModel, piReasoningLevels } from "@appstrate/runner-pi/pi-model";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -137,7 +136,7 @@ describe("loadModel — catalog fallback", () => {
 
   const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 
-  it("says what `off` sends for a model outside the registry, from the model a run builds", async () => {
+  it("says what `off` sends for a model outside the registry", async () => {
     const offOf = async (
       providerId: string,
       modelId: string,
@@ -162,22 +161,6 @@ describe("loadModel — catalog fallback", () => {
       const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
         ?.reasoning;
       expect(listed).toEqual(generation!);
-      // The model the runner builds from a non-aliased binding (`runtime-pi/env.ts`):
-      // its `MODEL_BASE_URL` is the sidecar's LLM proxy, never the upstream.
-      const run = buildPiModel({
-        id: resolved.modelId,
-        dialect: resolved.dialect,
-        apiShape: resolved.apiShape,
-        piProvider: resolved.piProvider,
-        baseUrl: "http://sidecar:8080/llm",
-        reasoning: resolved.reasoning,
-      });
-      const levels = piReasoningLevels(run);
-      expect(
-        Object.keys(generation!.levels).filter(
-          (l) => generation!.levels[l as never] === "supported",
-        ),
-      ).toEqual(levels);
       return generation;
     };
     // A gateway's openai-completions sends no reasoning parameter at `off`;

@@ -85,7 +85,7 @@ export type ModelGenerationSettings = z.infer<typeof modelGenerationSettingsSche
  */
 export const MODEL_REASONING_OFF_BEHAVIOURS = ["disables", "unsent"] as const;
 
-export const modelReasoningOffSchema = z.enum(MODEL_REASONING_OFF_BEHAVIOURS);
+const modelReasoningOffSchema = z.enum(MODEL_REASONING_OFF_BEHAVIOURS);
 
 export type ModelReasoningOff = z.infer<typeof modelReasoningOffSchema>;
 

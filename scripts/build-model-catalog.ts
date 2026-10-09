@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { isAliasBackingShape } from "@appstrate/core/model-swap";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   type CatalogRecord,
@@ -44,7 +45,7 @@ import { piReasoningOff, piTakesReasoningOff } from "../packages/runner-pi/src/p
 import { privateKeyFromSeed } from "./lib/ed25519-seed.ts";
 
 const SECRET_ENV = "MODEL_CATALOG_SIGNING_KEY";
-const SERVED_SHAPES: ReadonlySet<string> = new Set(MODEL_API_SHAPES);
+const SERVED_SHAPES: ReadonlySet<string> = new Set(MODEL_API_SHAPES.filter(isAliasBackingShape));
 
 /** A record of a Pi data file, as Pi wrote it. */
 interface SourceRecord extends Record<string, unknown> {
@@ -157,14 +158,14 @@ async function recordRefusal(source: SourceRecord): Promise<string | null> {
       return `request not built at level ${level ?? "unset"}: ${getErrorMessage(err)}`;
     }
   }
-  // An instance serves the derived `off`: a record the rule does not cover or
-  // misreads is dropped rather than served with no label or a wrong one. A
-  // shape no provider offers is never served, so neither is its `off`.
+  // An instance serves the derived `off`: a record it would misreport is
+  // dropped. A shape no provider declares is never served, so neither is its `off`.
   if (SERVED_SHAPES.has(built.api) && piTakesReasoningOff(built)) {
     const derived = piReasoningOff(built);
-    if (!derived) return "reasoning off: not derivable";
     const observed = await observedReasoningOff(built);
-    if (observed !== derived) return `reasoning off: derived "${derived}", observed "${observed}"`;
+    if (derived !== observed) {
+      return `reasoning off: derived "${derived ?? "none"}", observed "${observed}"`;
+    }
   }
   return null;
 }

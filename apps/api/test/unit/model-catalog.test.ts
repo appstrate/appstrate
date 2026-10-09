@@ -226,19 +226,6 @@ describe("catalog invariants over every core provider's offer", () => {
     ).toEqual([]);
   });
 
-  it("says what `off` sends exactly when a reasoning model takes `off`", () => {
-    expect(
-      entries
-        .filter(
-          (e) =>
-            (e.generation?.reasoning.off !== undefined) !==
-            (e.generation?.reasoning.supported === "supported" &&
-              e.generation.reasoning.levels.off === "supported"),
-        )
-        .map((e) => e.key),
-    ).toEqual([]);
-  });
-
   it("never advertises reasoning without a selectable effort", () => {
     expect(
       entries

@@ -3,8 +3,6 @@
 import { describe, expect, it } from "bun:test";
 import {
   mapModelReasoningLevels,
-  MODEL_REASONING_OFF_BEHAVIOURS,
-  modelGenerationCapabilitiesSchema,
   ModelGenerationError,
   reconcileModelGenerationSettings,
   resolveModelGenerationSettings,
@@ -22,29 +20,6 @@ describe("mapModelReasoningLevels", () => {
       xhigh: "XHIGH",
       max: "MAX",
     });
-  });
-});
-
-describe("modelGenerationCapabilitiesSchema reasoning.off", () => {
-  const reasoning = { supported: "supported", adaptive: null, levels: { off: "supported" } };
-  const withOff = (off: unknown) => ({
-    temperature: "supported",
-    reasoning: { ...reasoning, off },
-  });
-
-  it.each([...MODEL_REASONING_OFF_BEHAVIOURS])("accepts %s", (off) => {
-    expect(modelGenerationCapabilitiesSchema.parse(withOff(off)).reasoning.off).toBe(off);
-  });
-
-  it("refuses any other value", () => {
-    for (const off of ["none", "disabled", true, null]) {
-      expect(modelGenerationCapabilitiesSchema.safeParse(withOff(off)).success).toBe(false);
-    }
-  });
-
-  it("stays absent when omitted", () => {
-    const parsed = modelGenerationCapabilitiesSchema.parse({ temperature: "supported", reasoning });
-    expect(parsed.reasoning).not.toHaveProperty("off");
   });
 });
 

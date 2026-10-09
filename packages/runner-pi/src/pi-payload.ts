@@ -21,6 +21,9 @@ type Payload = Record<string, unknown>;
 // `api.openai.com` as a ChatGPT sign-in and shapes the request for it.
 export const PAYLOAD_API_KEY = "sk-test-key";
 
+// A run's Pi talks to the sidecar or the llm-proxy, never the upstream endpoint.
+export const RUN_BASE_URL = "http://sidecar.test/llm";
+
 // pi-ai reads the ChatGPT account id off a codex token's JWT claims.
 const CODEX_PAYLOAD_TOKEN = `h.${btoa(
   JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" } }),
@@ -51,13 +54,15 @@ export async function capturePayload(
 }
 
 /**
- * `unsent` when Pi's `off` payload equals the model's declared non-reasoning,
- * instruction role pinned (it follows `reasoning` too). Limit: parameters sent
- * whatever `reasoning` (`compat.supportsMidConvoEffort`) read as `unsent`; those refuse `off`.
+ * `unsent` when Pi's `off` payload, as a run builds it, equals the model's
+ * declared non-reasoning, instruction role pinned (it follows `reasoning` too).
+ * Limit: parameters sent whatever `reasoning` (`compat.supportsMidConvoEffort`)
+ * read as `unsent`; those refuse `off`.
  */
 export async function observedReasoningOff(model: Model<Api>): Promise<ModelReasoningOff> {
   const pinned = {
     ...model,
+    baseUrl: RUN_BASE_URL,
     compat: { ...model.compat, supportsDeveloperRole: false },
   } as Model<Api>;
   const [off, plain] = await Promise.all([
