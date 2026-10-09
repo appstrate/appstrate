@@ -6781,7 +6781,7 @@
         "operationId": "importIntegrationConnection",
         "tags": ["Integrations"],
         "summary": "Import a connection by submitting credentials directly (programmatic)",
-        "description": "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).\n\nPassing `connection_id` renews that connection in place, for every agent that uses it; to give one agent a different credential, create a new connection instead. Do not duplicate an integration to change its credential or scopes; create another connection.",
+        "description": "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).\n\nA credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6825,7 +6825,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row."
+                    "description": "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration."
                   },
                   "variables": {
                     "type": "object",
@@ -7019,7 +7019,7 @@
         "operationId": "initiateIntegrationOAuth",
         "tags": ["Integrations"],
         "summary": "Headless OAuth2 PKCE start — returns an authorize URL (programmatic)",
-        "description": "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.\n\nScopes: omitting `scopes` requests the auth's `default_scopes`; `default_scopes` is always requested, and `scopes` widens it. Passing `connection_id` reconnects that connection in place: added scopes then apply to every agent that uses it. To give one agent more rights without widening the others, start a NEW connection (no `connection_id`) with the required scopes. Do not duplicate an integration to change its scopes; create another connection.",
+        "description": "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7068,7 +7068,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`."
+                    "description": "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection."
                   },
                   "variables": {
                     "type": "object",
@@ -7140,7 +7140,7 @@
         "operationId": "initiateIntegrationConnect",
         "tags": ["Integrations"],
         "summary": "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
-        "description": "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).\n\nScopes: omitting `scopes` requests the auth's `default_scopes`; `default_scopes` is always requested, and `scopes` widens it. Passing `connection_id` reconnects that connection in place: added scopes then apply to every agent that uses it. To give one agent more rights without widening the others, start a NEW connection (no `connection_id`) with the required scopes. Do not duplicate an integration to change its scopes; create another connection.",
+        "description": "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7189,7 +7189,7 @@
                   "connection_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`."
+                    "description": "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection."
                   }
                 },
                 "additionalProperties": false
@@ -8435,7 +8435,7 @@
         "operationId": "upsertIntegrationPin",
         "tags": ["Integrations"],
         "summary": "Pin a set of admin-shared connections to an agent for all members (admin)",
-        "description": "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create a new connection with those scopes rather than upgrading one other agents use.",
+        "description": "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8668,7 +8668,7 @@
         "operationId": "upsertIntegrationOrgDefault",
         "tags": ["Integrations"],
         "summary": "Set the space default connection for this integration (admin)",
-        "description": "Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one. Every consuming agent gets the default's scopes: give an agent that needs more its own connection (a pin) rather than upgrading a default one.",
+        "description": "Replace the (space, integration) default connection SET. Keyed per-integration, NOT per-auth: the body carries the WHOLE set and this write replaces it, `enforce` included. Selecting connections of a different auth type replaces the current default rather than adding a second one. Every consuming agent gets the default's scopes: bind an agent that needs more to its own connection rather than upgrading a default one — a member pin overrides a soft default, and only an admin pin overrides an enforced one.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -28686,7 +28686,7 @@
                 },
                 "owned_by_actor": {
                   "type": "boolean",
-                  "description": "True when the connection is the caller's own, false when inherited via org sharing."
+                  "description": "True when the connection is the caller's own, false when another member shared it in the space."
                 },
                 "needs_reconnection": {
                   "type": "boolean",
@@ -28698,7 +28698,7 @@
           },
           "connection_id": {
             "type": "string",
-            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id` so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
+            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
           },
           "missing_scopes": {
             "type": "array",
@@ -28709,14 +28709,14 @@
           },
           "owned_by_actor": {
             "type": "boolean",
-            "description": "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error)."
+            "description": "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection belongs to the calling actor, who alone may reconnect or upgrade it; false for another member's shared row (read-only error)."
           },
           "required_scopes": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them."
+            "description": "Populated on the codes a connect flow can clear (`not_connected`, `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`), except `needs_reconnection`: a reconnect re-consents what the connection holds. OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting a new connection so the consent covers them."
           },
           "auth_key": {
             "type": "string",

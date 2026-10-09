@@ -84,27 +84,36 @@ describe("MCP server instructions — connect bullet", () => {
     );
   });
 
-  // #1871: an in-place upgrade widens every agent bound to the connection.
-  it("answers `insufficient_scopes` with a NEW connection, not an in-place upgrade", () => {
+  // #1871: an in-place upgrade widens every agent bound to the connection, and a new
+  // connection helps only once the layer named by the item's `source` binds it.
+  it("answers `insufficient_scopes` with a NEW connection bound by the item's `source`", () => {
     for (const contextInjected of [false, true]) {
       const bullet = connectBullet(contextInjected);
       expect(bullet).toMatch(/An `insufficient_scopes` item carries no `connect_url`/);
-      expect(bullet).toMatch(/start a NEW connection[^.]*WITHOUT `connection_id`/);
-      expect(bullet).toMatch(/only when the user explicitly chooses it/);
+      expect(bullet).toMatch(/Create a NEW connection \(as above, WITHOUT `connection_id`\)/);
+      expect(bullet).toMatch(/`fallback_auto` — the next run picks it/);
+      expect(bullet).toMatch(/`member_pin` — then replace the old id in that pin/);
+      expect(bullet).toMatch(/`run_override` — then retry with `connection_overrides`/);
+      expect(bullet).toMatch(/`schedule_override` — create nothing/);
+      expect(bullet).toMatch(
+        /only when `owned_by_actor` is true and the user explicitly chooses it/,
+      );
     }
-    // Without the connect grant the user does it on the agent's page.
+    // Without the connect grant the user does it.
     const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
     expect(cannotConnect).toMatch(
-      /An `insufficient_scopes` item carries no `connect_url`: tell the user[^.]*on the agent's page/,
+      /An `insufficient_scopes` item carries no `connect_url`: tell the user to create a connection/,
     );
   });
 
-  it("names the member pin as the way to settle the choice once a new connection exists", () => {
+  it("names the member pin as the way to make a choice stick for a stored agent", () => {
     const exception = instructionsFor(permissions)
       .split("\n")
       .find((line) => line.startsWith("- The exception —"));
-    expect(exception).toContain("After a new connection was created for an agent");
+    expect(exception).toContain("For a stored agent, a member pin makes the choice stick");
     expect(exception).toContain("`upsertMyIntegrationPin`");
+    // Settled by the resolver for one account; listing connections contradicts "match it there".
+    expect(exception).not.toContain("listIntegrationConnections");
   });
 
   it("differs between the two client kinds on delivery only", () => {

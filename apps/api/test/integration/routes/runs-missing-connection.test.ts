@@ -828,8 +828,9 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
-    const conn1 = await seedConnection(INTEGRATION, ctx.user.id);
-    const conn2 = await seedConnection(INTEGRATION, ctx.user.id);
+    // Two accounts: connections of one account differ by scopes only, and bind alone.
+    const conn1 = await seedConnection(INTEGRATION, ctx.user.id, { accountId: "acct-a" });
+    const conn2 = await seedConnection(INTEGRATION, ctx.user.id, { accountId: "acct-b" });
 
     const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
       method: "POST",
@@ -1096,7 +1097,11 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     // `needs_reconnection` re-consents THAT row in place, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
-      async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
+      async function seedDeadConnection(
+        userId: string,
+        sharedWithOrg = false,
+        scopesGranted = ["base", "search.read"],
+      ): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
@@ -1107,7 +1112,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             userId,
             endUserId: null,
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
-            scopesGranted: ["base", "search.read"],
+            scopesGranted,
             needsReconnection: true,
             sharedWithOrg,
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
@@ -1118,23 +1123,27 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
 
       it("mints a connect_url when the dead connection belongs to the caller", async () => {
         await seedOauthIntegration();
-        const connectionId = await seedDeadConnection(ctx.user.id);
+        const connectionId = await seedDeadConnection(ctx.user.id, false, ["base"]);
         const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
 
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
         expect(err.code).toBe("needs_reconnection");
         expect(err.owned_by_actor).toBe(true);
         expect(err.connection_id).toBe(connectionId);
+        // #1871: the agent needs `search.read`, the row holds `base` only. A reconnect
+        // re-consents what the row holds; this agent's scopes would widen every agent on it.
+        expect(err.required_scopes).toBeUndefined();
         expect(err.connect_url).toStartWith("http");
         // The claims re-consent the SAME row — without `connection_id` the
         // callback INSERTs a duplicate instead of reviving the dead one.
         const token = new URL(err.connect_url!).searchParams.get("token");
-        expect(readConnectToken(token!)).toMatchObject({
+        const claims = readConnectToken(token!);
+        expect(claims).toMatchObject({
           package_id: OAUTH_INTEGRATION,
           auth_key: "primary",
           connection_id: connectionId,
-          scopes: ["search.read"],
         });
+        expect(claims!.scopes ?? []).not.toContain("search.read");
       });
 
       it("mints nothing when the dead connection is a colleague's shared row", async () => {

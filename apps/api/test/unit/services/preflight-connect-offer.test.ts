@@ -113,11 +113,12 @@ describe("connectOfferTarget", () => {
   });
 
   it("accepts needs_reconnection on the actor's OWN connection, re-consented in place", () => {
-    // Ownership is what makes signing claims against the row safe.
+    // Ownership is what makes signing claims against the row safe. No scopes even
+    // when relayed: a reconnect re-consents what the row holds (#1871).
     expect(connectOfferTarget(inPlace("needs_reconnection", true))).toEqual({
       integrationId: INTEGRATION,
       authKey: "primary",
-      scopes: ["mail.read", "mail.send"],
+      scopes: [],
       connectionId: "conn-9",
     });
   });
@@ -281,7 +282,9 @@ describe("attachConnectOffers", () => {
       manifestCache: cache,
     });
     expect(item!.connect_url).toStartWith("http");
-    expect(claimsOf(item!)).toMatchObject({ connection_id: "conn-9" });
+    const claims = claimsOf(item!);
+    expect(claims).toMatchObject({ connection_id: "conn-9" });
+    expect(claims!.scopes).toBeUndefined();
   });
 
   it("leaves insufficient_scopes on an owned connection, and a foreign-owned item, untouched", async () => {

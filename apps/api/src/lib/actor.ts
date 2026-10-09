@@ -78,7 +78,7 @@ export function actorScopeFilter(actor: Actor, cols: { userId: Column; endUserId
 
 /**
  * WHERE clause for "connections this actor may use": their own rows UNION
- * every row opted into org-wide sharing, whoever owns it. Applies to any
+ * every row shared in its space, whoever owns it. Applies to any
  * table carrying the `{userId, endUserId, sharedWithOrg}` triple —
  * `integration_connections` today.
  *

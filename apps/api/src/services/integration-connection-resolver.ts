@@ -10,7 +10,8 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      several → `must_choose_connection`, none → as below
+ *      several of one known account, for an agent requiring scopes → the least-privileged
+ *      covering it; otherwise several → `must_choose_connection`; none → as below
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -72,7 +73,7 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { listActiveIntegrationIds } from "./integration-connections.ts";
+import { displayAccountId, listActiveIntegrationIds } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -441,6 +442,8 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   // Health plays no part: a dead own row is still the pick, so an expiry never switches accounts.
   const own = serving.filter((c) => isOwnedByActor(args, c));
   if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
+  const sameAccount = own.length > 1 ? leastPrivilegedOfOneAccount(args, own) : null;
+  if (sameAccount) return bindSet(args, [sameAccount], "fallback_auto");
   if (own.length > 1) {
     return errorOf(args, {
       code: "must_choose_connection",
@@ -449,6 +452,35 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     });
   }
   return gapOf(args, nothingOwnServes(args, serving));
+}
+
+/**
+ * Own connections of ONE known account differ only by scopes, so no account is chosen: the one
+ * covering the agent with the fewest grants, else the one missing the fewest (its
+ * `insufficient_scopes` carries the remedy). `null` across accounts, for an unknown identity, or
+ * when the selection requires no scope (an out-of-run proxy call): nothing then tells them apart.
+ */
+function leastPrivilegedOfOneAccount(
+  args: ResolveOneArgs,
+  own: ConnectionRow[],
+): ConnectionRow | null {
+  const account = displayAccountId(own[0]!.accountId);
+  if (account === null || own.some((c) => c.accountId !== account)) return null;
+  if (own.every((c) => oauthScopesForAuth(args, c.authKey).length === 0)) return null;
+  const missing = (c: ConnectionRow) =>
+    missingScopesForConnection({
+      manifest: args.manifest,
+      authKey: c.authKey,
+      granted: c.scopesGranted,
+      agentTools: args.agentTools,
+      agentScopes: args.agentScopes,
+    }).length;
+  // A stable sort: ties keep the candidates' order.
+  return own
+    .map((c) => ({ c, missing: missing(c) }))
+    .sort(
+      (a, b) => a.missing - b.missing || a.c.scopesGranted.length - b.c.scopesGranted.length,
+    )[0]!.c;
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -659,14 +691,13 @@ function checkHealth(
 
   if (conn.needsReconnection) {
     const authKey = declaredAuthKey(args.manifest, conn.authKey);
-    const requiredScopes = authKey === null ? [] : oauthScopesForAuth(args, authKey);
     return errorOf(args, {
       code: "needs_reconnection",
       // The reconnect UPDATEs this row in place; without the id it would INSERT a duplicate.
       connectionId: conn.id,
-      // One consent covering the selection's scopes, not reconnect → insufficient_scopes.
+      // No `requiredScopes`: the reconnect re-consents what the row holds and widens no agent
+      // bound to it; a row still short afterwards answers `insufficient_scopes`.
       ...(authKey !== null ? { authKey } : {}),
-      ...(requiredScopes.length > 0 ? { requiredScopes } : {}),
       ownedByActor,
       source,
       message: `Connection for ${args.integrationId} needs to be reconnected.`,
@@ -844,8 +875,8 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
             : {}),
         }
       : {}),
-    // Smuggle scope-diff detail on insufficient_scopes so the UI can offer
-    // an upgrade (own connection) or a read-only error (foreign owner).
+    // Scope-diff detail on insufficient_scopes: the caller chooses between a new
+    // connection and an upgrade (own connection only), or reports it (foreign owner).
     ...(e.code === "insufficient_scopes"
       ? {
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),

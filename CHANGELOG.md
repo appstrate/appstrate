@@ -82,6 +82,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (agents): a Gmail connection no longer gets write access by
+  default** (#1871). `@appstrate/gmail` 1.1.7 drops `gmail.send` and
+  `@appstrate/gmail-mcp` 2.3.6 drops `gmail.compose` from `default_scopes`,
+  which every connection of the auth requests: a connection made for a
+  read-only agent is read-only. `@appstrate/gmail` has no `tools_policy`, so an
+  agent that sends mail without declaring the scope now gets a read-only
+  connection and fails at run time. Migration: declare it,
+  `integrations_configuration["@appstrate/gmail"].scopes:
+["https://www.googleapis.com/auth/gmail.send"]`. A `@appstrate/gmail-mcp`
+  agent selecting `create_draft` gets `gmail.compose` from its tool; one with
+  `tools: "*"` declares it the same way. Existing connections keep what they
+  were granted.
+- **The fallback binds among your own connections of one account** (#1871),
+  for an agent that declares scopes: when every own connection serving an
+  integration belongs to the same known account, the run binds the
+  least-privileged one that covers the agent (else
+  the closest, which answers `insufficient_scopes`) instead of answering
+  `must_choose_connection`. A new connection made for one agent no longer
+  breaks the others. Several accounts, or an unknown identity, still ask.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -475,20 +494,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   agent or keep a call open with repeated values. With progress,
   `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
   the call's total duration.
-- **A Gmail connection no longer gets write access by default** (#1871).
-  `@appstrate/gmail` 1.1.7 drops `gmail.send` and `@appstrate/gmail-mcp` 2.3.6
-  drops `gmail.compose` from `default_scopes`, which every connection of the
-  auth requests: a connection made for a read-only agent is read-only. An agent
-  that sends or drafts declares that scope and gets it. Existing connections
-  keep what they were granted, and a reconnect keeps it too.
 - **An `insufficient_scopes` item no longer carries a `connect_url`** (#1871).
   The link upgraded the existing connection in place, which widens every agent
   that uses it. MCP clients are pointed at a new connection with the item's
-  `required_scopes` instead. The OpenAPI descriptions of the connect kickoffs,
-  `connection_id`, pins and space defaults state the same rule, and a
-  reconnect that changes a connection's granted scopes records
-  `integration.connection.scopes_updated` in the audit log, with the scopes
-  before and after.
+  `required_scopes`, bound by the layer its `source` names. The OpenAPI
+  descriptions of the connect kickoffs, `connection_id`, pins and space
+  defaults state the same rule, and an `integration.connection.reconnected`
+  audit event that changed a connection's granted scopes carries them before
+  and after (`scopesGranted`).
+- **A reconnect no longer adds scopes** (#1871): a `needs_reconnection` item
+  carries no `required_scopes`, and its link re-consents what the connection
+  holds. It used to request the current agent's scopes, which then reached
+  every agent bound to the connection.
 
 ## [1.0.0-beta.66] - 2026-10-08
 

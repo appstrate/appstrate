@@ -382,21 +382,23 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     const trail = await db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.resourceId, connection!.id));
-    expect(trail.map((r) => r.action).sort()).toEqual([
-      "integration.connection.created",
-      "integration.connection.reconnected",
-      "integration.connection.reconnected",
-      "integration.connection.scopes_updated",
+      .where(eq(auditEvents.resourceId, connection!.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.spaceId])).toEqual([
+      ["integration.connection.created", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
+      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
     ]);
-    const scopesUpdated = trail.find((r) => r.action === "integration.connection.scopes_updated");
-    expect([scopesUpdated!.actorType, scopesUpdated!.actorId, scopesUpdated!.spaceId]).toEqual([
-      "user",
-      ctx.user.id,
-      ctx.defaultSpaceId,
-    ]);
-    expect(scopesUpdated!.before).toEqual({ scopesGranted: ["files.read"] });
-    expect(scopesUpdated!.after).toEqual({ scopesGranted: ["files.read", "files.write"] });
+    const [, unchanged, widened] = trail;
+    // The control carries no scopes; the widening carries them before and after.
+    expect(unchanged!.before).toBeNull();
+    expect(unchanged!.after).not.toHaveProperty("scopesGranted");
+    expect(widened!.before).toEqual({ scopesGranted: ["files.read"] });
+    expect(widened!.after).toMatchObject({
+      packageId: INTEGRATION,
+      authKey: AUTH_KEY,
+      scopesGranted: ["files.read", "files.write"],
+    });
   });
 
   it("keeps the client secret out of the stored state and resolves an org client at callback", async () => {

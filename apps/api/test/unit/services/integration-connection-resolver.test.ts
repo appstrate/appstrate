@@ -15,7 +15,8 @@
  *   4. integration_pins (user_id = actor.id)     → member preference
  *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto, two or more = must_choose; no own row =
+ *      → exactly one OWN = auto, two or more = must_choose (one known account:
+ *        the least-privileged that covers the agent); no own row =
  *        not_connected / must_choose when `required`, else bound to none + warning
  *
  * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
@@ -432,6 +433,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   const shared = (over: Partial<ConnectionRow> = {}) =>
     conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
   const DEAD = { needsReconnection: true };
+  /** `conn()` rows share `acc_x`; two accounts are a real choice. */
+  const OTHER_ACCOUNT = "acc_y";
 
   /**
    * Bind `rows[bind]`, raise `error` — on `rows[on]` when the error names a connection — or
@@ -480,18 +483,18 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       verdict: { error: "needs_reconnection", on: 1 },
     },
     {
-      name: "own 2 (any auth shape)",
-      rows: () => [own(), own({ authKey: "pat" })],
+      name: "own 2 accounts (any auth shape)",
+      rows: () => [own(), own({ authKey: "pat", accountId: OTHER_ACCOUNT })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2, one dead (the dead one counts)",
-      rows: () => [own(DEAD), own({ authKey: "pat" })],
+      name: "own 2 accounts, one dead (the dead one counts)",
+      rows: () => [own(DEAD), own({ authKey: "pat", accountId: OTHER_ACCOUNT })],
       verdict: { error: "must_choose_connection" },
     },
     {
-      name: "own 2, both dead",
-      rows: () => [own(DEAD), own({ authKey: "pat", ...DEAD })],
+      name: "own 2 accounts, both dead",
+      rows: () => [own(DEAD), own({ authKey: "pat", accountId: OTHER_ACCOUNT, ...DEAD })],
       verdict: { error: "must_choose_connection" },
     },
   ];
@@ -570,7 +573,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
 
   it("my second account expiring is a choice, never a silent switch to the first", () => {
     const first = own({ label: "Boulot" });
-    const second = own({ authKey: "pat", label: "Perso", ...DEAD });
+    const second = own({ authKey: "pat", label: "Perso", accountId: OTHER_ACCOUNT, ...DEAD });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [first, second],
@@ -920,6 +923,68 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
   });
 });
 
+// #1871: a new connection for least privilege must not break the fallback of the actor's other
+// agents. Own connections of ONE known account differ by scopes only: no account is chosen.
+describe("resolveConnections — fallback among own connections of one account", () => {
+  const narrow = () => conn({ label: "lecture", scopesGranted: ["read"] });
+  const broad = () => conn({ label: "écriture", scopesGranted: ["read", "write"] });
+  const fallback = (rows: ConnectionRow[], agentScopes: string[]) =>
+    resolveConnections({
+      requirements: [req(oauth2Manifest(), [], agentScopes)],
+      accessibleConnections: rows,
+      pins: [],
+    });
+
+  it("binds the narrow one when it covers the agent", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([b, n], ["read"]);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: n.id, source: "fallback_auto" }]);
+  });
+
+  it("binds the broad one when only it covers the agent", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([n, b], ["write"]);
+    expect(result.errors).toEqual([]);
+    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: b.id }]);
+  });
+
+  it("binds the closest when none covers, which then answers insufficient_scopes", () => {
+    const [n, b] = [narrow(), broad()];
+    const result = fallback([n, b], ["read", "write", "admin"]);
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors[0]).toMatchObject({
+      code: "insufficient_scopes",
+      connectionId: b.id,
+      missingScopes: ["admin"],
+      source: "fallback_auto",
+    });
+  });
+
+  it("still asks when the agent requires no scope", () => {
+    expect(fallback([narrow(), broad()], []).errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks across two accounts", () => {
+    const result = fallback(
+      [narrow(), conn({ accountId: "acc_y", scopesGranted: ["read"] })],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("still asks when an identity is unknown", () => {
+    const result = fallback(
+      [
+        conn({ accountId: "default", scopesGranted: ["read"] }),
+        conn({ accountId: "default", scopesGranted: ["read", "write"] }),
+      ],
+      ["read"],
+    );
+    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+});
+
 describe("resolveConnections — insufficient scopes on resolved connection", () => {
   // Manifest where tool `t1` requires the `repo` scope on the oauth auth.
   function scopedManifest(): IntegrationManifest {
@@ -1209,7 +1274,7 @@ describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
 
   it("falls back to existing cascade when no `auth_key` is pinned (parity with prior behavior)", () => {
     const oauthConn = conn({ authKey: "oauth" });
-    const patConn = conn({ authKey: "pat" });
+    const patConn = conn({ authKey: "pat", accountId: "acc_y" });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [oauthConn, patConn],
@@ -1676,9 +1741,9 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(result.errors[0]).toMatchObject({ code: "not_connected", authKey: "oauth" });
   });
 
-  it("needs_reconnection carries the dead connection's auth_key and the full required set", () => {
-    // A reconnect is a connect flow too: one consent that already covers the
-    // selection, instead of reconnect → insufficient_scopes → upgrade.
+  it("needs_reconnection carries the dead connection's auth_key and NO required set", () => {
+    // #1871: the reconnect re-consents what the row holds; carrying this agent's
+    // scopes would widen every other agent bound to it.
     const c = conn({ authKey: "oauth", scopesGranted: ["repo"], needsReconnection: true });
     const result = resolveConnections({
       requirements: [req(scopedManifest(), ["t1", "t2"], ["user"])],
@@ -1690,17 +1755,18 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     expect(err.code).toBe("needs_reconnection");
     expect(err.connectionId).toBe(c.id);
     expect(err.authKey).toBe("oauth");
-    expect(err.requiredScopes).toEqual(["repo", "admin:repo", "user"]);
-    expect(translateResolutionError(err)).toMatchObject({
+    expect(err.requiredScopes).toBeUndefined();
+    const field = translateResolutionError(err);
+    expect(field).toMatchObject({
       field: `integrations.${INTEG}`,
       code: "needs_reconnection",
       connection_id: c.id,
       auth_key: "oauth",
-      required_scopes: ["repo", "admin:repo", "user"],
       // Repairing the row in place is the owner's to do, and the connect-offer
       // mint reads this field.
       owned_by_actor: true,
     });
+    expect(field).not.toHaveProperty("required_scopes");
   });
 
   it("needs_reconnection on an api_key auth carries auth_key only", () => {

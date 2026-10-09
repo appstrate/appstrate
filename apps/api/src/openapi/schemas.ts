@@ -206,7 +206,7 @@ export const schemas = {
             owned_by_actor: {
               type: "boolean",
               description:
-                "True when the connection is the caller's own, false when inherited via org sharing.",
+                "True when the connection is the caller's own, false when another member shared it in the space.",
             },
             needs_reconnection: {
               type: "boolean",
@@ -221,7 +221,7 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id` so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection for every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -232,12 +232,12 @@ export const schemas = {
       owned_by_actor: {
         type: "boolean",
         description:
-          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error).",
+          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection belongs to the calling actor, who alone may reconnect or upgrade it; false for another member's shared row (read-only error).",
       },
       required_scopes: {
         type: "array",
         items: { type: "string" },
-        description: `Populated on the codes a connect flow can clear (${CONNECT_FLOW_CODES.map((c) => `\`${c}\``).join(", ")}). OAuth scopes the run's selected tools require on \`auth_key\`. Forward as \`scopes\` when starting the connect flow so the consent covers them.`,
+        description: `Populated on the codes a connect flow can clear (${CONNECT_FLOW_CODES.map((c) => `\`${c}\``).join(", ")}), except \`needs_reconnection\`: a reconnect re-consents what the connection holds. OAuth scopes the run's selected tools require on \`auth_key\`. Forward as \`scopes\` when starting a new connection so the consent covers them.`,
       },
       auth_key: {
         type: "string",

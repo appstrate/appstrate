@@ -2668,12 +2668,13 @@ async function firstFreeLabel(
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
  * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
- * integration-detail ConnectionRow reconnect), and the run-kickoff
- * MissingConnectionsModal reconnect button. The latter two consume the
- * `connection_id` field smuggled on `needs_reconnection` / `insufficient_scopes`
- * ProblemDetails by `integration-connection-resolver.ts:translateResolutionError`
- * and forward it through the OAuth state record so the callback lands here on
- * the `update-owned` path.
+ * integration-detail ConnectionRow reconnect), the run-kickoff
+ * MissingConnectionsModal reconnect button, and an upgrade the user chose. The
+ * latter consume the `connection_id` field carried on `needs_reconnection` /
+ * `insufficient_scopes` ProblemDetails by
+ * `integration-connection-resolver.ts:translateResolutionError` and forward it
+ * through the OAuth state record so the callback lands here on the
+ * `update-owned` path.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,
@@ -3075,7 +3076,7 @@ export async function saveIntegrationConnection(
 
 /**
  * List the connections the actor can *use* for an integration in this
- * space: their own rows, plus every row opted into org-wide sharing
+ * space: their own rows, plus every row shared in its space
  * (`sharedWithOrg`) whoever owns it.
  *
  * The union — not the actor's own rows — is the correct set here because
@@ -3156,7 +3157,7 @@ interface UsableIntegration {
 /**
  * Integrations the actor could use when building an agent manually in the
  * current space: any integration for which a connection exists that is
- * either the actor's own (`actorFilter`) OR opted into org-wide sharing
+ * either the actor's own (`actorFilter`) OR shared in its space
  * (`sharedWithOrg`) — `actorOrSharedFilter`, the resolver's access predicate.
  *
  * Deduped to the integration level (the agent picks an integration; the
@@ -3185,7 +3186,7 @@ export async function listUsableIntegrationsForActor(
     );
   if (rows.length === 0) return [];
 
-  // own = row owned by this actor; shared = row opted into org-wide sharing.
+  // own = row owned by this actor; shared = row shared in its space.
   // A single integration can have both kinds across multiple connection rows.
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {

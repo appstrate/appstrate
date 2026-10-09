@@ -69,15 +69,14 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
   if (!e.field.startsWith(FIELD_PREFIX)) return null;
   const integrationId = e.field.slice(FIELD_PREFIX.length);
   if (!integrationId || !e.auth_key) return null;
-  const scopes = e.required_scopes ?? [];
-
   switch (e.code) {
     case "not_connected":
     case "auth_key_mismatch":
-      return { integrationId, authKey: e.auth_key, scopes };
+      return { integrationId, authKey: e.auth_key, scopes: e.required_scopes ?? [] };
     case "needs_reconnection":
+      // Re-consents what the row holds: no scope of this agent reaches the others bound to it.
       return e.owned_by_actor === true && e.connection_id
-        ? { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id }
+        ? { integrationId, authKey: e.auth_key, scopes: [], connectionId: e.connection_id }
         : null;
     // insufficient_scopes: upgrading in place widens every bound agent, a new one stays unbound.
     default:

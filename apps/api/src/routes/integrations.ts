@@ -582,35 +582,26 @@ function scopesBeforeWrite(ctx: ConnectContext): Promise<string[] | null> {
 }
 
 /**
- * Audit events for a connection written by a connect door. A reconnect (`scopesBefore` set)
- * renews the credential in place; when it changed the granted scopes, a second event records
- * them, since they reach every agent the connection serves.
+ * Audit event for a connection written by a connect door. A reconnect (`scopesBefore` set) renews
+ * the credential in place, and records the granted scopes when it changed them: they reach every
+ * agent the connection serves.
  */
-function connectionPersistedAudits(
+function connectionPersistedAudit(
   conn: { id: string; account_id: string; scopes_granted: string[] },
   packageId: string,
   authKey: string,
   scopesBefore: string[] | null,
 ) {
-  const persisted = {
-    action: scopesBefore ? "integration.connection.reconnected" : "integration.connection.created",
-    resourceType: "integration_connection",
-    resourceId: conn.id,
-    after: { packageId, authKey, accountId: conn.account_id },
-  };
+  const after = { packageId, authKey, accountId: conn.account_id };
   const scopes =
     scopesBefore &&
     auditDiff({ scopesGranted: [[...scopesBefore].sort(), [...conn.scopes_granted].sort()] });
-  if (!scopes) return [persisted];
-  return [
-    persisted,
-    {
-      action: "integration.connection.scopes_updated",
-      resourceType: "integration_connection",
-      resourceId: conn.id,
-      ...scopes,
-    },
-  ];
+  return {
+    action: scopesBefore ? "integration.connection.reconnected" : "integration.connection.created",
+    resourceType: "integration_connection",
+    resourceId: conn.id,
+    ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
+  };
 }
 
 /** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
@@ -854,18 +845,11 @@ export function createIntegrationsRouter() {
       };
       const scopesBefore = await scopesBeforeWrite(ctx);
       const conn = await strategy.complete(ctx, { kind: "oauth2-result", result });
-      for (const event of connectionPersistedAudits(
-        conn,
-        result.packageId,
-        result.authKey,
-        scopesBefore,
-      )) {
-        await recordAuditAs(
-          c,
-          { ...scope, actorType: result.actor.type, actorId: result.actor.id },
-          event,
-        );
-      }
+      await recordAuditAs(
+        c,
+        { ...scope, actorType: result.actor.type, actorId: result.actor.id },
+        connectionPersistedAudit(conn, result.packageId, result.authKey, scopesBefore),
+      );
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
@@ -1003,9 +987,10 @@ export function createIntegrationsRouter() {
         const conn = await resolveStrategy(auth, {
           connectToolExecutor: createConnectRunExecutor(),
         }).complete(ctx, { kind: "fields", credentials: body.credentials });
-        for (const event of connectionPersistedAudits(conn, packageId, authKey, scopesBefore)) {
-          await recordAuditFromContext(c, event);
-        }
+        await recordAuditFromContext(
+          c,
+          connectionPersistedAudit(conn, packageId, authKey, scopesBefore),
+        );
         return c.json(conn);
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -1320,14 +1305,11 @@ export function createIntegrationsRouter() {
       const conn = await resolveStrategy(auth, {
         connectToolExecutor: createConnectRunExecutor(),
       }).complete(ctx, { kind: "fields", credentials });
-      for (const event of connectionPersistedAudits(
-        conn,
-        claims.package_id,
-        claims.auth_key,
-        scopesBefore,
-      )) {
-        await recordAuditAs(c, { ...scope, actorType: actor.type, actorId: actor.id }, event);
-      }
+      await recordAuditAs(
+        c,
+        { ...scope, actorType: actor.type, actorId: actor.id },
+        connectionPersistedAudit(conn, claims.package_id, claims.auth_key, scopesBefore),
+      );
       clearConnectPageCookie(c);
       // Carried on the response, not fetched: the page cookie that authenticates
       // the portal was just cleared, and the end-user may hold no session.
