@@ -19,7 +19,7 @@
 #
 # All paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.14-alpine
+ARG BUN_IMAGE=oven/bun:1.4.2-alpine
 
 # ── Stage 1 — dependency install ──────────────────────────────────
 # Produces a runtime-pi-scoped `node_modules` tree (filter-installed
@@ -51,6 +51,7 @@ COPY --parents */package.json */*/package.json ./
 # would be a no-op for what's installed here — we omit it.
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
+        --frozen-lockfile \
         --filter=appstrate-pi-runtime \
         --no-progress
 

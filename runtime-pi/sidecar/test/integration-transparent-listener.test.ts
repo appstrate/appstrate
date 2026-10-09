@@ -22,6 +22,7 @@ import { isBlockedHost, type AuthorityPolicy, type Peer } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { buildClientHello } from "./helpers/tls-client-hello.ts";
 import { privateIpv4 } from "./helpers/private-ipv4.ts";
+import { halfCloseClient, startLateReplyServer } from "./helpers/half-close.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
 const openServers: Server[] = [];
@@ -464,5 +465,65 @@ describe("transparent egress listener — internal hosts: the runner rule (#1819
     expect(closed).toBe(true);
     expect(events[0]?.reason).toBe("ssrf");
     expect(upstream.received.length).toBe(0);
+  });
+});
+
+describe("transparent egress listener — half-close", () => {
+  const head = "GET / HTTP/1.1\r\nHost: up.example\r\n\r\n";
+
+  it("relays the client's FIN as a FIN: the upstream's later answer arrives, then both close", async () => {
+    const upstream = await startLateReplyServer((server) => openServers.push(server));
+    const listener = await makeListener({ upstreamPort: upstream.port });
+
+    const res = await halfCloseClient(listener.address().port, head);
+    expect(res).toEqual({ received: `late:${head}`, closed: true });
+    await upstream.closed;
+  });
+
+  // The preamble deadline is 10 s: a FIN ends the preamble at once, as no SNI or `Host` can follow.
+  it("closes on a FIN mid-HTTP-head, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const res = await halfCloseClient(listener.address().port, "GET / HTTP/1.1\r\nHo");
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("closes on a FIN mid-ClientHello, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const partial = buildClientHello("api.example.com").subarray(0, 20);
+    const res = await halfCloseClient(listener.address().port, partial);
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("relays the upstream's FIN as a FIN: what the client sends afterwards still arrives", async () => {
+    let markDone!: (received: string) => void;
+    const done = new Promise<string>((res) => (markDone = res));
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
+      let received = "";
+      socket.end("bye");
+      socket.on("data", (chunk: Buffer) => (received += chunk.toString("latin1")));
+      socket.on("error", () => {});
+      socket.on("close", () => markDone(received));
+    });
+    openServers.push(server);
+    await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+    const listener = await makeListener({
+      upstreamPort: (server.address() as { port: number }).port,
+    });
+
+    const client = netConnect(
+      { port: listener.address().port, host: "127.0.0.1", allowHalfOpen: true },
+      () => client.write(head),
+    );
+    client.on("error", () => {});
+    client.resume();
+    client.on("end", () => setTimeout(() => client.end("after"), 50));
+    expect(await Promise.race([done, Bun.sleep(2_000).then(() => "<timeout>")])).toBe(
+      `${head}after`,
+    );
+    client.destroy();
   });
 });

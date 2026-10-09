@@ -411,12 +411,7 @@ export function isContainerPathSafeForMount(containerPath: string): boolean {
  *     world-writable inside the container.
  *   - {@link STICKY_STAGED_DIRS} are the exception: `/tmp` and `/var/tmp` are
  *     1777 in every base image, and 0755 there would break every runtime that
- *     writes to them. The world-writable half is what matters and is what
- *     lands; the sticky bit is requested but not reachable from here — Bun's
- *     `fs.chmod` masks off every bit above 0o777 (setuid/setgid/sticky alike,
- *     measured on 1.3.11), so 0777 is what the staged directory actually
- *     carries. Nothing depends on the sticky bit: the runner container has one
- *     user.
+ *     writes to them, so they are staged 1777, sticky bit included.
  *
  * Throws (after wiping the partial staging directory) on an unsafe path or an
  * I/O failure, so the per-spec try/catch in `integrations-boot.ts` records it.

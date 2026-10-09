@@ -43,10 +43,10 @@ jobs:
         uses: ./.github/actions/bun-setup
 
       # No `bun install`, and not as an optimisation: `bun audit` reads
-      # `bun.lock` and needs nothing else. MEASURED 2026-09-07 — `package.json`
+      # `bun.lock` and needs nothing else. MEASURED 2026-10-09 — `package.json`
       # and `bun.lock` copied alone into an empty directory produced a report
-      # identical to the one this repo yields with `node_modules` present (20
-      # packages, 66 advisories). Installing first would cost a full dependency
+      # identical to the one this repo yields with `node_modules` present (18
+      # packages, 44 advisories). Installing first would cost a full dependency
       # resolution and change nothing the gate reads.
       #
       # `DEPENDENCY_AUDIT_POLICY` is deliberately NOT set here.

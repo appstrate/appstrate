@@ -3,7 +3,7 @@
 # directives below are BuildKit-only — the classic builder (DOCKER_BUILDKIT=0)
 # cannot build this image.
 # ── Stage 1: Workspace manifests (shared by both install stages) ───
-FROM oven/bun:1.3.14-alpine AS manifests
+FROM oven/bun:1.4.2-alpine AS manifests
 
 WORKDIR /app
 
@@ -27,9 +27,10 @@ COPY --parents */package.json */*/package.json ./
 # dependency tree. This tree is ~1.0 GB and never reaches the final image.
 FROM manifests AS deps
 
-# rationale: see .github/actions/bun-setup/action.yml
+# `--frozen-lockfile` on every install here: a bun.lock out of step with the
+# manifests fails the build instead of resolving versions afresh.
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
-    bun install
+    bun install --frozen-lockfile
 
 # ── Stage 2b: Runtime install (shipped workspace members only) ────
 # The final image ships exactly three node_modules trees — root (the shared
@@ -59,10 +60,10 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 FROM manifests AS deps-runtime
 
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
-    bun install --filter '@appstrate/api' --filter './packages/*'
+    bun install --frozen-lockfile --filter '@appstrate/api' --filter './packages/*'
 
 # ── Stage 3: Build ────────────────────────────────────────────────
-FROM oven/bun:1.3.14-alpine AS build
+FROM oven/bun:1.4.2-alpine AS build
 
 WORKDIR /app
 
@@ -80,12 +81,12 @@ COPY . .
 # Re-link workspace packages after COPY overwrites symlinks. Without this,
 # Rolldown (Vite 8) can't resolve transitive deps like i18next via the broken
 # apps/web/node_modules/i18next → /app/node_modules/.bun/i18next@X symlink.
-RUN bun install
+RUN bun install --frozen-lockfile
 
 RUN bun run build
 
 # ── Stage 4: Production image ─────────────────────────────────────
-FROM oven/bun:1.3.14-alpine
+FROM oven/bun:1.4.2-alpine
 
 # On the FINAL stage on purpose: a LABEL set on an intermediate stage never
 # reaches the published image (it was on `deps` before, so the image shipped

@@ -321,7 +321,7 @@ describe("delivery.files — safe-path floor judges the CANONICAL path", () => {
  * `/usr/` was refused because it "plants an executable on the PATH of
  * everything that runs next" — and that rationale was applied to exactly one
  * of its instances. `/bin/gh` and `/sbin/x` are the REST of the same PATH in
- * the runner image (`oven/bun:1.3.14-alpine`); `/etc/ld.so.preload` is
+ * the Alpine runner images; `/etc/ld.so.preload` is
  * strictly worse (it injects into every process spawned afterwards, whatever
  * its name); `/etc/profile.d/x.sh` is sourced by every login shell; and
  * `/root/.ssh/authorized_keys` hands out a login. All were ACCEPTED.

@@ -140,7 +140,9 @@ async function collectHttpHead(socket: Socket, seed: Buffer): Promise<Buffer> {
     };
     socket.on("data", onData);
     socket.on("error", reject);
-    socket.once("close", () => reject(new Error("socket closed before HTTP head")));
+    for (const event of ["end", "close"]) {
+      socket.once(event, () => reject(new Error("socket closed before HTTP head")));
+    }
   });
 }
 
@@ -157,7 +159,7 @@ export function createTransparentEgressListener(
   const resolveHostFn = options.resolveHostFn;
   const emit = options.onEvent ?? (() => {});
 
-  const server = netCreateServer();
+  const server = netCreateServer({ allowHalfOpen: true });
 
   server.on("connection", (clientSocket: Socket) => {
     // Peer gate, started at accept.

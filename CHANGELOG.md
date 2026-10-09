@@ -106,6 +106,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   backstop for every run on that host, leaving only the sidecar's app-layer
   floor. The exemption ships in this release's Firecracker rootfs: pin the
   runner's artifacts to this release.
+- **Self-hosters who build their own images: rebuild on `oven/bun:1.4.2`**
+  (#1878). The platform image, `PI_IMAGE`, `SIDECAR_IMAGE` and the
+  Firecracker rootfs (built from those two) now start from Bun 1.4.2. They
+  are one version contract: ship all of them, and the Firecracker artifacts,
+  from this release together. An image built from this tree pulls the new
+  base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
 ### Changed
 
@@ -121,6 +127,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Code plugin now pins by URL, so its first sync after the upgrade asks for the
   plugin's OAuth login once. Details: `docs/guides/connecting-mcp-clients.md`.
 
+- **The repository requires Bun 1.4.2 or later** (#1878): `packageManager`
+  moves to `bun@1.4.2` and the root `engines.bun` to `>=1.4.2`, which the root
+  test preload enforces. CI reads the version from `packageManager` (setup-bun
+  `bun-version-file`), and the Dockerfiles and the devcontainer pin the same
+  `oven/bun:1.4.2` base, held to it by `scripts/test/bun-version-pins.test.ts`.
+  Every install, in CI and in the images, runs `bun install --frozen-lockfile`,
+  which replaces CI's `git diff --exit-code bun.lock` check. Published packages
+  keep their own `>=1.3.9`.
 - **A local integration runner can reach a host listed in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
   transparent listeners refused every private, loopback or link-local
@@ -418,6 +432,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint: unless the token response names the account, connections to
   different Expo accounts share one account key and a reconnect is unchecked.
 
+- **Browser Use — delegate web tasks to Browser Use Cloud's browser agent
+  (#1880).** `@appstrate/browser-use@1.0.0` targets the hosted v3 MCP server,
+  `streamable-http` against `https://api.browser-use.com/v3/mcp`, with an API
+  key sent as `X-Browser-Use-API-Key` with no prefix: the first remote
+  integration delivering its credential outside `Authorization`. Not OAuth:
+  Browser Use's RFC 9728 protected-resource metadata names only the v1 `/mcp`
+  resource (`/.well-known/oauth-protected-resource/v3/mcp` is 404), and its
+  authorization server issues no refresh token, so an OAuth connection would die
+  when its access token expires. `run_session` and `send_task` consume credits,
+  `stop_session` changes state; `get_session`, `get_session_messages`,
+  `list_sessions` and `list_browser_profiles` read. Tasks can run for minutes,
+  so the agent polls `get_session`. Cloud only: the open-source `browser-use`
+  library is not a self-hostable copy of this API (its MCP server is stdio-only,
+  with other tools); a self-hosted browser is #1827. `tools/list` is public, so
+  the weekly conformance monitor checks tool parity without a credential.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
@@ -433,6 +463,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The OAuth consent and device-activation pages introduce the scope list
   with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover
   of the application → space rename (#1825).
+
+- **Runner egress tunnels relay a half-close, and the http relay cancels an
+  abandoned upstream request** (#1878). On the egress CONNECT listener, the
+  transparent plane and the agent's forward proxy, a client's FIN reaches the
+  upstream as a FIN, so a reply sent after it now arrives instead of being cut;
+  a half-open tunnel stays bounded by the idle timeout, and a FIN before the
+  tunnel's first bytes closes it at once. A client that leaves before the whole
+  answer cancels the upstream request instead of letting it run to the upstream
+  timeout. Pipelined `http://` requests are vetted one by one and answered in
+  order, and one pipelined behind a refusal is dropped, never relayed.
 
 - **A proxy-aware local runner reaches `http://` targets through its egress
   listener** (#1819). The listener of a runner with nothing to inject

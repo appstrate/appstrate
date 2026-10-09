@@ -218,26 +218,34 @@ const realmResolver = hookSlot<RealmResolver>();
 
 export const setRealmResolver = realmResolver.set;
 
-// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
-async function assertMagicLinkAudience(
-  userId: string,
-  context: GenericEndpointContext | null,
-): Promise<void> {
-  const resolver = realmResolver.get();
-  if (context?.path !== "/magic-link/verify" || !resolver) return;
-  const [account] = await db
+/** `user.realm` of `userId`, or `undefined` when no such row exists. */
+async function readUserRealm(userId: string): Promise<string | undefined> {
+  const [row] = await db
     .select({ realm: user.realm })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  if (!account) return;
+  return row?.realm;
+}
+
+// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
+// `readRealm` runs only on the verify leg with a resolver installed, so `account.delete`
+// queries nothing elsewhere.
+async function assertMagicLinkAudience(
+  readRealm: () => Promise<string | undefined>,
+  context: GenericEndpointContext | null,
+): Promise<void> {
+  const resolver = realmResolver.get();
+  if (context?.path !== "/magic-link/verify" || !resolver) return;
+  const realm = await readRealm();
+  if (realm === undefined) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
   const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
   });
-  if (account.realm === expected) return;
+  if (realm === expected) return;
   logger.warn("auth: refused a magic link for an account outside its audience", { expected });
   const raw = query.errorCallbackURL ?? query.callbackURL;
   const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
@@ -1259,7 +1267,7 @@ function buildAuth(options: CreateAuthOptions) {
       account: {
         delete: {
           before: async (account, context) => {
-            await assertMagicLinkAudience(account.userId, context);
+            await assertMagicLinkAudience(() => readUserRealm(account.userId), context);
           },
         },
       },
@@ -1271,18 +1279,15 @@ function buildAuth(options: CreateAuthOptions) {
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
           before: async (sess, context) => {
-            await assertMagicLinkAudience(sess.userId, context);
-            const [row] = await db
-              .select({ realm: user.realm })
-              .from(user)
-              .where(eq(user.id, sess.userId))
-              .limit(1);
-            // If the user row vanished between session insert and our SELECT
-            // (shouldn't happen — BA inserts the user before the session in
-            // the same flow), fall back to "platform". The request-time guard
-            // then treats the session as platform-scoped, which is safer than
-            // leaking an end-user session.
-            return { data: { realm: row?.realm ?? "platform" } };
+            // One read serves both the magic-link audience check and the patch.
+            const realm = await readUserRealm(sess.userId);
+            await assertMagicLinkAudience(async () => realm, context);
+            // If the user row vanished before our SELECT (shouldn't happen —
+            // BA inserts the user before the session in the same flow), fall
+            // back to "platform". The request-time guard then treats the
+            // session as platform-scoped, which is safer than leaking an
+            // end-user session.
+            return { data: { realm: realm ?? "platform" } };
           },
         },
       },

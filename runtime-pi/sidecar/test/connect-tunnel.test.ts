@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { createServer as netCreateServer, connect as netConnect, Socket } from "node:net";
 import type { Server as NetServer } from "node:net";
 
-import { tieSockets } from "../connect-tunnel.ts";
+import { relaySockets, tieSockets } from "../connect-tunnel.ts";
 
 const servers: NetServer[] = [];
 const sockets: Socket[] = [];
@@ -24,9 +24,12 @@ afterEach(async () => {
 const PAYLOAD_BYTES = 16 * 1024 * 1024;
 
 /** A server on an ephemeral 127.0.0.1 port; resolves with the port. */
-function listen(onAccept: (socket: Socket) => void = () => {}): Promise<number> {
+function listen(
+  onAccept: (socket: Socket) => void = () => {},
+  allowHalfOpen = false,
+): Promise<number> {
   return new Promise((resolve) => {
-    const server = netCreateServer((socket) => {
+    const server = netCreateServer({ allowHalfOpen }, (socket) => {
       sockets.push(socket);
       socket.on("error", () => {});
       onAccept(socket);
@@ -39,11 +42,14 @@ function listen(onAccept: (socket: Socket) => void = () => {}): Promise<number> 
   });
 }
 
-/** A connected TCP pair: the accepted side and the client side, half-open when its peer ends. */
-async function tcpPair(): Promise<{ accepted: Socket; client: Socket }> {
+/**
+ * A connected TCP pair: the accepted side and the client side, half-open when its peer ends (the
+ * accepted side too when `allowHalfOpen`).
+ */
+async function tcpPair(allowHalfOpen = false): Promise<{ accepted: Socket; client: Socket }> {
   let accept!: (socket: Socket) => void;
   const accepted = new Promise<Socket>((res) => (accept = res));
-  const port = await listen((s) => accept(s));
+  const port = await listen((s) => accept(s), allowHalfOpen);
   const client = netConnect({ port, host: "127.0.0.1", allowHalfOpen: true });
   sockets.push(client);
   client.on("error", () => {});
@@ -116,5 +122,21 @@ describe("tieSockets", () => {
     expect(to.connecting).toBe(true);
     from.emit("close");
     expect(to.destroyed).toBe(true);
+  });
+});
+
+describe("relaySockets", () => {
+  it("destroys a half-open relay that stays idle, on both sides", async () => {
+    const a = await tcpPair(true);
+    const b = await tcpPair(true);
+    relaySockets(a.accepted, b.accepted, 300);
+    tieSockets(a.accepted, b.accepted);
+    const closed = (s: Socket) => new Promise<void>((res) => s.once("close", () => res()));
+    const bothClosed = Promise.all([closed(a.accepted), closed(b.accepted)]).then(() => true);
+
+    a.client.end(); // relayed as a FIN to `b.client`, which never answers
+    await Bun.sleep(100);
+    expect([a.accepted.destroyed, b.accepted.destroyed]).toEqual([false, false]);
+    expect(await Promise.race([bothClosed, Bun.sleep(1_500).then(() => false)])).toBe(true);
   });
 });
