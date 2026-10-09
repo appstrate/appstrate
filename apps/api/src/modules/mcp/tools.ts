@@ -29,17 +29,19 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  AppstrateRequestExtra,
-  AppstrateResourceProvider,
-  AppstrateToolDefinition,
-  ReadResourceResult,
+import {
+  notifyDetached,
+  type AppstrateRequestExtra,
+  type AppstrateResourceProvider,
+  type AppstrateToolDefinition,
+  type ReadResourceResult,
 } from "@appstrate/mcp-transport";
 import {
   launchRunAndWait,
   waitForRunAndWaitCompletion,
   fetchRunFiles,
   type RunAndWaitFile,
+  type RunAndWaitStep,
 } from "@appstrate/core/run-and-wait-client";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
@@ -53,6 +55,7 @@ import {
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
@@ -874,6 +877,37 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
   throw signal.reason ?? new Error("Aborted");
 }
 
+/** Heartbeat period: under the 60 s request/idle timers a client resets on each progress notification. */
+export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = 15_000;
+/** Wait cap (launch included) without a progress token: answer before clients' 60 s first-byte timeout. */
+export const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
+
+function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return null;
+  const startedAt = performance.now();
+  let progress = 0;
+  const beat = (message: string) =>
+    notifyDetached(
+      extra,
+      {
+        method: "notifications/progress",
+        params: { progressToken, progress: ++progress, message },
+      },
+      (err) =>
+        logger.debug("mcp: run_and_wait progress notification failed", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+  beat(`Run ${runId} launched`);
+  const timer = setInterval(() => {
+    const elapsedS = Math.round((performance.now() - startedAt) / 1000);
+    beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
+  }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
+
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -969,8 +1003,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
       "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
-      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. " +
+      "status. If its wait ends first, it returns `done:false` with the run `id` and an `error` " +
+      "saying so: the run is still going — never call `run_and_wait` again for it; read its " +
+      "outcome with `getRun` on that `id`. After `done:true`, do NOT call `getRun` to wait; the " +
+      "run is over. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
@@ -1153,12 +1189,19 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const final = await waitForRunAndWaitCompletion(launched.launch, {
-      origin: ctx.origin,
-      headers: dispatchHeaders,
-      fetch: dispatchFetch,
-      signal,
-    });
+    const stopHeartbeat = startProgressHeartbeat(extra, runId);
+    let final: RunAndWaitStep;
+    try {
+      final = await waitForRunAndWaitCompletion(launched.launch, {
+        origin: ctx.origin,
+        headers: dispatchHeaders,
+        fetch: dispatchFetch,
+        signal,
+        maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+      });
+    } finally {
+      stopHeartbeat?.();
+    }
 
     // Report the REAL run outcome, not the polling GET's HTTP status (which is
     // always 200 for a completed run). Map the run's terminal status to an

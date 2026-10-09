@@ -59,22 +59,33 @@ await pair.close();
 When you need to expose tools over an HTTP/stdio/subprocess transport,
 use `createMcpServer()` directly:
 
+A stateless endpoint builds a fresh pair per request. `parseMcpPost` reads
+the body once and tells whether a request asked for progress; answer JSON
+unless it did, and let `serveStatelessPost` serve it — it closes the pair at
+once for JSON, and only once the stream is over for SSE:
+
 ```ts
-import { createMcpServer } from "@appstrate/mcp-transport";
+import { createMcpServer, parseMcpPost, serveStatelessPost } from "@appstrate/mcp-transport";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
-const server = createMcpServer(tools, { name: "my-server", version: "1.0" });
-const transport = new WebStandardStreamableHTTPServerTransport({
-  sessionIdGenerator: undefined, // stateless
-  enableJsonResponse: true,
+app.post("/mcp", async (c) => {
+  const body = await c.req.arrayBuffer();
+  const post = parseMcpPost(body);
+  const server = createMcpServer(tools, { name: "my-server", version: "1.0" });
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined, // stateless
+    enableJsonResponse: !post?.requestsProgress, // SSE only when progress was asked for
+  });
+  const request = new Request(c.req.url, { method: "POST", headers: c.req.raw.headers, body });
+  return serveStatelessPost(server, transport, request, post);
 });
-await server.connect(transport);
-
-// In a Hono handler:
-app.all("/mcp", (c) => transport.handleRequest(c.req.raw));
 ```
 
-The Appstrate sidecar uses exactly this pattern in `runtime-pi/sidecar/mcp.ts`.
+The platform's MCP router and the sidecar (`runtime-pi/sidecar/mcp.ts`) both
+serve POSTs this way. A tool handler reports progress without risking its
+result with `notifyDetached(extra, notification, onError)`, and a client
+requests it per call with `callTool(args, { onProgress })` — which also turns
+the call's timeout into an idle timeout.
 
 ## API surface
 

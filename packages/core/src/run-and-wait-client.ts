@@ -778,7 +778,10 @@ export async function waitForRunAndWaitCompletion(
       id: launch.runId,
       packageId: asString(lastRun?.packageId) ?? asString(launch.launchRecord.packageId) ?? null,
       status: asString(lastRun?.status) ?? asString(launch.launchRecord.status) ?? null,
-      error: "run_and_wait timed out before the run reached a terminal status.",
+      // Not a run outcome: the run is still going, so a relaunch would duplicate it.
+      error:
+        "run_and_wait stopped waiting before the run reached a terminal status; the run is " +
+        "still in progress. Do not launch it again — read its outcome later with `getRun` on this `id`.",
     },
   };
 }

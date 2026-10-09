@@ -12,12 +12,12 @@
 
 import { describe, it, expect, jest, mock } from "bun:test";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
+import { McpHost } from "../mcp-host.ts";
+import { createInProcessPair, createMcpHttpClient, wrapClient } from "@appstrate/mcp-transport";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -65,9 +65,8 @@ async function rpc(
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
   });
   const text = await res.text();
-  // The SDK's stateless mode returns either application/json (when
-  // `enableJsonResponse` is set, which we do) or text/event-stream. We
-  // configure JSON, so the body is a single JSON-RPC envelope.
+  // The sidecar answers JSON unless the request carries a progressToken
+  // (then SSE); these requests carry none, so the body is one JSON-RPC envelope.
   return { status: res.status, json: JSON.parse(text) };
 }
 
@@ -223,6 +222,114 @@ describe("POST /mcp — tools/call run_history", () => {
     expect(calledUrl).toContain("/internal/run-history");
     expect(calledUrl).toContain("limit=5");
     expect(calledUrl).toContain("fields=checkpoint");
+  });
+});
+
+describe("POST /mcp — answer format", () => {
+  async function callRunHistory(meta?: Record<string, unknown>): Promise<Response> {
+    const app = createTestApp(makeDeps());
+    return app.request("/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Host: "localhost",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "run_history", arguments: {}, ...(meta ? { _meta: meta } : {}) },
+      }),
+    });
+  }
+
+  it("answers JSON when the call asks for no progress", async () => {
+    const res = await callRunHistory();
+    expect(res.headers.get("content-type")).toStartWith("application/json");
+    expect(((await res.json()) as { id: number }).id).toBe(1);
+  });
+
+  it("streams over SSE, opened at once, when the call carries a progressToken", async () => {
+    const res = await callRunHistory({ progressToken: "agent_tok" });
+    expect(res.headers.get("content-type")).toStartWith("text/event-stream");
+    const text = await res.text();
+    // The open comment first, then the result frame: the server lived until the
+    // tool answered, it was not torn down when the response was returned.
+    expect(text.startsWith(": stream open\n\n")).toBe(true);
+    const frame = text.split("\n").find((line) => line.startsWith("data: "));
+    expect(JSON.parse(frame!.slice("data: ".length))).toMatchObject({ id: 1, result: {} });
+  });
+});
+
+describe("GET /mcp", () => {
+  it("is answered and closed at once, not held open for the run", async () => {
+    const app = createTestApp(makeDeps());
+    const res = await app.request("/mcp", {
+      method: "GET",
+      headers: { Accept: "text/event-stream", Host: "localhost" },
+    });
+    const drained = await Promise.race([
+      res.text().then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+    ]);
+    expect(drained).toBe(true);
+  });
+});
+
+describe("/mcp — progress relay over SSE, end to end", () => {
+  it("delivers an upstream's progress to an agent client that asked for it", async () => {
+    // Upstream integration: reports progress under whatever token it receives.
+    const upstream = await createInProcessPair([
+      {
+        descriptor: { name: "long", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          const progressToken = extra._meta?.progressToken;
+          if (progressToken !== undefined) {
+            for (const progress of [1, 2]) {
+              await extra.sendNotification({
+                method: "notifications/progress",
+                params: { progressToken, progress, message: `step ${progress}` },
+              });
+            }
+          }
+          return { content: [{ type: "text", text: "done" }] };
+        },
+      },
+    ]);
+    const host = new McpHost();
+    await host.register({
+      connection: { label: "work", accountId: null },
+      namespace: "up",
+      client: wrapClient(upstream.client, { close: () => Promise.resolve() }),
+    });
+    const app = createTestApp({
+      ...makeDeps(),
+      additionalMcpToolsProvider: () => host.buildTools(),
+    });
+    // The agent's real HTTP client, routed into the in-process app.
+    const agent = await createMcpHttpClient("http://localhost/mcp", {
+      fetch: ((input: URL | Request | string, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        headers.set("Host", "localhost");
+        return app.request(new URL(String(input)).pathname, { ...init, headers });
+      }) as typeof fetch,
+    });
+    try {
+      const received: unknown[] = [];
+      const result = await agent.callTool(
+        { name: "up__long" },
+        { onProgress: (p) => received.push(p) },
+      );
+      expect(result.content).toEqual([{ type: "text", text: "done" }]);
+      expect(received).toEqual([
+        { progress: 1, message: "step 1" },
+        { progress: 2, message: "step 2" },
+      ]);
+    } finally {
+      await agent.close();
+      await upstream.close();
+    }
   });
 });
 
@@ -471,17 +578,6 @@ describe("POST /mcp — bounded response read", () => {
     // The token-budget gate must have triggered the blob spill.
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
-  });
-});
-
-describe("StreamableHTTPClientTransport interop (smoke test)", () => {
-  it("`enableJsonResponse: true` is wired so SDK clients without SSE work", async () => {
-    // Sanity check: the SDK ships a real StreamableHTTPClientTransport
-    // we can import without instantiating (instantiation requires a
-    // network URL; we pin only that the symbol exists so any future
-    // refactor that swaps transports compile-fails this test).
-    expect(typeof StreamableHTTPClientTransport).toBe("function");
-    expect(typeof Client).toBe("function");
   });
 });
 

@@ -258,6 +258,37 @@ describe("buildMcpDirectFactories — integration tools", () => {
     }
   });
 
+  it("requests progress on an integration call, so the sidecar can keep it alive", async () => {
+    let progressToken: unknown;
+    const pair = await createInProcessPair([
+      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+      {
+        descriptor: { name: "appstrate__run_and_wait", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          progressToken = extra._meta?.progressToken;
+          return { content: [{ type: "text" as const, text: "{}" }] };
+        },
+      },
+    ]);
+    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
+    try {
+      const factories = await buildMcpDirectFactories({
+        mcp,
+        runId: "run-1",
+        emit: () => {},
+        workspace: "/tmp",
+        drainer: EMPTY_DRAINER,
+      });
+      const captured: CapturedTool[] = [];
+      for (const f of factories) f(makeMockExtensionApi(captured));
+      await captured.find((c) => c.name === "appstrate__run_and_wait")!.execute("call-1", {});
+      expect(progressToken).toBeDefined();
+    } finally {
+      await pair.close();
+    }
+  });
+
   it("surfaces MCP structuredContent as Pi `details` (logs/UI only — not model-visible)", async () => {
     const structured = { status: 200, repo: "appstrate" };
     const pair = await createInProcessPair([
