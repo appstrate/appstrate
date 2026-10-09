@@ -80,7 +80,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
+- **After the deploy, run
+  `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
+  Drizzle `0086` adds `org_id` to `integration_connections`, makes
+  `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
+  leaving every row space-scoped with the reach it had. With the app up,
+  take a `pg_dump`, run the dry run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`),
+  read the rows it will widen per organization and the labels it will rename
+  `<label> (n)`, then run it again with `--apply`. It widens the user-owned
+  connections not minted by a space's own OAuth client (`space_id` NULL,
+  `origin_space_id` the old space, shares kept), then checks three
+  invariants and rolls back with exit 1 if one fails; a second run finds
+  nothing. Until it runs, those connections keep working in their space
+  only. Details: `scripts/migration/README.md`.
+
 ### Changed
+
+- **BREAKING (API): a connection may serve the whole organization, and is
+  shared with a set of spaces** (#1870).
+  - `shared_with_org` is gone from the connection DTOs (connection list,
+    accessible connections, pin candidates) and from the body of
+    `PATCH /api/integrations/{packageId}/connections/{connectionId}`, which
+    takes `shared_space_ids`, the full target set, instead. The DTOs add
+    `scope` (`"org"` | `"space"`), `shared_space_ids` (the full set for the
+    owner; for anyone else the current space when shared into it, else
+    `[]`) and `origin_space_id` (owner only). New refusals:
+    `400 invalid_share_target`, `403 connection_blocked_by_admin` on a share
+    into a space blocking user connections without `integrations:configure`
+    there, `403` on renaming an org-scoped connection one does not own.
+  - New `PATCH /api/me/connections/{connectionId}` (owner,
+    `integrations:connect` ceiling): label and `shared_space_ids`.
+  - `GET /api/me/connections`: `space` is `null` for an org-scoped
+    connection; new `scope`, `origin_space` and `shared_spaces`.
+  - The realtime `connection_update` event adds `orgId`, and `spaceId` is
+    `null` for an org-scoped connection, delivered to its owner in every
+    space of the org.
+  - `409 connection_scope_narrowing` on a reconnect that would move an
+    org-scoped connection onto a space's own OAuth client;
+    `409 auto_client_exists_at_org` on promoting a DCR client to an org that
+    already holds one for that server.
+
+- **A connection is reusable across the spaces of its organization**
+  (#1870). Its scope is the tier of the OAuth client that minted it: the
+  system client, an org client or none (API key, basic, fields) makes it
+  usable by its owner in every space of the org; a space's own OAuth client,
+  or an end user, keeps it in that space. A space with its own OAuth client
+  for that auth uses only the org-wide connections connected from it. The
+  owner shares a connection with chosen spaces; losing access to a space
+  withdraws that share only, and deleting a space withdraws it from every
+  share. With several of their own connections, a member's run binds the one
+  made in the run's space. Promoting a space OAuth client to the org widens
+  its connections.
+- **Remote MCP clients registered by DCR/CIMD live at the org tier**
+  (#1870): one client per organization, integration, auth and authorization
+  server, reused by every space. A client registered in a space before this
+  release keeps refreshing its connections, which move to the org client at
+  their next reconnect.
+- **A token refresh that narrows the granted scopes no longer flags the
+  connection for reconnection** (#1870): `scopes_granted` is updated, and an
+  agent needing a dropped scope gets `insufficient_scopes` when it binds.
+- **`block_user_connections` applies when a run binds, not only when a
+  connection is created** (#1870): in a space blocking user connections for
+  an integration, a member's own connection binds only when shared into that
+  space or made in it.
+- **Connection labels are unique per owner** (#1622, #1870): a label no
+  longer collides with another member's private connection. Two members'
+  equal labels in one pin or default are suffixed ` (2)` in the run.
 
 - **BREAKING (API): a declared integration blocks a run only when the agent
   marks it `required`** (#1830, #1848, afps-spec#28). A non-required
@@ -266,8 +332,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   incoherent OAuth client configuration makes the sidecar refresh endpoint
   answer `500`, and the credential proxy logs it as an error while relaying
   the upstream `401`.
-- **One refresh decision for every credential path** (#1829). A scope shrink
-  seen by the platform credential proxy now flags `needsReconnection` too; a
+- **One refresh decision for every credential path** (#1829). A
   2xx token response carrying `error: invalid_grant` is classified revoked,
   on a refresh and on a code exchange; the `410` problem's `detail` wording
   changed.
