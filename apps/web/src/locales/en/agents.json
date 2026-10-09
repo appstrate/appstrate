@@ -488,7 +488,7 @@
   "error.needsReconnection": "The connection must be reconnected by its owner before it can be used.",
   "error.mustChooseConnection": "Several connections are possible, or only connections shared by other members: choose which ones to use.",
   "error.notConnected": "No usable connection for this integration: connect an account.",
-  "error.insufficientScopes": "The connection lacks required permissions: create a new connection with this agent's permissions, or pick another one.",
+  "error.insufficientScopes": "The connection lacks required permissions: create a connection with this agent's permissions, or pick another one — if the connection is imposed, ask an admin or the schedule's owner to change it.",
   "error.authKeyMismatch": "Your connections use another auth method than the one the agent requires: connect an account with the right method.",
   "error.authServesNoSelectedTool": "A chosen connection uses an auth method that exposes none of the agent's selected tools: remove it from the selection.",
   "error.authKeyServesNoSelectedTool": "The auth method this agent requires exposes none of its selected tools: change the agent's auth method or its tool selection.",

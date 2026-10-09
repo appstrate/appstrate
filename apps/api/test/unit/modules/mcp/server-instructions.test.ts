@@ -95,7 +95,7 @@ describe("MCP server instructions — connect bullet", () => {
       // Rebound by the launch override, which beats a member pin and works inline too.
       expect(part).toContain("`connection_overrides`");
       // …and the caller is told where the new connection's id comes from.
-      expect(part).toMatch(/`listIntegrationConnections`|the fallback picks it/);
+      expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
       // The layers a member cannot override themselves.
       for (const layer of ["admin_pin", "org_default_enforced", "schedule_override"]) {
         expect(part).toContain(`\`${layer}\``);

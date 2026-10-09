@@ -227,7 +227,7 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names.",
+          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead.",
       },
       owned_by_actor: {
         type: "boolean",

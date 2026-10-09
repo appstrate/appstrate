@@ -488,7 +488,7 @@
   "error.needsReconnection": "La connexion doit être reconnectée par son propriétaire avant de pouvoir être utilisée.",
   "error.mustChooseConnection": "Plusieurs connexions sont possibles, ou seulement des connexions partagées par d'autres membres : choisissez celles à utiliser.",
   "error.notConnected": "Aucune connexion utilisable pour cette intégration : connectez un compte.",
-  "error.insufficientScopes": "La connexion n'a pas toutes les permissions requises : créez une nouvelle connexion avec les permissions de cet agent, ou choisissez-en une autre.",
+  "error.insufficientScopes": "La connexion n'a pas toutes les permissions requises : créez une connexion avec les permissions de cet agent, ou choisissez-en une autre — si la connexion est imposée, demandez à un administrateur ou au propriétaire de la planification de la changer.",
   "error.authKeyMismatch": "Vos connexions utilisent une autre méthode d'authentification que celle requise par l'agent : connectez un compte avec la bonne méthode.",
   "error.authServesNoSelectedTool": "Une connexion choisie utilise une méthode d'authentification qui n'expose aucun outil sélectionné par l'agent : retirez-la de la sélection.",
   "error.authKeyServesNoSelectedTool": "La méthode d'authentification exigée par l'agent n'expose aucun de ses outils sélectionnés : modifiez cette méthode ou la sélection d'outils de l'agent.",
