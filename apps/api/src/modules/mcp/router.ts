@@ -97,6 +97,7 @@ import {
   type OrgWideSpaces,
 } from "./spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
+import { isUserPrincipal } from "../../lib/principal.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -236,6 +237,13 @@ export function buildServerInstructions(
     ? `- Writes are read-then-write — a versioned resource's result carries \`etag\`; send it back verbatim as \`if_match\` on the next write to it. Package draft updates (\`updateAgent\`, \`updateSkill\`, …) REQUIRE it (428 without): read the package first, then write with its \`etag\`, and use the \`etag\` of each write's result for the next one. A 412 means it changed in between: re-read, reapply your change, retry.
 `
     : "";
+  // The chat renders the memory in its own prompt and says how to keep it; an
+  // external client has neither and needs the rule here.
+  const memoryBullet =
+    surface.remembers && !contextInjected
+      ? `- Memory: call the \`memory\` tool with \`action: "view"\` at the start of a conversation to read what you remember about the person (about them, plus what was learned in this organization; nothing learned in their other organizations is ever shown here). Use it to answer as they like, and keep it with the same tool when they tell you something durable about themselves.
+`
+      : "";
   const heavyListBullet = invokes
     ? `- Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
@@ -302,7 +310,7 @@ ${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
-${heavyListBullet}${concurrencyBullet}${
+${memoryBullet}${heavyListBullet}${concurrencyBullet}${
     authors
       ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
           granted("getIntegration")
@@ -346,6 +354,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     authors: any("authors"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    remembers: any("remembers"),
   };
 }
 
@@ -506,7 +515,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const actor = getActor(c);
     const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
       ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor),
+      surface: deriveMcpSurface(space.permissions, ceiling, actor, isUserPrincipal(c)),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
@@ -521,7 +530,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor),
+      surface: deriveMcpSurface(permissions, ceiling, actor, isUserPrincipal(c)),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -650,7 +659,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor);
+      : deriveMcpSurface(permissions, ceiling, actor, isUserPrincipal(c));
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed

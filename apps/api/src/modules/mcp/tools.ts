@@ -88,6 +88,7 @@ import {
   type McpSpace,
   type OrgWideSpaces,
 } from "./spaces.ts";
+import { buildMemoryTool } from "./memory-tool.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -101,6 +102,7 @@ export type McpToolName =
   | "list_files"
   | "read_file"
   | "read_skill"
+  | "memory"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -1626,12 +1628,20 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
+  /**
+   * `memory`: the person's own credential holding `memory:write`. The switches
+   * (the person's, the org's) are NOT read here: the surface is cached per
+   * permission set by the chat, so the tool checks them on every call instead.
+   */
+  remembers: boolean;
 }
 
 export function deriveMcpSurface(
   permissions: ReadonlySet<string>,
   ceiling: ReadonlySet<string> | undefined,
   actor: Actor,
+  /** The credential is the person themselves (`isUserPrincipal`), not a delegate. */
+  personal = false,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
@@ -1647,6 +1657,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+    // A scoped credential (the chat's loopback bearer) is capped by `memory:write`.
+    remembers: personal && actor.type === "user" && granted("updateMyMemory"),
   };
 }
 
@@ -1700,6 +1712,17 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
       observe: (event) => emit(ctx, event),
     }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
+    ...(surface.remembers
+      ? [
+          buildMemoryTool({
+            userId: ctx.actor.id,
+            orgId: ctx.scope.orgId,
+            requestId: ctx.requestId,
+            offersView: !ctx.contextInjected,
+            observe: (event) => emit(ctx, event),
+          }),
+        ]
+      : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
@@ -1726,6 +1749,7 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   import_package_file: "importsPackages",
   get_me: null,
   get_runtime_capabilities: false,
+  memory: false,
 };
 
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
