@@ -257,11 +257,12 @@ describe("MITM listener — no value reaches a response or an event", () => {
     };
   }
 
-  function loginSource(password: string): MitmCredentialSource {
+  function loginSource(password: string, refused: string[] = []): MitmCredentialSource {
     return {
       current: () => ({ auths: [] }),
       deliveryPlans: () => ({}),
       activeInputs: () => ({ inputs: { password }, authorizedUris: ["https://api.example/**"] }),
+      refuseActiveInput: (field) => refused.push(field),
     };
   }
 
@@ -304,13 +305,40 @@ describe("MITM listener — no value reaches a response or an event", () => {
     });
   }
 
-  it("refuses a login input substituted into a header it cannot be in", async () => {
-    const { res, fetched } = await run(
-      loginSource(`${SECRET}€`),
-      new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+  for (const bad of ["€", "\r\nX-Evil: 1"]) {
+    it(`refuses a login input ending ${JSON.stringify(bad)} substituted into a header, naming the field to the source`, async () => {
+      const refused: string[] = [];
+      const { res, body, fetched } = await run(
+        loginSource(`${SECRET}${bad}`, refused),
+        new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+      );
+      expect(res.status).toBe(403);
+      expect(body).toBe(
+        "MITM listener: login input contains a character this request cannot carry where it is placed",
+      );
+      expect(fetched).toBe(0);
+      expect(refused).toEqual(["password"]);
+    });
+  }
+
+  it("encodes a login input for the request's own form body", async () => {
+    let sentBody = "";
+    const { res } = await run(
+      loginSource("p&ss=w+rd %x"),
+      new Request("https://127.0.0.1/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "username=alice&password={{password}}",
+      }),
+      (async (_url: string, init?: RequestInit) => {
+        sentBody = new TextDecoder().decode(init?.body as Uint8Array);
+        return new Response("ok");
+      }) as unknown as typeof fetch,
     );
-    expect(res.status).toBe(403);
-    expect(fetched).toBe(0);
+    expect(res.status).toBe(200);
+    const params = new URLSearchParams(sentBody);
+    expect([...params.keys()]).toEqual(["username", "password"]);
+    expect(params.getAll("password")).toEqual(["p&ss=w+rd %x"]);
   });
 
   it("names the path before login substitution and no query in its events", async () => {

@@ -379,6 +379,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   after the call returned.
 - **`ssh_read`, `ssh_write_file` and `ssh_edit_file` accept `~` and `~/…`**
   (#1798), from the account's home directory; `~user` is refused.
+- **A login input is encoded for the place it takes** (#1818), in a declarative
+  `connect.login` and in a `connect.tool` login tool's requests: a password with
+  `&` or `=` no longer breaks a form login, and no value adds a parameter,
+  member or header line. A declarative login now validates the submitted
+  credentials against `credentials.schema` and types them by it. Rules and
+  refusals: `docs/guides/writing-an-integration-with-connect.md`.
+- **A refused declarative login answers `400 invalid_request`**, not `500`, on
+  `connect/fields` and the hosted form (#1818), as a refused `connect.tool`
+  login does; an unreachable or failing service is `502`, a slow one `504`.
+  Importing a form login without `success_criteria` warns.
+- **The guide's `connect.tool` examples send the session cookie as a `Cookie`
+  header** (#1818): `delivery.http.in: "cookie"` is refused at import.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each

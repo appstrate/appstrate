@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — login inputs encoded for their place (#1818)
+
+- `substituteRequest` (`./resolvers`): substitutes `{{name}}` into a request's
+  URL, headers and body, each value encoded for its place — a leading URL
+  placeholder as is, every other URL value percent-encoded; a form, JSON, XML
+  or multipart body by its `Content-Type`; a header value refused unless it is
+  an HTTP field value (and a `cookie-octet` string in a `Cookie` header).
+  Inputs may be typed: a non-string value is its JSON text, or that JSON value
+  in a bare JSON position, where a string is always a JSON string.
+- `UnencodableInputError` (`./resolvers`): what `substituteRequest` throws for
+  a value it cannot carry where it is placed; carries the `field`, never the
+  value.
+- `headerNamed` (`./resolvers`): a header's value whatever the case of its
+  name.
+- `substituteVars` takes an `encode` option, `(value, key, offset) => string`,
+  rendering each resolved value for its place in the template.
+
+### Changed
+
+- `unresolvedPlaceholders` accepts a `Readonly<Record<string, unknown>>` (it
+  reads only the keys); a `Record<string, string>` still passes.
+
 ### Added — the integrations a run starts without (#1830)
 
 - `PlatformPromptOptions.unavailableIntegrations` (`./bundle`):

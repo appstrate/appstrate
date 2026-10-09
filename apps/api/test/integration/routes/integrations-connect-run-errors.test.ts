@@ -18,10 +18,10 @@
  * swapped for a fake that emits the sidecar's stdout sentinels verbatim.
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { fieldsConnect, hostedSubmit, type ProblemBody } from "../../helpers/connect-surfaces.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -40,8 +40,6 @@ import type {
   WorkloadHandle,
 } from "@appstrate/core/platform-types";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-
-const app = getTestApp();
 
 const INTEGRATION_ID = "@myorg/portal";
 const SERVER_ID = "@myorg/portal-server";
@@ -104,54 +102,11 @@ function sentinelOrchestrator(stdoutLines: string[]): RunOrchestrator {
   return orch as RunOrchestrator;
 }
 
-interface ProblemBody {
-  status: number;
-  code: string;
-  detail: string;
-  param?: string;
-}
-
-/** Drive the hosted portal end to end: mint → dispatch → context → submit. */
-async function hostedSubmit(
-  ctx: TestContext,
-  credentials: Record<string, unknown>,
-): Promise<Response> {
-  const mint = await app.request(
-    `/api/integrations/${INTEGRATION_ID}/auths/session/connect/session`,
-    {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    },
-  );
-  expect(mint.status).toBe(200);
-  const token = new URL(((await mint.json()) as { connect_url: string }).connect_url).searchParams
-    .get("token")!
-    .toString();
-
-  const start = await app.request(
-    `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
-    { redirect: "manual" },
-  );
-  const cookie = `appstrate_connect=${start.headers.get("set-cookie")!.match(/appstrate_connect=([^;]+)/)![1]}`;
-  const context = (await (
-    await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie } })
-  ).json()) as { csrf: string };
-
-  return app.request("/api/integrations/connect/submit", {
-    method: "POST",
-    headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": context.csrf },
-    body: JSON.stringify({ credentials }),
-  });
-}
-
-async function fieldsConnect(ctx: TestContext): Promise<Response> {
-  return app.request(`/api/integrations/${INTEGRATION_ID}/auths/session/connect/fields`, {
-    method: "POST",
-    headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-    body: JSON.stringify({ credentials: { email: "a@b.c", password: "pw" } }),
-  });
-}
+/** Both connect doors for this integration's `session` auth. */
+const submitFields = (ctx: TestContext) =>
+  fieldsConnect(ctx, INTEGRATION_ID, "session", { email: "a@b.c", password: "pw" });
+const submitHosted = (ctx: TestContext, credentials: Record<string, unknown>) =>
+  hostedSubmit(ctx, INTEGRATION_ID, "session", credentials);
 
 describe("connect-run failures at the route boundary", () => {
   let ctx: TestContext;
@@ -204,7 +159,7 @@ describe("connect-run failures at the route boundary", () => {
       ]),
     );
 
-    const res = await fieldsConnect(ctx);
+    const res = await submitFields(ctx);
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as ProblemBody;
@@ -220,7 +175,7 @@ describe("connect-run failures at the route boundary", () => {
       ]),
     );
 
-    const res = await hostedSubmit(ctx, { email: "a@b.c", password: "nope" });
+    const res = await submitHosted(ctx, { email: "a@b.c", password: "nope" });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as ProblemBody;
@@ -238,7 +193,7 @@ describe("connect-run failures at the route boundary", () => {
       ]),
     );
 
-    const res = await fieldsConnect(ctx);
+    const res = await submitFields(ctx);
 
     expect(res.status).toBe(500);
     const raw = await res.text();
@@ -266,7 +221,7 @@ describe("connect-run failures at the route boundary", () => {
     );
     _resetCacheForTesting();
     try {
-      const res = await hostedSubmit(ctx, { email: "a@b.c", password: "pw" });
+      const res = await submitHosted(ctx, { email: "a@b.c", password: "pw" });
 
       expect(res.status).toBe(503);
       const raw = await res.text();
