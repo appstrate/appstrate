@@ -263,7 +263,8 @@ function agentBody(view: AgentLaunchView, scope: string, name: string, files: bo
       "- `done: false`: the run is still going, with no outcome yet. Wait with " +
         `\`${INVOKE_OPERATION}\` \`${GET_RUN}\` until it ends, then list its files with ` +
         `\`${LIST_FILES}\` \`{ "runId": "<id>" }\`. Never call \`getRun\` on a finished run.`,
-      "- `connect_url` or `must_choose_connection`: follow the Appstrate server's instructions.",
+      "- `connect_url`, `must_choose_connection` or `insufficient_scopes`: follow the Appstrate " +
+        "server's instructions.",
       `- \`warnings\` items (${CONNECTION_RESOLUTION_WARNING_CODES.map(code).join(", ")}): the ` +
         "run started without those integrations. Say so with the result; do not retry. They " +
         `carry no link: connect a ${code("not_connected")} or ${code("auth_key_mismatch")} one ` +

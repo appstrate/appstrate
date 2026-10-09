@@ -491,7 +491,7 @@ export async function assertConnectionShareable(
   if (!conn.userId) {
     throw conflict(
       "end_user_connection_not_shareable",
-      "An end user's connection cannot be shared with a space.",
+      "An end user's connection cannot be shared with the space.",
     );
   }
   await lockOrgMember(tx, conn.orgId, conn.userId);

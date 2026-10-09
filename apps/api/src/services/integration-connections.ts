@@ -135,6 +135,12 @@ import {
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
+  PLACEHOLDER_ACCOUNT_ID,
+  connectionVariablesOf,
+  displayAccountId,
+  sameConnectionVariables,
+} from "../lib/connection-identity.ts";
+import {
   getLocalServerRef,
   getRemoteSource,
   hasPerConnectionAuthServer,
@@ -250,21 +256,6 @@ interface ActorConnectionRow {
   oauthResource: string | null;
 }
 
-/** Whether two connections name the same upstream: the same variables, the same values. */
-function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
-  const entries = Object.entries(a);
-  return entries.length === Object.keys(b).length && entries.every(([k, v]) => b[k] === v);
-}
-
-/** Own string values only: the column is jsonb, and a renderer substitutes what it is given. */
-function connectionVariablesOf(value: unknown): ConnectionVariables {
-  const out: Record<string, string> = {};
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    for (const [name, v] of Object.entries(value)) if (typeof v === "string") out[name] = v;
-  }
-  return Object.freeze(out);
-}
-
 /**
  * Spawn-side connection row — carries the `authKey` so the spawn
  * resolver can pick the right `manifest.auths[authKey].delivery`
@@ -274,13 +265,6 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
   /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
   credentialRevision: string;
-}
-
-/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
-const PLACEHOLDER_ACCOUNT_ID = "default";
-
-export function displayAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
 }
 
 // IDOR guard on a client-supplied reconnect target. Ownership, not usability:
@@ -462,6 +446,7 @@ export async function selectAccessibleConnection(
         agentTools: [],
         agentScopes: [],
         required: true,
+        noAgentSelection: true,
       },
     ],
     accessibleConnections: rows,
@@ -2787,12 +2772,13 @@ export async function widenConnectionsToOrgScope(
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
  * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
- * integration-detail ConnectionRow reconnect), and the run-kickoff
- * MissingConnectionsModal reconnect button. The latter two consume the
- * `connection_id` field smuggled on `needs_reconnection` / `insufficient_scopes`
- * ProblemDetails by `integration-connection-resolver.ts:translateResolutionError`
- * and forward it through the OAuth state record so the callback lands here on
- * the `update-owned` path.
+ * integration-detail ConnectionRow reconnect), the run-kickoff
+ * MissingConnectionsModal reconnect button, and an upgrade the user chose. The
+ * latter consume the `connection_id` field carried on `needs_reconnection` /
+ * `insufficient_scopes` ProblemDetails by
+ * `integration-connection-resolver.ts:translateResolutionError` and forward it
+ * through the OAuth state record so the callback lands here on the
+ * `update-owned` path.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,

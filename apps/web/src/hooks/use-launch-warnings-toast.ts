@@ -9,9 +9,9 @@ import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
 import { packageDetailPath } from "../lib/package-paths";
 import {
-  hasLaunchWarnings,
   isViewersLaunch,
   launchWarningsToast,
+  warnedIntegrationIds,
   type LaunchTarget,
   type LaunchWarning,
 } from "../lib/launch-warnings";
@@ -28,8 +28,9 @@ export function useLaunchWarningsToast() {
   const canReach = useCanReach();
   return (target: LaunchTarget, agentPackageId: string, warnings: readonly LaunchWarning[]) => {
     // Checked first: a launch without warnings costs no name lookup.
-    if (!hasLaunchWarnings(warnings)) return;
-    void integrationNames().then((nameOf) => {
+    const integrationIds = warnedIntegrationIds(warnings);
+    if (integrationIds.length === 0) return;
+    void integrationNames(integrationIds).then((nameOf) => {
       const content = launchWarningsToast({ kind: target.kind, warnings, nameOf });
       if (!content) return;
       const agentPath = packageDetailPath("agent", agentPackageId);

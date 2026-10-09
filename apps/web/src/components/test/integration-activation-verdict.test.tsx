@@ -59,9 +59,9 @@ function spaceFixture(permissions: string[], personal: boolean) {
 }
 
 /**
- * Render the dependency card for an integration that is NOT active here — the
- * `/api/integrations` list is empty, which is exactly "nothing is active in
- * this space" — with the caller's standing in the target space seeded.
+ * Render the dependency card for an integration that is NOT active here — its
+ * own detail says `active: false` — with the caller's standing in the target
+ * space seeded.
  */
 function cardFor(permissions: string[], personal: boolean): string {
   const qc = new QueryClient();
@@ -78,16 +78,11 @@ function cardFor(permissions: string[], personal: boolean): string {
       hasMore: false,
     },
   );
-  qc.setQueryData($api.queryOptions("get", "/api/integrations", { params: scoped }).queryKey, {
-    object: "list",
-    data: [],
-    hasMore: false,
-  });
   qc.setQueryData(
     $api.queryOptions("get", "/api/integrations/{packageId}", {
       params: { path: { packageId: "@acme/gmail" }, ...scoped },
     }).queryKey,
-    { manifest: { display_name: "Gmail" }, auths: [] },
+    { manifest: { display_name: "Gmail" }, auths: [], active: false },
   );
 
   // `renderToStaticMarkup` takes zustand's SERVER snapshot, so the current

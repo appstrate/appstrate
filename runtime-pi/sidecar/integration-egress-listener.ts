@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-connection PLAIN CONNECT egress listener (issue #543).
+ * Per-connection plain HTTP egress proxy (issue #543).
  *
  * A local-source runner sits on the per-run network (`internal: true` in
  * docker mode) with no direct egress. When the integration injects a
@@ -11,22 +11,22 @@
  * itself, e.g. a form/session login) it only needs a way OUT, not a proxy
  * that opens its TLS. This listener is that way out:
  *
- *   - terminates the `CONNECT host:port` preamble,
- *   - applies the SSRF floor and the egress allowlist at CONNECT, then to the
- *     ClientHello's SNI (a CDN front routes on SNI, not on the CONNECT target),
- *   - blind-relays raw TCP both directions (NO TLS termination, NO per-SNI
- *     cert mint, NO header injection).
+ *   - `CONNECT host:port`: the SSRF floor and the egress allowlist apply at
+ *     CONNECT, then to the ClientHello's SNI (a CDN front routes on SNI, not on
+ *     the CONNECT target), then raw TCP is blind-relayed both directions (NO TLS
+ *     termination, NO per-SNI cert mint, NO header injection);
+ *   - absolute-form `http://` requests, vetted the same way and forwarded
+ *     verbatim on a connection of their own (no injected credential).
  *
  * It deliberately mirrors the MITM listener's {@link MitmListenerHandle}
  * surface (`ready` / `address` / `proxyUrl` / `close`) so `integrations-boot`
- * collects and tears down both listener kinds uniformly. CONNECT-only, exactly
- * like the MITM listener (which 405s plain HTTP) — env-delivery runners
- * previously routed through MITM, so HTTPS-only egress is unchanged behaviour.
+ * collects and tears down both listener kinds uniformly.
  *
  * Only the owning runner may connect (`isPeerAllowed`, #1458).
  */
 
-import { createServer as netCreateServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 
 import {
@@ -34,33 +34,43 @@ import {
   peerAddress,
   peerAdmitted,
   resolveAndCheckHost,
+  ssrfFloorFor,
   PREAMBLE_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
 } from "./helpers.ts";
 import {
-  parseConnectTarget,
+  destroyBothWhenIdle,
+  forwardHttpRequest,
   netConnectWithTimeout,
-  TUNNEL_IDLE_TIMEOUT_MS,
+  parseConnectTarget,
+  tieSockets,
+  withoutHopByHop,
 } from "./connect-tunnel.ts";
 import { extractSni, type MitmListenerHandle } from "./integration-mitm-listener.ts";
 
 /** TLS plaintext record cap (RFC 8446 §5.1). */
 const MAX_TLS_RECORD = 16_384;
 
-/** The tunnel's first bytes: the whole first record if TLS (0x16), else the first chunk. */
-function collectTunnelHead(socket: Socket): Promise<Buffer> {
+/** Whether `buf` holds the tunnel's whole first bytes: the first record if TLS (0x16), else any. */
+function headComplete(buf: Buffer): boolean {
+  if (buf.length === 0) return false;
+  if (buf[0] !== 0x16) return true;
+  if (buf.length < 5) return false;
+  const recordLen = buf.readUInt16BE(3);
+  return recordLen > MAX_TLS_RECORD || buf.length >= 5 + recordLen;
+}
+
+/** The tunnel's first bytes, `seed` (read with the CONNECT head) first; the socket is left paused. */
+function collectTunnelHead(socket: Socket, seed: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    let buf = Buffer.alloc(0);
+    let buf = seed;
+    if (headComplete(buf)) return resolve(buf);
     const onClose = () => reject(new Error("socket closed before tunnel bytes"));
     const onData = (chunk: Buffer) => {
       buf = Buffer.concat([buf, chunk]);
-      if (buf[0] === 0x16) {
-        if (buf.length < 5) return;
-        const recordLen = buf.readUInt16BE(3);
-        if (recordLen <= MAX_TLS_RECORD && buf.length < 5 + recordLen) return;
-      }
+      if (!headComplete(buf)) return;
       socket.off("data", onData);
       socket.off("close", onClose);
       socket.pause(); // buffer until pipe() resumes
@@ -80,9 +90,39 @@ function clientHelloSni(head: Buffer): string | null | undefined {
   return extractSni(head.subarray(0, 5 + recordLen));
 }
 
+interface HttpTarget {
+  host: string;
+  port: number;
+  authority: string;
+  hostHeader: string;
+  path: string;
+}
+
+/** `undefined` for a non-`http://` target, `null` for a malformed or userinfo one. */
+function httpTarget(raw: string): HttpTarget | null | undefined {
+  if (!/^http:\/\//i.test(raw)) return undefined;
+  const url = URL.parse(raw);
+  if (!url?.hostname || url.username || url.password) return null;
+  const port = url.port ? Number(url.port) : 80;
+  if (port < 1) return null;
+  return {
+    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
+    port,
+    authority: `${url.hostname}:${port}`,
+    hostHeader: url.host,
+    path: url.pathname + url.search,
+  };
+}
+
+/** Whether the client asked for the connection to close after this exchange (RFC 9112 §9.3). */
+function wantsClose(req: IncomingMessage): boolean {
+  const tokens = (req.headers.connection ?? "").split(",").map((t) => t.trim().toLowerCase());
+  return req.httpVersion === "1.0" ? !tokens.includes("keep-alive") : tokens.includes("close");
+}
+
 export interface EgressListenerEvent {
   kind: "tunnel-opened" | "tunnel-refused" | "tunnel-error";
-  /** `host:port` target of the CONNECT, or of the refused SNI (never a path / query). */
+  /** `host:port` of the CONNECT / `http://` target or of the refused SNI (never a path / query). */
   target: string;
   /** Populated for `tunnel-refused` (SSRF / allowlist / SNI / peer / preamble timeout) and `tunnel-error`. */
   reason?: string;
@@ -103,12 +143,14 @@ interface CreateEgressListenerOptions {
   resolveHostFn?: HostResolver;
   egressPolicy: AuthorityPolicy;
   isPeerAllowed: PeerCheck;
-  /** Deadline for the client's first bytes while upstream is silent too (tests shorten it). */
+  /** Deadline for a tunnel's first bytes after the 200, while both sides are silent. */
   preambleTimeoutMs?: number;
+  /** Idle deadline of a relayed `http://` request's upstream (default `API_CALL_TIMEOUT_MS`). */
+  upstreamTimeoutMs?: number;
 }
 
 /**
- * Create a per-connection plain CONNECT egress listener on an ephemeral port.
+ * Create a per-connection plain egress listener on an ephemeral port.
  * Returns a {@link MitmListenerHandle}-shaped handle for uniform lifecycle
  * management alongside MITM listeners.
  */
@@ -122,120 +164,146 @@ export function createIntegrationEgressListener(
   const { egressPolicy } = options;
   const preambleTimeoutMs = options.preambleTimeoutMs ?? PREAMBLE_TIMEOUT_MS;
 
-  const server = netCreateServer();
+  // Peer gate, settled once per connection: nothing a refused peer sends is acted upon. Settled at
+  // accept for the http relay; Bun 1.3 emits no `connection` for a CONNECT socket: settled at CONNECT.
+  const admissions = new WeakMap<Socket, Promise<boolean>>();
+  const admitted = (socket: Socket): Promise<boolean> => {
+    let admission = admissions.get(socket);
+    if (!admission) {
+      admission = peerAdmitted(socket, options.isPeerAllowed);
+      admissions.set(socket, admission);
+    }
+    return admission;
+  };
 
-  server.on("connection", (clientSocket: Socket) => {
-    const refuse = (target: string, reason: string, peer?: string) => {
-      emit({ kind: "tunnel-refused", target, reason, peer });
-      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+  // Floor and allowlist before any DNS lookup, then the rebind layer: the PINNED address, or why.
+  const vet = async (
+    targetHost: string,
+    port: number,
+  ): Promise<{ address: string } | { refused: string }> => {
+    const lowerHost = targetHost.toLowerCase();
+    const ssrfFloor = ssrfFloorFor(egressPolicy, lowerHost, port, isBlockedHostFn);
+    if (ssrfFloor(lowerHost)) return { refused: "ssrf" };
+    if (!egressPolicy.allowsAuthority(lowerHost, port)) return { refused: "not-authorized" };
+    const check = await resolveAndCheckHost(lowerHost, {
+      resolve: resolveHostFn,
+      isBlockedHostFn: ssrfFloor,
+    });
+    if (!check.blocked) return { address: check.pinnedAddress };
+    return { refused: check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf" };
+  };
+
+  const refused = (target: string, reason: string, peer?: string) =>
+    emit({ kind: "tunnel-refused", target, reason, peer });
+  // One bad connection must never become an unhandled rejection: Bun would exit.
+  const crashed = (destroy: () => void) => (err: unknown) => {
+    const reason = err instanceof Error ? err.name : "unknown";
+    emit({ kind: "tunnel-error", target: "<unknown>", reason });
+    destroy();
+  };
+
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
+    const reply = (status: number) => {
+      req.resume();
+      res.writeHead(status, { connection: "close", "content-length": "0" });
+      res.end();
+    };
+    if (!(await admitted(req.socket))) {
+      refused("<unknown>", "peer-not-allowed", peerAddress(req.socket));
+      return reply(403);
+    }
+    const target = httpTarget(req.url ?? "");
+    if (target === undefined) return reply(405);
+    if (target === null) return reply(400);
+    const vetted = await vet(target.host, target.port);
+    if (req.socket.destroyed) return; // client gave up during resolution
+    if ("refused" in vetted) {
+      refused(target.authority, vetted.refused);
+      return reply(403);
+    }
+    emit({ kind: "tunnel-opened", target: target.authority });
+    const headers = { ...withoutHopByHop(req.headers), host: target.hostHeader };
+    // `agent: false`: no upstream connection is pooled, so none is shared with another runner.
+    const upstream = {
+      hostname: vetted.address,
+      port: target.port,
+      path: target.path,
+      agent: false,
+    };
+    forwardHttpRequest(
+      req,
+      res,
+      { ...upstream, method: req.method, headers },
+      (err) => emit({ kind: "tunnel-error", target: target.authority, reason: err.message }),
+      options.upstreamTimeoutMs,
+    );
+  };
+
+  const handleConnect = async (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
+    const reply = (status: string) => {
+      clientSocket.write(`HTTP/1.1 ${status}\r\n\r\n`);
       clientSocket.destroy();
     };
-    // Peer gate, started at accept: nothing a refused peer sends is acted upon.
-    const admitted = peerAdmitted(clientSocket, options.isPeerAllowed);
-    // The kernel hands us a raw TCP socket; we must read the CONNECT preamble
-    // ourselves (net.Server has no `connect` event — that's http.Server). The
-    // request line can be split across TCP segments, so accumulate until the
-    // first CRLF instead of assuming it arrives in one chunk; cap the buffer so
-    // a peer that never sends a CRLF can't grow it unbounded. Headers after the
-    // request line are ignored (we tunnel, not inspect); a well-behaved CONNECT
-    // client waits for the 200 before sending tunnel bytes, so none are lost.
-    const MAX_PREAMBLE_BYTES = 8_192;
-    let preamble = "";
-    const onData = (chunk: Buffer) => {
-      preamble += chunk.toString("latin1");
-      const lineEnd = preamble.indexOf("\r\n");
-      if (lineEnd === -1) {
-        if (preamble.length > MAX_PREAMBLE_BYTES) {
-          clientSocket.off("data", onData);
-          clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-          clientSocket.destroy();
-        }
-        return; // request line not complete yet — await more segments
-      }
-      clientSocket.off("data", onData);
-      void (async () => {
-        if (!(await admitted)) {
-          return refuse("<unknown>", "peer-not-allowed", peerAddress(clientSocket));
-        }
-        const firstLine = preamble.slice(0, lineEnd);
-        const match = /^CONNECT\s+(\S+)\s+HTTP\/1\.[01]$/i.exec(firstLine);
-        if (!match) {
-          clientSocket.write("HTTP/1.1 405 Method Not Allowed\r\n\r\n");
-          clientSocket.destroy();
-          return;
-        }
-        const target = match[1] ?? "";
-        const parsed = parseConnectTarget(target);
-        if (!parsed) {
-          clientSocket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-          clientSocket.destroy();
-          return;
-        }
-        const { host: targetHost, port } = parsed;
-        const lowerHost = targetHost.toLowerCase();
+    if (!(await admitted(clientSocket))) {
+      refused("<unknown>", "peer-not-allowed", peerAddress(clientSocket));
+      return reply("403 Forbidden");
+    }
+    const target = req.url ?? "";
+    const parsed = parseConnectTarget(target);
+    if (!parsed) return reply("400 Bad Request");
+    const { port } = parsed;
+    const vetted = await vet(parsed.host, port);
+    if (clientSocket.destroyed) return; // client gave up during resolution
+    if ("refused" in vetted) {
+      refused(target, vetted.refused);
+      return reply("403 Forbidden");
+    }
 
-        // SSRF floor, literal layer — before any DNS round-trip.
-        if (isBlockedHostFn(lowerHost)) return refuse(target, "ssrf");
-
-        // Hard egress allowlist — before any DNS lookup of the name.
-        if (!egressPolicy.allowsAuthority(lowerHost, port)) return refuse(target, "not-authorized");
-
-        // DNS-rebind layer: refuse if ANY record is internal, then dial the PINNED
-        // IP (safe: the client's own handshake carries SNI/Host for the name).
-        const check = await resolveAndCheckHost(lowerHost, {
-          resolve: resolveHostFn,
-          isBlockedHostFn,
-        });
-        if (clientSocket.destroyed) return; // client gave up during resolution
-        if (check.blocked) {
-          return refuse(
-            target,
-            check.reason === "resolution-failed" ? "dns-resolution-failed" : "ssrf",
-          );
-        }
-        // Upstream receives nothing until the client's head is vetted; its own
-        // bytes flow at once (server-first banners: SMTP, IMAP, MySQL…).
-        const upstream = netConnectWithTimeout(port, check.pinnedAddress, () => {
-          clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          upstream.pipe(clientSocket);
-          for (const s of [clientSocket, upstream]) {
-            s.setTimeout(TUNNEL_IDLE_TIMEOUT_MS, () => s.destroy());
-          }
-          // Only a tunnel silent on BOTH sides dies at the preamble deadline.
-          const preamble = setTimeout(() => {
-            emit({ kind: "tunnel-refused", target, reason: "preamble-timeout" });
+    const upstream = netConnectWithTimeout(port, vetted.address, () => {
+      destroyBothWhenIdle(clientSocket, upstream);
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      // Upstream gets nothing until the client's first bytes are vetted; its bytes flow at once
+      // (SMTP, IMAP banners…). Only a tunnel silent on BOTH sides dies at the deadline.
+      upstream.pipe(clientSocket);
+      const preamble = setTimeout(() => {
+        refused(target, "preamble-timeout");
+        clientSocket.destroy();
+      }, preambleTimeoutMs);
+      const endPreamble = () => clearTimeout(preamble);
+      upstream.once("data", endPreamble);
+      clientSocket.once("close", endPreamble);
+      collectTunnelHead(clientSocket, head)
+        .then((first) => {
+          endPreamble();
+          const sni = first[0] === 0x16 ? clientHelloSni(first) : null;
+          if (sni === undefined || (sni !== null && !egressPolicy.allowsAuthority(sni, port))) {
+            const reason = sni === undefined ? "malformed-client-hello" : "not-authorized";
+            refused(sni ? `${sni}:${port}` : target, reason);
             clientSocket.destroy();
-          }, preambleTimeoutMs);
-          const endPreamble = () => clearTimeout(preamble);
-          upstream.once("data", endPreamble);
-          clientSocket.once("close", endPreamble);
-          collectTunnelHead(clientSocket)
-            .then((head) => {
-              endPreamble();
-              const sni = head[0] === 0x16 ? clientHelloSni(head) : null;
-              if (sni === undefined || (sni !== null && !egressPolicy.allowsAuthority(sni, port))) {
-                const reason = sni === undefined ? "malformed-client-hello" : "not-authorized";
-                emit({ kind: "tunnel-refused", target: sni ? `${sni}:${port}` : target, reason });
-                clientSocket.destroy();
-                return;
-              }
-              upstream.write(head); // replay the vetted bytes before splicing
-              emit({ kind: "tunnel-opened", target });
-              clientSocket.pipe(upstream);
-            })
-            .catch(() => clientSocket.destroy());
-        });
-        upstream.on("error", (err: Error) => {
-          emit({ kind: "tunnel-error", target, reason: err.message });
-          clientSocket.destroy();
-        });
-        upstream.once("close", () => clientSocket.destroy());
-        clientSocket.on("error", () => upstream.destroy());
-        clientSocket.once("close", () => upstream.destroy());
-      })();
-    };
-    clientSocket.on("data", onData);
+            return;
+          }
+          upstream.write(first); // replay the vetted bytes before splicing
+          emit({ kind: "tunnel-opened", target });
+          clientSocket.pipe(upstream);
+        })
+        .catch(() => clientSocket.destroy());
+    });
+    upstream.on("error", (err: Error) => {
+      emit({ kind: "tunnel-error", target, reason: err.message });
+    });
+    tieSockets(clientSocket, upstream);
+  };
+
+  const server = createHttpServer();
+  server.on("connection", (socket: Socket) => void admitted(socket));
+  server.on("request", (req: IncomingMessage, res: ServerResponse) => {
+    // Bun 1.3 may keep the connection open after an asynchronous answer, whatever the client asked.
+    if (wantsClose(req)) res.once("finish", () => req.socket.end());
+    handleRequest(req, res).catch(crashed(() => res.destroy()));
+  });
+  server.on("connect", (req: IncomingMessage, clientSocket: Socket, head: Buffer) => {
     clientSocket.on("error", () => clientSocket.destroy());
+    handleConnect(req, clientSocket, head).catch(crashed(() => clientSocket.destroy()));
   });
 
   let readyResolve!: () => void;

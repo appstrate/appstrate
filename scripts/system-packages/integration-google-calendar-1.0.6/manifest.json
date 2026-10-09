@@ -1,13 +1,13 @@
 {
-  "name": "@appstrate/google-forms",
-  "version": "1.0.5",
+  "name": "@appstrate/google-calendar",
+  "version": "1.0.6",
   "type": "integration",
   "schema_version": "0.3",
-  "display_name": "Google Forms (API)",
-  "description": "Form creation and response collection by Google",
-  "keywords": ["forms", "productivity"],
+  "display_name": "Google Calendar (API)",
+  "description": "Calendar and scheduling service by Google",
+  "keywords": ["calendar", "productivity"],
   "license": "Apache-2.0",
-  "icon": "simple-icons:googleforms",
+  "icon": "logos:google-calendar",
   "source": {
     "kind": "none"
   },
@@ -35,8 +35,8 @@
       "default_scopes": [
         "openid",
         "email",
-        "https://www.googleapis.com/auth/forms.body.readonly",
-        "https://www.googleapis.com/auth/forms.responses.readonly"
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/calendar.readonly"
       ],
       "authorization_params": {
         "access_type": "offline",
@@ -66,27 +66,31 @@
           "implies": ["email"]
         },
         {
-          "value": "https://www.googleapis.com/auth/forms.body.readonly",
-          "label": "Read form structure"
+          "value": "https://www.googleapis.com/auth/calendar.readonly",
+          "label": "Read-only access to calendars and events"
         },
         {
-          "value": "https://www.googleapis.com/auth/forms.body",
-          "label": "Read and edit form structure"
+          "value": "https://www.googleapis.com/auth/calendar",
+          "label": "Full calendar access (read & write)"
         },
         {
-          "value": "https://www.googleapis.com/auth/forms.responses.readonly",
-          "label": "Read form responses"
+          "value": "https://www.googleapis.com/auth/calendar.events",
+          "label": "Manage events on all calendars"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive.readonly",
-          "label": "Read Google Drive (list forms)"
+          "value": "https://www.googleapis.com/auth/calendar.events.readonly",
+          "label": "Read events only"
         },
         {
-          "value": "https://www.googleapis.com/auth/drive",
-          "label": "Full Google Drive access"
+          "value": "https://www.googleapis.com/auth/calendar.settings.readonly",
+          "label": "Read calendar settings"
+        },
+        {
+          "value": "https://www.googleapis.com/auth/calendar.freebusy",
+          "label": "Read free/busy information"
         }
       ],
-      "authorized_uris": ["https://forms.googleapis.com/**"],
+      "authorized_uris": ["https://www.googleapis.com/calendar/**"],
       "delivery": {
         "http": {
           "in": "header",

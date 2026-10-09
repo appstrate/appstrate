@@ -193,7 +193,7 @@ describe("block_user_connections workflow", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { code?: string; detail?: string };
     expect(body.code).toBe("connection_blocked_by_admin");
-    expect(body.detail ?? "").toMatch(/disabled by a space admin/i);
+    expect(body.detail ?? "").toMatch(/disabled by an admin of this space/i);
 
     // Nothing persisted — the gate fires before strategy.complete.
     const rows = await db

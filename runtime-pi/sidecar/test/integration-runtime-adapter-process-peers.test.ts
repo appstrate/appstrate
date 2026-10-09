@@ -19,9 +19,7 @@ import { connect, createServer, type AddressInfo, type Server, type Socket } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
-
-import { socketPeer } from "../helpers.ts";
+import { socketPeer, type RunnerEgressPolicy } from "../helpers.ts";
 
 import {
   createProcessIntegrationRuntimeAdapter,
@@ -394,9 +392,11 @@ async function freePort(kind: "tcp" | "udp"): Promise<number> {
 describe("process adapter — transparent egress plane (#779)", () => {
   const FIRST = FIXTURE_RUNNER_UIDS.first;
   const ALLOWED = "api.allowed.test";
-  const policy: EgressPolicy = {
+  const policy: RunnerEgressPolicy = {
     allowsAuthority: (host) => host === ALLOWED,
     allowsUrl: () => true,
+    skipsSsrfFloor: () => false,
+    isSelf: () => false,
   };
   const connectEgress: RuntimeEgressContext = {
     proxyUrl: "http://127.0.0.1:1",

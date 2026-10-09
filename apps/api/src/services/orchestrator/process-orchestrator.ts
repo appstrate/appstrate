@@ -460,8 +460,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    // No `runId`: RUN_ID only serves container labeling and this
-    // topology spawns no containers.
+    // No `runId`: RUN_ID only names Docker runner resources, and this topology spawns none.
     const env = buildBaseSidecarEnv({
       spec,
       baseEnv: cleanProcessEnv(),
@@ -470,14 +469,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
       platformApiUrl,
       workspace: boundary.workspace,
     });
-    // This run is NOT containerized (process orchestrator), so its integrations
-    // must spawn as host subprocesses too. The sidecar selects its integration
-    // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
-    // pin it to mirror this orchestrator's RUN_ADAPTER. Respect an explicit
-    // operator override carried in from the environment.
-    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
-      env.INTEGRATION_RUNTIME_ADAPTER = "process";
-    }
+    env.INTEGRATION_RUNTIME_ADAPTER = "process";
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
     env.LISTEN_HOST = LOOPBACK;

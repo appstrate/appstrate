@@ -300,6 +300,7 @@ describe("resolveIntegrationSpawns — delivery templates with connection variab
     });
     expect(spec.egress).toEqual({
       authorizedUris: ["https://forge.example.com/api/**"],
+      declaredUris: ["{$variable.base_url}/api/**"],
       allowAllUris: false,
     });
   });
@@ -330,7 +331,11 @@ describe("resolveIntegrationSpawns — delivery templates with connection variab
 
     const { specs } = await resolve(ctx);
     expect(specs[0]!.httpDeliveryAuths?.primary?.authorizedUris).toEqual([]);
-    expect(specs[0]!.egress).toEqual({ authorizedUris: [], allowAllUris: false });
+    expect(specs[0]!.egress).toEqual({
+      authorizedUris: [],
+      declaredUris: ["{$variable.base_url}/api/**"],
+      allowAllUris: false,
+    });
   });
 });
 
