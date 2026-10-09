@@ -63,7 +63,7 @@ export function PickerMenu({
   const navigate = useNavigate();
   const {
     runBlocking,
-    candidates,
+    sortedCandidates,
     resolvedConnectionIds,
     canAddConnection,
     byDefault,
@@ -90,6 +90,10 @@ export function PickerMenu({
     canApply,
     ownerLabel,
     setLabel,
+    scopeFitOf,
+    grantedSummary,
+    missingScopeLabels,
+    connectsWithAgentScopes,
     open,
     setOpen,
     onOpenChange,
@@ -101,6 +105,19 @@ export function PickerMenu({
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
+  };
+  // A fresh connect requests the agent's scopes: saying so is what makes it the safe choice
+  // over upgrading a shared connection.
+  const addLabel = (authKey: string): string => {
+    const tl = authKeys.length > 1 ? typeLabel(authKey) : null;
+    if (connectsWithAgentScopes(authKey)) {
+      return tl
+        ? t("detail.integrationMemberPicker.newWithAgentScopesVia", { label: tl })
+        : t("detail.integrationMemberPicker.newWithAgentScopes");
+    }
+    return tl
+      ? t("detail.integrationMemberPicker.addVia", { label: tl })
+      : t("detail.integrationMemberPicker.addConnection");
   };
   const trigger = triggerKind(picker);
   const triggerLabel = {
@@ -147,8 +164,12 @@ export function PickerMenu({
         <DropdownMenuLabel className="text-[0.7rem]">
           {t("detail.integrationMemberPicker.title")}
         </DropdownMenuLabel>
-        {candidates.map((c) => {
+        {/* Compatible first, the ones granting no more than the agent asks for leading. */}
+        {sortedCandidates.map((c) => {
           const tl = typeLabel(c.auth_key);
+          const fit = scopeFitOf(c);
+          const summary = grantedSummary(c);
+          const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
             explicitIds === null &&
@@ -186,7 +207,9 @@ export function PickerMenu({
                   className="pointer-events-none"
                 />
               )}
-              <div className="flex min-w-0 flex-1 flex-col">
+              <div
+                className={`flex min-w-0 flex-1 flex-col ${fit === "missing" ? "opacity-60" : ""}`}
+              >
                 <div className="flex items-center gap-1.5">
                   <span className="truncate font-medium">{c.label}</span>
                   {tl && (
@@ -197,11 +220,6 @@ export function PickerMenu({
                   {c.shared_with_org && (
                     <Badge variant="secondary" className="text-[0.6rem]">
                       {t("detail.integrationMemberPicker.sharedBadge")}
-                    </Badge>
-                  )}
-                  {c.missing_scopes.length > 0 && (
-                    <Badge variant="destructive" className="text-[0.6rem]">
-                      {t("detail.integrationMemberPicker.missingScopesBadge")}
                     </Badge>
                   )}
                   {isDefault && (
@@ -215,6 +233,23 @@ export function PickerMenu({
                   {c.needs_reconnection &&
                     ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                 </span>
+                {fit === "missing" ? (
+                  <span className={`truncate text-[0.65rem] ${AMBER_TEXT}`} title={missing}>
+                    {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
+                  </span>
+                ) : summary.text ? (
+                  <span
+                    className="text-muted-foreground truncate text-[0.65rem]"
+                    title={summary.title}
+                  >
+                    {summary.text}
+                  </span>
+                ) : null}
+                {fit === "broader" && (
+                  <span className="text-muted-foreground truncate text-[0.65rem] italic">
+                    {t("detail.integrationMemberPicker.broaderThanAgent")}
+                  </span>
+                )}
               </div>
               {canRenew && (
                 <Button
@@ -315,23 +350,16 @@ export function PickerMenu({
         )}
         {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
         {canAddConnection &&
-          authKeys.map((k) => {
-            const tl = typeLabel(k);
-            return (
-              <DropdownMenuItem
-                key={`add-${k}`}
-                onSelect={() => void triggerConnect(k)}
-                data-testid={`member-pick-add-${integrationId}-${k}`}
-              >
-                <Plus className="size-3.5" />
-                <span>
-                  {authKeys.length > 1 && tl
-                    ? t("detail.integrationMemberPicker.addVia", { label: tl })
-                    : t("detail.integrationMemberPicker.addConnection")}
-                </span>
-              </DropdownMenuItem>
-            );
-          })}
+          authKeys.map((k) => (
+            <DropdownMenuItem
+              key={`add-${k}`}
+              onSelect={() => void triggerConnect(k)}
+              data-testid={`member-pick-add-${integrationId}-${k}`}
+            >
+              <Plus className="size-3.5" />
+              <span>{addLabel(k)}</span>
+            </DropdownMenuItem>
+          ))}
         {/* Escape hatch to the integration page for the full connection
             management surface (rename, share-with-org, delete, OAuth client). */}
         {canOpenIntegration && (

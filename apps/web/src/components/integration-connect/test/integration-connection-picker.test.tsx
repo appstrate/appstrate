@@ -25,6 +25,7 @@ import {
 } from "../../../hooks/use-integrations.ts";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
+import { UnderScopedWarning } from "../connection-picker-states.tsx";
 import {
   useConnectionPicker,
   type ConnectionPicker,
@@ -790,5 +791,85 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     } finally {
       toasted.mockRestore();
     }
+  });
+});
+
+describe("IntegrationConnectionPicker — scopes against the agent", () => {
+  const OAUTH = {
+    auths: {
+      primary: {
+        type: "oauth2",
+        default_scopes: ["read"],
+        scope_catalog: [
+          { value: "read", label: "Read" },
+          { value: "send", label: "Send" },
+          { value: "labels", label: "Labels" },
+        ],
+      },
+    },
+  } as unknown as IntegrationManifestView;
+  const LABELS = "44444444-4444-4444-8444-444444444444";
+  const scoped = (id: string, granted: string[], missing: string[] = []): Candidate => ({
+    ...candidate(id, id),
+    scopes_granted: granted,
+    missing_scopes: missing,
+  });
+
+  function pickerOver(candidates: Candidate[]): ConnectionPicker {
+    const qc = new QueryClient();
+    qc.setQueryData(READINESS_KEY, readiness(resolution({ candidates })));
+    const pickers: Array<ConnectionPicker | null> = [];
+    render(
+      <PickerProbe
+        persistence={{ mode: "pin" }}
+        manifest={OAUTH}
+        onPicker={(p) => pickers.push(p)}
+      />,
+      { queryClient: qc },
+    );
+    const picker = pickers[0];
+    if (!picker) throw new Error("the readiness verdict should be loaded");
+    return picker;
+  }
+
+  it("lists compatible connections first, the ones granting no more than asked leading", () => {
+    const picker = pickerOver([
+      scoped(WEB, ["read"], ["send"]),
+      scoped(LABELS, ["read", "labels"]),
+      scoped(DB, ["read"]),
+    ]);
+    expect(picker.sortedCandidates.map((c) => c.id)).toEqual([DB, LABELS, WEB]);
+    expect(picker.candidates.map((c) => c.id)).toEqual([WEB, LABELS, DB]);
+  });
+
+  it("offers a new connection with the agent's scopes first, the in-place upgrade second", () => {
+    const conn = scoped(WEB, ["read"], ["send"]);
+    const picker = {
+      ...pickerOver([conn]),
+      canConnect: true,
+      canAddConnection: true,
+      authKeys: ["primary"],
+    };
+    const html = render(<UnderScopedWarning conn={conn} picker={picker} />);
+    const create = html.indexOf(`member-pick-new-for-agent-${WEB}`);
+    const upgrade = html.indexOf(`member-pick-upgrade-${WEB}`);
+    expect(create).toBeGreaterThan(-1);
+    expect(upgrade).toBeGreaterThan(create);
+    expect(html).toContain(
+      i18n.t("agents:detail.integrationMemberPicker.missingScopes", { scopes: "Send" }),
+    );
+  });
+
+  it("offers no upgrade of a connection the actor does not own", () => {
+    const conn = { ...scoped(WEB, ["read"], ["send"]), is_own: false };
+    const picker = {
+      ...pickerOver([conn]),
+      canConnect: true,
+      canAddConnection: true,
+      authKeys: ["primary"],
+    };
+    const html = render(<UnderScopedWarning conn={conn} picker={picker} />);
+    expect(html).toContain(`member-pick-new-for-agent-${WEB}`);
+    expect(html).not.toContain(`member-pick-upgrade-${WEB}`);
   });
 });

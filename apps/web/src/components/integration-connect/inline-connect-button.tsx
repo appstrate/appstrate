@@ -13,7 +13,7 @@ import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
- * Agent-driven inline connect/upgrade trigger.
+ * Agent-driven inline connect/reconnect trigger.
  *
  * Every auth type (oauth2 / api_key / basic / mtls / custom) goes through the
  * unified hosted connect portal (issue #769): one `openPopup` call mints a
@@ -50,8 +50,7 @@ interface InlineConnectButtonProps {
    * minimum the agent needs. The backend requests `defaults ∪ these ∪
    * what the target connection already granted` — it does NOT walk
    * the org's agents, so omitting this (e.g. the integration page's "+
-   * Add account") connects with the manifest defaults only. Scope
-   * upgrades pass the missing scopes here explicitly.
+   * Add account") connects with the manifest defaults only.
    */
   scopes?: string[];
   /**
@@ -59,12 +58,8 @@ interface InlineConnectButtonProps {
    * `reconnect` — connection exists but `needsReconnection=true`; user
    *   re-runs the full OAuth dance, the upstream row is preserved
    *   (upsert keyed by `(integration, authKey, accountId, app, owner)`).
-   * `upgrade` — connection exists with valid tokens but the agent's
-   *   selected tools require scopes the actor hasn't granted yet; OAuth
-   *   re-kickoff requests defaults + missing + already-granted so the
-   *   IdP shows an incremental-consent screen for the diff only.
    */
-  intent: "connect" | "reconnect" | "upgrade";
+  intent: "connect" | "reconnect";
   size?: "sm" | "default";
   /** Override button label entirely. */
   label?: string;
@@ -76,7 +71,7 @@ interface InlineConnectButtonProps {
    */
   forceAccountSelect?: boolean;
   /**
-   * Existing connection id to UPDATE in place (reconnect / upgrade).
+   * Existing connection id to UPDATE in place (reconnect).
    * Omitted on fresh-connect CTAs — the callback then INSERTs a new
    * row. Threaded all the way through the OAuth state record.
    */
@@ -144,13 +139,8 @@ export function InlineConnectButton({
 
   const text =
     label ??
-    (intent === "upgrade"
-      ? t("detail.integrationUpgrade")
-      : intent === "reconnect"
-        ? t("detail.integrationReconnect")
-        : t("detail.integrationConnect"));
+    (intent === "reconnect" ? t("detail.integrationReconnect") : t("detail.integrationConnect"));
   const Icon = intent === "connect" ? Plug : RefreshCw;
-  const tooltip = intent === "upgrade" ? t("detail.integrationUpgradeTooltip") : undefined;
 
   return (
     <>
@@ -187,7 +177,6 @@ export function InlineConnectButton({
           size={size}
           onClick={() => triggerConnect(defaultAuthKey)}
           disabled={disabled}
-          title={tooltip}
           data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
         >
           <Icon className="mr-1 size-3" />

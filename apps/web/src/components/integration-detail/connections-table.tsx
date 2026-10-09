@@ -26,9 +26,11 @@ import {
   isConnectionOwnedBy,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
+import { summarizeScopes } from "../integration-connect/connection-scope-fit";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
+  useIntegrationDetail,
   useUpdateIntegrationConnection,
   type IntegrationAuthType,
   type IntegrationConnection,
@@ -121,6 +123,8 @@ function ConnectionTableRow({
   const [draftLabel, setDraftLabel] = useState(connection.label);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
+  const { data: detail } = useIntegrationDetail(packageId);
+  const scopes = summarizeScopes(detail?.manifest, authKey, connection.scopes_granted);
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
@@ -299,12 +303,12 @@ function ConnectionTableRow({
 
         {/* Granted scopes */}
         <TableCell className="max-w-[16rem]">
-          {connection.scopes_granted.length > 0 ? (
+          {scopes.text ? (
             <span
-              className="text-muted-foreground block truncate font-mono text-[0.65rem]"
-              title={connection.scopes_granted.join(" ")}
+              className="text-muted-foreground block truncate text-[0.65rem]"
+              title={scopes.title}
             >
-              {connection.scopes_granted.join(" ")}
+              {scopes.text}
             </span>
           ) : (
             <span className="text-muted-foreground text-xs">—</span>
