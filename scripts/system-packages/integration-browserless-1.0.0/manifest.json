@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "Browserless",
   "icon": "mdi:application-outline",
-  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page into structured data, crawl or map a site, search the web, export a page as PDF or screenshot, run a Lighthouse audit, run Puppeteer code, or hand a multi-step task to Browserless's browser agent. Connect with an API token. On a self-hosted open-source Browserless, only Puppeteer code (browserless_function) works: the other tools need Browserless Cloud or Enterprise. On Browserless Cloud, every call consumes units.",
+  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page into structured data, crawl or map a site, search the web, export a page as PDF or screenshot, run a Lighthouse audit, run Puppeteer code, or hand a task to Browserless's browser agent. On Cloud, also read account usage, sessions and logs, and get a live viewer link. Connect with an API token. A self-hosted open-source Browserless runs only Puppeteer code (browserless_function). Cloud calls consume units.",
   "keywords": ["browser-automation", "web-scraping", "ai"],
   "license": "Apache-2.0",
   "source": {
@@ -31,7 +31,6 @@
       "required": ["base_url"]
     }
   },
-  "allow_undeclared_tools": true,
   "auths": {
     "api_key": {
       "type": "api_key",
@@ -64,16 +63,25 @@
       }
     }
   },
+  "hidden_tools": ["browserless_link_checkout", "browserless_link_connect"],
   "tools_policy": {
+    "browserless_account": {},
     "browserless_agent": {},
     "browserless_crawl": {},
     "browserless_export": {},
     "browserless_function": {},
+    "browserless_link_checkout": {},
+    "browserless_link_connect": {},
+    "browserless_live_url": {},
+    "browserless_logs": {},
     "browserless_map": {},
     "browserless_performance": {},
+    "browserless_profiles": {},
     "browserless_search": {},
+    "browserless_sessions": {},
     "browserless_skill": {},
-    "browserless_smartscraper": {}
+    "browserless_smartscraper": {},
+    "browserless_usage": {}
   },
   "_meta": {
     "dev.appstrate/package": {
