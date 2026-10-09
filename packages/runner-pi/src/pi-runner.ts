@@ -679,8 +679,6 @@ export class PiRunner {
               });
             },
           ];
-    // The run sees the platform's resources only: the skills the bundle
-    // materialised under `<cwd>/.pi/skills`, never the host's.
     const resourceLoader = await createIsolatedResourceLoader({
       DefaultResourceLoader,
       SettingsManager,

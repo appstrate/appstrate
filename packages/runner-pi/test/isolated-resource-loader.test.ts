@@ -15,10 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import { createIsolatedResourceLoader } from "../src/isolated-resource-loader.ts";
-import { PiRunner, type ExtensionFactory } from "../src/index.ts";
-import { buildPiModel } from "../src/pi-model.ts";
-import { LLM_PROXY_ROUTES } from "../src/llm-proxy-routes.ts";
-import { createCaptureSink, makeBundlePackage, makeContext, makeTestBundle } from "./helpers.ts";
+import type { ExtensionFactory } from "../src/index.ts";
+import { runAgainstStub, stubGatewayModel } from "./helpers.ts";
 
 /** Text that must never reach a session, one per host source. */
 const HOST_MARKERS = [
@@ -161,49 +159,23 @@ describe("createIsolatedResourceLoader", () => {
 
 describe("PiRunner on the host", () => {
   it("sends the model the platform's skills and none of the host's resources", async () => {
-    let requestBody: string | undefined;
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      async fetch(request) {
-        requestBody ??= await request.text();
-        // Non-retryable: the first request is all this test reads.
-        return new Response("stop", { status: 400 });
-      },
-    });
     let platformExtensionLoaded = false;
-    try {
-      const runner = new PiRunner({
-        model: buildPiModel({
-          id: "gateway-model",
-          dialect: null,
-          apiShape: "openai-completions",
-          piProvider: null,
-          baseUrl: `${server.url.origin}${LLM_PROXY_ROUTES["openai-completions"].baseSuffix}`,
-        }),
-        apiKey: "gateway-key",
+    const { requests } = await runAgainstStub({
+      model: stubGatewayModel("openai-completions"),
+      runner: {
         systemPrompt: "Platform prompt",
-        startMessage: "Say done.",
         cwd: seeded().cwd,
         agentDir: seeded().agentDir,
-        authStoragePath: join(seeded().root, "auth.json"),
         extensionFactories: [
           () => {
             platformExtensionLoaded = true;
           },
         ],
         modelRetry: false,
-      });
-      await runner.run({
-        bundle: makeTestBundle(makeBundlePackage("@test/host-isolation", "0.0.0", "agent", {})),
-        context: makeContext(),
-        eventSink: createCaptureSink(),
-      });
-    } finally {
-      await server.stop(true);
-    }
+      },
+    });
 
-    expect(requestBody).toBeDefined();
+    const requestBody = requests[0]?.body;
     expect(requestBody).toContain("Platform prompt");
     expect(requestBody).toContain("platform-skill");
     for (const marker of HOST_MARKERS) expect(requestBody).not.toContain(marker);

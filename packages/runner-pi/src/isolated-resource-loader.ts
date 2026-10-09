@@ -10,7 +10,6 @@ interface IsolatedResourceLoaderOptions extends Pick<
   agentDir: string;
   systemPrompt: string;
   extensionFactories: ExtensionFactory[];
-  /** Skill files or directories the caller provides — the only skills the session sees. */
   skillPaths: string[];
 }
 
@@ -24,12 +23,6 @@ const NO_PACKAGE_RESOURCES = {
 /**
  * A Pi resource loader that sees only what its caller passes: the system
  * prompt, the inline extension factories and the listed skill paths.
- *
- * Left to itself, Pi reads whoever runs the process: `~/.agents/skills`,
- * `<agentDir>/{extensions,skills,prompts,themes}`, `.agents/skills` in every
- * ancestor of `cwd`, `AGENTS.md`/`CLAUDE.md` in `agentDir` and every ancestor of
- * `cwd`, and `APPEND_SYSTEM.md`. A run on the host (`RUN_ADAPTER=process`, the
- * CLI) or a chat turn must not inherit any of it.
  *
  * Pi's package manager scans the user-scope directories before it consults
  * `noSkills` and its sibling flags, so the flags alone do not stop the scan:

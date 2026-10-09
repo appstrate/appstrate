@@ -349,18 +349,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **An agent run no longer picks up resources from the machine it runs on**
-  (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, the run's
-  prompt carried the skills of the host user's `~/.agents/skills`, of the Pi
-  agent directory and of `.agents/skills` in the workspace's parent
+- **A run or a chat turn no longer picks up resources from the machine it
+  runs on** (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, a
+  run's prompt carried the skills of the host user's `~/.agents/skills`, of
+  the Pi agent directory and of `.agents/skills` in the workspace's parent
   directories, the `AGENTS.md` / `CLAUDE.md` of the agent directory and of
   those parent directories, and the `APPEND_SYSTEM.md` of the agent directory
-  or of the workspace's `.pi/`. A run now sees only the skills its bundle
-  provides, the platform's prompt and its own tools.
-- **A chat turn no longer appends a local `APPEND_SYSTEM.md` to its prompt**
-  (#1820): Pi read one from `/tmp/.pi/` or `/tmp/pi-chat/`. The chat and the
-  runs share one resource loader that reads nothing from the filesystem but
-  the skills it is given.
+  or of the workspace's `.pi/`. A chat turn appended an `APPEND_SYSTEM.md`
+  found in `/tmp/.pi/` or `/tmp/pi-chat/`. A run now sees only the skills its
+  bundle provides, the platform's prompt and its own tools; a chat turn, only
+  its prompt and tools.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
