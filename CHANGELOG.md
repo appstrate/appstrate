@@ -232,6 +232,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.
 
+- **`@appstrate/connect` `parseTokenResponse` returns
+  `scopesReturned: string[] | null`** instead of `scopesGranted`, and no
+  longer takes the requested scopes (#1854): `null` means the response omitted
+  `scope` (RFC 6749 §5.1), and an echoed `scope` with no token (`""`, `" "`)
+  is treated as omitted. `exchangeAuthorizationCode` drops its
+  `scopesRequested` input; the integration callback applies the
+  requested-scopes fallback itself.
+
 - **An internal error during an integration credential refresh is no longer
   reported as a transient upstream failure** (#1847). A database fault or an
   incoherent OAuth client configuration makes the sidecar refresh endpoint
@@ -269,6 +277,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and the Pi dialect, and called `off` an explicit disable on models where Pi
   sends no reasoning parameter (e.g. `opencode-go/kimi-k2.7-code`,
   `mistral/magistral-medium-latest`).
+
+- **`client_secret_basic` form-urlencodes the client id and secret before
+  base64** (#1854, RFC 6749 §2.3.1): a space becomes `+` and `!'()~` are
+  percent-encoded, the same encoding `client_secret_post` uses.
 
 - **A rejected credential on a connection already flagged for reconnection
   ends the run's credential refresh with `410`** (#1847), the run marked

@@ -69,7 +69,6 @@ function baseInput(
     codeVerifier: "verifier-123",
     redirectUri: "http://localhost:3000/cb",
     code: "AUTH_CODE",
-    scopesRequested: ["openid", "email"],
     errorLabel: "@official/gmail:primary",
     state: "state-key",
     store,

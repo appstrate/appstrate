@@ -15,32 +15,32 @@ describe("parseTokenResponse", () => {
 
   it("parses space-separated scopes", () => {
     const result = parseTokenResponse({ ...baseToken, scope: "read:user repo" });
-    expect(result.scopesGranted).toEqual(["read:user", "repo"]);
+    expect(result.scopesReturned).toEqual(["read:user", "repo"]);
   });
 
   it("parses comma-separated scopes (GitHub-style)", () => {
     const result = parseTokenResponse({ ...baseToken, scope: "read:user,repo" });
-    expect(result.scopesGranted).toEqual(["read:user", "repo"]);
+    expect(result.scopesReturned).toEqual(["read:user", "repo"]);
   });
 
   it("parses mixed comma and space separators", () => {
     const result = parseTokenResponse({ ...baseToken, scope: "read:user, repo workflow" });
-    expect(result.scopesGranted).toEqual(["read:user", "repo", "workflow"]);
+    expect(result.scopesReturned).toEqual(["read:user", "repo", "workflow"]);
   });
 
   it("parses %20-separated scopes", () => {
     const result = parseTokenResponse({ ...baseToken, scope: "read:user%20repo" });
-    expect(result.scopesGranted).toEqual(["read:user", "repo"]);
+    expect(result.scopesReturned).toEqual(["read:user", "repo"]);
   });
 
-  it("uses fallback scopes when scope is missing", () => {
-    const result = parseTokenResponse(baseToken, ["fallback"]);
-    expect(result.scopesGranted).toEqual(["fallback"]);
+  it("returns null when the response omits scope (RFC 6749 §5.1)", () => {
+    expect(parseTokenResponse(baseToken).scopesReturned).toBeNull();
+    expect(parseTokenResponse({ ...baseToken, scope: null }).scopesReturned).toBeNull();
   });
 
-  it("returns empty array when no scope and no fallback", () => {
-    const result = parseTokenResponse(baseToken);
-    expect(result.scopesGranted).toEqual([]);
+  it("returns null for an echoed scope with no token, as if omitted", () => {
+    expect(parseTokenResponse({ ...baseToken, scope: " " }).scopesReturned).toBeNull();
+    expect(parseTokenResponse({ ...baseToken, scope: "" }).scopesReturned).toBeNull();
   });
 
   it("extracts accessToken", () => {
@@ -67,29 +67,13 @@ describe("parseTokenResponse", () => {
   });
 
   it("preserves fallback refresh token", () => {
-    const result = parseTokenResponse(baseToken, undefined, "rt_old");
+    const result = parseTokenResponse(baseToken, "rt_old");
     expect(result.refreshToken).toBe("rt_old");
   });
 
   it("prefers response refresh token over fallback", () => {
-    const result = parseTokenResponse(
-      { ...baseToken, refresh_token: "rt_new" },
-      undefined,
-      "rt_old",
-    );
+    const result = parseTokenResponse({ ...baseToken, refresh_token: "rt_new" }, "rt_old");
     expect(result.refreshToken).toBe("rt_new");
-  });
-});
-
-describe("parseTokenResponse — granted vs requested", () => {
-  it("reports the response scopes verbatim when the provider narrows the request", () => {
-    // Shortfall is computed by the platform against the manifest's `implies`
-    // aliases; here the response simply wins over the requested set.
-    const result = parseTokenResponse({ access_token: "tok_x", scope: "read:user" }, [
-      "read:user",
-      "repo",
-    ]);
-    expect(result.scopesGranted).toEqual(["read:user"]);
   });
 });
 
@@ -283,9 +267,13 @@ describe("buildTokenHeaders", () => {
 
   it("sets Basic auth header for client_secret_basic", () => {
     const headers = buildTokenHeaders("client_secret_basic", "my_id", "my_secret");
-    expect(headers["Authorization"]).toStartWith("Basic ");
-    const decoded = Buffer.from(headers["Authorization"]!.slice(6), "base64").toString();
-    expect(decoded).toBe("my_id:my_secret");
+    expect(headers["Authorization"]).toBe(`Basic ${btoa("my_id:my_secret")}`);
+  });
+
+  it("form-urlencodes each credential before base64 (RFC 6749 §2.3.1, Appendix B)", () => {
+    const headers = buildTokenHeaders("client_secret_basic", "my id", "a:b c+d%é!");
+    expect(headers["Authorization"]).toBe("Basic bXkraWQ6YSUzQWIrYyUyQmQlMjUlQzMlQTklMjE=");
+    expect(atob(headers["Authorization"]!.slice(6))).toBe("my+id:a%3Ab+c%2Bd%25%C3%A9%21");
   });
 });
 

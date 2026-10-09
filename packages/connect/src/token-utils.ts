@@ -11,6 +11,11 @@
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
 import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
 
+/** `application/x-www-form-urlencoded` encoding of one value — the serializer {@link buildTokenBody} uses. */
+function formUrlEncode(value: string): string {
+  return new URLSearchParams([["", value]]).toString().slice(1);
+}
+
 /**
  * Build headers for an OAuth2 token endpoint request.
  * When tokenAuthMethod is "client_secret_basic", credentials are sent
@@ -26,11 +31,10 @@ export function buildTokenHeaders(
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
-    // RFC 6749 §2.3.1: credentials MUST be URL-encoded before base64
-    const encoded = Buffer.from(
-      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
-    ).toString("base64");
-    headers["Authorization"] = `Basic ${encoded}`;
+    // RFC 6749 §2.3.1: each credential is form-urlencoded (Appendix B), which leaves only
+    // ASCII for `btoa`.
+    headers["Authorization"] =
+      `Basic ${btoa(`${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`)}`;
   }
   return headers;
 }
@@ -46,7 +50,12 @@ export interface ParsedTokenResponse {
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
-  scopesGranted: string[];
+  /**
+   * The response's `scope`, split; `null` when the response omits it or echoes one holding no
+   * token. RFC 6749 §5.1 defines an omitted `scope` as "identical to the scope requested by the
+   * client" — never "no scopes".
+   */
+  scopesReturned: string[] | null;
 }
 
 /**
@@ -235,19 +244,17 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
  *
  * Scope parsing is universal: splits by comma, space, or %20 to handle all
  * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
+ * An echoed `scope` that holds no token carries no information and parses as omitted.
  *
  * Scope comparison against the request is not done here: it needs the
  * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
  * `…/auth/userinfo.email`), which only the platform layer knows.
  *
  * @param tokenData - Token endpoint body, as narrowed by {@link readTokenResponse}
- * @param requestedScopes - Scopes that were sent in the authorize / refresh call. Used
- *   as the granted set when the response omits `scope` (RFC 6749 §5.1).
  * @param fallbackRefreshToken - Refresh token to preserve if not present in response
  */
 export function parseTokenResponse(
   tokenData: TokenResponseBody,
-  requestedScopes?: string[],
   fallbackRefreshToken?: string,
 ): ParsedTokenResponse {
   const accessToken = tokenData.access_token;
@@ -270,11 +277,15 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
-  const scopeStr = typeof tokenData.scope === "string" ? tokenData.scope : "";
-  const responseScopes = scopeStr ? scopeStr.split(/[\s,]+|%20/).filter(Boolean) : [];
-  const scopesGranted = responseScopes.length > 0 ? responseScopes : (requestedScopes ?? []);
+  const scopes =
+    typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
 
-  return { accessToken, refreshToken, expiresAt, scopesGranted };
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    scopesReturned: scopes.length > 0 ? scopes : null,
+  };
 }
 
 /**

@@ -356,6 +356,19 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
+  it("an echoed `scope` holding no token keeps the stored grant and flags nothing", async () => {
+    const connId = await seedConnection(["read", "send"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: " " });
+
+    expect(refreshedFields(await refresh(connId)).access_token).toBe("new-access");
+    expect(await storedScopes(connId)).toEqual(["read", "send"]);
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
   // ── The lead window and the freshness short-circuit, both sides of them ──
   //
   // A rejection is evidence against the stored token whatever its remaining lifetime; an

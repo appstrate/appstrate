@@ -80,8 +80,7 @@ export class RefreshError extends Error {
 export interface RefreshExchangeResult {
   /** Normalised token response (access/refresh token, expiry, scopes). */
   parsed: ParsedTokenResponse;
-  /** Raw JSON body — callers that need provider-specific fields (e.g. the
-   *  authoritative `scope` echo for shrink detection) read it directly. */
+  /** Raw JSON body — callers that need provider-specific fields (e.g. `id_token`) read it directly. */
   raw: Record<string, unknown>;
 }
 
@@ -165,6 +164,6 @@ export async function performRefreshTokenExchange(
   // `refreshToken` as the third argument is a DIFFERENT case: RFC 6749 §6 lets
   // the server omit `refresh_token` to mean "keep the one you have", so
   // non-rotating providers (Google, Slack, GitHub) depend on it.
-  const parsed = parseTokenResponse(read.raw, undefined, refreshToken);
+  const parsed = parseTokenResponse(read.raw, refreshToken);
   return { parsed, raw: read.raw };
 }

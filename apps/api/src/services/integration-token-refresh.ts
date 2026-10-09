@@ -242,11 +242,9 @@ async function doRefresh(
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
-  // Only an explicitly echoed `scope` is authoritative: `parseTokenResponse` falls back to the
-  // requested scopes (here `[]`) when the response omits it, which would falsely signal a total
-  // revocation.
-  const responseHadScopeField = typeof tokenData.scope === "string" && tokenData.scope.length > 0;
-  const responseScopes = responseHadScopeField ? parsed.scopesGranted : null;
+  // Only an echoed `scope` is authoritative; an omitted one (`null`) is the grant already stored
+  // (RFC 6749 §5.1).
+  const responseScopes = parsed.scopesReturned;
 
   // The stored outputs, with what this response carries: a field the IdP does not
   // send again (`token_type`, `id_token`, `scope`) keeps the value the connect stored.
@@ -268,9 +266,7 @@ async function doRefresh(
     .limit(1);
   const prevScopes = prevRow?.scopesGranted ?? [];
   const shrinkDetected =
-    responseScopes !== null && responseScopes.length > 0
-      ? prevScopes.some((s) => !responseScopes.includes(s))
-      : false;
+    responseScopes !== null && prevScopes.some((s) => !responseScopes.includes(s));
 
   // Converged write — the single credential writer. `scopesGranted` is passed
   // only when the IdP authoritatively echoed a `scope` field; otherwise it is
