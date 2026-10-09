@@ -311,7 +311,7 @@ A scheduled run executes as the person who created the schedule, with their conn
 
 When the intranet drops the session, it redirects to `/login`. `api_call` follows that redirect and returns the login form with a `200` status, so nothing flags the connection as broken: this is why the skill tells the agent to return `needs_reconnect: true` instead of empty figures. To get a fresh session, the user connects again on the same connection, passing its id as `connection_id` (to `connect/session` or `connect/fields`). The connection keeps its id, so the schedule and any pin that names it keep working.
 
-For a login this page cannot express, the code route is a local MCP server that logs in on every call and exposes a tool such as `get_sales_report(from, to)`: see [Custom integrations](/integrations/custom-integrations#a-local-mcp-server). That route does not apply the `EGRESS_ALLOW_INTERNAL_HOSTS` exemption, so today it fits an app on a public HTTPS address, not one inside a private network.
+For a login this page cannot express, the code route is a local MCP server that logs in on every call and exposes a tool such as `get_sales_report(from, to)`: see [Custom integrations](/integrations/custom-integrations#a-local-mcp-server). It needs the `docker` or `firecracker` run adapter, and it reaches a private intranet only on stricter terms than `api_call`: the host is listed in `EGRESS_ALLOW_INTERNAL_HOSTS`, the integration's `authorized_uris` names it with no template (`{…}`) and no `*` in its host or port, on the port the server dials (its scheme's default port when the entry names none), and `allow_all_uris` is off. On `firecracker`, the intranet's range must also be left out of the runner's `FIRECRACKER_EGRESS_DENY_CIDRS`.
 
 ## Troubleshooting
 

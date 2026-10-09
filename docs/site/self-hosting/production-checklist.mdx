@@ -72,7 +72,7 @@ Appstrate needs at least one LLM provider. Either set `SYSTEM_PROVIDER_KEYS` (a 
 
 ## Review egress
 
-Agents can only reach hosts that an integration's `authorized_uris` allows, and private ranges are blocked. If an integration must call an internal API, add its host to `EGRESS_ALLOW_INTERNAL_HOSTS`. That is an instance-wide trust decision, so list only hosts that every organization may use. The sidecar needs working DNS. See [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
+Agents can only reach hosts that an integration's `authorized_uris` allows, and private ranges are blocked. If an integration must call an internal API, add its host to `EGRESS_ALLOW_INTERNAL_HOSTS`. That is an instance-wide trust decision: a listed host also opens at the TCP level to the local integration runners of every organization, on the ports their `authorized_uris` names literally. List only hosts that every organization may reach. That includes `host.docker.internal`, often listed for a local model: it is not loopback, so listing it opens the Docker host's declared ports to those runners. On `RUN_ADAPTER=firecracker`, a private host also needs its range left out of the runner's deny list, see [Firecracker](/self-hosting/firecracker#network-and-egress-policy). The sidecar needs working DNS. See [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
 
 The API process itself also makes outbound requests to `get.appstrate.dev` to read the live model catalog. On a network that must stay closed, set `MODEL_CATALOG_URL=off` (see [Isolation and Security](/self-hosting/isolation-and-security#live-model-catalog)).
 

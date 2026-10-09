@@ -52,7 +52,7 @@ Two common causes:
 - **Wrong backend.** `RUN_ADAPTER` defaults to `process` (host subprocesses, no isolation). The shipped Compose files set `docker`.
 - **Docker socket.** The platform container must reach `/var/run/docker.sock`. Check the group mapping (`DOCKER_GID`) and the socket's permissions. See [Isolation and Security](/self-hosting/isolation-and-security#the-docker-socket).
 - **Runtime images missing.** Check `docker images | grep appstrate`. Pull the same version of `appstrate-pi`, `appstrate-sidecar` and the five `appstrate-mcp-runner-*` images from `ghcr.io/appstrate`. A missing MCP runner image fails the integration that needs it, because the sidecar never pulls images.
-- **Local integration refused under `process`.** A `source.kind: "local"` integration (for example `@appstrate/github-git`) does not start with `RUN_ADAPTER=process`. Set `INTEGRATION_RUNTIME_ADAPTER=docker` or use `RUN_ADAPTER=docker`.
+- **Local integration refused under `process`.** A `source.kind: "local"` integration (for example `@appstrate/github-git`) does not start with `RUN_ADAPTER=process`, and no setting overrides that. Use `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`.
 - **"Run never started executing".** The runner posted no event within `RUN_BOOT_DEADLINE_SECONDS` (default 300). Look for a slow image pull, a missing image or a container that exits at boot.
 - **Run failed as stalled.** No heartbeat for `RUN_STALL_THRESHOLD_SECONDS` (default 60). Check the run's container logs and the host's resources.
 - **"Server restarted while run was in progress".** A restart finalizes in-flight runs as failed. Retry them.

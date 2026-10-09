@@ -98,7 +98,7 @@ The `appstrate` service gets its configuration from the `environment:` list of t
 
 Since 1.0.0-beta.65 the root file and the three tier templates forward the variables most installs set: the `AUTH_*` closed-mode settings including `AUTH_BOOTSTRAP_TOKEN`, `EGRESS_ALLOW_INTERNAL_HOSTS`, SMTP, Google and GitHub sign-in, `PLATFORM_RUN_LIMITS` and `INLINE_RUN_LIMITS`, `PROXY_URL` and `SYSTEM_PROXIES`, and `MODEL_CATALOG_URL`. The two sets differ a little: only the root file forwards the `STRIPE_*` and `EE_*` variables of the commercial module, and only the tier templates forward `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN`.
 
-Some variables are still not forwarded by the root file or by any file in `examples/self-hosting/`, for example `LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`, `FILE_MAX_BYTES`, `STORAGE_DELETION_WORKER_INTERVAL_MS`, `INTEGRATION_RUNTIME_ADAPTER` and `FIRECRACKER_RUNNER_TLS_REQUIRED`. Before relying on a variable, check that it appears under `appstrate.environment`. If it does not, add a bare `- NAME` line to pass it through from `.env`:
+Some variables are still not forwarded by the root file or by any file in `examples/self-hosting/`, for example `LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`, `FILE_MAX_BYTES`, `STORAGE_DELETION_WORKER_INTERVAL_MS` and `FIRECRACKER_RUNNER_TLS_REQUIRED`. Before relying on a variable, check that it appears under `appstrate.environment`. If it does not, add a bare `- NAME` line to pass it through from `.env`:
 
 ```yaml
 services:

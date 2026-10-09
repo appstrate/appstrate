@@ -140,7 +140,7 @@ There is no tool-code package. To give agents a new capability, publish an **int
 - an integration with `source.kind: "remote"` points at a hosted MCP server (Streamable HTTP or SSE);
 - an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per connection bound to the run.
 
-Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs a container-capable backend: the default `process` run adapter refuses to spawn one unless the operator sets `INTEGRATION_RUNTIME_ADAPTER=docker`. See [Integrations](/integrations/how-integrations-work) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs an isolating backend: the default `process` run adapter refuses to spawn one, with no override, so run it with `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`. See [Integrations](/integrations/how-integrations-work) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
 
 ## Related
 
