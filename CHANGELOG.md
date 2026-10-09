@@ -518,6 +518,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with other tools); a self-hosted browser is #1827. `tools/list` is public, so
   the weekly conformance monitor checks tool parity without a credential.
 
+- **Browserless — headless browsers over Browserless's MCP server, Cloud or
+  self-hosted (#1892).** `@appstrate/browserless@1.0.0` speaks `streamable-http`
+  to a `base_url` connection variable defaulting to the Cloud
+  (`https://mcp.browserless.io/mcp`), as `twenty-mcp` and `gitlab-mcp` do.
+  Self-hosted is `@browserless.io/mcp` started with `TRANSPORT=httpStream` and
+  pointed at the operator's Browserless by `BROWSERLESS_API_URL`. One `api_key`
+  auth, sent as `Authorization: Bearer`, valid on both. Not OAuth: Browserless
+  Cloud's dynamic client registration accepts only a fixed allowlist of
+  redirect URIs (localhost, claude.ai, chatgpt.com, Cursor, Devin) and refuses
+  Appstrate's callback (`invalid_redirect_uri`, observed live).
+  Tools mirror the Cloud's live `tools/list`; `browserless_link_connect` and
+  `browserless_link_checkout` (Stripe Link wallet, payment checkout) are in
+  `hidden_tools`, so no agent can select them. No `allow_undeclared_tools`: a
+  new upstream tool is reviewed before agents can use it. Self-hosted serves a
+  subset: on the open-source `browserless/chromium` image only
+  `browserless_function` (Puppeteer code) works; the scraping, export, map,
+  search, crawl and agent tools call Cloud/Enterprise REST routes
+  (`/smart-scrape`, `/export`, `/map` answer 404). Cloud calls consume units.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
