@@ -277,10 +277,7 @@ export async function createInProcessPair(
   };
 }
 
-/**
- * Send `notification` on the request's stream without awaiting it: a failed
- * send — the client went away — goes to `onError` and never fails the handler.
- */
+/** Fire-and-forget: a failed send (client gone) goes to `onError`, never fails the handler. */
 export function notifyDetached(
   extra: AppstrateRequestExtra,
   notification: ServerNotification,
@@ -306,8 +303,6 @@ export type {
 // exported above.
 export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
 
-// Serving one stateless Streamable HTTP POST: JSON unless progress was asked
-// for, and a server kept alive until its SSE answer is over.
 export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child

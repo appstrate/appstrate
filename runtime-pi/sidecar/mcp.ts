@@ -1833,9 +1833,8 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     const hostError = validateMcpHostHeader(c.req.raw);
     if (hostError) return hostError;
 
-    // Body-size guard: we pre-read the body (bounded) and parse it once
-    // here; the SDK reads the bytes itself only when they did not parse,
-    // from the fresh Request we hand it. `Content-Length`, when
+    // Body-size guard: we pre-read the body (bounded), then hand a fresh
+    // Request to the transport. `Content-Length`, when
     // declared, is enforced up-front; otherwise we stream and abort if
     // the cap is exceeded mid-read. Either way the SDK never sees a
     // body larger than MAX_MCP_REQUEST_BODY_SIZE.
@@ -1938,17 +1937,13 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     // host/origin check is therefore disabled.
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      // JSON unless the agent asked for progress: then SSE, so the progress an
-      // upstream reports (relayed by the McpHost) reaches the agent's client.
       enableJsonResponse: !post?.requestsProgress,
       enableDnsRebindingProtection: false,
       // The envelope was already bounded above; without this the SDK's own
       // 4 MB default rejects it first and the tool never answers 413 itself.
       maxRequestBodySize: MAX_MCP_REQUEST_BODY_SIZE,
     });
-    // A POST may be answered over SSE, so the pair lives until its stream is
-    // over. Any other verb (a GET would otherwise hold its standalone stream
-    // open for the whole run) is answered and torn down at once.
+    // Only a POST may stream; a GET's standalone stream would otherwise stay open for the run.
     if (method === "POST") return serveStatelessPost(server, transport, forwarded, post);
     try {
       await server.connect(transport);

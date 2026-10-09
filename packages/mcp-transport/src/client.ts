@@ -165,10 +165,7 @@ export interface AppstrateMcpClient {
     options?: {
       signal?: AbortSignal;
       timeoutMs?: number;
-      /**
-       * Requests progress for this call and receives the server's
-       * `notifications/progress`; `timeoutMs` then becomes an idle timeout.
-       */
+      /** Requests progress; `timeoutMs` then restarts on each notification. */
       onProgress?: (progress: Progress) => void;
     },
   ): Promise<CallToolResult>;
@@ -554,11 +551,8 @@ export function wrapClient(
     },
     async callTool(args, options) {
       return client.callTool(args, undefined, {
-        // Opt-in: asking for progress makes the SDK send a `progressToken`, and
-        // every `notifications/progress` then restarts `timeout`, so a long call
-        // that reports progress (`run_and_wait`) is bounded by silence, not
-        // duration. No `maxTotalTimeout`: that would cut such a call anyway, so a
-        // caller opting in bounds the total itself, with `signal`.
+        // No `maxTotalTimeout`: it would cut a call that keeps reporting; a caller
+        // opting in bounds the total with `signal`.
         ...(options?.onProgress
           ? { onprogress: options.onProgress, resetTimeoutOnProgress: true }
           : {}),

@@ -879,20 +879,9 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /** Heartbeat period: under the 60 s request/idle timers a client resets on each progress notification. */
 export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = 15_000;
-/**
- * Wait cap, launch included, when the caller asked for no progress: nothing then
- * keeps the request alive, so answer before the 60 s first-byte / default request
- * timeout of MCP clients rather than be cut by it.
- */
+/** Wait cap (launch included) without a progress token: answer before clients' 60 s first-byte timeout. */
 export const RUN_AND_WAIT_UNSTREAMED_MAX_MS = 45_000;
 
-/**
- * Emit `notifications/progress` at once, then every
- * {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS} while a run is waited on, when the
- * request carried a `progressToken`; returns
- * the stop function, or `null` without a token. A failed send is logged and
- * never fails the tool call.
- */
 function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
@@ -1200,8 +1189,6 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    // With a progress token the heartbeat keeps the request alive for the full
-    // default wait; without one the wait is capped below the clients' timeout.
     const stopHeartbeat = startProgressHeartbeat(extra, runId);
     let final: RunAndWaitStep;
     try {

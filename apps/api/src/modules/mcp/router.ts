@@ -497,8 +497,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // hard kill would have lost anyway. The insert is itself best-effort and
     // never rejects (recordAudit swallows), and `recordAuditFromContext` reads
     // the context synchronously before its first await, so nothing here
-    // depends on the request outliving the response. Over SSE this runs after
-    // the handler has returned; `c` stays readable, nothing in it is torn down.
+    // depends on the request outliving the response (over SSE it runs after the handler returned).
     const observe: McpObserver = (event) => {
       logger.info("mcp.tool_call", {
         requestId: c.get("requestId"),
@@ -571,7 +570,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const post = parseMcpPost(body);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      // JSON unless the caller asked for progress (see `parseMcpPost`).
       enableJsonResponse: !post?.requestsProgress,
       // Disabled deliberately: the SDK's Host-header allowlist would reject
       // legitimate reverse-proxied hosts, and the rebinding threat it guards
@@ -580,13 +578,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       // or a SameSite session cookie), so a cross-site page cannot drive it.
       enableDnsRebindingProtection: false,
       // The global `bodyLimit` already bounds this request; match it so the
-      // SDK's own 4 MB default does not become a second, lower, hidden cap
-      // (it applies only to a body the SDK reads itself: one that did not parse).
+      // SDK's own 4 MB default does not become a second, lower, hidden cap.
       maxRequestBodySize: getEnv().API_BODY_LIMIT_BYTES,
     });
 
-    // Reconstruct the request: the SDK reads the bytes only when they did not
-    // parse here, and takes the parsed payload otherwise.
+    // The SDK reads these bytes only when they did not parse here.
     const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
 
     // Any audit insert the tool layer triggered is already tracked (see

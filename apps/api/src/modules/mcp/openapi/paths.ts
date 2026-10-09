@@ -27,10 +27,7 @@ const jsonRpcRequestBody = {
   },
 } as const;
 
-/**
- * A refusal the MCP SDK transport answers itself, before any tool runs: a
- * JSON-RPC 2.0 error envelope with `id: null` (the request was never accepted).
- */
+/** A refusal the SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
 function jsonRpcTransportError(description: string) {
   return {
     description,

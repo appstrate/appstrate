@@ -55,12 +55,7 @@ import { logger } from "./logger.ts";
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
 
-/**
- * Relay the upstream's progress for one call to the agent under the agent's own
- * `progressToken`, so its client's timeout restarts too; `undefined` when the
- * agent asked for none. Only the spec fields cross, the message capped. A failed
- * send is logged and never fails the call.
- */
+/** Relays upstream progress under the agent's own token, so its client's timeout restarts too. */
 function relayProgress(
   extra: AppstrateRequestExtra,
 ): Parameters<AppstrateMcpClient["callTool"]>[1] {
