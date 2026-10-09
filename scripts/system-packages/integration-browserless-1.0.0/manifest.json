@@ -1,0 +1,107 @@
+{
+  "name": "@appstrate/browserless",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Browserless",
+  "icon": "mdi:application-outline",
+  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page into structured data, crawl or map a site, search the web, export a page as PDF or screenshot, run a Lighthouse audit, run Puppeteer code, or hand a multi-step task to Browserless's browser agent. Connect with an API token on any deployment, or with OAuth on Browserless Cloud only. Every call consumes Browserless units.",
+  "keywords": ["browser-automation", "web-scraping", "ai"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL du serveur MCP Browserless",
+          "description": "Gardez https://mcp.browserless.io pour Browserless Cloud. Pour un Browserless auto-hébergé : adresse du serveur @browserless.io/mcp lancé en mode HTTP (TRANSPORT=httpStream) et relié à votre instance par BROWSERLESS_API_URL, sans /mcp (ex. https://browserless-mcp.example.com). OAuth n'existe que sur Browserless Cloud : sur votre instance, connectez-vous avec le jeton d'API.",
+          "default": "https://mcp.browserless.io"
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "allow_undeclared_tools": true,
+  "auths": {
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "title": "Jeton d'API",
+              "description": "Sur Browserless Cloud, le jeton d'API de votre compte (https://browserless.io/account) : chaque appel consomme ses unités. Sur une instance auto-hébergée, le TOKEN de cette instance."
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    },
+    "oauth": {
+      "type": "oauth2",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["email"],
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "refresh_token_issuance": "default"
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "browserless_agent": {},
+    "browserless_crawl": {},
+    "browserless_export": {},
+    "browserless_function": {},
+    "browserless_map": {},
+    "browserless_performance": {},
+    "browserless_search": {},
+    "browserless_skill": {},
+    "browserless_smartscraper": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
