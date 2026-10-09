@@ -12,11 +12,8 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
 import type { IntegrationManifestView } from "../../../hooks/use-integrations.ts";
-import {
-  ConnectScopesForm,
-  useConnectWithScopes,
-  type ConnectWithScopesDeps,
-} from "../connect-scopes-dialog.tsx";
+import { ConnectScopesForm } from "../connect-scopes-dialog.tsx";
+import { useConnectWithScopes, type ConnectWithScopesDeps } from "../use-connect-with-scopes.ts";
 import { scopeChoiceFor } from "../connect-scope-choice.ts";
 
 await i18nReady;
