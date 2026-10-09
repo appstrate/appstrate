@@ -5,7 +5,12 @@ import { classify } from "./load.ts";
 import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.ts";
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
-import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
+import {
+  remoteUrl,
+  toolsPolicyKeys,
+  allowsUndeclared,
+  credentialHeaders,
+} from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness, requiredCredentialFields } from "./auth-live.ts";
 import { checkAuthRejection } from "./auth-reject.ts";
 import { checkIdentityClaimKeys, checkIdentitySource } from "./identity-source.ts";
@@ -304,6 +309,36 @@ describe("remote manifest accessors", () => {
     expect(allowsUndeclared({ allow_undeclared_tools: true })).toBe(true);
     expect(allowsUndeclared({ allow_undeclared_tools: false })).toBe(false);
     expect(allowsUndeclared({})).toBe(false);
+  });
+});
+
+describe("credentialHeaders", () => {
+  it("delivers an api_key in the manifest's header, bare, with no Authorization", () => {
+    // The browser-use shape.
+    const manifest = {
+      auths: {
+        api_key: {
+          type: "api_key",
+          credentials: { schema: { properties: { api_key: {} }, required: ["api_key"] } },
+          delivery: {
+            http: { in: "header", name: "X-Browser-Use-API-Key", value: "{$credential.api_key}" },
+          },
+        },
+      },
+    };
+    expect(credentialHeaders(manifest, "tok")).toEqual({ "X-Browser-Use-API-Key": "tok" });
+  });
+
+  it("still sends an OAuth credential as Authorization: Bearer", () => {
+    const manifest = {
+      auths: {
+        oauth: {
+          type: "oauth2",
+          delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer " } },
+        },
+      },
+    };
+    expect(credentialHeaders(manifest, "tok")).toEqual({ Authorization: "Bearer tok" });
   });
 });
 
