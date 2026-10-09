@@ -2,12 +2,13 @@
 
 /**
  * Ctrl-C in the middle of `appstrate api --batch`, against the real process: the
- * shutdown coordinator (`lib/shutdown.ts`) exits as soon as its hooks settle, and
- * `process.exit` drops what a pipe has not taken yet (#1824). A batch that does not
- * register a hook loses the tail of its output, mid-line.
+ * shutdown coordinator (`lib/shutdown.ts`) calls `process.exit` as soon as its hooks
+ * settle, before the batch has written its remaining lines. The batch's hook holds that
+ * exit so the command ends through `CommandExit`, which drains stdio (#1824).
  *
- * The child's stdout is left unread until after the signal, so the output (hundreds
- * of KB) is far beyond what a pipe holds and the exit has something to lose.
+ * `Bun.spawn` reads a child's pipe eagerly, so this cannot apply back-pressure; what it
+ * proves is that the exit waits for every line. A reader that lags behind a full pipe
+ * was checked by hand (`cmd | (sleep 1; cat)`): 3,000 of 3,000 lines, 64 KiB without the hook.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";

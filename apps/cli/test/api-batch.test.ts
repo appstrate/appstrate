@@ -65,7 +65,7 @@ interface BatchRun {
   code: number | null;
   out: string;
   err: string;
-  /** IO events in order: every stdout write, the flush, the exit. */
+  /** IO events in order: every stdout write, then the exit. */
   events: string[];
   results: Record<string, any>[];
 }
@@ -97,7 +97,6 @@ async function runBatch(
       },
     },
     stderr: { write: (c) => void (err += text(c)) },
-    flush: async () => void events.push("flush"),
     exit: (c) => {
       code = c;
       events.push("exit");
@@ -185,6 +184,37 @@ describe("appstrate api --batch", () => {
     expect(b!.headers["Content-Type"]).toBeUndefined();
   });
 
+  it("lets -H set the Content-Type of an object body, in any case, and the line override -H", async () => {
+    installFetch(() => new Response("", { status: 204 }));
+
+    const { code } = await runBatch(
+      [
+        { url: "/api/a", body: { x: 1 } },
+        { url: "/api/b", body: { x: 1 }, headers: { "CONTENT-TYPE": "application/ld+json" } },
+      ],
+      { header: ["content-type: application/vnd.api+json"] },
+    );
+
+    expect(code).toBe(0);
+    const ct = (h: Record<string, string>) =>
+      Object.entries(h).filter(([k]) => k.toLowerCase() === "content-type");
+    expect(ct(fetchCalls[0]!.headers)).toEqual([["content-type", "application/vnd.api+json"]]);
+    expect(ct(fetchCalls[1]!.headers)).toEqual([["CONTENT-TYPE", "application/ld+json"]]);
+  });
+
+  it("refuses a header HTTP cannot carry before sending anything", async () => {
+    installFetch(() => new Response("{}", { status: 200 }));
+
+    const { code, err } = await runBatch([
+      { url: "/api/a" },
+      { url: "/api/b", headers: { "X-Bad": "a\r\nInjected: 1" } },
+    ]);
+
+    expect(code).toBe(2);
+    expect(err).toContain("line 2: invalid header");
+    expect(fetchCalls).toHaveLength(0);
+  });
+
   it("reads the requests from stdin with -", async () => {
     installFetch(() => Response.json({ ok: true }));
     const { code, results } = await runBatch([], {}, '{"url":"/api/a"}\n{"url":"/api/b"}\n');
@@ -192,7 +222,7 @@ describe("appstrate api --batch", () => {
     expect(results.map((r) => r.custom_id)).toEqual(["1", "2"]);
   });
 
-  it("writes each line as soon as the lines before it are known, and flushes before exiting", async () => {
+  it("writes each line as soon as the lines before it are known", async () => {
     let writtenBeforeSecond = "";
     installFetch((call) => {
       if (call.url.endsWith("/b")) writtenBeforeSecond = liveOut;
@@ -205,7 +235,7 @@ describe("appstrate api --batch", () => {
 
     expect(code).toBe(0);
     expect(JSON.parse(writtenBeforeSecond).custom_id).toBe("1");
-    expect(events).toEqual(["write", "write", "flush", "exit"]);
+    expect(events).toEqual(["write", "write", "exit"]);
   });
 
   it("keeps at most --parallel-max requests in flight", async () => {

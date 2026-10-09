@@ -38,7 +38,11 @@ const DEFAULT_PARALLEL_MAX = 5;
 const EXIT_INTERRUPTED = 130;
 
 interface BatchRequest {
+  /** 1-based line of the input file, for messages. */
+  line: number;
   customId: string;
+  /** The body came as an object or array: `Content-Type: application/json` unless a header sets one. */
+  json: boolean;
   method: string;
   url: string;
   headers: Record<string, string>;
@@ -56,6 +60,9 @@ type BatchResult =
       };
     }
   | { custom_id: string; error: { code: number; message: string } };
+
+/** What a written line leaves behind: its status, or the curl code of its failure. */
+type Outcome = { status: number; error?: undefined } | { status?: undefined; error: number };
 
 /** Single-request flags that have no meaning for a batch: refused rather than ignored. */
 const SINGLE_REQUEST_FLAGS: Array<[keyof ApiCommandOptions, string]> = [
@@ -79,11 +86,7 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
     if (opts.silent && !opts.showError) return;
     io.stderr.write(msg);
   };
-  // Every exit awaits the flush: a batch's output is larger than a pipe holds (#1824).
-  const exit = async (code: number): Promise<never> => {
-    await io.flush?.();
-    return io.exit(code);
-  };
+  const exit = (code: number): never => io.exit(code);
 
   const conflicting = SINGLE_REQUEST_FLAGS.filter(([key]) => {
     const value = opts[key];
@@ -123,7 +126,12 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
   let token = auth.accessToken;
   const headersFor = (r: BatchRequest, bearer: string): Record<string, string> =>
     buildHeaders({
-      userHeaders: [...opts.header, ...Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`)],
+      // Lowest first: the JSON default, then `-H`, then the line's own headers.
+      userHeaders: [
+        ...(r.json ? ["Content-Type: application/json"] : []),
+        ...opts.header,
+        ...Object.entries(r.headers).map(([k, v]) => `${k}: ${v}`),
+      ],
       token: bearer,
       orgId: auth.orgId,
       spaceId: auth.spaceId,
@@ -133,6 +141,16 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
       range: opts.range,
       compressed: opts.compressed,
     });
+  // Header syntax (a name with a space, a value with CR/LF) fails in `fetch`, by then other
+  // requests are out: check every request's final headers before sending any.
+  for (const r of requests) {
+    try {
+      new Headers(headersFor(r, token));
+    } catch (err) {
+      writeError(`line ${r.line}: invalid header: ${errorMessage(err)}\n`);
+      return exit(2);
+    }
+  }
   /** A newer token than `sent` (refreshed now or by a parallel request), or undefined. */
   const freshToken = async (sent: string): Promise<string | undefined> => {
     if (profileName === undefined) return undefined; // an API key does not refresh
@@ -149,15 +167,13 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
   // `--max-time` bounds the whole batch: what is not sent by then is reported, not sent.
   const ac = new AbortController();
   io.onSigint?.(() => ac.abort());
-  // The shutdown coordinator exits right after its hooks settle, and `process.exit` drops
-  // what a pipe has not taken yet (#1824): on Ctrl-C it waits for the batch to account for
-  // every line (the unsent ones come back as errors) and for the output to be flushed.
-  let batchDone!: () => void;
-  const batchSettled = new Promise<void>((resolve) => (batchDone = resolve));
-  const unregisterShutdown = onShutdown(async () => {
+  // On Ctrl-C the shutdown coordinator calls `process.exit` once its hooks settle, which drops
+  // what a pipe has not taken yet (#1824). This hook never settles: the batch accounts for every
+  // line (the unsent ones come back as errors) and ends through `io.exit`, whose `CommandExit`
+  // lets the process end once stdio is drained, within the coordinator's own ceiling.
+  const unregisterShutdown = onShutdown(() => {
     ac.abort();
-    await batchSettled;
-    await io.flush?.();
+    return new Promise<never>(() => {});
   });
   const timeout =
     typeof opts.maxTime === "number" && opts.maxTime > 0
@@ -222,18 +238,20 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
     }
   };
 
-  // Lines go out in input order, each as soon as every earlier one is known.
+  // Lines go out in input order, each as soon as every earlier one is known; a written line
+  // keeps only its outcome, so memory holds the responses not yet written, not the batch.
   const sink = opts.output ? Bun.file(opts.output).writer() : undefined;
-  const results: Array<BatchResult | undefined> = new Array(requests.length);
-  let written = 0;
+  const pending = new Map<number, BatchResult>();
+  const outcomes: Outcome[] = [];
   const record = (index: number, result: BatchResult): void => {
-    results[index] = result;
-    while (written < results.length && results[written] !== undefined) {
-      const line = `${JSON.stringify(results[written])}\n`;
+    pending.set(index, result);
+    for (let r = pending.get(outcomes.length); r !== undefined; r = pending.get(outcomes.length)) {
+      pending.delete(outcomes.length);
+      const line = `${JSON.stringify(r)}\n`;
       // A file sink buffers; its `end()` below awaits the rest.
       if (sink) void sink.write(line);
       else io.stdout.write(line);
-      written++;
+      outcomes.push("response" in r ? { status: r.response.status_code } : { error: r.error.code });
     }
   };
 
@@ -252,19 +270,17 @@ export async function apiBatchCommand(opts: ApiCommandOptions, io: ApiCommandIO)
     if (timeout) clearTimeout(timeout);
     restoreTls?.();
     await sink?.end();
-    batchDone();
     unregisterShutdown();
   }
 
-  const done = results as BatchResult[];
-  if (!opts.silent && done.some((r) => "response" in r && r.response.status_code === 401)) {
+  if (!opts.silent && outcomes.some((o) => o.status === 401)) {
     io.stderr.write(
       profileName === undefined
         ? "API key rejected — check --api-key / APPSTRATE_API_KEY (revoked, expired, or for another instance)\n"
         : `Session may be expired — run: ${loginRemedy(profileName, auth.instance)}\n`,
     );
   }
-  return exit(exitCode(done, opts, writeError));
+  return exit(exitCode(outcomes, opts, writeError));
 }
 
 /**
@@ -324,18 +340,13 @@ function parseBatch(
       if (err instanceof HostMismatchError) return { error: `${where}: ${err.message}` };
       throw err;
     }
-    const lineHeaders = { ...((headers as Record<string, string> | undefined) ?? {}) };
-    if (
-      typeof body === "object" &&
-      !Object.keys(lineHeaders).some((k) => k.toLowerCase() === "content-type")
-    ) {
-      lineHeaders["Content-Type"] = "application/json";
-    }
     requests.push({
+      line: i + 1,
       customId,
+      json: typeof body === "object",
       method: resolvedMethod,
       url: target,
-      headers: lineHeaders,
+      headers: (headers as Record<string, string> | undefined) ?? {},
       body: typeof body === "object" ? JSON.stringify(body) : body,
     });
   }
@@ -362,7 +373,7 @@ function decodeBody(
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return { body: Buffer.from(bytes).toString("base64"), body_encoding: "base64" };
+    return { body: bytes.toBase64(), body_encoding: "base64" };
   }
   if (contentType && /^application\/([\w.+-]+\+)?json\b/i.test(contentType)) {
     try {
@@ -389,19 +400,18 @@ function errorMessage(err: unknown): string {
  * else 0, or with `-f` / `--fail-with-body` 22 (a 4xx) / 25 (a 5xx). Every line is written either way.
  */
 function exitCode(
-  results: BatchResult[],
+  outcomes: Outcome[],
   opts: ApiCommandOptions,
   writeError: (msg: string) => void,
 ): number {
-  const failed = results.filter((r) => "error" in r);
+  const failed = outcomes.filter((o) => o.error !== undefined);
   if (failed.length > 0) {
-    writeError(`${failed.length} of ${results.length} requests got no response\n`);
-    return failed[0]!.error.code;
+    writeError(`${failed.length} of ${outcomes.length} requests got no response\n`);
+    return failed[0]!.error!;
   }
   if (opts.fail || opts.failWithBody) {
-    const statuses = results.map((r) => ("response" in r ? r.response.status_code : 0));
-    if (statuses.some((s) => s >= 500)) return 25;
-    if (statuses.some((s) => s >= 400)) return 22;
+    if (outcomes.some((o) => o.status! >= 500)) return 25;
+    if (outcomes.some((o) => o.status! >= 400)) return 22;
   }
   return 0;
 }
