@@ -267,6 +267,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The sidecar reads only the status.
 - **A failed model-token refresh answers `502`** with a `cause` (was `500`)
   (#1853).
+- **"No connection" works the same way on every screen** (#1855): a schedule
+  run by another member, agent pins, the connection picker. Unticking the
+  last connection clears the choice; only the explicit "No connection" box
+  records "no connection".
 - **Every `appstrate` command ends through one handler** (#1858): it sets the
   exit code instead of calling `process.exit`, so no command has to drain
   stdout itself.
@@ -288,8 +292,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **Saving an agent in the editor no longer drops the
-  `integrations_configuration` keys it does not edit**, such as `_meta`
-  (#1830): `writeManifestIntegrations` merges onto the stored configuration.
+  `integrations_configuration` keys it does not edit**, such as `_meta` or a
+  setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
+  integration's configuration through whole, and `writeManifestIntegrations`
+  merges onto the stored configuration.
+- **Screen readers announce the connection picker's "No connection" option as
+  a radio item**, checked or not (#1855).
 - **The agent's system prompt carries one `## Integration` section per
   integration** instead of one per bound connection (#1830).
 - **MCP `run_and_wait` no longer times out client-side on long runs**

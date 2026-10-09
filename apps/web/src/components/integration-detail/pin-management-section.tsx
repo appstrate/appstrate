@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Table,
@@ -21,8 +20,8 @@ import {
   useUpsertIntegrationPin,
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
-import { connectionOptionLabel } from "../../lib/connection-set";
-import { ConnectionSetChecklist } from "./connection-set-checklist";
+import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
+import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
@@ -38,8 +37,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const deletePin = useDeleteIntegrationPin();
 
   const [newAgent, setNewAgent] = useState("");
-  const [newConnectionIds, setNewConnectionIds] = useState<string[]>([]);
-  const [newPinNone, setNewPinNone] = useState(false);
+  const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
 
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_with_org === true);
 
@@ -47,20 +45,17 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const agentDisplayName = (id: string): string =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
-  const canAddPin = !!newAgent && (newPinNone || newConnectionIds.length > 0);
-
   const onSubmitNewPin = () => {
-    if (!canAddPin) return;
+    if (!newAgent || newConnectionIds === null) return;
     upsertPin.mutate(
       {
         params: { path: { packageId, agentPackageId: newAgent } },
-        body: { connection_ids: newPinNone ? [] : newConnectionIds },
+        body: { connection_ids: newConnectionIds },
       },
       {
         onSuccess: () => {
           setNewAgent("");
-          setNewConnectionIds([]);
-          setNewPinNone(false);
+          setNewConnectionIds(null);
         },
       },
     );
@@ -188,27 +183,27 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
             <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
               {t("integration.admin.pinManagement.colConnections")}
             </Label>
-            <label className="mb-1 flex items-center gap-2 text-xs" data-testid="pin-add-none">
-              <Checkbox checked={newPinNone} onCheckedChange={(v) => setNewPinNone(v === true)} />
-              {t("integration.admin.pinManagement.none")}
-            </label>
-            {newPinNone ? null : pinnableConnections.length > 0 ? (
-              <ConnectionSetChecklist
-                connections={pinnableConnections}
-                value={newConnectionIds}
-                onChange={setNewConnectionIds}
-                idPrefix="pin-add-connection"
-              />
-            ) : (
-              <p className="text-muted-foreground text-xs italic">
+            {pinnableConnections.length === 0 && (
+              <p className="text-muted-foreground mb-1 text-xs italic">
                 {t("integration.admin.pinManagement.noPinnableConnections")}
               </p>
             )}
+            <ConnectionSetChecklist
+              options={pinnableConnections.map((c) => ({
+                id: c.id,
+                label: <ConnectionOptionLabel connection={c} />,
+              }))}
+              value={newConnectionIds}
+              onChange={setNewConnectionIds}
+              idPrefix="pin-add-connection"
+              allowNone
+              noneHint={t("integration.admin.pinManagement.noneHint")}
+            />
           </div>
           <Button
             size="sm"
             onClick={onSubmitNewPin}
-            disabled={!canAddPin || upsertPin.isPending}
+            disabled={!newAgent || newConnectionIds === null || upsertPin.isPending}
             data-testid="pin-add-submit"
           >
             {t("integration.admin.pinManagement.add")}

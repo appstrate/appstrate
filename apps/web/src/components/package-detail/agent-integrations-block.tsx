@@ -203,7 +203,7 @@ function ManagedIntegrationCard({
       title={displayName}
       subtitle={packageId}
       extraSubtitle={requiredNone ?? unboundLabel(resolution?.warning ?? null) ?? reuseInfo}
-      extraSubtitleAlert={requiredNone !== null}
+      extraSubtitleTone={requiredNone !== null ? "warning" : "muted"}
       badge={entry?.required ? <RequiredBadge packageId={packageId} /> : null}
     >
       <IntegrationConnectionPicker
@@ -302,13 +302,20 @@ function buildReuseInfo(
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
 
+type SubtitleTone = "muted" | "warning";
+
+const SUBTITLE_TONE_CLASS: Record<SubtitleTone, string> = {
+  muted: "text-muted-foreground/80",
+  warning: AMBER_TEXT,
+};
+
 function CardShell({
   icon,
   title,
   badge,
   subtitle,
   extraSubtitle,
-  extraSubtitleAlert = false,
+  extraSubtitleTone = "muted",
   children,
 }: {
   /** Optional inline icon before the subtitle (e.g. loading spinner). */
@@ -318,8 +325,8 @@ function CardShell({
   subtitle: string;
   /** Second-line subtitle (e.g. reuse hint). Omitted when null/undefined. */
   extraSubtitle?: string | null;
-  /** The second line explains a refused run, in the picker's warning tone. */
-  extraSubtitleAlert?: boolean;
+  /** `warning` when the second line explains a refused run, in the picker's warning tone. */
+  extraSubtitleTone?: SubtitleTone;
   children?: React.ReactNode;
 }) {
   return (
@@ -337,7 +344,7 @@ function CardShell({
           </div>
           {extraSubtitle && (
             <div
-              className={`${extraSubtitleAlert ? AMBER_TEXT : "text-muted-foreground/80"} mt-0.5 text-[0.65rem] break-words`}
+              className={`${SUBTITLE_TONE_CLASS[extraSubtitleTone]} mt-0.5 text-[0.65rem] break-words`}
             >
               {extraSubtitle}
             </div>

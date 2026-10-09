@@ -11,6 +11,7 @@
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
+import { isValidElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { $api, type components } from "../../../api/client.ts";
@@ -23,6 +24,7 @@ import {
   type IntegrationManifestView,
 } from "../../../hooks/use-integrations.ts";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
+import { PickerMenu } from "../connection-picker-menu.tsx";
 import {
   useConnectionPicker,
   type ConnectionPicker,
@@ -381,6 +383,32 @@ function PickerProbe({
   return null;
 }
 
+/** The menu's element tree for a picker — its content is a portal a static render drops. */
+function MenuProbe({
+  picker,
+  onTree,
+}: {
+  picker: ConnectionPicker;
+  onTree: (tree: ReactNode) => void;
+}) {
+  onTree(PickerMenu({ integrationId: INTEGRATION, picker }));
+  return null;
+}
+
+/** The props of the element carrying `testId`, found in an element tree. */
+function propsOf(node: ReactNode, testId: string): Record<string, unknown> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = propsOf(child, testId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement<Record<string, unknown>>(node)) return undefined;
+  if (node.props["data-testid"] === testId) return node.props;
+  return propsOf(node.props.children as ReactNode, testId);
+}
+
 describe("IntegrationConnectionPicker — 'no connection'", () => {
   const t = (key: string, opts?: Record<string, unknown>) =>
     i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
@@ -593,6 +621,20 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
         inherit,
       ),
     ).not.toContain(none);
+  });
+
+  it("reads out 'no connection' as a radio, checked when it is the stored choice", () => {
+    const noneItem = (res: Resolution) => {
+      const trees: ReactNode[] = [];
+      render(<MenuProbe picker={pickerFor(res)} onTree={(tree) => trees.push(tree)} />);
+      return propsOf(trees[0], `member-pick-none-${INTEGRATION}`);
+    };
+    const none = resolution({ source: null, member_pinned_connection_ids: [] });
+    expect(noneItem(none)).toMatchObject({ role: "menuitemradio", "aria-checked": true });
+    expect(noneItem(resolution({}))).toMatchObject({
+      role: "menuitemradio",
+      "aria-checked": false,
+    });
   });
 
   it("offers nothing to pick before the readiness entry, and so `required`, is known", () => {

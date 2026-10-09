@@ -134,16 +134,16 @@ describe("ScheduleActorConnectionChoice", () => {
   it("offers 'no connection' for each integration the agent does not require, refused or not", () => {
     const html = renderChoice({}, [{ id: GMAIL }, { id: NOTION, required: true }, { id: SLACK }]);
     // Inside the refused card of an optional integration, and on its own row otherwise.
-    expect(html).toContain(`id="sched-none-${GMAIL}"`);
+    expect(html).toContain(`id="sched-choice-${GMAIL}-none"`);
     expect(html).toContain(`schedule-actor-none-${SLACK}`);
-    expect(html).toContain(`id="sched-none-${SLACK}"`);
+    expect(html).toContain(`id="sched-choice-${SLACK}-none"`);
     // Control: never for one the agent requires.
-    expect(html).not.toContain(`sched-none-${NOTION}`);
+    expect(html).not.toContain(`sched-choice-${NOTION}-none`);
   });
 
   it("shows a stored 'no connection' ticked", () => {
     const box = (html: string) =>
-      html.match(new RegExp(`<button[^>]*id="sched-none-${SLACK}"[^>]*>`))![0];
+      html.match(new RegExp(`<button[^>]*id="sched-choice-${SLACK}-none"[^>]*>`))![0];
     expect(box(renderChoice({ [SLACK]: [] }, [{ id: SLACK }]))).toContain('aria-checked="true"');
     expect(box(renderChoice({}, [{ id: SLACK }]))).toContain('aria-checked="false"');
   });
@@ -157,7 +157,7 @@ describe("ScheduleActorConnectionChoice", () => {
         onChange={() => {}}
       />,
     );
-    expect(html).not.toContain(`sched-none-${GMAIL}`);
+    expect(html).not.toContain(`sched-choice-${GMAIL}-none`);
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
   });
 });
