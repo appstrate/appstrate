@@ -15,17 +15,17 @@ import type { ModelGenerationControlLabels } from "./model-generation-controls.t
  *
  * `t` must already be bound to a namespace that resolves `models.generation.*`
  * (`settings`, which is a boot namespace and therefore loaded on every route).
- * `offSendsNothing` (`reasoningOffSendsNothing`) names `off` for what it
- * does on that model: no parameter, the server decides.
+ * Where the server reports `reasoning.off: "unsent"`, `off` is named for what
+ * it does on that model: no parameter, the server decides.
  */
 export function buildGenerationLabels(
   t: (key: string, options?: { level: string }) => string,
   capabilities?: ModelGenerationCapabilities | null,
-  offSendsNothing = false,
 ): ModelGenerationControlLabels {
+  const offUnsent = capabilities?.reasoning.off === "unsent";
   const levelLabel = (level: ModelReasoningLevel) =>
     t(
-      level === "off" && offSendsNothing
+      level === "off" && offUnsent
         ? "models.generation.levels.offSendsNothing"
         : `models.generation.levels.${level}`,
     );
@@ -35,7 +35,7 @@ export function buildGenerationLabels(
     temperature: t("models.generation.temperature"),
     temperatureHint: t("models.generation.temperatureHint"),
     reasoning: t("models.generation.reasoning"),
-    reasoningHint: offSendsNothing
+    reasoningHint: offUnsent
       ? `${reasoningHint} ${t("models.generation.reasoningOffSendsNothingHint")}`
       : reasoningHint,
     inherit: t("models.generation.inherit"),

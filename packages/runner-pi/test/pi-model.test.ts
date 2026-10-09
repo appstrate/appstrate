@@ -25,7 +25,6 @@ import { nativeModel } from "./pi-payload.ts";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelCost } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import { reasoningOffSendsNothing } from "../../ui/src/components/reasoning-off.ts";
 
 const PROXY = "https://appstrate.test/api/llm-proxy/openai-responses/v1";
 
@@ -255,18 +254,12 @@ describe("a reasoning model Pi keeps no record of", () => {
     const model = gateway("openai-completions");
     expect(await capturePayload(model, "high")).toMatchObject({ reasoning_effort: "high" });
     expect(await offPayload(model)).not.toHaveProperty("reasoning_effort");
-    expect(reasoningOffSendsNothing({ apiShape: "openai-completions", pi_dialect: null })).toBe(
-      true,
-    );
   });
 
   it("disables thinking explicitly for off on the Messages API", async () => {
     const model = gateway("anthropic-messages");
     expect(await offPayload(model)).toMatchObject({ thinking: { type: "disabled" } });
     expect(await capturePayload(model, "low")).toMatchObject({ thinking: { type: "enabled" } });
-    expect(reasoningOffSendsNothing({ apiShape: "anthropic-messages", pi_dialect: null })).toBe(
-      false,
-    );
   });
 
   it("leaves an alias's client model Pi's own set: the platform clamped the level already", () => {

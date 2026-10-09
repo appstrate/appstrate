@@ -3,7 +3,7 @@
 /**
  * Every offered model, one line each, so a Pi bump reviews as one diff line per
  * changed model: `provider id api ctx max $=in/out/cacheRead/cacheWrite [>tier:rates]
- * caps levels temp [temp+reasoning] [adaptive] [featured]`. Regenerate with
+ * caps levels [off] temp [temp+reasoning] [adaptive] [featured]`. Regenerate with
  * `bun test --update-snapshots`; under `CI=true` a missing snapshot fails.
  */
 
@@ -40,6 +40,7 @@ function line(def: ModelProviderDefinition, m: CatalogModelEntry & { id: string 
     ...tiers,
     `caps=${m.capabilities.join(",")}`,
     `levels=${levels.join(",") || "-"}`,
+    reasoning?.off ? `off=${reasoning.off}` : "",
     `temp=${m.generation?.temperature ?? "-"}`,
     reasoning?.temperature_compatible ? `temp+reasoning=${reasoning.temperature_compatible}` : "",
     reasoning?.adaptive ? "adaptive" : "",

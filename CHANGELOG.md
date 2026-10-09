@@ -27,6 +27,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint: unless the token response names the account, connections to
   different Expo accounts share one account key and a reconnect is unchecked.
 
+- **Model capabilities say what reasoning level `off` puts on the wire**
+  (#1774). `OrgModel.generation` and the provider registry's models carry
+  `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
+  parameter, `unsent` when it sends none and the server keeps its own default
+  (some models still reason). The server derives it from the model a run
+  builds; it is absent when the model does not reason or does not take `off`.
+  An alias never reports it: it would identify the backing model. The live
+  model catalog drops a record whose `off` cannot be derived or differs from
+  the payload Pi builds.
+
 ### Changed
 
 - **A subscription run or chat turn prices each model call at its price tier**
@@ -51,6 +61,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stderr have taken everything, the `-w` line included, and so does the
   failure report of `appstrate code sync`. A reader that stops reading now
   makes the CLI wait, as curl does, instead of losing the tail.
+
+- **The model settings and the chat model picker name `off` from the
+  server's `reasoning.off`** (#1774). They used to guess it from the API shape
+  and the Pi dialect, and called `off` an explicit disable on models where Pi
+  sends no reasoning parameter (e.g. `opencode-go/kimi-k2.7-code`,
+  `mistral/magistral-medium-latest`).
 
 ## [1.0.0-beta.66] - 2026-10-08
 

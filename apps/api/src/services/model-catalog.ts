@@ -33,6 +33,7 @@ import {
   piReasoningLevels,
   usableRecordMaxTokens,
 } from "@appstrate/runner-pi/pi-model";
+import { piReasoningOff } from "@appstrate/runner-pi/pi-reasoning-off";
 import { findOverlayModelsById, listOverlayModels } from "./model-catalog-overlay.ts";
 import { hasLiveModelSearch } from "./model-search.ts";
 
@@ -160,6 +161,7 @@ interface AnthropicCompat {
  * Anthropic: the temperature Pi sends (`supportsTemperature`, never with
  * mid-conversation effort, never while thinking) and adaptive thinking.
  * Responses APIs: a reasoning model takes no temperature.
+ * `off`: what Pi puts on the wire for level `off` on this record.
  */
 function generationOf(record: Model<Api>): ModelGenerationCapabilities {
   const anthropic = record.api === "anthropic-messages";
@@ -169,6 +171,7 @@ function generationOf(record: Model<Api>): ModelGenerationCapabilities {
     : !(record.reasoning && RESPONSES_APIS.has(record.api));
   const levels = new Set<string>(piReasoningLevels(record));
   const support = (on: boolean): ModelCapabilitySupport => (on ? "supported" : "unsupported");
+  const off = piReasoningOff(record);
   return {
     temperature: support(temperatureSupported),
     reasoning: {
@@ -180,6 +183,7 @@ function generationOf(record: Model<Api>): ModelGenerationCapabilities {
       levels: Object.fromEntries(
         MODEL_REASONING_LEVELS.map((level) => [level, support(levels.has(level))]),
       ),
+      ...(off ? { off } : {}),
     },
   };
 }
