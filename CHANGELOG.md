@@ -349,6 +349,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A new organization's starter agent runs from the CLI, the chat and the
+  Claude Code plugin on its first try** (#1789). It was created as a draft
+  only, so `appstrate run @<scope>/hello-world`, which runs the latest
+  published version, answered `404 no_published_version`. Its version 1.0.0
+  is now published when the organization is created. An organization created
+  before this release publishes it from the agent's page (**Create version**).
+- **A run or a chat turn no longer picks up resources from the machine it
+  runs on** (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, a
+  run's prompt carried the skills of the host user's `~/.agents/skills`, of
+  the Pi agent directory and of `.agents/skills` in the workspace's parent
+  directories, the `AGENTS.md` / `CLAUDE.md` of the agent directory and of
+  those parent directories, and the `APPEND_SYSTEM.md` of the agent directory
+  or of the workspace's `.pi/`. A chat turn appended an `APPEND_SYSTEM.md`
+  found in `/tmp/.pi/` or `/tmp/pi-chat/`. A run now sees only the skills its
+  bundle provides, the platform's prompt and its own tools; a chat turn, only
+  its prompt and tools.
+- **`@appstrate/ssh-mcp` 1.0.2 no longer opens an SSH connection per tool
+  call** (#1802). The ssh and sftp calls of a run are channels on one SSH
+  ControlMaster, kept up to 5 minutes after the last call and closed when the
+  server ends: calls less than 5 minutes apart authenticate once, so a target
+  behind `ufw limit 22/tcp`, fail2ban or a tight `MaxStartups` no longer bans
+  the runner's egress IP after a handful of calls.
+- **`ssh_exec` stops a command that outlives `timeout_seconds` on the target**
+  (#1799): its process group (the command alone under a wrapping forced
+  command) gets SIGTERM, then SIGKILL 5 s later, and the
+  result carries `remote_pid` and `remote_process` (`terminated`,
+  `already_exited`, `still_running` or `unknown`). The command used to run on
+  after the call returned.
+- **`ssh_read`, `ssh_write_file` and `ssh_edit_file` accept `~` and `~/…`**
+  (#1798), from the account's home directory; `~user` is refused.
 - **A login input is encoded for the place it takes** (#1818), in a declarative
   `connect.login` and in a `connect.tool` login tool's requests: a password with
   `&` or `=` no longer breaks a form login, and no value adds a parameter,
@@ -428,6 +458,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **A run never loads Pi extensions from its agent directory** (#1820). In
+  process mode that directory is `/tmp/pi-agent`, under the world-writable
+  `/tmp`, and Pi loaded the extensions it found there whenever the run had
+  extension factories of its own, as a platform run does. Any local user
+  could drop `/tmp/pi-agent/extensions/x.ts` and have it executed inside every
+  run, with the run's environment and workspace.
 - **The sidecar relays an integration MCP server's progress notifications only
   when the value increases** (#1857), as the MCP spec requires, and at most
   once per second per call: an untrusted upstream can no longer flood the
