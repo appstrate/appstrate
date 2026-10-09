@@ -7,14 +7,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { installFakeStorage } from "../../test/fake-storage.ts";
-
-installFakeStorage({
-  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
-});
-
-const { personalApiKeyBody, personalApiKeyProviders, ownPersonalCredentials, modelsPaidByCaller } =
-  await import("../preferences/models.tsx");
+import {
+  personalApiKeyBody,
+  personalApiKeyProviders,
+  ownPersonalCredentials,
+  modelsPaidByCaller,
+} from "../personal-model-credentials.ts";
 
 describe("personalApiKeyProviders", () => {
   it("offers key-based providers only, never a subscription or a custom endpoint", () => {

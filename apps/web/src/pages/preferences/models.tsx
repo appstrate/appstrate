@@ -3,181 +3,36 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, KeyRound, Pencil, X } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { $api } from "../../api/client";
+  ApiKeyForm,
+  SubscriptionPairing,
+} from "../../components/personal-model-credential-dialogs";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { Modal } from "../../components/modal";
-import { OAuthPairingBody } from "../../components/oauth-pairing-body";
-import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
 import { PROVIDER_ICONS } from "../../components/icons";
+import { InlineLabelEditor } from "../../components/inline-label-editor";
+import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import {
-  useCreateModelProviderCredential,
   useDeleteModelProviderCredential,
+  useModelProviderCredentials,
+  useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
   type ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials";
 import { useModels } from "../../hooks/use-models";
-import { useAppForm } from "../../hooks/use-app-form";
 import { useAuth } from "../../hooks/use-auth";
-import { useOrgOnlyScope } from "../../hooks/use-org-scope";
-import { usePairingDismissConfirm } from "../../hooks/use-pairing-dismiss-confirm";
 import { usePermissions } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
 import { errorMessage } from "../../lib/mutation-error";
+import {
+  modelsPaidByCaller,
+  ownPersonalCredentials,
+  personalApiKeyProviders,
+} from "../../lib/personal-model-credentials";
 import { quickConnectProviders, resolveProviderEntry } from "../../lib/provider-registry-helpers";
-
-// ─────────────────────────────────────────────
-// Pure helpers (pinned by pages/test/preferences-models.test.ts)
-// ─────────────────────────────────────────────
-
-/** Providers a personal API key can be added for: key-based, never a custom endpoint. */
-export function personalApiKeyProviders<
-  T extends { authMode: "api_key" | "oauth2"; baseUrlOverridable: boolean },
->(registry: readonly T[]): T[] {
-  return registry.filter((p) => p.authMode === "api_key" && !p.baseUrlOverridable);
-}
-
-/** The caller's own personal credentials, out of an org-wide list (a reader gets every member's). */
-export function ownPersonalCredentials<
-  T extends { owner_type: "org" | "user"; owner_id: string | null },
->(credentials: readonly T[], userId: string | undefined): T[] {
-  if (!userId) return [];
-  return credentials.filter((c) => c.owner_type === "user" && c.owner_id === userId);
-}
-
-/** The organization models the caller's own credentials pay for (`billed_to` is computed for the caller). */
-export function modelsPaidByCaller<T extends { billed_to: "user" | "org" | null }>(
-  models: readonly T[],
-): T[] {
-  return models.filter((m) => m.billed_to === "user");
-}
-
-/** Body of a personal API-key credential: owned by the caller, so the server refuses a custom endpoint. */
-export function personalApiKeyBody(input: { providerId: string; label: string; apiKey: string }) {
-  return {
-    providerId: input.providerId,
-    label: input.label,
-    api_key: input.apiKey,
-    owner_type: "user" as const,
-  };
-}
-
-// ─────────────────────────────────────────────
-// Queries
-// ─────────────────────────────────────────────
-
-/** Every credential the caller may see: all of the org for a reader, own personal ones for `connect` only. */
-function useCredentialList(enabled: boolean) {
-  const scope = useOrgOnlyScope();
-  return $api.useQuery(
-    "get",
-    "/api/model-provider-credentials",
-    { params: { header: scope.header } },
-    { enabled: scope.enabled && enabled, select: (e) => e.data },
-  );
-}
-
-/**
- * The registry, read under `connect` too: `useProvidersRegistry` gates on `read`,
- * which a member does not hold, so the picker would stay empty for them.
- */
-function usePersonalRegistry(enabled: boolean) {
-  const scope = useOrgOnlyScope();
-  return $api.useQuery(
-    "get",
-    "/api/model-provider-credentials/registry",
-    { params: { header: scope.header } },
-    {
-      enabled: scope.enabled && enabled,
-      staleTime: 5 * 60 * 1000,
-      select: (e) => e.data as ProviderRegistryEntry[],
-    },
-  );
-}
-
-// ─────────────────────────────────────────────
-// Inline label edit (same behaviour as the connection label editor)
-// ─────────────────────────────────────────────
-
-function LabelEditor({
-  current,
-  saving,
-  onSave,
-}: {
-  current: string;
-  saving: boolean;
-  /** Calls `onSuccess` once saved: a refused label stays open to fix. */
-  onSave: (next: string, onSuccess: () => void) => void;
-}) {
-  const { t } = useTranslation("settings");
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(current);
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setValue(current);
-          setEditing(true);
-        }}
-        className="text-foreground inline-flex items-center gap-1.5 text-sm font-medium"
-        title={t("credentials.edit")}
-      >
-        <span>{current}</span>
-        <Pencil className="text-muted-foreground h-3 w-3" />
-      </button>
-    );
-  }
-
-  const commit = () => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0 || trimmed === current) setEditing(false);
-    else onSave(trimmed, () => setEditing(false));
-  };
-
-  return (
-    <div className="flex items-center gap-1">
-      <Input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-        className="h-7 w-44 text-xs"
-        disabled={saving}
-        placeholder={t("modelCredentials.labelPlaceholder")}
-      />
-      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={commit} disabled={saving}>
-        <Check className="h-3 w-3" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-6 w-6"
-        onClick={() => setEditing(false)}
-        disabled={saving}
-      >
-        <X className="h-3 w-3" />
-      </Button>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────
 // Credential row
@@ -212,7 +67,16 @@ function CredentialRow({
         <div className="flex flex-wrap items-center gap-2">
           {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
           {editable ? (
-            <LabelEditor current={credential.label} saving={saving} onSave={onRename} />
+            <InlineLabelEditor
+              current={credential.label}
+              saving={saving}
+              onSave={onRename}
+              editTitle={t("credentials.edit")}
+              placeholder={t("modelCredentials.labelPlaceholder")}
+              className="text-foreground text-sm font-medium"
+              iconClassName="text-muted-foreground"
+              inputClassName="w-44"
+            />
           ) : (
             <span className="text-sm font-medium">{credential.label}</span>
           )}
@@ -254,217 +118,6 @@ function CredentialRow({
 }
 
 // ─────────────────────────────────────────────
-// API key modal
-// ─────────────────────────────────────────────
-
-interface ApiKeyFields {
-  label: string;
-  apiKey: string;
-}
-
-function ApiKeyModal({
-  open,
-  onClose,
-  providers,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  providers: ProviderRegistryEntry[];
-  onCreated: () => void;
-}) {
-  // Re-mounted on every opening, so the form starts empty.
-  if (!open) return null;
-  return <ApiKeyForm onClose={onClose} providers={providers} onCreated={onCreated} />;
-}
-
-function ApiKeyForm({
-  onClose,
-  providers,
-  onCreated,
-}: {
-  onClose: () => void;
-  providers: ProviderRegistryEntry[];
-  onCreated: () => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const [providerId, setProviderId] = useState(providers[0]?.providerId ?? "");
-  const createCredential = useCreateModelProviderCredential();
-  const {
-    register,
-    handleSubmit,
-    showError,
-    formState: { errors },
-  } = useAppForm<ApiKeyFields>({ defaultValues: { label: "", apiKey: "" } });
-  const required = (v: string) =>
-    !v.trim() ? t("validation.required", { ns: "common" }) : undefined;
-
-  const onFormSubmit = handleSubmit((data) => {
-    if (!providerId) return;
-    createCredential.mutate(
-      {
-        body: personalApiKeyBody({
-          providerId,
-          label: data.label.trim(),
-          apiKey: data.apiKey.trim(),
-        }),
-      },
-      {
-        onSuccess: () => {
-          onCreated();
-          onClose();
-        },
-      },
-    );
-  });
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={t("modelCredentials.apiKeyTitle")}
-      actions={
-        <>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button type="submit" form="pmc-api-key-form" disabled={createCredential.isPending}>
-            {createCredential.isPending ? <Spinner /> : t("btn.save", { ns: "common" })}
-          </Button>
-        </>
-      }
-    >
-      <form id="pmc-api-key-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="pmc-provider">{t("credentials.form.provider")}</Label>
-          <Select value={providerId} onValueChange={setProviderId}>
-            <SelectTrigger id="pmc-provider">
-              <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              {providers.map((p) => {
-                const Icon = PROVIDER_ICONS[p.iconUrl];
-                return (
-                  <SelectItem key={p.providerId} value={p.providerId}>
-                    <span className="flex items-center gap-2">
-                      {Icon && <Icon className="size-4" />}
-                      {p.displayName}
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pmc-label">{t("credentials.form.label")}</Label>
-          <Input
-            id="pmc-label"
-            type="text"
-            {...register("label", { validate: required })}
-            placeholder={t("modelCredentials.labelPlaceholder")}
-            aria-invalid={showError("label") ? true : undefined}
-          />
-          {showError("label") && errors.label?.message && (
-            <div className="text-destructive text-sm">{errors.label.message}</div>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pmc-api-key">{t("credentials.form.apiKey")}</Label>
-          <Input
-            id="pmc-api-key"
-            type="password"
-            {...register("apiKey", { validate: required })}
-            placeholder="sk-..."
-            aria-invalid={showError("apiKey") ? true : undefined}
-          />
-          <p className="text-muted-foreground text-xs">{t("modelCredentials.apiKeyHint")}</p>
-          {showError("apiKey") && errors.apiKey?.message && (
-            <div className="text-destructive text-sm">{errors.apiKey.message}</div>
-          )}
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Subscription (OAuth pairing) modal
-// ─────────────────────────────────────────────
-
-function SubscriptionModal({
-  open,
-  onClose,
-  providers,
-}: {
-  open: boolean;
-  onClose: () => void;
-  providers: ProviderRegistryEntry[];
-}) {
-  if (!open) return null;
-  return <SubscriptionPairing onClose={onClose} providers={providers} />;
-}
-
-function SubscriptionPairing({
-  onClose,
-  providers,
-}: {
-  onClose: () => void;
-  providers: ProviderRegistryEntry[];
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const [providerId, setProviderId] = useState(providers[0]?.providerId ?? "");
-  const dismiss = usePairingDismissConfirm(onClose);
-
-  return (
-    <>
-      <Modal
-        open
-        onClose={dismiss.requestClose}
-        title={t("modelCredentials.subscriptionTitle")}
-        actions={
-          <Button type="button" variant="outline" onClick={dismiss.requestClose}>
-            {t("credentials.oauth.close")}
-          </Button>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-muted-foreground text-sm">{t("modelCredentials.subscriptionHint")}</p>
-          {providers.length > 1 && (
-            <div className="space-y-2">
-              <Label htmlFor="pmc-subscription">{t("credentials.form.provider")}</Label>
-              <Select value={providerId} onValueChange={setProviderId}>
-                <SelectTrigger id="pmc-subscription">
-                  <SelectValue placeholder={t("models.form.providerPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers.map((p) => (
-                    <SelectItem key={p.providerId} value={p.providerId}>
-                      {p.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {providerId && (
-            <OAuthPairingBody
-              key={providerId}
-              providerId={providerId}
-              onConnected={() => onClose()}
-              onBusyChange={dismiss.onBusyChange}
-            />
-          )}
-        </div>
-      </Modal>
-      {dismiss.confirmDialog}
-    </>
-  );
-}
-
-// ─────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────
 
@@ -475,9 +128,8 @@ export function PreferencesModelsPage() {
   const queryClient = useQueryClient();
 
   const canConnect = can("model-provider-credentials:connect");
-  const canList = canConnect || can("model-provider-credentials:read");
-  const credentialsQuery = useCredentialList(canList);
-  const registryQuery = usePersonalRegistry(canConnect);
+  const credentialsQuery = useModelProviderCredentials();
+  const registryQuery = useProvidersRegistry();
   const modelsQuery = useModels();
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
@@ -572,20 +224,22 @@ export function PreferencesModelsPage() {
         )}
       </div>
 
-      <ApiKeyModal
-        open={apiKeyOpen}
-        onClose={() => setApiKeyOpen(false)}
-        providers={apiKeyProviders}
-        onCreated={refreshModels}
-      />
-      <SubscriptionModal
-        open={subscriptionOpen}
-        onClose={() => {
-          setSubscriptionOpen(false);
-          refreshModels();
-        }}
-        providers={subscriptionProviders}
-      />
+      {apiKeyOpen && (
+        <ApiKeyForm
+          onClose={() => setApiKeyOpen(false)}
+          providers={apiKeyProviders}
+          onCreated={refreshModels}
+        />
+      )}
+      {subscriptionOpen && (
+        <SubscriptionPairing
+          onClose={() => {
+            setSubscriptionOpen(false);
+            refreshModels();
+          }}
+          providers={subscriptionProviders}
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}

@@ -37,20 +37,22 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
   >;
 
 /**
- * Both reads guard on `model-provider-credentials:read`, which the agent and
- * launch surfaces mounting them do not imply.
+ * Both reads open to `read` (every credential of the org) or `connect` (the
+ * server then lists only the caller's own personal credentials).
  */
-function useCredentialsReadScope() {
+function useCredentialsScope() {
   const scope = useOrgOnlyScope();
   const { can } = usePermissions();
   return {
     header: scope.header,
-    enabled: scope.enabled && can("model-provider-credentials:read"),
+    enabled:
+      scope.enabled &&
+      (can("model-provider-credentials:read") || can("model-provider-credentials:connect")),
   };
 }
 
 export function useModelProviderCredentials() {
-  const scope = useCredentialsReadScope();
+  const scope = useCredentialsScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
@@ -60,7 +62,7 @@ export function useModelProviderCredentials() {
 }
 
 export function useProvidersRegistry() {
-  const scope = useCredentialsReadScope();
+  const scope = useCredentialsScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials/registry",

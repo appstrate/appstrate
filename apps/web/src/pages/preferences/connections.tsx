@@ -3,9 +3,8 @@
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Unplug, Pencil, Check, X } from "lucide-react";
+import { Unplug } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
 import {
   useMyConnections,
@@ -16,6 +15,7 @@ import {
 import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { InlineLabelEditor } from "../../components/inline-label-editor";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
 import { ConnectionDeleteImpact } from "../../components/integration-connect/connection-delete-impact";
@@ -40,77 +40,6 @@ function statusBadge(t: ReturnType<typeof useTranslation>["t"], conn: MeConnecti
     <ConnectionStatusBadge tone="connected">
       {t("connections.statusConnected")}
     </ConnectionStatusBadge>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Inline label edit
-// ─────────────────────────────────────────────
-
-function LabelEditor({
-  current,
-  saving,
-  onSave,
-}: {
-  current: string;
-  saving: boolean;
-  /** Calls `onSuccess` once saved: a refused label (e.g. already taken) stays open to fix. */
-  onSave: (next: string, onSuccess: () => void) => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(current);
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setValue(current);
-          setEditing(true);
-        }}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs"
-        title={t("connections.editLabel")}
-      >
-        <span>{current}</span>
-        <Pencil className="h-3 w-3" />
-      </button>
-    );
-  }
-
-  const commit = () => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0 || trimmed === current) setEditing(false);
-    else onSave(trimmed, () => setEditing(false));
-  };
-
-  return (
-    <div className="flex items-center gap-1">
-      <Input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-        className="h-7 w-40 text-xs"
-        disabled={saving}
-        placeholder={t("connections.labelPlaceholder")}
-      />
-      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={commit} disabled={saving}>
-        <Check className="h-3 w-3" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-6 w-6"
-        onClick={() => setEditing(false)}
-        disabled={saving}
-      >
-        <X className="h-3 w-3" />
-      </Button>
-    </div>
   );
 }
 
@@ -203,7 +132,15 @@ function ConnectionRow({
         {/* Header: label (editable for integration) + status */}
         <div className="flex flex-wrap items-center gap-2">
           {onUpdateLabel ? (
-            <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
+            <InlineLabelEditor
+              current={conn.label}
+              saving={updating}
+              onSave={onUpdateLabel}
+              editTitle={t("connections.editLabel")}
+              placeholder={t("connections.labelPlaceholder")}
+              className="text-muted-foreground hover:text-foreground text-xs"
+              inputClassName="w-40"
+            />
           ) : (
             <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
