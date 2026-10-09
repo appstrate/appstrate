@@ -53,9 +53,11 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
 function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
-  getRun?: Response[];
+  /** Successive poll answers; a function answers when its promise settles. */
+  getRun?: Array<Response | (() => Promise<Response>)>;
   /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
+  runAndWaitTiming?: McpToolContext["runAndWaitTiming"];
 }): {
   tool: ReturnType<typeof toolsFor>[number];
   calls: Array<{
@@ -99,7 +101,8 @@ function makeRunAndWait(opts: {
       return (opts.launch ?? (() => jsonResponse({ id: "run_1", status: "pending" })))();
     }
     if (req.method === "GET" && /\/api\/runs\/[^/]+$/.test(url.pathname)) {
-      return getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
+      const next = getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
+      return typeof next === "function" ? next() : next;
     }
     // Post-completion file enrichment (fetchRunFiles).
     if (req.method === "GET" && url.pathname === "/api/files") {
@@ -125,6 +128,7 @@ function makeRunAndWait(opts: {
     mayShareRoot: async () => false,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    runAndWaitTiming: opts.runAndWaitTiming,
   };
   const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
@@ -358,7 +362,108 @@ describe("run_and_wait", () => {
       result: { ok: true },
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
-    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+    // No progress token: the wait is capped below the clients' 60 s timeout.
+    expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=44");
+  });
+
+  describe("progress heartbeat and unstreamed wait cap", () => {
+    type SentNotification = Parameters<AppstrateRequestExtra["sendNotification"]>[0];
+
+    it("tells the model to read a `done:false` run back with getRun, not relaunch it", () => {
+      const description = makeRunAndWait({}).tool.descriptor.description;
+      expect(description).toContain("`done:false`");
+      expect(description).toContain("never call `run_and_wait` again");
+      expect(description).toContain("read its outcome with `getRun` on that `id`");
+      // The chat reuses this text with only its closing-reply margin left: no long-poll advice.
+      expect(description).not.toContain("wait: true");
+    });
+
+    function extraWith(
+      progressToken: string | number | undefined,
+      send: (n: SentNotification) => Promise<void>,
+    ): AppstrateRequestExtra {
+      return {
+        ...(progressToken === undefined ? {} : { _meta: { progressToken } }),
+        sendNotification: send,
+      } as AppstrateRequestExtra;
+    }
+
+    /** A poll answer that settles `ms` later. */
+    const delayed = (ms: number, body: Record<string, unknown>) => () =>
+      Bun.sleep(ms).then(() => jsonResponse(body));
+
+    it("streams strictly increasing progress under the caller's token, then stops", async () => {
+      const sent: SentNotification[] = [];
+      const { tool, calls } = makeRunAndWait({
+        getRun: [delayed(60, { id: "run_1", status: "success" })],
+        runAndWaitTiming: { progressIntervalMs: 5 },
+      });
+
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer" },
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      const sentAtReturn = sent.length;
+      await Bun.sleep(30);
+
+      expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
+      // A streamed call keeps the full default wait.
+      expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=55");
+      expect(sentAtReturn).toBeGreaterThanOrEqual(2);
+      expect(sent.length).toBe(sentAtReturn);
+      const progress = sent.map((n) => {
+        expect(n.method).toBe("notifications/progress");
+        const params = n.params as { progressToken: unknown; progress: number; total?: number };
+        expect(params.progressToken).toBe("tok_1");
+        expect(params.total).toBeUndefined();
+        return params.progress;
+      });
+      expect(progress.every((p, i) => i === 0 || p > progress[i - 1]!)).toBe(true);
+    });
+
+    it("never fails the call when sending a notification throws", async () => {
+      let attempts = 0;
+      const { tool } = makeRunAndWait({
+        getRun: [delayed(40, { id: "run_1", status: "success" })],
+        runAndWaitTiming: { progressIntervalMs: 5 },
+      });
+
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer" },
+        extraWith(7, () => {
+          attempts += 1;
+          throw new Error("transport closed");
+        }),
+      );
+
+      expect(attempts).toBeGreaterThanOrEqual(1);
+      expect(res.isError).toBeFalsy();
+      expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
+    });
+
+    it("sends nothing and returns done:false with the run id once the cap passes", async () => {
+      const sent: SentNotification[] = [];
+      const { tool } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_7", status: "running" })],
+        runAndWaitTiming: { progressIntervalMs: 5, unstreamedMaxMs: 30 },
+      });
+
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer" },
+        extraWith(undefined, async (n) => {
+          sent.push(n);
+        }),
+      );
+
+      expect(res.isError).toBeFalsy();
+      const payload = parseResult(res);
+      expect(payload).toMatchObject({ id: "run_7", status: "running", done: false });
+      expect(payload.error).toContain("Do not launch it again");
+      expect(sent).toEqual([]);
+    });
   });
 
   it("opts the launch into connect offers, and only the launch", async () => {
