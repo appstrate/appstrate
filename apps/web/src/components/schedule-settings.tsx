@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { ArrowRight, Lock, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
@@ -23,12 +24,14 @@ import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
 import { RoleLimitNotice } from "./role-limit-notice";
 import { ActorSelect } from "./actor-select";
-import { AgentInputForm } from "./agent-input-form";
-import { AgentVersionField } from "./package-version-select";
-import { RunOverridesPanel, ScheduleConnectionOverridesSection } from "./run-overrides-panel";
+import { PackageVersionSelect } from "./package-version-select";
+import { RunOverridesPanel } from "./run-overrides-panel";
+import { AgentIdentityTile } from "./agent-identity";
+import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-block";
+import { InputFieldRow, SaveFeedback } from "./package-detail/agent-configuration-tab";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
-import { ErrorState, LoadingState } from "./page-states";
+import { EmptyState, ErrorState, LoadingState } from "./page-states";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
@@ -36,7 +39,15 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
-import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
+import {
+  changedInputValues,
+  formatInputValue,
+  hasInputFields,
+  initialInputValues,
+} from "../lib/agent-input";
+import { authorDefaults, getOrderedKeys } from "@appstrate/core/form";
+import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
+import { useUploadClient } from "../hooks/use-upload";
 import { type ConnectionChoice, scheduleConnectionChoices } from "../lib/connection-choice";
 import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
 import { type ActorValue, type RunOverridesValue, sameActor } from "../lib/schedule-payload";
@@ -143,9 +154,7 @@ function SectionBody({
 function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save }) {
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
-  const agentPath = `/agents/${schedule.packageId}`;
-  const agentName =
-    agents?.find((agent) => agent.id === schedule.packageId)?.display_name ?? schedule.packageId;
+  const agent = agents?.find((a) => a.id === schedule.packageId);
   return (
     <>
       <SettingRow label={t("schedule.name")}>
@@ -157,10 +166,32 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
         />
       </SettingRow>
       <SettingRow label={t("schedule.agent")} description={t("schedule.settings.agentHint")}>
-        <Link className="text-primary text-sm hover:underline" to={agentPath}>
-          {agentName}
+        {/* The agent's identity, as its own Général previews it. */}
+        <Link
+          to={`/agents/${schedule.packageId}`}
+          className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
+        >
+          <AgentIdentityTile
+            agentId={schedule.packageId}
+            icon={agent?.icon}
+            color={agent?.color}
+            className="size-11 rounded-xl"
+            iconClassName="size-5"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">
+              {agent?.display_name || schedule.packageId}
+            </span>
+            {agent?.description && (
+              <span className="text-muted-foreground block truncate text-xs">
+                {agent.description}
+              </span>
+            )}
+          </span>
+          <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
         </Link>
       </SettingRow>
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
     </>
   );
 }
@@ -179,16 +210,19 @@ function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: S
     () => setEdited(false),
   );
   return (
-    <FrequencyComposer
-      cron={schedule.cron_expression}
-      timezone={schedule.timezone}
-      onChange={(next) => {
-        if (!next || next === cron) return;
-        setCron(next);
-        setEdited(true);
-      }}
-      onTimezoneChange={(timezone) => update.mutate({ id: schedule.id, timezone })}
-    />
+    <>
+      <FrequencyComposer
+        cron={schedule.cron_expression}
+        timezone={schedule.timezone}
+        onChange={(next) => {
+          if (!next || next === cron) return;
+          setCron(next);
+          setEdited(true);
+        }}
+        onTimezoneChange={(timezone) => update.mutate({ id: schedule.id, timezone })}
+      />
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
+    </>
   );
 }
 
@@ -257,6 +291,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
           </Button>
         </div>
       )}
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
     </>
   );
 }
@@ -296,6 +331,8 @@ function InputsSection({
   update: Save;
 }) {
   const { t } = useTranslation(["agents"]);
+  const labels = useSchemaFormLabels();
+  const upload = useUploadClient();
   const wrapper = deps.inputWrapper;
   // Seeded from the schedule's frozen values over the agent's resolved ones,
   // minus every locked field; only what differs from the agent is sent back,
@@ -317,16 +354,49 @@ function InputsSection({
   if (!hasInputFields(wrapper)) {
     return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
   }
+  const defaults = authorDefaults(wrapper.schema);
   return (
-    <AgentInputForm
-      wrapper={wrapper}
-      settings={wrapper}
-      value={values}
-      onChange={(next) => {
-        setValues(next);
-        setEdited(true);
-      }}
-    />
+    <div className="space-y-4">
+      {getOrderedKeys(wrapper.schema, wrapper.property_order).map((key) => {
+        // A field the agent locks is the agent's value at every fire.
+        const locked = wrapper.locked_fields.includes(key);
+        const agentValue = wrapper.values[key] ?? defaults[key];
+        return (
+          <InputFieldRow
+            key={key}
+            fieldKey={key}
+            wrapper={wrapper}
+            value={locked ? agentValue : values[key]}
+            disabled={locked}
+            labels={labels}
+            upload={upload}
+            onValueChange={(next) => {
+              setValues((prev) => {
+                const out = { ...prev };
+                if (next === undefined) delete out[key];
+                else out[key] = next;
+                return out;
+              });
+              setEdited(true);
+            }}
+            hint={
+              agentValue !== undefined && !locked
+                ? t("schedule.settings.agentValue", { value: formatInputValue(agentValue) })
+                : undefined
+            }
+            control={
+              locked ? (
+                <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                  <Lock className="size-3.5" aria-hidden />
+                  {t("schedule.settings.lockedByAgent")}
+                </span>
+              ) : undefined
+            }
+          />
+        );
+      })}
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
+    </div>
   );
 }
 
@@ -365,30 +435,36 @@ function ExecutionSection({
   const version = schedule.version_override ?? VERSION_INHERIT;
 
   return (
-    <div className="space-y-6">
-      <AgentVersionField
-        packageId={schedule.packageId}
+    <>
+      <SettingRow
         label={t("run.overrides.versionLabel")}
-        value={version}
-        // Only a real change is sent: naming the working copy is an author's
-        // act the route judges (403 `draft_not_writable`), and echoing the
-        // stored value back would claim it for whoever touched the select.
-        onChange={(next) => {
-          if (next !== version) {
-            update.mutate({
-              id: schedule.id,
-              version_override: next === VERSION_INHERIT ? null : next,
-            });
-          }
-        }}
-        leadingOptions={[
-          { value: VERSION_INHERIT, label: t("run.overrides.versionInheritLatest") },
-          ...(deps.homeWritable || version === "draft"
-            ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
-            : []),
-        ]}
-      />
+        description={t("schedule.settings.versionHint")}
+      >
+        <PackageVersionSelect
+          type="agent"
+          packageId={schedule.packageId}
+          value={version}
+          // Only a real change is sent: naming the working copy is an author's
+          // act the route judges (403 `draft_not_writable`), and echoing the
+          // stored value back would claim it for whoever touched the select.
+          onChange={(next) => {
+            if (next !== version) {
+              update.mutate({
+                id: schedule.id,
+                version_override: next === VERSION_INHERIT ? null : next,
+              });
+            }
+          }}
+          leadingOptions={[
+            { value: VERSION_INHERIT, label: t("run.overrides.versionInheritLatest") },
+            ...(deps.homeWritable || version === "draft"
+              ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
+              : []),
+          ]}
+        />
+      </SettingRow>
       <RunOverridesPanel
+        layout="settings"
         packageId={schedule.packageId}
         persistedModelId={deps.persistedModelId}
         persistedGenerationConfig={deps.persistedGenerationConfig}
@@ -400,7 +476,8 @@ function ExecutionSection({
         }}
         version={schedule.version_override ?? VERSION_PUBLISHED}
       />
-    </div>
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
+    </>
   );
 }
 
@@ -415,8 +492,9 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
   const integrations = usePackageDetail("agent", schedule.packageId, { version: firedVersion }).data
     ?.dependencies.integrations;
   const picks = schedule.connection_overrides ?? {};
-  // The pickers judge the VIEWER's connections: they speak only for a schedule
-  // that runs as the viewer. Another actor's are named from the candidates.
+  // The pickers judge the VIEWER's connections: the agent's table speaks only
+  // for a schedule that runs as the viewer. Another actor's connections are
+  // named from the candidates the server offers when it refuses a write.
   const actorIsViewer =
     !!user && sameActor({ userId: schedule.userId ?? undefined }, { userId: user.id });
 
@@ -436,18 +514,23 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
 
   if (!integrations) return <LoadingState />;
   if (integrations.length === 0) {
-    return <p className="text-muted-foreground text-sm">{t("schedule.settings.noIntegrations")}</p>;
+    return (
+      <EmptyState
+        message={t("detail.emptyConnections")}
+        hint={t("schedule.settings.noIntegrations")}
+        icon={Unplug}
+        compact
+      />
+    );
   }
   return (
     <div className="space-y-4">
       <ScheduleConnectionRefusals choices={choices} />
       {actorIsViewer ? (
-        <ScheduleConnectionOverridesSection
+        <AgentIntegrationsBlock
+          entries={integrations}
           agentPackageId={schedule.packageId}
-          integrations={integrations}
-          version={firedVersion}
-          value={picks}
-          onChange={pick}
+          scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion }}
         />
       ) : (
         <ScheduleActorConnectionChoice choices={choices} value={picks} onChange={pick} />

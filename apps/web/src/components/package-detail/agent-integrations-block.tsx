@@ -33,6 +33,20 @@ interface AgentIntegrationsBlockProps {
    * for THIS agent on each (integration, authKey).
    */
   agentPackageId?: string;
+  /**
+   * The table for a schedule rather than the agent: "Compte utilisé" picks the
+   * connections frozen on the schedule (`connection_overrides`, the launch
+   * layer of every fire) instead of the member's pin, against the version the
+   * schedule fires. The agent's readiness column says nothing of a schedule,
+   * so it goes.
+   */
+  scheduleOverrides?: ScheduleOverrides;
+}
+
+interface ScheduleOverrides {
+  value: Readonly<Record<string, string[]>>;
+  onChange: (integrationId: string, connectionIds: string[]) => void;
+  version?: string;
 }
 
 /**
@@ -50,7 +64,11 @@ interface AgentIntegrationsBlockProps {
  * integration. Whether an integration BLOCKS the run (run semantics) is the
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
-export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
+export function AgentIntegrationsBlock({
+  entries,
+  agentPackageId,
+  scheduleOverrides,
+}: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const [search, setSearch] = useState("");
   const [states, setStates] = useState<string[]>([]);
@@ -110,10 +128,13 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           agentScopes={entry.scopes}
           appActive={appActive}
           {...(agentPackageId ? { agentPackageId } : {})}
+          {...(scheduleOverrides ? { scheduleOverrides } : {})}
         />
       ),
     },
-    {
+  ];
+  if (!scheduleOverrides)
+    columns.push({
       id: "status",
       header: t("detail.connectionsTable.status"),
       width: "130px",
@@ -124,8 +145,7 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
           agentPackageId={agentPackageId}
         />
       ),
-    },
-  ];
+    });
   const filters: FilterSpec[] = [
     {
       id: "activation",
@@ -179,6 +199,7 @@ interface IntegrationConnectionCardProps {
   /** Whether the integration is active — placed in this space and switched on. */
   appActive: boolean;
   agentPackageId?: string;
+  scheduleOverrides?: ScheduleOverrides;
 }
 
 function IntegrationConnectionCell({
@@ -187,6 +208,7 @@ function IntegrationConnectionCell({
   agentScopes,
   appActive,
   agentPackageId,
+  scheduleOverrides,
 }: IntegrationConnectionCardProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
@@ -242,6 +264,25 @@ function IntegrationConnectionCell({
   // Matches the prior behaviour for library/marketplace previews.
   if (!agentPackageId) {
     return <span className="text-muted-foreground text-sm">—</span>;
+  }
+
+  if (scheduleOverrides) {
+    return (
+      <IntegrationConnectionPicker
+        integrationId={packageId}
+        agentPackageId={agentPackageId}
+        manifest={detail.manifest}
+        authStatuses={detail.auths}
+        agentTools={agentTools}
+        agentScopes={agentScopes}
+        persistence={{
+          mode: "override",
+          value: scheduleOverrides.value[packageId] ?? [],
+          onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
+        }}
+        version={scheduleOverrides.version}
+      />
+    );
   }
 
   return (

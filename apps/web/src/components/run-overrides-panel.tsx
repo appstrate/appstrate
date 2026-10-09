@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -22,6 +23,8 @@ import { withConnectionOverride } from "../lib/connection-set";
 import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
+import { GenerationSettingRows } from "./model-generation-rows";
+import { SettingRow } from "./settings/setting-row";
 import {
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
@@ -64,6 +67,39 @@ interface RunOverridesPanelProps {
    * their per-integration readiness verdict judges the definition that runs.
    */
   version?: string;
+  /**
+   * `launch` (the run modal): labelled fields, temperature and reasoning as
+   * sliders. `settings` (a schedule's Exécution): the settings rows and selects
+   * of the agent's own Modèle and Proxy sections.
+   */
+  layout?: "launch" | "settings";
+}
+
+/** One override: a labelled field in a launch form, a settings row elsewhere. */
+function OverrideRow({
+  layout,
+  label,
+  description,
+  children,
+}: {
+  layout: "launch" | "settings";
+  label: string;
+  description: string;
+  children: ReactNode;
+}) {
+  if (layout === "settings") {
+    return (
+      <SettingRow label={label} description={description}>
+        {children}
+      </SettingRow>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -91,6 +127,7 @@ export function RunOverridesPanel({
   value,
   onChange,
   version,
+  layout = "launch",
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -159,16 +196,33 @@ export function RunOverridesPanel({
     }
   };
 
+  const setGeneration = (generation: ModelGenerationSettings) => {
+    if (Object.keys(generation).length === 0) {
+      const { generation_config_override: _omit, ...rest } = value;
+      void _omit;
+      onChange(rest);
+    } else {
+      onChange({ ...value, generation_config_override: generation });
+    }
+  };
+
   const modelSelectValue = value.model_id_override ?? INHERIT;
   const selectedModel =
     orgModels?.find((model) => model.id === value.model_id_override) ?? inheritedModel;
   const proxySelectValue = value.proxy_id_override ?? INHERIT;
 
   return (
-    <div className="space-y-4">
+    <div className={layout === "launch" ? "space-y-4" : undefined}>
       {orgModels && orgModels.length > 0 && (
-        <div className="space-y-2">
-          <Label>{t("models.tabTitle", { ns: "settings" })}</Label>
+        <OverrideRow
+          layout={layout}
+          label={
+            layout === "settings"
+              ? t("detail.configuration.modelChoice", { ns: "agents" })
+              : t("models.tabTitle", { ns: "settings" })
+          }
+          description={t("schedule.settings.modelHint", { ns: "agents" })}
+        >
           <Select value={modelSelectValue} onValueChange={setModel}>
             <SelectTrigger>
               <SelectValue />
@@ -207,34 +261,47 @@ export function RunOverridesPanel({
               })}
             </SelectContent>
           </Select>
-        </div>
+        </OverrideRow>
       )}
 
-      {orgModels && orgModels.length > 0 && (
-        <ModelGenerationFields
-          value={value.generation_config_override ?? {}}
+      {orgModels && orgModels.length > 0 && layout === "settings" && (
+        <GenerationSettingRows
           model={selectedModel}
-          onChange={(generation) => {
-            if (Object.keys(generation).length === 0) {
-              const { generation_config_override: _omit, ...rest } = value;
-              void _omit;
-              onChange(rest);
-            } else {
-              onChange({ ...value, generation_config_override: generation });
-            }
+          generation={value.generation_config_override ?? {}}
+          inheritLabels={{
+            ...(persistedGenerationConfig?.temperature != null
+              ? { temperature: t("schedule.settings.inheritAgent", { ns: "agents" }) }
+              : {}),
+            ...(persistedGenerationConfig?.reasoning_level
+              ? { reasoning: t("schedule.settings.inheritAgent", { ns: "agents" }) }
+              : {}),
           }}
+          onChange={setGeneration}
         />
       )}
 
-      {persistedGenerationConfig && Object.keys(persistedGenerationConfig).length > 0 && (
-        <p className="text-muted-foreground text-xs">
-          {t("run.overrides.generationInheritHint", { ns: "agents" })}
-        </p>
+      {orgModels && orgModels.length > 0 && layout === "launch" && (
+        <ModelGenerationFields
+          value={value.generation_config_override ?? {}}
+          model={selectedModel}
+          onChange={setGeneration}
+        />
       )}
 
+      {layout === "launch" &&
+        persistedGenerationConfig &&
+        Object.keys(persistedGenerationConfig).length > 0 && (
+          <p className="text-muted-foreground text-xs">
+            {t("run.overrides.generationInheritHint", { ns: "agents" })}
+          </p>
+        )}
+
       {orgProxies && orgProxies.length > 0 && (
-        <div className="space-y-2">
-          <Label>{t("detail.configSectionProxy", { ns: "agents" })}</Label>
+        <OverrideRow
+          layout={layout}
+          label={t("detail.configSectionProxy", { ns: "agents" })}
+          description={t("schedule.settings.proxyHint", { ns: "agents" })}
+        >
           <Select value={proxySelectValue} onValueChange={setProxy}>
             <SelectTrigger>
               <SelectValue />
@@ -266,7 +333,7 @@ export function RunOverridesPanel({
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </OverrideRow>
       )}
 
       {agentIntegrations && agentIntegrations.length > 0 && (
@@ -295,7 +362,7 @@ export function RunOverridesPanel({
  * list, scope/lock verdicts and inline connect flow — only the
  * persistence target differs (transient form value vs. member pin).
  */
-export function ScheduleConnectionOverridesSection({
+function ScheduleConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,

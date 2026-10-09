@@ -34,7 +34,7 @@ import {
   parseCron,
   toCron,
 } from "../lib/cron-frequency";
-import { timezoneOptions } from "../lib/timezones";
+import { TimezoneSelect } from "./timezone-select";
 
 /** The rhythms offered, in the order of the select, with their labels. */
 const KIND_LABELS: Record<FrequencyKind, string> = {
@@ -300,7 +300,8 @@ export function FrequencyComposer({
             <Input
               id="frequency-at"
               type="time"
-              className="w-36"
+              // shadcn's date-and-time block: the native field, its clock icon hidden.
+              className="w-36 appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
               value={timeValue(frequency.at)}
               onChange={(e) => setAt(e.target.value)}
             />
@@ -325,18 +326,7 @@ export function FrequencyComposer({
 
       <Field>
         <Label htmlFor="frequency-timezone">{t("schedule.timezone")}</Label>
-        <Select value={timezone} onValueChange={onTimezoneChange}>
-          <SelectTrigger id="frequency-timezone">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {timezoneOptions(timezone).map((zone) => (
-              <SelectItem key={zone} value={zone}>
-                {zone}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <TimezoneSelect id="frequency-timezone" value={timezone} onChange={onTimezoneChange} />
       </Field>
 
       {/* What was composed, read back. */}

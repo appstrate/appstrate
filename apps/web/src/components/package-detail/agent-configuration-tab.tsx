@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
-import { CircleSlash2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
@@ -25,21 +24,18 @@ import {
 } from "../../hooks/use-models";
 import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
-import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
-import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
 import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
 import {
-  MODEL_REASONING_LEVELS,
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
-  type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { JsonView } from "../json-view";
 import { SettingRow } from "../settings/setting-row";
+import { GenerationSettingRows } from "../model-generation-rows";
 
 // ─── Input Settings Section ─────────────────────────────────────────
 
@@ -167,6 +163,67 @@ function InputSettingRow({
   onLockChange: (locked: boolean) => void;
 }) {
   const { t } = useTranslation(["agents"]);
+  return (
+    <InputFieldRow
+      fieldKey={fieldKey}
+      wrapper={wrapper}
+      value={value}
+      disabled={disabled}
+      labels={labels}
+      upload={upload}
+      onValueChange={onValueChange}
+      hint={
+        authorDefault !== undefined
+          ? t("detail.inputSettings.authorDefault", { value: formatInputValue(authorDefault) })
+          : undefined
+      }
+      control={
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id={`lock-${fieldKey}`}
+            checked={locked}
+            onCheckedChange={(checked) => onLockChange(Boolean(checked))}
+            disabled={disabled}
+          />
+          <Label
+            htmlFor={`lock-${fieldKey}`}
+            className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
+            title={t("detail.inputSettings.lockHint")}
+          >
+            {t("detail.inputSettings.lock")}
+          </Label>
+        </div>
+      }
+    />
+  );
+}
+
+/**
+ * One input as a settings row: its field, a line under it saying where the
+ * value comes from, and a control on the right. The agent's Entrées (with
+ * "Verrouiller") and a schedule's Entrées share it.
+ */
+export function InputFieldRow({
+  fieldKey,
+  wrapper,
+  value,
+  disabled,
+  labels,
+  upload,
+  onValueChange,
+  hint,
+  control,
+}: {
+  fieldKey: string;
+  wrapper: SchemaWrapper;
+  value: unknown;
+  disabled?: boolean;
+  labels: ReturnType<typeof useSchemaFormLabels>;
+  upload: ReturnType<typeof useUploadClient>;
+  onValueChange: (next: unknown) => void;
+  hint?: string;
+  control?: ReactNode;
+}) {
   const subset = subsetWrapper(wrapper, [fieldKey]);
   if (!subset) return null;
   // `required` is dropped exactly as the server drops it: an empty value here
@@ -187,28 +244,8 @@ function InputSettingRow({
         onChange={(e) => onValueChange((e.formData as Record<string, unknown>)[fieldKey])}
       />
       <div className="flex items-center justify-between gap-3">
-        {authorDefault !== undefined ? (
-          <p className="text-muted-foreground text-xs">
-            {t("detail.inputSettings.authorDefault", { value: formatInputValue(authorDefault) })}
-          </p>
-        ) : (
-          <span />
-        )}
-        <div className="flex items-center gap-1.5">
-          <Checkbox
-            id={`lock-${fieldKey}`}
-            checked={locked}
-            onCheckedChange={(checked) => onLockChange(Boolean(checked))}
-            disabled={disabled}
-          />
-          <Label
-            htmlFor={`lock-${fieldKey}`}
-            className="text-muted-foreground cursor-pointer text-xs font-normal whitespace-nowrap"
-            title={t("detail.inputSettings.lockHint")}
-          >
-            {t("detail.inputSettings.lock")}
-          </Label>
-        </div>
+        {hint ? <p className="text-muted-foreground text-xs">{hint}</p> : <span />}
+        {control}
       </div>
     </div>
   );
@@ -261,41 +298,6 @@ function ModelSectionEditor({
   // the inherited default must be named even when it is unusable.
   const orgDefaultModel = orgModels.find((m) => m.is_default);
   const resolvedModel = modelId ? orgModels.find((m) => m.id === modelId) : orgDefaultModel;
-  const temperatureUnsupported = resolvedModel?.generation?.temperature === "unsupported";
-  const supportedReasoningLevels = MODEL_REASONING_LEVELS.filter(
-    (level) => resolvedModel?.generation?.reasoning.levels[level] === "supported",
-  );
-  const reasoningUnsupported =
-    resolvedModel?.generation?.reasoning.supported === "unsupported" ||
-    supportedReasoningLevels.length === 0;
-
-  const temperatureOptions: Array<{ value: string; label: string }> = [
-    { value: "__inherit__", label: t("models.generation.inherit", { ns: "settings" }) },
-    { value: "0", label: t("detail.configuration.temperature.precise", { ns: "agents" }) },
-    { value: "0.2", label: t("detail.configuration.temperature.focused", { ns: "agents" }) },
-    { value: "0.5", label: t("detail.configuration.temperature.balanced", { ns: "agents" }) },
-    { value: "0.8", label: t("detail.configuration.temperature.creative", { ns: "agents" }) },
-    { value: "1", label: t("detail.configuration.temperature.exploratory", { ns: "agents" }) },
-  ];
-
-  // The level names, the default level and the `off` of a model that sends
-  // nothing for it, worded once for every surface that offers the choice.
-  const generationLabels = buildGenerationLabels(
-    t,
-    resolvedModel?.generation,
-    !!resolvedModel && reasoningOffSendsNothing(resolvedModel),
-  );
-
-  const withoutTemperature = () => {
-    const { temperature: _temperature, ...rest } = generation;
-    void _temperature;
-    return rest;
-  };
-  const withoutReasoning = () => {
-    const { reasoning_level: _reasoningLevel, ...rest } = generation;
-    void _reasoningLevel;
-    return rest;
-  };
   const save = (nextModelId: string | null, nextGeneration: ModelGenerationSettings) => {
     setAgentModel.mutate({
       modelId: nextModelId,
@@ -363,100 +365,15 @@ function ModelSectionEditor({
         </Select>
       </SettingRow>
 
-      <SettingRow
-        label={t("models.generation.temperature", { ns: "settings" })}
-        description={
-          temperatureUnsupported
-            ? t("models.generation.unsupported", { ns: "settings" })
-            : t("models.generation.temperatureHint", { ns: "settings" })
-        }
-      >
-        <Select
-          value={
-            temperatureUnsupported
-              ? "__unsupported__"
-              : generation.temperature == null
-                ? "__inherit__"
-                : String(generation.temperature)
-          }
-          disabled={setAgentModel.isPending || temperatureUnsupported}
-          onValueChange={(value) => {
-            const nextGeneration =
-              value === "__inherit__"
-                ? withoutTemperature()
-                : { ...generation, temperature: Number(value) };
-            setGeneration(nextGeneration);
-            save(modelId, nextGeneration);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {temperatureUnsupported ? (
-              <SelectItem value="__unsupported__">
-                <span className="inline-flex items-center gap-2">
-                  <CircleSlash2 className="size-3.5" />
-                  {t("models.generation.unsupportedShort", { ns: "settings" })}
-                </span>
-              </SelectItem>
-            ) : (
-              temperatureOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
-      </SettingRow>
-
-      <SettingRow
-        label={t("models.generation.reasoning", { ns: "settings" })}
-        description={
-          reasoningUnsupported
-            ? t("models.generation.unsupported", { ns: "settings" })
-            : generationLabels.reasoningHint
-        }
-      >
-        <Select
-          value={
-            reasoningUnsupported ? "__unsupported__" : (generation.reasoning_level ?? "__inherit__")
-          }
-          disabled={setAgentModel.isPending || reasoningUnsupported}
-          onValueChange={(value) => {
-            const nextGeneration =
-              value === "__inherit__"
-                ? withoutReasoning()
-                : { ...generation, reasoning_level: value as ModelReasoningLevel };
-            setGeneration(nextGeneration);
-            save(modelId, nextGeneration);
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {reasoningUnsupported ? (
-              <SelectItem value="__unsupported__">
-                <span className="inline-flex items-center gap-2">
-                  <CircleSlash2 className="size-3.5" />
-                  {t("models.generation.unsupportedShort", { ns: "settings" })}
-                </span>
-              </SelectItem>
-            ) : (
-              <>
-                <SelectItem value="__inherit__">{generationLabels.reasoningInherit}</SelectItem>
-                {supportedReasoningLevels.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    {generationLabels.levels[level]}
-                  </SelectItem>
-                ))}
-              </>
-            )}
-          </SelectContent>
-        </Select>
-      </SettingRow>
+      <GenerationSettingRows
+        model={resolvedModel}
+        generation={generation}
+        disabled={setAgentModel.isPending}
+        onChange={(nextGeneration) => {
+          setGeneration(nextGeneration);
+          save(modelId, nextGeneration);
+        }}
+      />
       <SaveFeedback
         pending={setAgentModel.isPending}
         success={setAgentModel.isSuccess}
@@ -517,7 +434,7 @@ export function ProxySection({ packageId }: { packageId: string }) {
   );
 }
 
-function SaveFeedback({
+export function SaveFeedback({
   pending,
   success,
   error,

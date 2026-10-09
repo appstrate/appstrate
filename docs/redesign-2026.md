@@ -1671,6 +1671,17 @@ detail/`, filled with the redesign's content (one OAuth client table, lock
   round-trips). A sentence and the next three fires read it back, computed by
   `cron-parser`, the scheduler's own parser. The five presets are gone, and
   a new schedule starts in the browser's time zone, not UTC.
+- A schedule's Paramètres show what the agent's show, not the run
+  launcher's: the agent as its Général preview (tile, name, description);
+  inputs as the agent's Entrées rows (`InputFieldRow`: the field, "Valeur de
+  l'agent : …" under it, "Imposée par l'agent" for a field the agent locks);
+  temperature and reasoning as the Modèle section's selects
+  (`GenerationSettingRows`, now shared by both, with `RunOverridesPanel`
+  `layout="settings"`); connections in the agent's table
+  (`AgentIntegrationsBlock scheduleOverrides`, which picks the schedule's set
+  and drops the agent-only readiness column). Time zones are searched
+  (`TimezoneSelect`, the Popover + Command combobox of the icon and identity
+  pickers); the time field is shadcn's native one, its clock icon hidden.
 - Every Alert is shadcn's grid alert: the icon sits on the middle of the
   text's first line, one line or several (the old absolute icon sat 5px
   low). An alert with a button in its row centres the button on that line
