@@ -11,7 +11,10 @@ import { ApiError } from "../../api/errors.ts";
 import { queryClient, shouldRetryQuery } from "../query-client.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 
+// The i18n instance is shared by every file of the process, and the forbidden
+// case asserts French copy: pin the language rather than inherit a neighbour's.
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 describe("shouldRetryQuery", () => {
   it("does not re-ask a refusal", () => {

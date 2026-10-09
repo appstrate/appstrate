@@ -91,10 +91,14 @@ describe("PinManagementSection — 'Aucune connexion'", () => {
       "L'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige",
     );
     await i18n.changeLanguage("en");
-    expect(renderSection({ connections: [SHARED] })).toContain(
-      "The agent runs without this integration, or does not start if it requires it",
-    );
-    await i18n.changeLanguage("fr");
+    try {
+      expect(renderSection({ connections: [SHARED] })).toContain(
+        "The agent runs without this integration, or does not start if it requires it",
+      );
+    } finally {
+      // The i18n instance is shared by the whole process: never leave English behind.
+      await i18n.changeLanguage("fr");
+    }
   });
 
   it("is offered even when no connection is shared, which only stops pinning one", () => {

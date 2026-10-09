@@ -3,9 +3,11 @@
 import { describe, it, expect, afterEach, spyOn } from "bun:test";
 import { createServer } from "node:http";
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from "node:http";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, createServer as netCreateServer } from "node:net";
+import type { Server as NetServer } from "node:net";
 import { createForwardProxy, type ForwardProxyResult } from "../forward-proxy.ts";
 import { logger } from "../logger.ts";
+import { halfCloseClient, startLateReplyServer } from "./helpers/half-close.ts";
 
 // Track servers for cleanup
 const servers: (HttpServer | ForwardProxyResult)[] = [];
@@ -812,6 +814,41 @@ describe("upstream proxy bypass for platform host", () => {
     // Fake upstream rejects CONNECT with 403 → forward proxy surfaces "Upstream Rejected".
     expect(res.statusCode).toBe(403);
     expect(upstream.receivedConnectTargets).toContain(`127.0.0.1:${echo.port}`);
+  });
+});
+
+describe("CONNECT tunnels half-close", () => {
+  it("relays the client's FIN as a FIN: the upstream's later answer arrives, then both close", async () => {
+    const tracked: NetServer[] = [];
+    const upstream = await startLateReplyServer((server) => tracked.push(server));
+    const proxy = makeProxy();
+    await proxy.ready;
+
+    const res = await halfCloseClient(proxy.address().port, "ping", `127.0.0.1:${upstream.port}`);
+    expect(res).toEqual({ received: "late:ping", closed: true });
+    await upstream.closed;
+    for (const server of tracked) server.close();
+  });
+
+  it("answers 502 when the upstream proxy hangs up without answering the CONNECT", async () => {
+    // Half-open upstream sockets must not leave the client waiting on a proxy that only sent a FIN.
+    const hangUp = netCreateServer({ allowHalfOpen: true }, (socket) => {
+      socket.once("data", () => socket.end());
+      socket.on("error", () => {});
+    });
+    await new Promise<void>((res) => hangUp.listen(0, "127.0.0.1", () => res()));
+    const proxy = makeProxy({
+      config: {
+        platformApiUrl: "http://platform-host:3000",
+        runToken: "tok",
+        proxyUrl: `http://127.0.0.1:${(hangUp.address() as { port: number }).port}`,
+      },
+    });
+    await proxy.ready;
+
+    const res = await connectViaProxy(proxy.address().port, "example.com:443");
+    expect(res.statusCode).toBe(502);
+    hangUp.close();
   });
 });
 

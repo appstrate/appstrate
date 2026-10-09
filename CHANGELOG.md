@@ -122,6 +122,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   backstop for every run on that host, leaving only the sidecar's app-layer
   floor. The exemption ships in this release's Firecracker rootfs: pin the
   runner's artifacts to this release.
+- **Self-hosters who build their own images: rebuild on `oven/bun:1.4.2`**
+  (#1878). The platform image, `PI_IMAGE`, `SIDECAR_IMAGE` and the
+  Firecracker rootfs (built from those two) now start from Bun 1.4.2. They
+  are one version contract: ship all of them, and the Firecracker artifacts,
+  from this release together. An image built from this tree pulls the new
+  base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
 ### Changed
 
@@ -181,6 +187,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Connection labels are unique per owner** (#1622, #1870): a label no
   longer collides with another member's private connection. Two members'
   equal labels in one pin or default are suffixed ` (2)` in the run.
+- **The repository requires Bun 1.4.2 or later** (#1878): `packageManager`
+  moves to `bun@1.4.2` and the root `engines.bun` to `>=1.4.2`, which the root
+  test preload enforces. CI reads the version from `packageManager` (setup-bun
+  `bun-version-file`), and the Dockerfiles and the devcontainer pin the same
+  `oven/bun:1.4.2` base, held to it by `scripts/test/bun-version-pins.test.ts`.
+  Every install, in CI and in the images, runs `bun install --frozen-lockfile`,
+  which replaces CI's `git diff --exit-code bun.lock` check. Published packages
+  keep their own `>=1.3.9`.
 - **A local integration runner can reach a host listed in
   `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
   transparent listeners refused every private, loopback or link-local
@@ -504,6 +518,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the payload Pi builds.
 
 ### Fixed
+
+- **Runner egress tunnels relay a half-close, and the http relay cancels an
+  abandoned upstream request** (#1878). On the egress CONNECT listener, the
+  transparent plane and the agent's forward proxy, a client's FIN reaches the
+  upstream as a FIN, so a reply sent after it now arrives instead of being cut;
+  a half-open tunnel stays bounded by the idle timeout, and a FIN before the
+  tunnel's first bytes closes it at once. A client that leaves before the whole
+  answer cancels the upstream request instead of letting it run to the upstream
+  timeout. Pipelined `http://` requests are vetted one by one and answered in
+  order, and one pipelined behind a refusal is dropped, never relayed.
 
 - **A proxy-aware local runner reaches `http://` targets through its egress
   listener** (#1819). The listener of a runner with nothing to inject
