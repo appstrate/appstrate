@@ -64,10 +64,10 @@ const formComponent: PlaceholderEncoder = (value) =>
   new URLSearchParams([["", value]]).toString().slice(1);
 
 /**
- * JSON: inside a string literal a value is escaped. Anywhere else it is one whole JSON value: a
- * value submitted typed as JSON; a string that is the JSON text of a number, a boolean or `null` as
- * that scalar (a lone scalar cannot add a member, and a form only submits strings); any other string
- * as a JSON string.
+ * JSON: inside a string literal a value is escaped. Anywhere else it is one whole JSON value of its
+ * own type: a string is a JSON string, whatever it spells, and a typed value is its JSON. A value's
+ * type never depends on its text — the caller types an input (from the schema it was submitted
+ * against) before substituting it.
  */
 function jsonEncoder(
   template: string,
@@ -86,18 +86,8 @@ function jsonEncoder(
   return (value, key, offset) => {
     if (inString[offset]) return JSON.stringify(value).slice(1, -1);
     const typed = inputs[key];
-    if (typeof typed !== "string") return JSON.stringify(typed) ?? JSON.stringify(value);
-    return isJsonScalar(value) ? value : JSON.stringify(value);
+    return (typeof typed === "string" ? undefined : JSON.stringify(typed)) ?? JSON.stringify(value);
   };
-}
-
-function isJsonScalar(text: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return parsed === null || typeof parsed === "number" || typeof parsed === "boolean";
-  } catch {
-    return false;
-  }
 }
 
 const XML_ENTITIES: Record<string, string> = {

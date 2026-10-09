@@ -115,7 +115,7 @@ describe("applyConnectInputSubstitution — each value encoded for its place", (
     expect(JSON.parse(result.bodyText!)).toEqual({ password: hostile });
   });
 
-  it("JSON body: a string that is a JSON scalar fills a bare position as that scalar, as in connect.login", () => {
+  it("JSON body: a bare position takes a login input as a JSON string, whatever it spells", () => {
     const result = substituted(
       applyConnectInputSubstitution(
         {
@@ -126,7 +126,7 @@ describe("applyConnectInputSubstitution — each value encoded for its place", (
         { pin: "1234", user: "alice" },
       ),
     );
-    expect(JSON.parse(result.bodyText!)).toEqual({ pin: 1234, user: "alice" });
+    expect(JSON.parse(result.bodyText!)).toEqual({ pin: "1234", user: "alice" });
   });
 
   it("URL: a value is one query component", () => {

@@ -30,10 +30,12 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 import {
+  assertCredentialsMatchSchema,
   assertFieldsInput,
   loginInputRefused,
   loginRejected,
   loginTimedOut,
+  loginUrlRefused,
   requireNonEmptyCredentials,
 } from "./strategy.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
@@ -64,19 +66,12 @@ function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
       );
     case "invalid_input":
       return loginInputRefused(err.field!);
-    case "url_not_allowed": {
-      const fields = err.fields ?? [];
-      if (fields.length === 0) return err;
-      const named = fields.map((f) => `'${f}'`).join(", ");
-      return invalidRequest(
-        `The ${fields.length === 1 ? "value" : "values"} of ${named} ${fields.length === 1 ? "does" : "do"} not give an address this login may reach.`,
-        fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
-      );
-    }
+    case "url_not_allowed":
+      return err.fields?.length ? loginUrlRefused(err.fields) : err;
     case "upstream_failed":
       return badGateway("The service could not complete the login. Try again later.");
     case "timeout":
-      return loginTimedOut();
+      return loginTimedOut(err.timeoutMs);
     default:
       return err;
   }
@@ -93,6 +88,8 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.login declaration`);
     }
     requireNonEmptyCredentials(credentials);
+    // Typed by the schema: a JSON body takes a `number` field as a number, a `string` one as a string.
+    const inputs = assertCredentialsMatchSchema(auth.credentials?.schema, credentials);
 
     const variables = await resolveConnectionVariables(
       manifest,
@@ -100,8 +97,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       ctx.variables,
     );
     const { outputs, identityClaims, expiresAt } = await runLogin(auth.connect as LoginConfig, {
-      // As submitted: the engine encodes each value, a typed one as JSON where the body is JSON.
-      inputs: credentials,
+      inputs,
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
       allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
     }).catch((err: unknown) => {

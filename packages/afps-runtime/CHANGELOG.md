@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or multipart body by its `Content-Type`; a header value refused unless it is
   an HTTP field value (and a `cookie-octet` string in a `Cookie` header).
   Inputs may be typed: a non-string value is its JSON text, or that JSON value
-  in a bare JSON position.
+  in a bare JSON position, where a string is always a JSON string.
 - `UnencodableInputError` (`./resolvers`): what `substituteRequest` throws for
   a value it cannot carry where it is placed; carries the `field`, never the
   value.

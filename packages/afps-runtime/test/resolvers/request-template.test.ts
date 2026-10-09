@@ -60,16 +60,25 @@ describe("substituteRequest — bodies", () => {
       inputs,
     ).body;
 
-  it("bare JSON: a string that is a JSON scalar is that scalar; any other string a JSON string", () => {
-    const template = '{"a":{{a}},"b":{{b}},"c":{{c}},"d":{{d}},"e":{{e}},"f":{{f}}}';
-    const inputs = { a: "1234", b: "true", c: "null", d: "0123", e: '1,"admin":true', f: "x" };
-    expect(JSON.parse(body(template, "application/json", inputs)!)).toEqual({
-      a: 1234,
-      b: true,
-      c: null,
+  it("bare JSON: a string is a JSON string whatever it spells; a typed value is its JSON", () => {
+    const template = '{"a":{{a}},"b":{{b}},"c":{{c}},"d":{{d}},"e":{{e}},"n":{{n}},"t":{{t}}}';
+    const inputs = {
+      a: "1234",
+      b: "true",
+      c: "null",
       d: "0123",
       e: '1,"admin":true',
-      f: "x",
+      n: 1234,
+      t: true,
+    };
+    expect(JSON.parse(body(template, "application/json", inputs)!)).toEqual({
+      a: "1234",
+      b: "true",
+      c: "null",
+      d: "0123",
+      e: '1,"admin":true',
+      n: 1234,
+      t: true,
     });
   });
 

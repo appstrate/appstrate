@@ -351,36 +351,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **A login input is encoded for the place it takes** (#1818), in a
   declarative `connect.login` request and in the requests a `connect.tool`
-  login tool sends through the sidecar alike. A password with `&` or `=`
-  broke a form login, and a value could add form parameters. A value is now a
-  form component in an `application/x-www-form-urlencoded` body, escaped in a
-  JSON (`application/json`, `text/json`, `application/x-json`, `+json`) or
-  XML body, and percent-encoded as one URL component everywhere but a
-  placeholder that starts the URL (a base URL, kept as is): a template writes
-  the `/` it needs (`https://example.com/{{tenant}}`, never
-  `https://example.com{{path}}`). A bare JSON placeholder takes a string that
-  is a JSON number, boolean or `null` as that scalar (`"1234"` → `1234`, as
-  before), any other string as a JSON string. A value carrying a line break
-  into a header or a `multipart/*` body, a `Cookie` value outside
-  `cookie-octet`, or any other character the request cannot carry where it is
-  placed, is refused with a `400 invalid_request` naming `credentials.<field>`,
-  and so is a submitted base URL that is malformed or outside
-  `authorized_uris`. A placeholder inside a multipart part's own headers is not
-  escaped. The
-  sidecar ships with the platform in this release: both read the error that
-  names the field.
+  login tool sends through the sidecar. A password with `&` or `=` broke a form
+  login, and a value could add form parameters. A value is now a form
+  component in a form body, escaped in a JSON or XML body, and percent-encoded
+  as one URL component everywhere but a placeholder that starts the URL (a base
+  URL, kept as is): write `https://example.com/{{tenant}}`, never
+  `https://example.com{{path}}`. A bare JSON placeholder takes the input's own
+  type, and a declarative login types the submitted credentials by
+  `credentials.schema` first (they are now validated against it, as for an
+  `api_key` auth): a `number` field goes as a number, a `string` field as a
+  JSON string whatever it spells. A value the request cannot carry where it is
+  placed (a line break in a header or a `multipart/*` body, a `Cookie` value
+  outside `cookie-octet`), or a submitted base URL outside `authorized_uris`,
+  is a `400 invalid_request` naming `credentials.<field>`. The sidecar ships
+  with the platform in this release: both read the error that names the field.
 - **A refused declarative login is no longer a `500 internal_error`** on
-  `POST …/connect/fields` and the hosted connect form (#1818). Credentials
-  the service refuses — declared `success_criteria` failed, or, with none, a
-  400, 401, 403 or 422 — answer what a refused `connect.tool` login answers, a
-  `400 invalid_request` on `credentials` whose detail starts `Login failed:`.
-  A 404, 405 or 410, and any other answer below 500 that no criterion judges,
-  stays a `500`; a 429, or a service that cannot be reached or answers 5xx is a `502 bad_gateway`, a
-  slow one a `504 timeout`, the cause logged server-side. The hosted form
-  shows the refusal and can be submitted again. A defect of the integration
-  stays a `500`. Importing an
-  integration whose form login declares no `success_criteria` now warns: a
-  2xx alone does not tell a session from a login page.
+  `POST …/connect/fields` and the hosted connect form (#1818). Credentials the
+  service refuses (declared `success_criteria` failed, or, with none, a 400,
+  401, 403 or 422) answer what a refused `connect.tool` login answers: a `400
+invalid_request` on `credentials` whose detail starts `Login failed:`, and
+  the hosted form can be submitted again. A service that cannot be reached or
+  answers 429 or 5xx is a `502 bad_gateway`, a slow one a `504 timeout`; a 404,
+  405, 410 or an unjudged 3xx stays a `500`. Importing a form login that
+  declares no `success_criteria` now warns.
 - **The `connect.tool` examples of
   `docs/guides/writing-an-integration-with-connect.md` deliver the session
   cookie as a `Cookie` header** (#1818): `delivery.http.in: "cookie"` is

@@ -164,7 +164,7 @@ interface LoginResult {
  *    on an answer below 500 other than 404, 405, 410 or 429, or, with none, the target answered
  *    400, 401, 403 or 422 (`upstreamStatus` says which);
  *  - `upstream_failed`: the target could not be reached, or answered 429 or 5xx;
- *  - `timeout`: the target did not answer within `request_timeout_ms`;
+ *  - `timeout`: the target did not answer within `request_timeout_ms` (`timeoutMs`);
  *  - `invalid_input`: input `field` cannot be encoded where the request carries it;
  *  - `url_not_allowed` with `fields`: the URL whose authority those inputs filled is refused;
  *  - every other reason is a defect of the integration (manifest, allowlist, a 404, a 302 that
@@ -172,6 +172,7 @@ interface LoginResult {
  */
 export class LoginError extends Error {
   readonly upstreamStatus?: number;
+  readonly timeoutMs?: number;
   readonly field?: string;
   readonly fields?: readonly string[];
 
@@ -195,6 +196,7 @@ export class LoginError extends Error {
      */
     options?: ErrorOptions & {
       upstreamStatus?: number;
+      timeoutMs?: number;
       field?: string;
       fields?: readonly string[];
     },
@@ -202,6 +204,7 @@ export class LoginError extends Error {
     super(message, options);
     this.name = "LoginError";
     this.upstreamStatus = options?.upstreamStatus;
+    this.timeoutMs = options?.timeoutMs;
     this.field = options?.field;
     this.fields = options?.fields;
   }
@@ -634,7 +637,9 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     });
   } catch (err) {
     if (ac.signal.aborted) {
-      throw new LoginError(`timed out after ${limits.stepTimeoutMs}ms`, "timeout");
+      throw new LoginError(`timed out after ${limits.stepTimeoutMs}ms`, "timeout", {
+        timeoutMs: limits.stepTimeoutMs,
+      });
     }
     // The error's class and code, never its message: a transport message may quote the URL,
     // which can carry a substituted input.

@@ -33,6 +33,8 @@ let failing = false;
 let slow = false;
 /** The `password` parameters of each login request the target received. */
 let received: string[][] = [];
+/** The parsed body of each JSON login request the target received. */
+let receivedJson: unknown[] = [];
 
 beforeAll(() => {
   restoreEgress = allowLoopbackOAuthEgress();
@@ -40,6 +42,10 @@ beforeAll(() => {
     hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
+      if (new URL(req.url).pathname === "/json-login") {
+        receivedJson.push(await req.json());
+        return new Response("ok", { headers: { "Set-Cookie": "sid=session-1; Path=/" } });
+      }
       if (new URL(req.url).pathname !== "/login") return new Response("no page", { status: 404 });
       const form = new URLSearchParams(await req.text());
       received.push(form.getAll("password"));
@@ -176,6 +182,7 @@ describe("declarative connect.login at the route boundary", () => {
     failing = false;
     slow = false;
     received = [];
+    receivedJson = [];
     await reseed(loginManifest(server.url.origin));
   });
 
@@ -214,8 +221,48 @@ describe("declarative connect.login at the route boundary", () => {
 
       expect(res.status).toBe(504);
       const raw = await res.text();
-      expect((JSON.parse(raw) as ProblemBody).code).toBe("timeout");
+      const body = JSON.parse(raw) as ProblemBody;
+      expect(body.code).toBe("timeout");
+      expect(body.detail).toContain("after 100ms");
       expect(raw).not.toContain(PASSWORD);
+    });
+
+    it(`${surface}: types a JSON login's inputs by credentials.schema, not by what they spell`, async () => {
+      await reseed(
+        loginManifest(server.url.origin, (auth) => {
+          auth.credentials.schema.properties = {
+            pin: { type: "number" },
+            code: { type: "string" },
+          };
+          auth.connect.login.request = {
+            method: "POST",
+            url: `${server.url.origin}/json-login`,
+            content_type: "application/json",
+            body: '{"pin":{{pin}},"code":{{code}}}',
+          };
+        }),
+      );
+
+      const res = await submit(ctx, { pin: "1234", code: "0123" });
+
+      expect(res.status).toBe(200);
+      expect(receivedJson).toEqual([{ pin: 1234, code: "0123" }]);
+    });
+
+    it(`${surface}: refuses credentials the schema refuses before any login request`, async () => {
+      await reseed(
+        loginManifest(server.url.origin, (auth) => {
+          auth.credentials.schema.properties.password = { type: "string", minLength: 64 };
+        }),
+      );
+
+      const res = await submit(ctx, { username: USERNAME, password: PASSWORD });
+
+      expect(res.status).toBe(400);
+      const raw = await res.text();
+      expect((JSON.parse(raw) as ProblemBody).param).toBe("credentials");
+      expect(raw).not.toContain(PASSWORD);
+      expect(received).toEqual([]);
     });
 
     it(`${surface}: answers a failing target with 502 bad_gateway`, async () => {

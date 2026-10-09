@@ -497,10 +497,11 @@ parameter, a member, a part or a header line (the sidecar does the same for the
 - `body` — by the media type of the `Content-Type` header, else of `content_type`:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
   - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
-    value inside a string literal. A bare `{{name}}` is one JSON value: a string that is
-    the JSON text of a number, a boolean or `null` goes as that scalar (`"1234"` →
-    `1234`), any other string as a JSON string, and a value submitted typed through
-    `connect/fields` as its JSON;
+    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
+    type: the submitted credentials are first typed by `credentials.schema`, so a field
+    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
+    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
+    tool's inputs are strings: a bare position takes them as JSON strings;
   - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
     in a CDATA section;
   - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
@@ -521,11 +522,11 @@ that no criterion judges (a 302) are a defect of the integration, a `500`. A ser
 that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
 does not answer within `request_timeout_ms` a `504 timeout`.
 
-**A form login must declare `success_criteria`.** Without one, any 2xx counts as success,
-and most web apps answer a wrong password with `200` and the login page again: the
-connection is stored with a dead session. Declare what only the logged-in answer has —
-the session cookie set, the redirect target, a marker in the body. The import warns on a
-form login with none.
+**A form login should declare `success_criteria`.** AFPS makes them optional, and without
+them any 2xx counts as success — but most web apps answer a wrong password with `200` and
+the login page again, so the connection is stored with a dead session. Declare what only
+the logged-in answer has: the session cookie set, the redirect target, a marker in the
+body. The import warns on a form login with none.
 
 ```jsonc
 "request": {

@@ -17,7 +17,9 @@
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
+import type { JSONSchemaObject } from "@appstrate/core/form";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { validateConnectionCredentials } from "../schema.ts";
 
 export type { CredentialBundle };
 
@@ -104,6 +106,26 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
 }
 
 /**
+ * The submitted credentials checked against the auth's `credentials.schema` (a 400 on `credentials`
+ * naming each mismatch), returned typed by it: a `"1234"` posted for a `number` field is `1234`.
+ */
+export function assertCredentialsMatchSchema(
+  schema: unknown,
+  credentials: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = validateConnectionCredentials(schema as JSONSchemaObject | undefined, credentials);
+  if (!result.valid) {
+    throw invalidRequest(
+      `Credentials do not match the integration's declared schema: ${result.errors
+        .map((e) => `${e.field} ${e.message}`)
+        .join("; ")}`,
+      "credentials",
+    );
+  }
+  return result.data ?? credentials;
+}
+
+/**
  * A login the service refused the submitted credentials to — the submitter's own input, so a 400
  * on `credentials` naming the remedy. `diagnostic` is one sentence, never a credential value.
  */
@@ -119,6 +141,15 @@ export function loginInputRefused(field: string): ApiError {
   return invalidRequest(
     `The value of '${field}' contains a character this request cannot carry where it is placed.`,
     `credentials.${field}`,
+  );
+}
+
+/** A submitted value put the login URL's host somewhere the auth's `authorized_uris` refuse. */
+export function loginUrlRefused(fields: readonly string[]): ApiError {
+  const one = fields.length === 1;
+  return invalidRequest(
+    `The ${one ? "value" : "values"} of ${fields.map((f) => `'${f}'`).join(", ")} ${one ? "does" : "do"} not give an address this login may reach.`,
+    one ? `credentials.${fields[0]}` : "credentials",
   );
 }
 

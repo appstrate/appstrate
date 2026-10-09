@@ -1146,7 +1146,7 @@ describe("runLogin — input encoding (AFPS §7.7 request)", () => {
     expect(await err).toMatchObject({ reason: "invalid_input", field: "password" });
     expect(calls).toHaveLength(0);
   });
-  it("JSON body: a string that is a JSON scalar fills a bare position as that scalar", async () => {
+  it("JSON body: a string fills a bare position as a JSON string, whatever it spells", async () => {
     const { init } = await sent(
       {
         method: "POST",
@@ -1157,8 +1157,8 @@ describe("runLogin — input encoding (AFPS §7.7 request)", () => {
       { pin: "1234", remember: "false", name: "1234x" },
     );
     expect(JSON.parse(String(init.body))).toEqual({
-      pin: 1234,
-      remember: false,
+      pin: "1234",
+      remember: "false",
       name: "1234x",
       pin_text: "1234",
     });
