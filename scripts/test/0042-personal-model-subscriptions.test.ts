@@ -6,7 +6,8 @@
  * pairings are deleted; every organization model bound to a subscription is unbound; an API-key
  * credential is left alone; a dry run writes nothing; a re-run is a no-op; the report names the
  * members who ran on a subscription they do not own; a blob that does not decrypt is reported and
- * kept.
+ * kept, and fails `--apply` at the end; an aliased model or a pending/running run pinned to a
+ * subscription makes `--apply` refuse its organization (the dry run reports both).
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -258,10 +259,119 @@ describe("0042 — model subscriptions become personal", () => {
     });
     await corruptCredentialBlob(broken.id);
 
-    const result = await run(true);
+    const result = await run(false);
 
     expect(result.unreadable.map((r) => r.id)).toEqual([broken.id]);
     expect(lines).toContain(`unreadable, skipped (not deleted): ${broken.id} "Illisible"`);
     expect(await rowOf(broken.id)).toBeDefined();
+  });
+
+  it("apply fails at the end while an unreadable org-owned blob remains; other organizations stay committed", async () => {
+    const broken = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: null,
+      label: "Illisible",
+    });
+    await corruptCredentialBlob(broken.id);
+    const other = await createTestContext({ orgSlug: "mig0042b" });
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: other.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: other.user.id,
+    });
+
+    await expect(run(true)).rejects.toThrow(`${broken.id} "Illisible"`);
+
+    expect((await rowOf(owned.id))!.ownerUserId).toBe(other.user.id);
+    expect(await rowOf(broken.id)).toBeDefined();
+  });
+
+  it("an aliased model bound to a subscription: the dry run reports it, apply refuses and writes nothing for that org", async () => {
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: owned.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-alias",
+      label: "Alias",
+      aliased: true,
+    });
+
+    const dry = await run(false);
+
+    expect(dry.orgs[0]!.aliasedModels.map((m) => m.id)).toEqual([model.id]);
+    expect(lines).toContain(`  aliased model ${model.id} "Alias" blocks --apply`);
+    expect((await modelOf(model.id)).credentialId).toBe(owned.id);
+
+    await expect(run(true)).rejects.toThrow(`${model.id} "Alias"`);
+
+    expect((await rowOf(owned.id))!.ownerUserId).toBeNull();
+    expect((await modelOf(model.id)).credentialId).toBe(owned.id);
+  });
+
+  it("a running run pinned to a subscription: the dry run reports it, apply refuses and writes nothing for that org", async () => {
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: owned.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-busy",
+    });
+    const busy = await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      modelCredentialId: owned.id,
+      status: "running",
+    });
+
+    const dry = await run(false);
+
+    expect(dry.orgs[0]!.activeRuns.map((r) => r.id)).toEqual([busy.id]);
+    expect(lines).toContain(`  active run ${busy.id} blocks --apply`);
+
+    await expect(run(true)).rejects.toThrow(busy.id);
+
+    expect((await rowOf(owned.id))!.ownerUserId).toBeNull();
+    expect((await modelOf(model.id)).credentialId).toBe(owned.id);
+  });
+
+  it("a finished run pinned to a subscription does not block apply", async () => {
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: owned.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-done",
+    });
+    await seedRun({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      modelCredentialId: owned.id,
+      status: "success",
+    });
+
+    const result = await run(true);
+
+    expect(result.orgs[0]!.activeRuns).toEqual([]);
+    expect(lines.at(-1)).toBe("0042: APPLIED — committed.");
+    expect((await rowOf(owned.id))!.ownerUserId).toBe(ctx.user.id);
+    expect((await modelOf(model.id)).credentialId).toBeNull();
   });
 });

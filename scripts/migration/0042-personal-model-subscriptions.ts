@@ -11,13 +11,16 @@
  * rows written before drizzle `0087` are re-homed: a subscription whose creator (`created_by`) is
  * still a member of its organization (`org_members`) becomes theirs (`owner_user_id`); one with no
  * creator, or whose creator has left the organization, is an orphan, deleted with its pairings.
- * Organization models bound to any subscription are unbound (`credential_id` NULL, `provider_id`
+ * Non-aliased organization models bound to any subscription are unbound (`credential_id` NULL, `provider_id`
  * kept), so each member now brings their own credential for them. Subscriptions are recognised by
  * decrypting the blob (`kind === "oauth"`), never through the provider registry: the subscription
  * modules are absent in production. A blob that does not decrypt is reported and left as it is.
- * Run after the deploy, app up, `pg_dump` first, and while no run is active. Refuses an empty
- * `DATABASE_URL`. One transaction per organization; dry run by default (each rolled back), `--apply`
- * commits. Idempotent.
+ * Run after the deploy, app up, with the `pg_dump` taken before it (`0087` runs at boot).
+ * Refuses an empty `DATABASE_URL`. One transaction
+ * per organization; dry run by default (each rolled back), `--apply` commits. Idempotent.
+ * `--apply` refuses, and the organization rolls back, while an aliased model is still bound to one
+ * of its subscriptions (an alias needs an organization credential) or while a `pending`/`running`
+ * run is pinned to one. It fails at the end while an unreadable org-owned blob is left.
  */
 
 import { parseArgs } from "node:util";
@@ -32,6 +35,7 @@ import {
 } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { decryptStoredCredential } from "../../apps/api/src/lib/stored-credential.ts";
 
 class DryRunRollback extends Error {}
@@ -53,6 +57,10 @@ export interface OrgSubscriptionReport {
   orphans: OrphanSubscription[];
   pairingsDeleted: number;
   unboundModels: Array<{ id: string; label: string }>;
+  /** Aliased models bound to a subscription: `--apply` refuses until they are rebound or deleted. */
+  aliasedModels: Array<{ id: string; label: string }>;
+  /** Pending or running runs pinned to a subscription: `--apply` refuses until they finish. */
+  activeRuns: Array<{ id: string }>;
   /** Members whose runs used a subscription they do not own (orphans count as not owned). */
   usersOnOthersSubscriptions: Array<{ id: string; email: string }>;
 }
@@ -152,6 +160,44 @@ export async function runPersonalModelSubscriptions(options: {
         const liveIds = live.map((r) => r.id);
         const orphanIds = orphans.map((r) => r.id);
 
+        // Refusals: `--apply` throws (the organization rolls back); a dry run only reports them.
+        const aliasedModels = liveIds.length
+          ? await tx
+              .select({ id: orgModels.id, label: orgModels.label })
+              .from(orgModels)
+              .where(
+                and(
+                  eq(orgModels.orgId, orgId),
+                  eq(orgModels.aliased, true),
+                  inArray(orgModels.credentialId, liveIds),
+                ),
+              )
+          : [];
+        const activeRuns = liveIds.length
+          ? await tx
+              .select({ id: runs.id })
+              .from(runs)
+              .where(
+                and(
+                  eq(runs.orgId, orgId),
+                  inArray(runs.status, [...activeRunStatusValues]),
+                  inArray(runs.modelCredentialId, liveIds),
+                ),
+              )
+          : [];
+        if (apply && aliasedModels.length) {
+          const named = aliasedModels.map((m) => `${m.id} ${JSON.stringify(m.label)}`).join(", ");
+          throw new Error(
+            `org ${orgId}: aliased models still bound to a subscription, rebind or delete them: ${named}`,
+          );
+        }
+        if (apply && activeRuns.length) {
+          const ids = activeRuns.map((r) => r.id).join(", ");
+          throw new Error(
+            `org ${orgId}: runs still active on a subscription, wait for them: ${ids}`,
+          );
+        }
+
         // Before any delete: deleting a credential nulls `runs.model_credential_id`.
         const usersOnOthers = liveIds.length
           ? await tx
@@ -176,11 +222,18 @@ export async function runPersonalModelSubscriptions(options: {
               ),
             );
         }
+        // Aliased rows are never unbound here: they refuse above.
         const unboundModels = liveIds.length
           ? await tx
               .update(orgModels)
               .set({ credentialId: null, updatedAt: sql`now()` })
-              .where(and(eq(orgModels.orgId, orgId), inArray(orgModels.credentialId, liveIds)))
+              .where(
+                and(
+                  eq(orgModels.orgId, orgId),
+                  eq(orgModels.aliased, false),
+                  inArray(orgModels.credentialId, liveIds),
+                ),
+              )
               .returning({ id: orgModels.id, label: orgModels.label })
           : [];
         const pairings = orphanIds.length
@@ -202,6 +255,8 @@ export async function runPersonalModelSubscriptions(options: {
           orphans: orphans.map((r) => ({ id: r.id, label: r.label })),
           pairingsDeleted: pairings.length,
           unboundModels,
+          aliasedModels,
+          activeRuns,
           usersOnOthersSubscriptions: usersOnOthers,
         };
         if (!apply) throw new DryRunRollback();
@@ -220,6 +275,9 @@ export async function runPersonalModelSubscriptions(options: {
       out(`  owner ${r.id} ${JSON.stringify(r.label)} → ${r.ownerUserId}`);
     for (const r of done.orphans) out(`  orphan ${r.id} ${JSON.stringify(r.label)}`);
     for (const m of done.unboundModels) out(`  unbound model ${m.id} ${JSON.stringify(m.label)}`);
+    for (const m of done.aliasedModels)
+      out(`  aliased model ${m.id} ${JSON.stringify(m.label)} blocks --apply`);
+    for (const r of done.activeRuns) out(`  active run ${r.id} blocks --apply`);
     const others = done.usersOnOthersSubscriptions.map((u) => `${u.email} (${u.id})`);
     out(`  users on subscriptions they do not own: ${others.join(", ") || "none"}`);
   }
@@ -229,7 +287,7 @@ export async function runPersonalModelSubscriptions(options: {
     for (const u of org.usersOnOthersSubscriptions) distinctUsers.set(u.id, u.email);
   }
   out(
-    `summary: owned ${orgs.reduce((n, o) => n + o.owned.length, 0)}, orphans ${orgs.reduce((n, o) => n + o.orphans.length, 0)}, pairings ${orgs.reduce((n, o) => n + o.pairingsDeleted, 0)}, models unbound ${orgs.reduce((n, o) => n + o.unboundModels.length, 0)}, unreadable skipped ${scan.unreadable.length}, users on subscriptions they do not own ${distinctUsers.size}`,
+    `summary: owned ${orgs.reduce((n, o) => n + o.owned.length, 0)}, orphans ${orgs.reduce((n, o) => n + o.orphans.length, 0)}, pairings ${orgs.reduce((n, o) => n + o.pairingsDeleted, 0)}, models unbound ${orgs.reduce((n, o) => n + o.unboundModels.length, 0)}, aliased models blocking ${orgs.reduce((n, o) => n + o.aliasedModels.length, 0)}, active runs blocking ${orgs.reduce((n, o) => n + o.activeRuns.length, 0)}, unreadable skipped ${scan.unreadable.length}, users on subscriptions they do not own ${distinctUsers.size}`,
   );
 
   if (!apply) {
@@ -240,6 +298,13 @@ export async function runPersonalModelSubscriptions(options: {
   const leftCount = [...left.subscriptions.values()].reduce((sum, rows) => sum + rows.length, 0);
   out(`left to migrate: ${leftCount}`);
   if (leftCount !== 0) throw new Error("subscriptions are left org-owned");
+  out(`left unreadable: ${left.unreadable.length}`);
+  if (left.unreadable.length) {
+    const named = left.unreadable.map((r) => `${r.id} ${JSON.stringify(r.label)}`).join(", ");
+    throw new Error(
+      `unreadable org-owned credentials left, repair or delete them, then re-run: ${named}`,
+    );
+  }
   out("0042: APPLIED — committed.");
   return { orgs, unreadable: scan.unreadable };
 }
@@ -264,7 +329,7 @@ if (import.meta.main) {
     code = 0;
   } catch (error) {
     process.stdout.write(
-      `0042: FAILED — ${getErrorMessage(error)}. The failing organization is rolled back; with --apply, those before it stay committed and a re-run migrates what is left.\n`,
+      `0042: FAILED — ${getErrorMessage(error)}. An organization in progress is rolled back; with --apply, those committed before it stay committed and a re-run migrates what is left.\n`,
     );
   } finally {
     await closeDb?.();
