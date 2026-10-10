@@ -724,6 +724,23 @@ describe("invoke_operation", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("declares scalar-only path_params and query in the inputSchema", () => {
+    const { byName } = makeTools(["mcp:invoke"]);
+    const props = byName.get("invoke_operation")!.descriptor.inputSchema.properties as Record<
+      string,
+      { additionalProperties?: unknown }
+    >;
+    expect(props.path_params!.additionalProperties).toEqual({
+      type: ["string", "number", "boolean"],
+    });
+    expect(props.query!.additionalProperties).toEqual({
+      anyOf: [
+        { type: ["string", "number", "boolean", "null"] },
+        { type: "array", items: { type: ["string", "number", "boolean"] } },
+      ],
+    });
+  });
+
   it("rejects an object query value instead of sending [object Object]", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);

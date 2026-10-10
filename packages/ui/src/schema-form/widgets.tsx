@@ -5,7 +5,7 @@
 // Single- and multi-selects both use react-select so we get a rich,
 // consistent dropdown in every Appstrate surface.
 
-import type { WidgetProps } from "@rjsf/utils";
+import { deepEquals, type WidgetProps } from "@rjsf/utils";
 import Select, { type StylesConfig } from "react-select";
 import { cn } from "../cn.ts";
 import { LABEL_CLASS } from "./primitives.tsx";
@@ -79,10 +79,10 @@ export function CheckboxWidget(props: WidgetProps) {
   );
 }
 
-/** Primitives compare by text ("1" matches 1); objects by JSON, as String() collapses them all. */
+/** Primitives compare by text ("1" matches 1); objects deeply, since jsonb reorders keys. */
 function sameOptionValue(a: unknown, b: unknown): boolean {
-  const key = (v: unknown) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v));
-  return key(a) === key(b);
+  if (typeof a === "object" || typeof b === "object") return deepEquals(a, b);
+  return String(a) === String(b);
 }
 
 export function SelectWidget(props: WidgetProps) {

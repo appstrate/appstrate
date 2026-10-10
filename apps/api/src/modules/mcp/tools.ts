@@ -583,7 +583,10 @@ function isScalar(value: unknown): value is Scalar {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
-/** Name of the first path/query parameter holding a non-scalar value, or null. */
+/**
+ * Name of the first path/query parameter holding a non-scalar value, or null.
+ * The inputSchema declares the same constraint, but the SDK does not enforce it.
+ */
 function findNonScalarParam(
   op: CatalogOperation,
   pathParams: Record<string, unknown>,
@@ -730,15 +733,18 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
           type: "object",
-          description:
-            "Values for path placeholders (e.g. { scope, name }); strings, numbers or booleans only.",
-          additionalProperties: true,
+          description: "Values for path placeholders, e.g. { scope, name }.",
+          additionalProperties: { type: ["string", "number", "boolean"] },
         },
         query: {
           type: "object",
-          description:
-            "Query-string parameters: string, number or boolean values (or arrays of them for repeated keys).",
-          additionalProperties: true,
+          description: "Query-string parameters; an array repeats the key.",
+          additionalProperties: {
+            anyOf: [
+              { type: ["string", "number", "boolean", "null"] },
+              { type: "array", items: { type: ["string", "number", "boolean"] } },
+            ],
+          },
         },
         body: {
           type: "object",

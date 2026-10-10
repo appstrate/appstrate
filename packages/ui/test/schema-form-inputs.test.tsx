@@ -5,7 +5,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { WidgetProps } from "@rjsf/utils";
 import { SchemaForm } from "../src/schema-form/index.tsx";
-import { SelectWidget } from "../src/schema-form/widgets.tsx";
+import { MultiSelectWidget, SelectWidget } from "../src/schema-form/widgets.tsx";
 
 const browserLanguages = Object.getOwnPropertyDescriptor(globalThis.navigator, "languages");
 
@@ -76,19 +76,29 @@ describe("SchemaForm inputs", () => {
 
 describe("SelectWidget option matching", () => {
   const enumOptions = [
-    { label: "Alpha", value: { id: 1 } },
+    { label: "Alpha", value: { a: 2, b: 1 } },
     { label: "Beta", value: { id: 2 } },
   ];
-  const render = (value: unknown) =>
+  const render = (Widget: typeof SelectWidget | typeof MultiSelectWidget, value: unknown) =>
     renderToStaticMarkup(
-      <SelectWidget
-        {...({ id: "s", value, options: { enumOptions } } as unknown as WidgetProps)}
-      />,
+      <Widget {...({ id: "s", value, options: { enumOptions } } as unknown as WidgetProps)} />,
     );
 
   it("selects only the object option equal to the value", () => {
-    const html = render({ id: 2 });
+    const html = render(SelectWidget, { id: 2 });
     expect(html).toContain("Beta");
     expect(html).not.toContain("Alpha");
+  });
+
+  it("matches an object value whose keys are ordered differently", () => {
+    const html = render(SelectWidget, { b: 1, a: 2 });
+    expect(html).toContain("Alpha");
+    expect(html).not.toContain("Beta");
+  });
+
+  it("matches multi-select object values regardless of key order", () => {
+    const html = render(MultiSelectWidget, [{ b: 1, a: 2 }]);
+    expect(html).toContain("Alpha");
+    expect(html).not.toContain("Beta");
   });
 });
