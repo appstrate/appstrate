@@ -151,10 +151,9 @@ function InputSettingRow({
   if (!subset) return null;
   // `required` is dropped exactly as the server drops it: an empty value here
   // means "not decided — ask at launch", not "invalid".
-  const fieldWrapper: SchemaWrapper = {
-    ...subset,
-    schema: { type: "object", properties: subset.schema.properties },
-  };
+  const fieldSchema = { ...subset.schema };
+  delete fieldSchema.required;
+  const fieldWrapper: SchemaWrapper = { ...subset, schema: fieldSchema };
 
   return (
     <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>

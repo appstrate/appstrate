@@ -11,7 +11,6 @@ import {
   type JSONSchemaObject,
   type JSONSchema7,
   type JSONSchema7TypeName,
-  type JSONSchema7Type,
   type FileConstraint,
   type UIHint,
   type SchemaWrapper,
@@ -307,44 +306,222 @@ export function toResourceEntry(r: {
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
 
+type ManifestSchemaWrapper = {
+  schema?: JSONSchemaObject;
+  file_constraints?: Record<string, FileConstraint>;
+  ui_hints?: Record<string, UIHint>;
+  property_order?: string[];
+};
+
+/** Narrow `manifest[key]` (`input` | `output`) to its schema wrapper. */
+export function manifestSchemaWrapper(
+  manifest: Record<string, unknown>,
+  key: "input" | "output",
+): ManifestSchemaWrapper | undefined {
+  const raw = manifest[key] as ManifestSchemaWrapper | undefined;
+  if (!raw) return undefined;
+  return raw;
+}
+
 /** Convert the manifest input/output wrappers into SchemaField arrays for the form. */
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
-  type ManifestWrapper = {
-    schema?: JSONSchemaObject;
-    file_constraints?: Record<string, FileConstraint>;
-    ui_hints?: Record<string, { placeholder?: string }>;
-    property_order?: string[];
-  };
-  const wrapperFor = (key: string) => {
-    const raw = manifest[key] as ManifestWrapper | undefined;
-    if (!raw) return undefined;
-    return {
-      schema: raw.schema,
-      file_constraints: raw.file_constraints,
-      ui_hints: raw.ui_hints,
-      property_order: raw.property_order,
-    };
-  };
+  const input = manifestSchemaWrapper(manifest, "input");
+  const output = manifestSchemaWrapper(manifest, "output");
   return {
-    input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
-    output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
+    input: schemaToFields(input?.schema, "input", input),
+    output: schemaToFields(output?.schema, "output", output),
   };
 }
 
-// ─── Schema field conversion (used by SchemaSection) ────────
+// ─── Schema fields (used by SchemaSection) ──────────────────
+//
+// A field IS its JSON-Schema property (`SchemaField.prop`): every keyword lives
+// there and nowhere else, so loading and saving a schema is lossless by
+// construction. Only AFPS wrapper data (file constraints, placeholder) is kept
+// beside it. Edits are the pure, immutable keyword operations below.
 
-function convertDefaultValue(value: string, type: string): unknown {
-  if (!value) return undefined;
-  if (type === "number" || type === "integer") {
-    const n = Number(value);
-    if (isNaN(n)) return value;
-    return type === "integer" ? Math.round(n) : n;
-  }
-  if (type === "boolean") return value === "true";
-  return value;
+type Scalar = string | number | boolean;
+
+type FileKind = "none" | "single" | "multiple";
+
+/** A keyword value as shown in a text input; `locked` = it cannot be edited as text (shown as JSON). */
+export interface TextValue {
+  text: string;
+  locked: boolean;
 }
+
+const fileItem = (): JSONSchema7 => ({
+  type: "string",
+  format: "uri",
+  contentMediaType: "application/octet-stream",
+});
+
+function itemsOf(prop: JSONSchema7): JSONSchema7 | undefined {
+  return prop.items && typeof prop.items === "object" && !Array.isArray(prop.items)
+    ? prop.items
+    : undefined;
+}
+
+/** Editor type of a property: the `type`, or the first non-"null" entry of a type array. */
+function primaryType(prop: JSONSchema7): string {
+  const t = Array.isArray(prop.type) ? prop.type.find((x) => x !== "null") : prop.type;
+  return t ?? "string";
+}
+
+/** Type of the array's `items` (what its enum values are typed as). */
+export function itemType(prop: JSONSchema7): string {
+  const items = itemsOf(prop);
+  return items ? primaryType(items) : "string";
+}
+
+export function fileKind(prop: JSONSchema7, mode: "input" | "output"): FileKind {
+  if (mode !== "input" || !isFileField(prop)) return "none";
+  return isMultipleFileField(prop) ? "multiple" : "single";
+}
+
+/** Type shown by the editor: file fields are strings (the file toggle carries the rest). */
+export function fieldType(prop: JSONSchema7, mode: "input" | "output"): string {
+  return fileKind(prop, mode) === "none" ? primaryType(prop) : "string";
+}
+
+/** Types whose `default`/`enum` values can be typed as text. */
+export function isTextType(type: string): boolean {
+  return type === "string" || type === "number" || type === "integer" || type === "boolean";
+}
+
+// ─── Keyword operations ─────────────────────────────────────
+
+/** Copy of `prop` with one keyword set, or removed when `value` is undefined. */
+export function setKeyword<K extends keyof JSONSchema7>(
+  prop: JSONSchema7,
+  key: K,
+  value: JSONSchema7[K] | undefined,
+): JSONSchema7 {
+  const next = { ...prop };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  return next;
+}
+
+const ANNOTATIONS = ["description", "title", "$comment", "deprecated", "readOnly", "writeOnly"];
+
+/** A fresh shape keeping only the type-agnostic annotations (not default/enum/examples/const). */
+function freshShape(prop: JSONSchema7, shape: JSONSchema7): JSONSchema7 {
+  const kept = Object.entries(prop).filter(([k]) => ANNOTATIONS.includes(k) || k.startsWith("x-"));
+  return { ...shape, ...Object.fromEntries(kept) };
+}
+
+/** A fresh property of another type: keywords of the old type would be invalid. */
+export function changeType(prop: JSONSchema7, type: JSONSchema7TypeName): JSONSchema7 {
+  return freshShape(prop, { type });
+}
+
+/** Turn the file shape on/off. Always a fresh property. */
+export function setFileKind(prop: JSONSchema7, kind: FileKind): JSONSchema7 {
+  const shape: JSONSchema7 =
+    kind === "none"
+      ? { type: "string" }
+      : kind === "single"
+        ? fileItem()
+        : { type: "array", items: fileItem() };
+  return freshShape(prop, shape);
+}
+
+/** Set (or clear, when empty) `items.enum`, keeping the other `items` keywords and its type. */
+export function setItemsEnum(prop: JSONSchema7, values: Scalar[]): JSONSchema7 {
+  if (prop.items !== undefined && !itemsOf(prop)) return prop; // tuple/boolean items: not ours to rewrite
+  const items = itemsOf(prop);
+  if (values.length > 0) {
+    return setKeyword(prop, "items", { ...(items ? items : { type: "string" }), enum: values });
+  }
+  if (!items) return prop;
+  const { enum: _removed, ...rest } = items;
+  return setKeyword(prop, "items", Object.keys(rest).length > 0 ? rest : undefined);
+}
+
+/** Numeric input → number, or undefined when empty or not a number. */
+function parseNumber(text: string): number | undefined {
+  if (!text.trim()) return undefined;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// ─── Text adapters (default, enum, items.enum) ──────────────
+
+export type NumericKeyword =
+  "minimum" | "maximum" | "multipleOf" | "minLength" | "maxLength" | "maxItems";
+
+const NON_NEGATIVE_INTEGER: string[] = ["minLength", "maxLength", "maxItems", "maxSize"];
+
+/** Numeric keyword (or file `maxSize`) input → number; undefined (removed) when empty or invalid for it. */
+export function toKeywordNumber(
+  keyword: NumericKeyword | "maxSize",
+  text: string,
+): number | undefined {
+  const n = parseNumber(text);
+  if (n === undefined) return undefined;
+  if (NON_NEGATIVE_INTEGER.includes(keyword)) return Number.isInteger(n) && n >= 0 ? n : undefined;
+  if (keyword === "multipleOf") return n > 0 ? n : undefined;
+  return n;
+}
+
+/** Text → typed value for `type`; undefined when empty or not a valid number. */
+export function textToValue(text: string, type: string): Scalar | undefined {
+  if (type === "string") return text || undefined;
+  if (!text.trim()) return undefined;
+  if (type === "number" || type === "integer") {
+    const n = parseNumber(text);
+    return n !== undefined && type === "integer" ? Math.round(n) : n;
+  }
+  if (type === "boolean") {
+    const word = text.trim();
+    return word === "true" ? true : word === "false" ? false : undefined;
+  }
+  return text;
+}
+
+/** Comma-separated text → typed values (items trimmed, empty ones dropped). */
+export function textToList(text: string, type: string): Scalar[] {
+  const out: Scalar[] = [];
+  for (const raw of text.split(",")) {
+    const v = textToValue(raw.trim(), type);
+    if (v !== undefined) out.push(v);
+  }
+  return out;
+}
+
+const locked = (value: unknown): TextValue => ({ text: JSON.stringify(value), locked: true });
+
+/** Editable as text only if reading the text back yields the exact same value. */
+export function valueToText(value: unknown, type: string): TextValue {
+  if (value === undefined) return { text: "", locked: false };
+  const scalar =
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  if (!scalar || !isTextType(type)) return locked(value);
+  const text = String(value);
+  return text !== "" && textToValue(text, type) === value ? { text, locked: false } : locked(value);
+}
+
+/** List variant: every item must round-trip and survive the comma split untouched. */
+export function listToText(value: unknown, type: string): TextValue {
+  if (value === undefined) return { text: "", locked: false };
+  const texts =
+    Array.isArray(value) && value.length > 0 ? value.map((v) => valueToText(v, type)) : [];
+  const editable =
+    texts.length > 0 &&
+    texts.every((t) => !t.locked && t.text === t.text.trim() && !t.text.includes(","));
+  return editable ? { text: texts.map((t) => t.text).join(", "), locked: false } : locked(value);
+}
+
+/** `items.enum` as text; locked JSON of `items` when they are a tuple/boolean we cannot edit. */
+export function itemsEnumText(prop: JSONSchema7): TextValue {
+  if (prop.items !== undefined && !itemsOf(prop)) return locked(prop.items);
+  return listToText(itemsOf(prop)?.enum, itemType(prop));
+}
+
+// ─── Manifest wrapper ⇄ fields ──────────────────────────────
 
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
@@ -357,70 +534,20 @@ export function schemaToFields(
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  const keys = getOrderedKeys(schema, wrapper?.property_order);
-  return keys.map((key) => {
+  return getOrderedKeys(schema, wrapper?.property_order).map((key) => {
     const prop = schema.properties[key]!;
-    const fileField = isFileField(prop);
-    const isInputFile = mode === "input" && fileField;
-    const constraints = wrapper?.file_constraints?.[key];
-    const hint = wrapper?.ui_hints?.[key];
-    const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
-
-    // Extract array enum items
-    let arrayEnumItems = "";
-    if (
-      type === "array" &&
-      prop.items &&
-      typeof prop.items === "object" &&
-      !Array.isArray(prop.items)
-    ) {
-      const items = prop.items;
-      if (Array.isArray(items.enum)) {
-        arrayEnumItems = items.enum.join(", ");
-      }
+    const base = { _id: crypto.randomUUID(), key, required: requiredSet.has(key), prop };
+    if (mode !== "input") return base;
+    if (isFileField(prop)) {
+      const constraint = wrapper?.file_constraints?.[key];
+      return {
+        ...base,
+        ...(constraint?.accept ? { accept: constraint.accept } : {}),
+        ...(constraint?.max_size != null ? { maxSize: constraint.max_size } : {}), // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
+      };
     }
-
-    return {
-      _id: crypto.randomUUID(),
-      key,
-      type,
-      description: prop.description || "",
-      required: requiredSet.has(key),
-      ...(isInputFile
-        ? {
-            isFile: true,
-            accept: constraints?.accept || "",
-            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
-            multiple: isMultipleFileField(prop),
-            maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
-          }
-        : {}),
-      ...(mode === "input" && !fileField
-        ? {
-            placeholder: hint?.placeholder || "",
-            default: prop.default != null ? String(prop.default) : "",
-            enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
-          }
-        : {}),
-      // String format
-      ...(type === "string" && prop.format ? { format: prop.format } : {}),
-      // String constraints
-      ...(type === "string" && prop.minLength != null ? { minLength: String(prop.minLength) } : {}),
-      ...(type === "string" && prop.maxLength != null ? { maxLength: String(prop.maxLength) } : {}),
-      ...(type === "string" && prop.pattern ? { pattern: prop.pattern } : {}),
-      // Number/integer constraints
-      ...((type === "number" || type === "integer") && prop.minimum != null
-        ? { minimum: String(prop.minimum) }
-        : {}),
-      ...((type === "number" || type === "integer") && prop.maximum != null
-        ? { maximum: String(prop.maximum) }
-        : {}),
-      ...((type === "number" || type === "integer") && prop.multipleOf != null
-        ? { step: String(prop.multipleOf) }
-        : {}),
-      // Array enum items
-      ...(arrayEnumItems ? { arrayEnumItems } : {}),
-    };
+    const placeholder = wrapper?.ui_hints?.[key]?.placeholder;
+    return placeholder ? { ...base, placeholder } : base;
   });
 }
 
@@ -428,17 +555,15 @@ export function schemaToFields(
  * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
  *
  * Emits only canonical snake_case keys (`schema`, `file_constraints`,
- * `ui_hints`, `property_order`). Every per-property entry is constructed
- * from scratch, so non-canonical camelCase siblings (`fileConstraints`,
- * `uiHints`, `propertyOrder`, per-property `maxSize`) cannot leak through.
- * The caller replaces the wrapper wholesale (`updateManifest({ input:
- * wrapper })`); the shallow-merge semantics drop any pre-existing camelCase
- * keys carried by the previous wrapper value. Idempotent against
- * already-canonical manifests.
+ * `ui_hints`, `property_order`). The caller replaces the wrapper wholesale
+ * (`updateManifest({ input: wrapper })`), which drops any non-canonical
+ * camelCase keys carried by the previous wrapper value.
  */
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output",
+  /** Current root schema: its keys other than `properties`/`required` (`$defs`, `title`, …) are kept. */
+  base?: JSONSchemaObject,
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -448,101 +573,23 @@ export function fieldsToSchema(
   const ui_hints: Record<string, UIHint> = {};
   for (const f of filtered) {
     const key = f.key.trim();
-    if (mode === "input" && f.isFile) {
-      // Generate standard JSON Schema for file fields
-      const fileItemProp: JSONSchema7 = {
-        type: "string",
-        format: "uri",
-        contentMediaType: "application/octet-stream",
-      };
-      if (f.multiple) {
-        const prop: JSONSchema7 = { type: "array", items: fileItemProp };
-        if (f.description) prop.description = f.description;
-        if (f.maxFiles) {
-          const n = Number(f.maxFiles);
-          if (!isNaN(n)) prop.maxItems = n;
-        }
-        properties[key] = prop;
-      } else {
-        const prop: JSONSchema7 = { ...fileItemProp };
-        if (f.description) prop.description = f.description;
-        properties[key] = prop;
-      }
-      // Build file_constraints (canonical AFPS snake_case)
+    properties[key] = f.prop;
+    if (f.required) required.push(key);
+    if (mode !== "input") continue;
+    if (isFileField(f.prop)) {
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;
-      if (f.maxSize) {
-        const n = Number(f.maxSize);
-        if (!isNaN(n)) constraint.max_size = n;
-      }
+      if (f.maxSize !== undefined) constraint.max_size = f.maxSize;
       if (Object.keys(constraint).length > 0) file_constraints[key] = constraint;
-    } else {
-      const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
-      if (f.description) prop.description = f.description;
-      if (mode === "input") {
-        const def = convertDefaultValue(f.default || "", f.type);
-        if (def != null) prop.default = def as JSONSchema7Type;
-        const enumVals = f.enumValues
-          ?.split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (enumVals && enumVals.length > 0) prop.enum = enumVals;
-      }
-      // String format
-      if (f.type === "string" && f.format && f.format !== "__none") {
-        prop.format = f.format;
-      }
-      // String constraints
-      if (f.type === "string") {
-        if (f.minLength) {
-          const n = Number(f.minLength);
-          if (!isNaN(n)) prop.minLength = n;
-        }
-        if (f.maxLength) {
-          const n = Number(f.maxLength);
-          if (!isNaN(n)) prop.maxLength = n;
-        }
-        if (f.pattern) prop.pattern = f.pattern;
-      }
-      // Number/integer constraints
-      if (f.type === "number" || f.type === "integer") {
-        if (f.minimum) {
-          const n = Number(f.minimum);
-          if (!isNaN(n)) prop.minimum = n;
-        }
-        if (f.maximum) {
-          const n = Number(f.maximum);
-          if (!isNaN(n)) prop.maximum = n;
-        }
-        if (f.step) {
-          const n = Number(f.step);
-          if (!isNaN(n)) prop.multipleOf = n;
-        }
-      }
-      // Array with enum items → multiselect schema
-      if (f.type === "array" && f.arrayEnumItems) {
-        const items = f.arrayEnumItems
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (items.length > 0) {
-          prop.items = { type: "string", enum: items };
-        }
-      }
-      properties[key] = prop;
-      // Build ui_hints for placeholder (canonical AFPS snake_case)
-      if (mode === "input" && f.placeholder) {
-        ui_hints[key] = { placeholder: f.placeholder };
-      }
+    } else if (f.placeholder) {
+      ui_hints[key] = { placeholder: f.placeholder };
     }
-    if (f.required) required.push(key);
   }
+  const rootSchema: JSONSchemaObject = { ...base, type: "object", properties };
+  if (required.length > 0) rootSchema.required = required;
+  else delete rootSchema.required;
   return {
-    schema: {
-      type: "object",
-      properties,
-      ...(required.length > 0 ? { required } : {}),
-    },
+    schema: rootSchema,
     ...(Object.keys(file_constraints).length > 0 ? { file_constraints } : {}),
     ...(Object.keys(ui_hints).length > 0 ? { ui_hints } : {}),
     property_order: filtered.map((f) => f.key.trim()),

@@ -178,6 +178,54 @@ describe("initiateIntegrationOAuth", () => {
     expect(new URL(result.authUrl).searchParams.get("prompt")).toBe("consent");
   });
 
+  describe("authorizationParams encoding", () => {
+    const authorizeUrlWith = async (authorizationParams: Record<string, unknown>) => {
+      const result = await initiateIntegrationOAuth(store, {
+        packageId: "@x/y",
+        authKey: "a",
+        authorizationEndpoint: "https://idp/authorize",
+        tokenEndpoint: "https://idp/token",
+        clientId: "c",
+        clientRef: "client-ref",
+        authorizationParams,
+        redirectUri: "http://localhost:3000/cb",
+        orgId: "o",
+        spaceId: "a",
+        actor: { type: "user", id: "u" },
+      });
+      return new URL(result.authUrl);
+    };
+
+    it("passes string values through unchanged", async () => {
+      const url = await authorizeUrlWith({ login_hint: "a b@x.io" });
+      expect(url.searchParams.get("login_hint")).toBe("a b@x.io");
+    });
+
+    it("encodes numbers and booleans as JSON scalars", async () => {
+      const url = await authorizeUrlWith({ max_age: 0, silent: true });
+      expect(url.searchParams.get("max_age")).toBe("0");
+      expect(url.searchParams.get("silent")).toBe("true");
+    });
+
+    it("serializes an object value (OIDC claims) as JSON", async () => {
+      const claims = { id_token: { email: { essential: true } } };
+      const url = await authorizeUrlWith({ claims });
+      expect(JSON.parse(url.searchParams.get("claims")!)).toEqual(claims);
+    });
+
+    it("serializes an array value as JSON", async () => {
+      const url = await authorizeUrlWith({ acr_values: ["a", "b"] });
+      expect(JSON.parse(url.searchParams.get("acr_values")!)).toEqual(["a", "b"]);
+    });
+
+    it("skips null and undefined values", async () => {
+      const url = await authorizeUrlWith({ a: null, b: undefined, c: "ok" });
+      expect(url.searchParams.has("a")).toBe(false);
+      expect(url.searchParams.has("b")).toBe(false);
+      expect(url.searchParams.get("c")).toBe("ok");
+    });
+  });
+
   it("captures end_user actor", async () => {
     const { state } = await initiateIntegrationOAuth(store, {
       packageId: "@x/y",

@@ -18,6 +18,7 @@
  * reject.
  */
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import {
   resolvedInputDefaults,
@@ -45,10 +46,17 @@ export function subsetWrapper(
   );
   if (Object.keys(properties).length === 0) return null;
   const required = (wrapper.schema.required ?? []).filter((key) => key in properties);
+  // Carry only the definition containers a kept property may `$ref` (RJSF
+  // throws without them). Other root keywords (`allOf`, `dependentRequired`,
+  // `minProperties`, …) can name dropped keys and make the subset unsatisfiable.
+  const definitions = Object.fromEntries(
+    Object.entries(wrapper.schema).filter(([key]) => key === "$defs" || key === "definitions"),
+  );
   const schema: JSONSchemaObject = {
     type: "object",
     properties,
     ...(required.length > 0 ? { required } : {}),
+    ...definitions,
   };
   const fileConstraints = pickKeys(wrapper.file_constraints, kept);
   const uiHints = pickKeys(wrapper.ui_hints, kept);
@@ -118,7 +126,7 @@ export function storedInputValues(settings: AgentInputSettings): Record<string, 
  */
 export function formatInputValue(value: unknown): string {
   if (value === undefined) return "—";
-  return typeof value === "string" ? value : JSON.stringify(value);
+  return jsonText(value);
 }
 
 /**
