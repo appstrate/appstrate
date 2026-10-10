@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "Playwright MCP",
   "icon": "logos:playwright",
-  "description": "Microsoft's Playwright MCP server on your own infrastructure (its URL is a connection variable): a real Chromium per connection, driven step by step through accessibility snapshots. Navigate, click, type, fill forms, select options, hover, drag, handle dialogs, manage tabs, wait, read console and network traffic, evaluate JavaScript and take screenshots; started with --caps vision it adds coordinate mouse tools, with --caps pdf it saves pages as PDF. Started with --cdp-endpoint it drives an existing Chromium instead. Playwright MCP has no authentication of its own: put a reverse proxy that checks the token in front of it. Running arbitrary code in the server process and uploading files from the server's disk are hidden.",
+  "description": "Microsoft's Playwright MCP server on your own infrastructure (its URL is a connection variable): a real Chromium per connection, driven step by step through accessibility snapshots. Navigate, click, type, fill forms, select options, hover, drag, handle dialogs, manage tabs, wait, read console and network traffic, evaluate JavaScript and take screenshots; started with --caps vision it adds coordinate mouse tools. Started with --cdp-endpoint it drives an existing Chromium instead. Playwright MCP has no authentication of its own: put a reverse proxy that checks the token in front of it. Running arbitrary code in the server process and uploading files from the server's disk are hidden.",
   "keywords": ["browser-automation", "web-scraping", "testing"],
   "license": "Apache-2.0",
   "source": {
@@ -86,7 +86,6 @@
     "browser_navigate_back": {},
     "browser_network_request": {},
     "browser_network_requests": {},
-    "browser_pdf_save": {},
     "browser_press_key": {},
     "browser_resize": {},
     "browser_run_code_unsafe": {},

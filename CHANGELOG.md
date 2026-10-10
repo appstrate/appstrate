@@ -623,7 +623,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the host Appstrate calls. The agent drives the page through accessibility
   snapshots (navigate, click, type, forms, dialogs, tabs, console, network,
   JavaScript evaluation, screenshots); `--caps vision` adds coordinate mouse
-  tools and `--caps pdf` adds `browser_pdf_save`, both declared. With
+  tools, declared. `browser_pdf_save` (`--caps pdf`) is not: it writes the PDF
+  to the server's disk, where the agent never reads it. With
   `--cdp-endpoint` the server drives an existing Chromium instead, for example
   a headful one whose live view lets a person watch or take over. Playwright
   MCP has no authentication of its own, so the one `api_key` auth, sent as
