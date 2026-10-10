@@ -45,11 +45,11 @@ export function subsetWrapper(
   );
   if (Object.keys(properties).length === 0) return null;
   const required = (wrapper.schema.required ?? []).filter((key) => key in properties);
-  const schema: JSONSchemaObject = {
-    type: "object",
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-  };
+  // Spread the root so `$defs`, `additionalProperties`, … survive: a kept
+  // property may `$ref` a root definition, and RJSF throws without it.
+  const schema: JSONSchemaObject = { ...wrapper.schema, properties };
+  if (required.length > 0) schema.required = required;
+  else delete schema.required;
   const fileConstraints = pickKeys(wrapper.file_constraints, kept);
   const uiHints = pickKeys(wrapper.ui_hints, kept);
   const order = (wrapper.property_order ?? []).filter((key) => key in properties);

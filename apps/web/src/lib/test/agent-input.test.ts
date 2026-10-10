@@ -62,6 +62,35 @@ describe("subsetWrapper", () => {
     expect(subsetWrapper(WRAPPER, ["limit"])!.schema.required).toBeUndefined();
   });
 
+  it("keeps root keywords so a kept property can still resolve its `$ref`", () => {
+    // Root keywords the typed shape does not declare but real schemas carry.
+    const rootKeywords = {
+      additionalProperties: false,
+      $defs: { personne: { type: "object", properties: { nom: { type: "string" } } } },
+    };
+    const wrapper: SchemaWrapper = {
+      schema: {
+        type: "object",
+        ...rootKeywords,
+        properties: {
+          contact: { $ref: "#/$defs/personne" },
+          other: { type: "string" },
+        },
+        required: ["contact", "other"],
+      },
+    };
+    const subset = subsetWrapper(wrapper, ["contact"])!;
+    expect(subset.schema).toMatchObject(rootKeywords);
+    expect(Object.keys(subset.schema.properties)).toEqual(["contact"]);
+    expect(subset.schema.required).toEqual(["contact"]);
+    const none = subsetWrapper(wrapper, ["other"])!;
+    expect(none.schema.required).toEqual(["other"]);
+    const noRequired = subsetWrapper({ schema: { ...wrapper.schema, required: ["contact"] } }, [
+      "other",
+    ])!;
+    expect(noRequired.schema.required).toBeUndefined();
+  });
+
   it("returns null for an empty subset so the caller can skip the form", () => {
     expect(subsetWrapper(WRAPPER, [])).toBeNull();
     expect(subsetWrapper(WRAPPER, ["unknown"])).toBeNull();
