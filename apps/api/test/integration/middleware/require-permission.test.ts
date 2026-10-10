@@ -18,7 +18,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedOrgModelProviderKey, seedPackage } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
@@ -120,7 +120,7 @@ describe("RBAC — Permission enforcement", () => {
 
   // ─── Model provider keys (admin-only read) ─────────────────
 
-  describe("model-provider-credentials:read (admin-only)", () => {
+  describe("model-provider-credentials list (read OR connect)", () => {
     it("admin can list model provider keys", async () => {
       const res = await app.request("/api/model-provider-credentials", {
         headers: authHeaders(admin),
@@ -128,11 +128,21 @@ describe("RBAC — Permission enforcement", () => {
       expect(res.status).toBe(200);
     });
 
-    it("member gets 403 on list model provider keys", async () => {
+    it("member lists only their own credentials", async () => {
+      // An organization credential exists. The admin sees it, so the member's
+      // empty list is the ownership filter and not an empty table.
+      await seedOrgModelProviderKey({ orgId: owner.orgId, createdBy: owner.user.id });
+
+      const adminRes = await app.request("/api/model-provider-credentials", {
+        headers: authHeaders(admin),
+      });
+      expect(((await adminRes.json()) as { data: unknown[] }).data).toHaveLength(1);
+
       const res = await app.request("/api/model-provider-credentials", {
         headers: authHeaders(member),
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { data: unknown[] }).data).toEqual([]);
     });
   });
 

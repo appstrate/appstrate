@@ -16,8 +16,9 @@
  * picker's single "custom endpoint" row and are configured through the shared
  * endpoint fields, which own the API type, the base URL and the key.
  *
- * OAuth rows are immutable (label included) outside the dedicated reconnect
- * affordance, which re-enters the modal with the exact credential targeted.
+ * An OAuth row can be renamed here and nothing else: its connection changes
+ * only through the reconnect affordance, which re-enters the modal with the
+ * exact credential targeted. No key is ever sent for an OAuth row.
  */
 
 import { useState } from "react";
@@ -53,6 +54,7 @@ import {
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { parsesAsUrl } from "@/lib/model-discovery";
+import { personalCredentialProviders } from "@/lib/personal-model-credentials";
 import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
@@ -77,6 +79,8 @@ interface CredentialFormModalProps {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
+  /** The caller's own credential: the picker offers only what a member may own. */
+  personal?: boolean;
 }
 
 interface CredentialFormFields {
@@ -117,16 +121,18 @@ function CredentialFormBody({
   isPending,
   onSubmit,
   onClose,
+  personal,
 }: {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
+  personal: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(registry);
+  const options = buildOptions(personal ? personalCredentialProviders(registry) : registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (credential?.providerId) {
@@ -261,12 +267,49 @@ function CredentialFormBody({
 
   const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
 
-  // OAuth-selected: the pairing body owns submission (helper POSTs creds
-  // back). Hide the form-side Test/Save buttons; only Close stays.
+  const labelField = (
+    <div className="space-y-2">
+      <Label htmlFor="pk-label">{t("credentials.form.label")}</Label>
+      <Input
+        id="pk-label"
+        type="text"
+        {...register("label", {
+          validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
+        })}
+        placeholder="ex: My Anthropic Key"
+        aria-invalid={showError("label") ? true : undefined}
+        className={cn(showError("label") && "border-destructive")}
+      />
+      {showError("label") && errors.label?.message && (
+        <div className="text-destructive text-sm">{errors.label.message}</div>
+      )}
+    </div>
+  );
+
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds
+  // back). An existing row is renamed here, and reconnected only when flagged.
   if (isOAuthSelected && selectedOption?.providerId) {
+    const showPairing = !isEditing || !!credential?.needs_reconnection;
     return (
       <>
-        <Modal open onClose={oauthDismiss.requestClose} title={title}>
+        <Modal
+          open
+          onClose={oauthDismiss.requestClose}
+          title={title}
+          // Only a rename is saved here; a new or reconnecting pairing is finished by the helper.
+          actions={
+            isEditing ? (
+              <>
+                <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
+                  {t("btn.cancel")}
+                </Button>
+                <Button type="submit" form="pk-form" disabled={isPending}>
+                  {isPending ? <Spinner /> : t("btn.save")}
+                </Button>
+              </>
+            ) : undefined
+          }
+        >
           <div className="space-y-4">
             {!isEditing && (
               <div className="space-y-2">
@@ -292,13 +335,20 @@ function CredentialFormBody({
                 </Select>
               </div>
             )}
-            <OAuthPairingBody
-              key={selectedOption.providerId}
-              providerId={selectedOption.providerId}
-              credentialId={credential?.id}
-              onConnected={() => onClose()}
-              onBusyChange={oauthDismiss.onBusyChange}
-            />
+            {isEditing && (
+              <form id="pk-form" onSubmit={onFormSubmit} noValidate>
+                {labelField}
+              </form>
+            )}
+            {showPairing && (
+              <OAuthPairingBody
+                key={selectedOption.providerId}
+                providerId={selectedOption.providerId}
+                credentialId={credential?.id}
+                onConnected={() => onClose()}
+                onBusyChange={oauthDismiss.onBusyChange}
+              />
+            )}
           </div>
         </Modal>
         {oauthDismiss.confirmDialog}
@@ -363,22 +413,7 @@ function CredentialFormBody({
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="pk-label">{t("credentials.form.label")}</Label>
-          <Input
-            id="pk-label"
-            type="text"
-            {...register("label", {
-              validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
-            })}
-            placeholder="ex: My Anthropic Key"
-            aria-invalid={showError("label") ? true : undefined}
-            className={cn(showError("label") && "border-destructive")}
-          />
-          {showError("label") && errors.label?.message && (
-            <div className="text-destructive text-sm">{errors.label.message}</div>
-          )}
-        </div>
+        {labelField}
 
         {needsBaseUrlOverride ? (
           <EndpointFields
@@ -458,6 +493,7 @@ export function CredentialFormModal({
   credential,
   isPending,
   onSubmit,
+  personal = false,
 }: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
@@ -470,6 +506,7 @@ export function CredentialFormModal({
       isPending={isPending}
       onSubmit={onSubmit}
       onClose={onClose}
+      personal={personal}
     />
   );
 }

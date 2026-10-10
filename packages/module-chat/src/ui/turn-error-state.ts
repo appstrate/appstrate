@@ -65,12 +65,22 @@ const FIX = {
     label: "turn.error.manageModels",
     href: "/org-settings/models",
   },
+  personalModels: {
+    permissions: ["model-provider-credentials:connect"],
+    label: "turn.error.managePersonalModels",
+    href: "/preferences/models",
+  },
 } as const;
 
-/** `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for. */
+/**
+ * `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for.
+ * `policyDisabledText`: the whole sentence when the organization refuses personal
+ * credentials, which withdraws the `personalModels` fix altogether.
+ */
 interface Fixable {
   text: string;
   memberText?: string;
+  policyDisabledText?: string;
   fix: keyof typeof FIX;
 }
 
@@ -90,12 +100,14 @@ const DEAD_CREDENTIAL: Fixable = {
 const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", fix: "billing" },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", fix: "billing" },
-  needs_reconnection: {
-    text: "turn.error.needsReconnection",
-    memberText: "turn.error.needsReconnectionMember",
-    fix: "models",
-  },
+  // Raised for a dead subscription, which is always its holder's own.
+  needs_reconnection: { text: "turn.error.needsReconnection", fix: "personalModels" },
   org_deleting: { text: "turn.error.orgDeleting" },
+  model_credential_required: {
+    text: "turn.error.modelCredentialRequired",
+    policyDisabledText: "turn.error.modelCredentialRequiredPolicy",
+    fix: "personalModels",
+  },
 };
 
 interface TurnErrorState {
@@ -106,11 +118,20 @@ interface TurnErrorState {
 }
 
 function withFix(
-  { text, memberText, fix }: Fixable,
+  { text, memberText, policyDisabledText, fix }: Fixable,
   t: ChatTranslate,
   can: ChatCan,
+  personalModelCredentials: boolean,
 ): Pick<TurnErrorState, "text" | "action"> {
   const { permissions, label, href } = FIX[fix];
+  // A personal credential cannot be added while the organization refuses them:
+  // the link would lead to a form answering 403, so only the sentence is shown.
+  if (fix === "personalModels" && !personalModelCredentials)
+    return {
+      text: policyDisabledText
+        ? t(policyDisabledText)
+        : `${t(text)} ${t("turn.error.contactAdmin")}`,
+    };
   if (permissions.every((permission) => can(permission)))
     return { text: t(text), action: { label: t(label), href } };
   return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
@@ -121,9 +142,10 @@ function classifiedState(
   category: ClientTurnError["category"],
   t: ChatTranslate,
   can: ChatCan,
+  personalModelCredentials: boolean,
 ): Pick<TurnErrorState, "text" | "action"> {
   return category === "credential_unavailable"
-    ? withFix(DEAD_CREDENTIAL, t, can)
+    ? withFix(DEAD_CREDENTIAL, t, can, personalModelCredentials)
     : { text: t(TURN_ERROR_KEY[category]) };
 }
 
@@ -148,6 +170,9 @@ export function turnErrorState(
   message: AssistantState["message"],
   t: ChatTranslate,
   can: ChatCan,
+  // Whether the organization lets members bring personal model credentials
+  // (`personal_model_credentials`); absent means allowed, as on the server.
+  personalModelCredentials = true,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   // A turn cut by the wall-clock ceiling can ALSO have been failing upstream
@@ -168,7 +193,7 @@ export function turnErrorState(
   if (turnFailed(turn)) {
     return {
       // Optional on the persisted shape (unvalidated JSONB): default it.
-      ...classifiedState(turn.errorCategory ?? "unknown", t, can),
+      ...classifiedState(turn.errorCategory ?? "unknown", t, can, personalModelCredentials),
       // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
       // whose cause was rate limiting is retryable, one whose credential is
       // dead is not. Read the persisted verdict either way.
@@ -187,7 +212,7 @@ export function turnErrorState(
     const requestId = classified?.requestId ?? problemRequestId(err);
     if (classified) {
       return {
-        ...classifiedState(classified.category, t, can),
+        ...classifiedState(classified.category, t, can, personalModelCredentials),
         retryable: classified.retryable,
         requestId,
       };
@@ -199,7 +224,9 @@ export function turnErrorState(
       return { text: t("turn.error.unknown"), retryable: true, requestId };
     }
     return {
-      ...(refusal.fix ? withFix(refusal, t, can) : { text: t(refusal.text) }),
+      ...(refusal.fix
+        ? withFix(refusal, t, can, personalModelCredentials)
+        : { text: t(refusal.text) }),
       retryable: false,
       requestId,
     };

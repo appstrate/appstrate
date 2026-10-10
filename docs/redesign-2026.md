@@ -1613,6 +1613,20 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 10 October merge of main (6 commits, 17 conflicted files)**
+
+Personal model credentials (#1895): Préférences › Identifiants de modèle (the
+redesign's table, personal credentials only), an org switch in Général ›
+Modèles that saves itself, an "Identifiant" column on the org's models, a
+"Propriétaire" column on its provider keys (only the holder edits or
+reconnects), "Votre identifiant" / "Identifiant requis" in every model picker,
+and "Non planifiable" for a model each member pays in a schedule's Exécution.
+The agent schema editor keeps JSON values intact (#1898). The redesign's agent
+diagnostics and map pass the payer (`requestPayerUserId(c)`) like main's doors.
+`0087_org_logo` met main's `0087` and is now `0088_org_logo`;
+`packages/db/schema-catalog.txt` now names `organizations.logo`, which the
+redesign had never added (regenerated from an empty Postgres 16).
+
 **The 9 October merge of main (35 commits, 29 conflicted files)**
 
 Same method, three Sonnet agents (API, integrations, schedules and runs) on

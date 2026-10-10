@@ -481,6 +481,7 @@ function ExecutionSection({
       </SettingRow>
       <RunOverridesPanel
         layout="settings"
+        scheduled
         packageId={schedule.packageId}
         persistedModelId={deps.persistedModelId}
         persistedGenerationConfig={deps.persistedGenerationConfig}

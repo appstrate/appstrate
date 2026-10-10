@@ -29,7 +29,8 @@ import {
   hashPairingSecret,
   randomBase64Url,
 } from "@appstrate/core/pairing-token";
-import { gone } from "../../lib/errors.ts";
+import { forbidden, gone } from "../../lib/errors.ts";
+import { lockOrgMember } from "../space-members.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Generated id prefix — mirrors `apst_` (api keys) and `appp_` (pairing token). */
@@ -105,14 +106,21 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
   const id = generatePairingId();
   const expiresAt = new Date(Date.now() + args.ttlSeconds * 1000);
 
-  await db.insert(modelProviderPairings).values({
-    id,
-    tokenHash,
-    userId: args.userId,
-    orgId: args.orgId,
-    providerId: args.providerId,
-    reconnectCredentialId: args.reconnectCredentialId ?? null,
-    expiresAt,
+  await db.transaction(async (tx) => {
+    // The organization exit holds this lock while it deletes the member's
+    // pairings: one minted during the exit cannot outlive it.
+    if (!(await lockOrgMember(tx, args.orgId, args.userId))) {
+      throw forbidden("Not a member of this organization");
+    }
+    await tx.insert(modelProviderPairings).values({
+      id,
+      tokenHash,
+      userId: args.userId,
+      orgId: args.orgId,
+      providerId: args.providerId,
+      reconnectCredentialId: args.reconnectCredentialId ?? null,
+      expiresAt,
+    });
   });
 
   return { id, token, expiresAt };
@@ -169,8 +177,12 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
   };
 }
 
-/** Read a pairing row by id, scoped to the calling org. Returns null if not found. */
-export async function getPairing(id: string, orgId: string): Promise<PairingRow | null> {
+/** Read a pairing row by id, scoped to the calling org and user. Returns null if not found. */
+export async function getPairing(
+  id: string,
+  orgId: string,
+  userId: string,
+): Promise<PairingRow | null> {
   const [row] = await db
     .select({
       id: modelProviderPairings.id,
@@ -179,7 +191,13 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
       credentialId: modelProviderPairings.credentialId,
     })
     .from(modelProviderPairings)
-    .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)))
+    .where(
+      and(
+        eq(modelProviderPairings.id, id),
+        eq(modelProviderPairings.orgId, orgId),
+        eq(modelProviderPairings.userId, userId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -202,14 +220,20 @@ export async function linkPairingCredential(
 }
 
 /**
- * Delete a pairing row by id, scoped to the calling org. Idempotent — a
+ * Delete a pairing row by id, scoped to the calling org and user. Idempotent — a
  * no-op when the row is absent (already deleted, never existed, or
- * belongs to a different org).
+ * belongs to a different org or user).
  */
-export async function cancelPairing(id: string, orgId: string): Promise<void> {
+export async function cancelPairing(id: string, orgId: string, userId: string): Promise<void> {
   await db
     .delete(modelProviderPairings)
-    .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)));
+    .where(
+      and(
+        eq(modelProviderPairings.id, id),
+        eq(modelProviderPairings.orgId, orgId),
+        eq(modelProviderPairings.userId, userId),
+      ),
+    );
 }
 
 /**

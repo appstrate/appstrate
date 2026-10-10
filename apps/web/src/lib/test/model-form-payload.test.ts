@@ -73,6 +73,7 @@ function build(
     capabilities: "auto",
     isEdit: false,
     selectedCredentialId: input.fields.credentialId || null,
+    unbound: false,
     ...input,
   });
   return data ? { ok: true, data } : { ok: false };
@@ -355,7 +356,7 @@ describe("buildModelFormPayload — the model's name", () => {
 
 describe("buildModelFormPayload — missing credential", () => {
   it.each([
-    ["an OAuth provider with no connection selected", CLAUDE_CODE],
+    ["an OAuth provider not left to each member", CLAUDE_CODE],
     ["an api-key provider with neither a selection nor an inline key", ANTHROPIC],
   ])("builds nothing for %s", (_name, provider) => {
     expect(build({ provider, fields: fields({ modelId: "claude-sonnet-4-5-20250929" }) }).ok).toBe(
@@ -408,6 +409,58 @@ describe("buildModelFormPayload — missing credential", () => {
   });
 });
 
+describe("buildModelFormPayload — each member's own credential (unbound)", () => {
+  it("binds the model to no credential, naming the provider the members' credentials match", () => {
+    expect(
+      ok(
+        build({
+          fields: fields({ modelId: "claude-sonnet-4-5-20250929" }),
+          unbound: true,
+        }),
+      ),
+    ).toEqual({
+      modelId: "claude-sonnet-4-5-20250929",
+      credentialId: null,
+      providerId: "anthropic",
+    });
+  });
+
+  it("refuses neither a missing key nor a missing connection, for either auth mode", () => {
+    expect(
+      ok(build({ provider: CLAUDE_CODE, fields: fields({ modelId: "m" }), unbound: true })),
+    ).toEqual({ modelId: "m", credentialId: null, providerId: "claude-code" });
+    expect(ok(build({ fields: fields({ modelId: "m" }), unbound: true })).providerId).toBe(
+      "anthropic",
+    );
+  });
+
+  it("mints nothing from a typed key, which the unbound model never binds", () => {
+    const data = ok(
+      build({
+        provider: OPENAI_COMPATIBLE,
+        fields: fields({
+          modelId: "qwen3:8b",
+          baseUrl: "http://localhost:11434/v1",
+          inlineApiKey: "sk-test",
+        }),
+        unbound: true,
+      }),
+    );
+    expect("newCredential" in data).toBe(false);
+    expect(data).toEqual({
+      modelId: "qwen3:8b",
+      credentialId: null,
+      providerId: "openai-compatible",
+    });
+  });
+
+  it("refuses only when no provider is picked", () => {
+    expect(build({ provider: undefined, fields: fields({ modelId: "m" }), unbound: true })).toEqual(
+      { ok: false },
+    );
+  });
+});
+
 describe("toCreateModelBody", () => {
   it("drops the `null` clears, which only PATCH understands", () => {
     const body = toCreateModelBody(
@@ -422,6 +475,18 @@ describe("toCreateModelBody", () => {
       "cred_new",
     );
     expect(body).toEqual({ modelId: "qwen3:8b", credentialId: "cred_new" });
+  });
+
+  it("carries the provider, and no credential, for an unbound model", () => {
+    const body = toCreateModelBody(
+      { modelId: "qwen3:8b", credentialId: null, providerId: "openai-compatible" },
+      null,
+    );
+    expect(body).toEqual({
+      modelId: "qwen3:8b",
+      credentialId: null,
+      providerId: "openai-compatible",
+    });
   });
 
   it("keeps every real value, and binds the credential it was created with", () => {
@@ -458,6 +523,7 @@ const SAVED_KEY = {
   selectedCredentialId: "cred_1",
   inlineApiKey: "",
   baseUrl: "http://localhost:11434/v1",
+  unbound: false,
 };
 
 function row(overrides: Partial<ModelPickRow> & { id: string; origin: ModelPickRow["origin"] }) {
@@ -599,6 +665,32 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
     expect(data.newCredential).toEqual({ api_key: "sk-ant-test", providerId: "anthropic" });
   });
 
+  it("binds every entry to no credential when each member brings their own", () => {
+    const data = ok(
+      buildModelsBatchPayload({
+        ...SAVED_KEY,
+        selectedCredentialId: null,
+        unbound: true,
+        rows: ROWS,
+      }),
+    );
+    expect(data).toEqual({
+      credentialId: null,
+      providerId: "openai-compatible",
+      models: [{ modelId: "a" }, { modelId: "b" }],
+    });
+  });
+
+  it("refuses an unbound batch with no provider picked", () => {
+    expect(
+      buildModelsBatchPayload({ ...SAVED_KEY, provider: undefined, unbound: true, rows: ROWS }),
+    ).toEqual({
+      ok: false,
+      field: "credentialId",
+      messageKey: "models.form.apiKeyRequired",
+    });
+  });
+
   it("refuses a batch with nothing checked", () => {
     expect(buildModelsBatchPayload({ ...SAVED_KEY, rows: [] })).toEqual({
       ok: false,
@@ -626,7 +718,22 @@ describe("modelFormRefusals", () => {
     selectedCredentialId: "cred_1",
     inlineApiKey: "",
     offeredIds: null,
+    unbound: false,
   };
+
+  it("names no key step for an unbound model, picked or not", () => {
+    expect(
+      modelFormRefusals({ ...base, selectedCredentialId: null, unbound: true }).credentialId,
+    ).toBeNull();
+    expect(
+      modelFormRefusals({
+        ...base,
+        provider: CLAUDE_CODE,
+        selectedCredentialId: null,
+        unbound: true,
+      }).credentialId,
+    ).toBeNull();
+  });
 
   it("names the missing key on the key row, not the endpoint steps", () => {
     expect(modelFormRefusals({ ...base, selectedCredentialId: null })).toEqual({
@@ -635,7 +742,7 @@ describe("modelFormRefusals", () => {
     });
     expect(
       modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
-    ).toEqual({ credentialId: "settings:models.form.connectionRequired", modelId: null });
+    ).toEqual({ credentialId: "settings:models.form.eachMemberRequired", modelId: null });
     // A typed key answers it; with no provider there is no key row to say it on.
     expect(
       modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,

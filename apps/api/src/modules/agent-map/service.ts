@@ -41,6 +41,7 @@ import { getSpacePackageSettings } from "../../services/space-packages.ts";
 import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
 import { collectBundleReadinessErrors } from "../../services/agent-diagnostics.ts";
 import { isUserPrincipal } from "../../lib/principal.ts";
+import { requestPayerUserId } from "../../services/model-providers/credential-chain.ts";
 import { listOrgModels } from "../../services/org-models.ts";
 import { listOrgProxies } from "../../services/org-proxies.ts";
 import {
@@ -420,7 +421,7 @@ export async function buildAgentMap(
       : Promise.resolve(null),
     // The map only needs ids and the default flag; the resolver's own
     // credential probe is what decides which rows are renderable.
-    listOrgModels(orgId),
+    listOrgModels(orgId, requestPayerUserId(c)),
     listOrgProxies(orgId),
     canReadPersistence ? listPinnedSlots(agent.id, spaceId, persistenceScope) : Promise.resolve([]),
     canReadPersistence ? listMemories(agent.id, spaceId, persistenceScope) : Promise.resolve([]),

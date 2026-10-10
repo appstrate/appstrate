@@ -95,6 +95,12 @@ export interface LlmUsageEntry {
   requestId?: string | null;
   /** Which credential set reached the provider. */
   credentialSource?: CredentialSource | null;
+  /**
+   * The `model_provider_credentials` row that served the call — the attribution
+   * of a personal credential to its owner. Null for a platform-supplied key and
+   * for rows written before the column existed.
+   */
+  credentialId?: string | null;
 }
 
 export interface RecordLlmUsageOptions {
@@ -244,6 +250,7 @@ export async function recordLlmUsage(
     realModel: entry.realModel ?? null,
     api: entry.api ?? null,
     credentialSource: entry.credentialSource ?? null,
+    credentialId: entry.credentialId ?? null,
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
     cacheReadTokens: entry.cacheReadTokens ?? null,

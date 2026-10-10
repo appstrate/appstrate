@@ -40,7 +40,7 @@ export function useModelProviderPairingStatus(id: string | null, options: { enab
     "/api/model-providers-oauth/pairing/{id}",
     { params: { path: { id: id ?? "" } } },
     {
-      enabled: options.enabled && !!id && can("model-provider-credentials:read"),
+      enabled: options.enabled && !!id && can("model-provider-credentials:connect"),
       refetchInterval: (q) => {
         // Any errored request is terminal for the poll: the TTL reap surfaces
         // as 404/410, but auth/permission/server failures (401/403/5xx, or a

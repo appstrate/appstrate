@@ -240,7 +240,7 @@ export function decryptCredentials<T = Record<string, string>>(encryptedStr: str
  *     injection path nor the agent.
  *
  * Values are typed `unknown` here; callers project to strings at the
- * boundary (`projectToStringMap`).
+ * boundary (`toCredentialStringMap`).
  */
 export interface CredentialEnvelope {
   outputs: Record<string, unknown>;

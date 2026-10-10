@@ -42,7 +42,7 @@ import {
   withIdleBound,
   STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";
-import type { ResolvedModel } from "../org-models.ts";
+import type { BoundModel } from "../org-models.ts";
 import { CACHE_STATUS_MISS, storeResponse } from "./response-cache.ts";
 import { asRecord, LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
@@ -378,7 +378,7 @@ export interface RecordUsageInputs {
   chatSessionId: string | null;
   /** The Appstrate preset id (org model row id) — stored as `llm_usage.model`. */
   presetId: string;
-  resolved: ResolvedModel;
+  resolved: BoundModel;
   usage: UpstreamUsage | null;
   durationMs: number;
 }
@@ -420,7 +420,7 @@ export async function recordProxyUsage(
       orgId: inputs.principal.orgId,
       presetId: inputs.presetId,
       runId: inputs.runId,
-      credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
+      credentialSource: inputs.resolved.credentialSource,
     });
   }
   const usage: UpstreamUsage = inputs.usage ?? { inputTokens: 0, outputTokens: 0 };
@@ -455,9 +455,14 @@ export async function recordProxyUsage(
     model: inputs.presetId,
     realModel: inputs.resolved.modelId,
     api: inputs.resolved.apiShape,
-    // Which credential set reached the provider: platform (system) models vs
-    // the org's own key. The resolved model already carries the flag.
-    credentialSource: inputs.resolved.isSystemModel ? "system" : "org",
+    // Which credential set reached the provider (platform vs customer-supplied),
+    // and the credential row that served it, as a run pins it: none for a
+    // platform key or an alias (whose backing is never disclosed).
+    credentialSource: inputs.resolved.credentialSource,
+    credentialId:
+      inputs.resolved.credentialSource === "system" || inputs.resolved.aliased
+        ? null
+        : (inputs.resolved.credentialId ?? null),
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens ?? null,
@@ -495,7 +500,7 @@ export interface MeteredForwardContext {
   chatSessionId: string | null;
   /** The Appstrate preset id (stored as `llm_usage.model`). */
   presetId: string;
-  resolved: ResolvedModel;
+  resolved: BoundModel;
   /** `Date.now()` captured just before the upstream fetch (for `durationMs`). */
   started: number;
   /** Platform `Request-Id`, for the upstream-error log. */

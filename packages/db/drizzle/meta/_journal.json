@@ -614,8 +614,15 @@
     {
       "idx": 87,
       "version": "7",
-      "when": 1791565439798,
-      "tag": "0087_org_logo",
+      "when": 1791581301597,
+      "tag": "0087_personal_model_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1791581361597,
+      "tag": "0088_org_logo",
       "breakpoints": true
     }
   ]

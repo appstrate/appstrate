@@ -20,7 +20,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
-import { resolveModel } from "./org-models.ts";
+import { requireBoundModel, resolveModelCascade } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -87,6 +87,11 @@ interface RunPipelineParams {
   agent: LoadedPackage;
   orgId: string;
   actor: Actor | null;
+  /**
+   * Whose personal model credentials may serve the run, or `null` for none (a
+   * schedule, an API key, a delegate): the door's `requestPayerUserId(c)`.
+   */
+  payerUserId: string | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   /**
@@ -370,6 +375,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     scheduleId,
     spaceId,
     apiKeyId,
+    payerUserId,
   } = params;
   // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
   // loads with its earlier `resolveRunPreflight` call) or create one scoped
@@ -380,25 +386,18 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
-  // --- Step 0: Resolve the credential source reported to the admission gate ---
+  // --- Step 0: Resolve the model, once ---
   //
-  // The `beforeUsage` gate fires for EVERY run; this resolution does not decide
-  // whether it fires, it supplies the fact the module quotes the MODEL
-  // component against (platform-supplied credential vs. the org's own BYOK /
-  // OAuth credential). Resolve the same model `buildRunContext` will (Step 3) —
-  // cheap: system models are in-memory and DB rows are short-TTL cached, so the
-  // later resolution is a cache hit. `modelId` is the effective preset (per-run
-  // override folded in by the route/scheduler/inline callers), matching the
-  // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
-  // with no resolvable model reports `null` and then fails downstream with
-  // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
-  // model component costs nothing.
-  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
-  const credentialSourceForGate: "system" | "org" | null = gateModel
-    ? gateModel.isSystemModel
-      ? "system"
-      : "org"
-    : null;
+  // The admission gate and the run context share this resolution. A member-paid
+  // model with no credential of the payer's is refused before the gate.
+  const modelCascade = await resolveModelCascade(
+    orgId,
+    params.agent.id,
+    modelId ?? null,
+    payerUserId,
+  );
+  if (modelCascade) requireBoundModel(modelCascade.model, payerUserId);
+  const credentialSourceForGate = modelCascade?.model.credentialSource ?? null;
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
@@ -530,6 +529,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         orgId,
         spaceId,
         actor,
+        modelCascade,
         input: input ?? undefined,
         files,
         modelId,

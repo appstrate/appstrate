@@ -11,6 +11,18 @@ import {
   setResourceEntries,
   schemaToFields,
   fieldsToSchema,
+  changeType,
+  fieldType,
+  fileKind,
+  itemsEnumText,
+  listToText,
+  setFileKind,
+  setItemsEnum,
+  setKeyword,
+  textToList,
+  textToValue,
+  toKeywordNumber,
+  valueToText,
   manifestToSchemaFields,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -19,7 +31,7 @@ import {
   setRuntimeTools,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
-import type { JSONSchemaObject } from "@appstrate/core/form";
+import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
 
@@ -270,9 +282,27 @@ describe("caretRange", () => {
   });
 });
 
-// ─── Schema field conversion ────────────────────────────────
+// ─── Schema fields ──────────────────────────────────────────
 
-describe("schemaToFields / fieldsToSchema roundtrip", () => {
+const FILE_ITEM = {
+  type: "string",
+  format: "uri",
+  contentMediaType: "application/octet-stream",
+} as const;
+
+const fieldOf = (
+  key: string,
+  prop: JSONSchema7,
+  extra: Partial<SchemaField> = {},
+): SchemaField => ({
+  _id: key,
+  key,
+  required: false,
+  prop,
+  ...extra,
+});
+
+describe("schemaToFields / fieldsToSchema", () => {
   it("roundtrips output schema", () => {
     const schema = {
       type: "object",
@@ -288,286 +318,132 @@ describe("schemaToFields / fieldsToSchema roundtrip", () => {
     expect(fields[0]!.required).toBe(true);
     expect(fields[1]!.key).toBe("count");
     expect(fields[1]!.required).toBe(false);
-
-    const result = fieldsToSchema(fields, "output");
-    expect(result).not.toBeNull();
-    expect(result!.schema.properties.summary!.type).toBe("string");
-    expect(result!.schema.required).toEqual(["summary"]);
+    expect(fieldsToSchema(fields, "output")!.schema).toEqual(schema);
   });
 
-  // Defaults and enums used to be a `config`-mode capability. With `config`
-  // collapsed into `input`, an author declaring a choice list or an author
-  // default does it on the one remaining schema — losing the roundtrip here
-  // would silently drop both from every existing manifest on the next save.
-  it("roundtrips input schema with an author default and an enum", () => {
-    const schema = {
-      type: "object",
-      properties: {
-        mode: { type: "string", description: "Mode", default: "fast", enum: ["fast", "slow"] },
-      },
-    } satisfies JSONSchemaObject;
-    const fields = schemaToFields(schema, "input", { property_order: ["mode"] });
-    expect(fields[0]!.default).toBe("fast");
-    expect(fields[0]!.enumValues).toBe("fast, slow");
-
-    const result = fieldsToSchema(fields, "input");
-    expect(result!.schema.properties.mode!.default).toBe("fast");
-    expect(result!.schema.properties.mode!.enum).toEqual(["fast", "slow"]);
-  });
-
-  it("roundtrips input schema with placeholder via ui_hints", () => {
-    const schema = {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Search query" },
-      },
-    } satisfies JSONSchemaObject;
-    const wrapper = {
-      ui_hints: { query: { placeholder: "Enter query..." } },
-      property_order: ["query"],
-    };
-    const fields = schemaToFields(schema, "input", wrapper);
-    expect(fields[0]!.placeholder).toBe("Enter query...");
-
-    const result = fieldsToSchema(fields, "input");
-    expect(result!.ui_hints?.query?.placeholder).toBe("Enter query...");
-  });
-
-  it("roundtrips input schema with file field", () => {
-    const schema = {
-      type: "object",
-      properties: {
-        doc: {
-          type: "array",
-          items: { type: "string", format: "uri", contentMediaType: "application/octet-stream" },
-          maxItems: 5,
-          description: "Upload docs",
-        },
-      },
-    } satisfies JSONSchemaObject;
-    const wrapper = {
-      file_constraints: { doc: { accept: ".pdf", max_size: 10485760 } },
-      property_order: ["doc"],
-    };
-    const fields = schemaToFields(schema, "input", wrapper);
-    expect(fields[0]!.type).toBe("string");
-    expect(fields[0]!.isFile).toBe(true);
-    expect(fields[0]!.multiple).toBe(true);
-    expect(fields[0]!.accept).toBe(".pdf");
-    expect(fields[0]!.maxFiles).toBe("5");
-
-    const result = fieldsToSchema(fields, "input");
-    const docProp = result!.schema.properties.doc!;
-    const docItems =
-      typeof docProp.items === "object" && !Array.isArray(docProp.items) ? docProp.items : null;
-    expect(docProp.type).toBe("array");
-    expect(docItems?.format).toBe("uri");
-    expect(docItems?.contentMediaType).toBe("application/octet-stream");
-    expect(result!.schema.properties.doc!.maxItems).toBe(5);
-    expect(result!.file_constraints?.doc?.accept).toBe(".pdf");
-    expect(result!.file_constraints?.doc?.max_size).toBe(10485760);
-  });
-
-  it("returns null for empty fields", () => {
+  it("returns null for empty fields and [] for an undefined schema", () => {
     expect(fieldsToSchema([], "output")).toBeNull();
-  });
-
-  it("returns empty array for undefined schema", () => {
     expect(schemaToFields(undefined, "output")).toEqual([]);
   });
-});
 
-// ─── JSON Schema purity — fieldsToSchema output ─────────────
+  it("does not persist fields with an empty key", () => {
+    const result = fieldsToSchema([fieldOf("a", { type: "string" }), fieldOf(" ", {})], "input");
+    expect(Object.keys(result!.schema.properties)).toEqual(["a"]);
+    expect(result!.property_order).toEqual(["a"]);
+  });
 
-const BANNED_SCHEMA_KEYWORDS = [
-  "placeholder",
-  "accept",
-  "maxSize",
-  "max_size",
-  "multiple",
-  "maxFiles",
-  "propertyOrder",
-  "property_order",
-];
+  it("keeps the prop as the field state (no copy projection)", () => {
+    const prop: JSONSchema7 = { type: "string", minLength: 3 };
+    const fields = schemaToFields({ type: "object", properties: { a: prop } }, "input");
+    expect(fields[0]!.prop).toBe(prop);
+  });
 
-function findKeywordInObject(obj: unknown, keyword: string, path = ""): string[] {
-  const found: string[] = [];
-  if (obj && typeof obj === "object") {
-    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      if (key === keyword) found.push(`${path}.${key}`);
-      if (value && typeof value === "object") {
-        found.push(...findKeywordInObject(value, keyword, `${path}.${key}`));
-      }
+  it("reads placeholder from ui_hints and writes it back there", () => {
+    const schema: JSONSchemaObject = { type: "object", properties: { query: { type: "string" } } };
+    const fields = schemaToFields(schema, "input", {
+      ui_hints: { query: { placeholder: "Enter query..." } },
+      property_order: ["query"],
+    });
+    expect(fields[0]!.placeholder).toBe("Enter query...");
+    const result = fieldsToSchema(fields, "input")!;
+    expect(result.ui_hints?.query?.placeholder).toBe("Enter query...");
+    expect(result.schema.properties.query).not.toHaveProperty("placeholder");
+  });
+
+  it("reads file constraints for file fields and writes them back to file_constraints", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        doc: { type: "array", items: { ...FILE_ITEM }, maxItems: 5, description: "Upload docs" },
+      },
+    };
+    const fields = schemaToFields(schema, "input", {
+      file_constraints: { doc: { accept: ".pdf", max_size: 10485760 } },
+      property_order: ["doc"],
+    });
+    expect(fields[0]!.accept).toBe(".pdf");
+    expect(fields[0]!.maxSize).toBe(10485760);
+    expect(fieldType(fields[0]!.prop, "input")).toBe("string");
+    expect(fileKind(fields[0]!.prop, "input")).toBe("multiple");
+
+    const result = fieldsToSchema(fields, "input")!;
+    expect(result.schema).toEqual(schema);
+    expect(result.file_constraints?.doc).toEqual({ accept: ".pdf", max_size: 10485760 });
+    expect(result.schema.properties.doc).not.toHaveProperty("accept");
+    expect(result.schema.properties.doc).not.toHaveProperty("maxSize");
+  });
+
+  it("only emits constraints for file fields and hints for non-file fields", () => {
+    const result = fieldsToSchema(
+      [
+        fieldOf("q", { type: "string" }, { accept: ".pdf", maxSize: 1, placeholder: "type…" }),
+        fieldOf("doc", { ...FILE_ITEM }, { accept: ".pdf", placeholder: "ignored" }),
+      ],
+      "input",
+    )!;
+    expect(result.ui_hints).toEqual({ q: { placeholder: "type…" } });
+    expect(result.file_constraints).toEqual({ doc: { accept: ".pdf" } });
+  });
+
+  it("treats a file-shaped property as a plain property in output mode", () => {
+    const schema: JSONSchemaObject = { type: "object", properties: { doc: { ...FILE_ITEM } } };
+    const fields = schemaToFields(schema, "output", { file_constraints: { doc: { accept: "x" } } });
+    expect(fileKind(fields[0]!.prop, "output")).toBe("none");
+    expect(fieldsToSchema(fields, "output")).toEqual({
+      schema,
+      property_order: ["doc"],
+    });
+  });
+
+  it("wrapper output has only canonical snake_case keys and no property_order in the schema", () => {
+    const wrapper = fieldsToSchema(
+      [
+        fieldOf("doc", { ...FILE_ITEM }, { accept: ".pdf", maxSize: 10485760 }),
+        fieldOf("q", { type: "string" }, { placeholder: "type…" }),
+      ],
+      "input",
+    )!;
+    expect(wrapper).toHaveProperty("file_constraints");
+    expect(wrapper).toHaveProperty("ui_hints");
+    expect(wrapper.property_order).toEqual(["doc", "q"]);
+    for (const key of ["fileConstraints", "uiHints", "propertyOrder"]) {
+      expect(wrapper).not.toHaveProperty(key);
     }
-  }
-  return found;
-}
-
-describe("fieldsToSchema — JSON Schema purity", () => {
-  it("schema never contains non-standard keywords for input with file + text fields", () => {
-    const fields = [
-      {
-        _id: "1",
-        key: "query",
-        type: "string",
-        description: "Search",
-        required: true,
-        placeholder: "Enter query...",
-        default: "",
-      },
-      {
-        _id: "2",
-        key: "doc",
-        type: "string",
-        isFile: true,
-        description: "Upload",
-        required: false,
-        accept: ".pdf,.docx",
-        maxSize: "10485760",
-        multiple: true,
-        maxFiles: "5",
-      },
-    ];
-    const result = fieldsToSchema(fields, "input");
-    expect(result).not.toBeNull();
-
-    // Check the schema object (not the wrapper) for banned keywords
-    for (const keyword of BANNED_SCHEMA_KEYWORDS) {
-      const violations = findKeywordInObject(result!.schema, keyword);
-      expect(violations).toEqual([]);
-    }
+    expect(wrapper.schema).not.toHaveProperty("property_order");
+    expect(wrapper.file_constraints!.doc).toHaveProperty("max_size");
+    expect(wrapper.file_constraints!.doc).not.toHaveProperty("maxSize");
+    expect(JSON.stringify(wrapper.schema)).not.toContain('"file"');
   });
 
-  it("schema never contains type:'file'", () => {
-    const fields = [
-      {
-        _id: "1",
-        key: "attachment",
-        type: "string",
-        isFile: true,
-        description: "File",
-        required: false,
-        accept: "",
-        maxSize: "",
-        multiple: false,
-        maxFiles: "",
+  it("replacing the wrapper wholesale drops non-canonical camelCase keys", () => {
+    const manifest: Record<string, unknown> = {
+      input: {
+        schema: { type: "object", properties: { x: { type: "string" } } },
+        fileConstraints: { x: { accept: ".pdf", maxSize: 1000 } },
+        uiHints: { x: { placeholder: "old" } },
+        propertyOrder: ["x"],
       },
-    ];
-    const result = fieldsToSchema(fields, "input");
-    expect(result).not.toBeNull();
-
-    const violations = findKeywordInObject(result!.schema, "type")
-      .map((path) => {
-        const parts = path.split(".");
-        let obj: unknown = result!.schema;
-        for (const p of parts.slice(1)) {
-          obj = (obj as Record<string, unknown>)?.[p];
-        }
-        return { path, value: obj };
-      })
-      .filter((v) => v.value === "file");
-
-    expect(violations).toEqual([]);
+    };
+    manifest.input = fieldsToSchema(
+      [fieldOf("x", { type: "string" }, { placeholder: "new" })],
+      "input",
+    );
+    const input = JSON.parse(JSON.stringify(manifest)).input as Record<string, unknown>;
+    expect(input).not.toHaveProperty("fileConstraints");
+    expect(input).not.toHaveProperty("uiHints");
+    expect(input).not.toHaveProperty("propertyOrder");
+    expect(input).toHaveProperty("ui_hints");
+    expect(input).toHaveProperty("property_order");
   });
 
-  it("placeholder goes to ui_hints, not into schema properties", () => {
-    const fields = [
-      {
-        _id: "1",
-        key: "email",
-        type: "string",
-        description: "Email",
-        required: true,
-        placeholder: "user@example.com",
-        default: "",
-      },
-    ];
-    const result = fieldsToSchema(fields, "input");
-    expect(result).not.toBeNull();
-
-    // Not in schema
-    expect(result!.schema.properties.email).not.toHaveProperty("placeholder");
-    // In wrapper ui_hints
-    expect(result!.ui_hints?.email?.placeholder).toBe("user@example.com");
-  });
-
-  it("file constraints go to file_constraints, not into schema properties", () => {
-    const fields = [
-      {
-        _id: "1",
-        key: "doc",
-        type: "string",
-        isFile: true,
-        description: "Document",
-        required: false,
-        accept: ".pdf",
-        maxSize: "5242880",
-        multiple: false,
-        maxFiles: "",
-      },
-    ];
-    const result = fieldsToSchema(fields, "input");
-    expect(result).not.toBeNull();
-
-    // Not in schema
-    expect(result!.schema.properties.doc).not.toHaveProperty("accept");
-    expect(result!.schema.properties.doc).not.toHaveProperty("max_size");
-    expect(result!.schema.properties.doc).not.toHaveProperty("maxSize");
-    expect(result!.schema.properties.doc).not.toHaveProperty("multiple");
-    expect(result!.schema.properties.doc).not.toHaveProperty("maxFiles");
-    // In wrapper
-    expect(result!.file_constraints?.doc?.accept).toBe(".pdf");
-    expect(result!.file_constraints?.doc?.max_size).toBe(5242880);
-  });
-
-  it("property_order is at wrapper level, not in schema", () => {
-    const fields = [
-      {
-        _id: "1",
-        key: "a",
-        type: "string",
-        description: "",
-        required: false,
-        placeholder: "",
-        default: "",
-      },
-      {
-        _id: "2",
-        key: "b",
-        type: "number",
-        description: "",
-        required: false,
-        placeholder: "",
-        default: "",
-      },
-    ];
-    const result = fieldsToSchema(fields, "input");
-    expect(result).not.toBeNull();
-
-    // Not in schema
-    expect(result!.schema).not.toHaveProperty("property_order");
-    expect(result!.schema).not.toHaveProperty("propertyOrder");
-    // In wrapper
-    expect(result!.property_order).toEqual(["a", "b"]);
-  });
-});
-
-// ─── manifestToSchemaFields — canonical AFPS wrapper reads ──
-
-describe("manifestToSchemaFields — canonical snake_case wrappers", () => {
-  it("reads canonical snake_case wrapper fields", () => {
+  it("reads canonical snake_case wrappers from the manifest, honouring property_order", () => {
     const manifest: Record<string, unknown> = {
       input: {
         schema: {
           type: "object",
           properties: {
             query: { type: "string", description: "Search" },
-            doc: {
-              type: "string",
-              format: "uri",
-              contentMediaType: "application/octet-stream",
-              description: "Upload",
-            },
+            doc: { ...FILE_ITEM, description: "Upload" },
           },
           required: ["query"],
         },
@@ -577,14 +453,344 @@ describe("manifestToSchemaFields — canonical snake_case wrappers", () => {
       },
     };
     const input = manifestToSchemaFields(manifest).input!;
-    // property_order respected → doc first, query second
     expect(input.map((f) => f.key)).toEqual(["doc", "query"]);
-    const queryField = input.find((f) => f.key === "query")!;
-    expect(queryField.placeholder).toBe("type…");
-    const docField = input.find((f) => f.key === "doc")!;
-    expect(docField.isFile).toBe(true);
-    expect(docField.accept).toBe(".pdf");
-    expect(docField.maxSize).toBe("1000000");
+    expect(input.find((f) => f.key === "query")!.placeholder).toBe("type…");
+    const doc = input.find((f) => f.key === "doc")!;
+    expect(fileKind(doc.prop, "input")).toBe("single");
+    expect(doc.accept).toBe(".pdf");
+    expect(doc.maxSize).toBe(1_000_000);
+  });
+
+  it("recomputes root required from the flags, and omits it when none", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["a", "b"],
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, required: false };
+    expect(fieldsToSchema(fields, "input", schema)!.schema.required).toEqual(["b"]);
+    fields[1] = { ...fields[1]!, required: false };
+    expect("required" in fieldsToSchema(fields, "input", schema)!.schema).toBe(false);
+  });
+});
+
+// ─── Lossless round-trip ────────────────────────────
+
+describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
+  const FILE_PDF = { type: "string", format: "uri", contentMediaType: "application/pdf" } as const;
+  const cases: Record<string, JSONSchemaObject["properties"]> = {
+    "nested object properties, required and additionalProperties": {
+      address: {
+        type: "object",
+        description: "Where",
+        properties: { city: { type: "string" }, zip: { type: "integer", minimum: 0 } },
+        required: ["city"],
+        additionalProperties: false,
+      },
+    },
+    "array of objects": {
+      rows: {
+        type: "array",
+        items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        minItems: 1,
+      },
+    },
+    "array of integers with item constraints": {
+      ids: { type: "array", items: { type: "integer", minimum: 0 } },
+    },
+    "numeric enum": { level: { type: "integer", enum: [1, 2, 3], default: 2 } },
+    "boolean enum": { flag: { type: "boolean", enum: [true, false] } },
+    "object default": { cfg: { type: "object", default: { a: 1 } } },
+    "array default": { tags: { type: "array", default: ["x", "y"] } },
+    "enum with a comma value": { city: { type: "string", enum: ["Paris, FR", "Lyon"] } },
+    "non-primitive items.enum": { pick: { type: "array", items: { enum: [{ a: 1 }, { a: 2 }] } } },
+    "unknown keywords": {
+      a: { type: "string", title: "A", examples: ["x"] },
+      b: { oneOf: [{ type: "string" }, { type: "number" }], title: "B" },
+      c: { type: ["string", "null"], const: null },
+      d: { type: "number", format: "double" },
+    },
+    "union types, items unions included": {
+      n: { type: ["integer", "null"] },
+      pick: { type: "array", items: { type: ["string", "null"], enum: ["a", "b"] } },
+    },
+    $ref: { a: { $ref: "#/$defs/x" } },
+    "single file with contentMediaType and title": {
+      doc: { ...FILE_PDF, title: "Doc" },
+    },
+    "multiple files with minItems and item keywords": {
+      docs: {
+        type: "array",
+        minItems: 1,
+        maxItems: 3,
+        items: { ...FILE_PDF, title: "Page" },
+      },
+    },
+  };
+
+  for (const [name, properties] of Object.entries(cases)) {
+    for (const mode of ["input", "output"] as const) {
+      it(`${name} (${mode})`, () => {
+        const schema: JSONSchemaObject = { type: "object", properties };
+        const result = fieldsToSchema(schemaToFields(schema, mode), mode, schema)!.schema;
+        expect(result).toEqual(schema);
+      });
+    }
+  }
+
+  it("keeps root keys ($defs, additionalProperties, title) and required", () => {
+    const schema: JSONSchemaObject & Record<string, unknown> = {
+      type: "object",
+      title: "Root",
+      additionalProperties: false,
+      $defs: { x: { type: "string" } },
+      properties: { a: { $ref: "#/$defs/x" }, b: { type: "string" } },
+      required: ["b"],
+    };
+    expect(fieldsToSchema(schemaToFields(schema, "input"), "input", schema)!.schema).toEqual(
+      schema,
+    );
+  });
+
+  it("a description edit on one field leaves the others byte-identical", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "old" },
+        address: {
+          type: "object",
+          properties: { city: { type: "string" } },
+          required: ["city"],
+          title: "Address",
+        },
+        pick: { type: "array", items: { type: ["string", "null"], enum: ["a"] } },
+      },
+    };
+    const before = JSON.stringify(schema.properties);
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, prop: setKeyword(fields[0]!.prop, "description", "new") };
+    const out = fieldsToSchema(fields, "input")!.schema.properties;
+    expect(out.name!.description).toBe("new");
+    expect(JSON.stringify({ ...out, name: schema.properties.name })).toBe(before);
+  });
+});
+
+// ─── Keyword operations ─────────────────────────────────────
+
+describe("setKeyword", () => {
+  it("sets a keyword without mutating the input", () => {
+    const prop: JSONSchema7 = { type: "string" };
+    expect(setKeyword(prop, "minLength", 2)).toEqual({ type: "string", minLength: 2 });
+    expect(prop).toEqual({ type: "string" });
+  });
+
+  it("deletes the keyword on undefined", () => {
+    const next = setKeyword({ type: "string", minLength: 2 }, "minLength", undefined);
+    expect(next).toEqual({ type: "string" });
+    expect("minLength" in next).toBe(false);
+  });
+
+  it("never rewrites a union type", () => {
+    const next = setKeyword({ type: ["integer", "null"] }, "default", 5);
+    expect(next).toEqual({ type: ["integer", "null"], default: 5 });
+  });
+});
+
+describe("changeType", () => {
+  it("drops the old type's keywords and keeps the description", () => {
+    const prop: JSONSchema7 = {
+      type: "object",
+      description: "d",
+      properties: { a: { type: "string" } },
+      default: { a: "x" },
+    };
+    expect(changeType(prop, "string")).toEqual({ type: "string", description: "d" });
+  });
+
+  it("keeps annotations and x-* keys but not type-specific values", () => {
+    const prop: JSONSchema7 & Record<string, unknown> = {
+      type: "string",
+      title: "T",
+      $comment: "c",
+      deprecated: true,
+      readOnly: true,
+      "x-ui": 1,
+      default: "a",
+      enum: ["a"],
+      examples: ["a"],
+      const: "a",
+    };
+    const expected: Record<string, unknown> = {
+      type: "number",
+      title: "T",
+      $comment: "c",
+      deprecated: true,
+      readOnly: true,
+      "x-ui": 1,
+    };
+    expect(changeType(prop, "number")).toEqual(expected);
+    const file: Record<string, unknown> = { ...FILE_ITEM, title: "T", "x-a": 1 };
+    const src: JSONSchema7 & Record<string, unknown> = {
+      type: "string",
+      title: "T",
+      "x-a": 1,
+      minLength: 1,
+    };
+    expect(setFileKind(src, "single")).toEqual(file);
+  });
+
+  it("does not add an undefined description", () => {
+    expect(changeType({ type: "array", items: {} }, "number")).toEqual({ type: "number" });
+  });
+});
+
+describe("setFileKind", () => {
+  it("turns a plain property into a single file, keeping the description", () => {
+    expect(setFileKind({ type: "string", description: "d", minLength: 1 }, "single")).toEqual({
+      ...FILE_ITEM,
+      description: "d",
+    });
+  });
+
+  it("turns a single file into multiple files", () => {
+    const next = setFileKind({ ...FILE_ITEM, description: "d" }, "multiple");
+    expect(next).toEqual({ type: "array", items: { ...FILE_ITEM }, description: "d" });
+    expect(fileKind(next, "input")).toBe("multiple");
+  });
+
+  it("turns files off into a plain string", () => {
+    expect(
+      setFileKind({ type: "array", items: { ...FILE_ITEM }, description: "d" }, "none"),
+    ).toEqual({
+      type: "string",
+      description: "d",
+    });
+    expect(setFileKind({ ...FILE_ITEM }, "none")).toEqual({ type: "string" });
+  });
+
+  it("file fields exist in input mode only, and show as strings", () => {
+    expect(fileKind({ ...FILE_ITEM }, "output")).toBe("none");
+    expect(fieldType({ type: "array", items: { ...FILE_ITEM } }, "input")).toBe("string");
+    expect(fieldType({ type: "array", items: { type: "string" } }, "input")).toBe("array");
+    expect(fieldType({ type: ["integer", "null"] }, "input")).toBe("integer");
+    expect(fieldType({ oneOf: [] }, "input")).toBe("string");
+  });
+});
+
+describe("setItemsEnum", () => {
+  it("keeps the other items keywords and the items type", () => {
+    const prop: JSONSchema7 = { type: "array", items: { type: ["string", "null"], title: "T" } };
+    expect(setItemsEnum(prop, ["a", "b"])).toEqual({
+      type: "array",
+      items: { type: ["string", "null"], title: "T", enum: ["a", "b"] },
+    });
+  });
+
+  it("does not narrow existing items that have no type", () => {
+    expect(setItemsEnum({ type: "array", items: { $ref: "#/x" } }, ["a"]).items).toEqual({
+      $ref: "#/x",
+      enum: ["a"],
+    });
+    expect(setItemsEnum({ type: "array", items: {} }, ["a"]).items).toEqual({ enum: ["a"] });
+  });
+
+  it("adds a string items type when there is none", () => {
+    expect(setItemsEnum({ type: "array" }, ["a"]).items).toEqual({ type: "string", enum: ["a"] });
+  });
+
+  it("removes only the enum when cleared, and items entirely if nothing else is left", () => {
+    expect(setItemsEnum({ type: "array", items: { type: "integer", enum: [1] } }, [])).toEqual({
+      type: "array",
+      items: { type: "integer" },
+    });
+    expect(setItemsEnum({ type: "array", items: { enum: [1] } }, [])).toEqual({ type: "array" });
+  });
+
+  it("leaves tuple items alone", () => {
+    const prop: JSONSchema7 = { type: "array", items: [{ type: "string" }] };
+    expect(setItemsEnum(prop, ["a"])).toBe(prop);
+  });
+});
+
+// ─── Text adapters ──────────────────────────────────────────
+
+describe("text adapters", () => {
+  it("types values per field type", () => {
+    expect(textToValue("3", "integer")).toBe(3);
+    expect(textToValue("1.5", "number")).toBe(1.5);
+    expect(textToValue("true", "boolean")).toBe(true);
+    expect(textToValue("false", "boolean")).toBe(false);
+    expect(textToValue("abc", "number")).toBeUndefined();
+    expect(textToValue("yes", "boolean")).toBeUndefined();
+    expect(textToList("true, yes, false", "boolean")).toEqual([true, false]);
+    expect(textToValue("", "string")).toBeUndefined();
+    expect(textToValue("x", "string")).toBe("x");
+    expect(textToList("1, 2 ,3,", "integer")).toEqual([1, 2, 3]);
+    expect(textToList("true, false", "boolean")).toEqual([true, false]);
+    expect(textToList("a, , b", "string")).toEqual(["a", "b"]);
+  });
+
+  it("toKeywordNumber validates per keyword", () => {
+    for (const k of ["minLength", "maxLength", "maxItems"] as const) {
+      expect(toKeywordNumber(k, "3")).toBe(3);
+      expect(toKeywordNumber(k, "0")).toBe(0);
+      expect(toKeywordNumber(k, "-1")).toBeUndefined();
+      expect(toKeywordNumber(k, "1.5")).toBeUndefined();
+    }
+    expect(toKeywordNumber("multipleOf", "0.5")).toBe(0.5);
+    expect(toKeywordNumber("multipleOf", "0")).toBeUndefined();
+    expect(toKeywordNumber("multipleOf", "-2")).toBeUndefined();
+    expect(toKeywordNumber("minimum", "-2.5")).toBe(-2.5);
+    expect(toKeywordNumber("maximum", "abc")).toBeUndefined();
+  });
+
+  it("toKeywordNumber is undefined for empty or non-numeric text; maxSize is a byte count", () => {
+    for (const text of ["", "  ", "-", "Infinity"]) {
+      expect(toKeywordNumber("minimum", text)).toBeUndefined();
+    }
+    expect(toKeywordNumber("maxSize", "1024")).toBe(1024);
+    expect(toKeywordNumber("maxSize", "-1")).toBeUndefined();
+    expect(toKeywordNumber("maxSize", "1.5")).toBeUndefined();
+  });
+
+  it("shows editable scalars as text", () => {
+    expect(valueToText(undefined, "string")).toEqual({ text: "", locked: false });
+    expect(valueToText("x", "string")).toEqual({ text: "x", locked: false });
+    expect(valueToText(2, "integer")).toEqual({ text: "2", locked: false });
+    expect(valueToText(false, "boolean")).toEqual({ text: "false", locked: false });
+  });
+
+  it("locks values that cannot round-trip through text", () => {
+    expect(valueToText({ a: 1 }, "object")).toEqual({ text: '{"a":1}', locked: true });
+    expect(valueToText(["x"], "array")).toEqual({ text: '["x"]', locked: true });
+    expect(valueToText("", "string").locked).toBe(true);
+    expect(valueToText(1.5, "integer").locked).toBe(true);
+    expect(valueToText(null, "string")).toEqual({ text: "null", locked: true });
+    expect(valueToText(5, "string").locked).toBe(true); // would come back as "5"
+  });
+
+  it("lists: numeric and boolean stay typed; commas, padding, empty and non-arrays lock", () => {
+    expect(listToText([1, 2], "integer")).toEqual({ text: "1, 2", locked: false });
+    expect(listToText([true, false], "boolean")).toEqual({ text: "true, false", locked: false });
+    expect(listToText(undefined, "string")).toEqual({ text: "", locked: false });
+    expect(listToText(["Paris, FR", "Lyon"], "string")).toEqual({
+      text: '["Paris, FR","Lyon"]',
+      locked: true,
+    });
+    expect(listToText([" a"], "string").locked).toBe(true);
+    expect(listToText([], "string").locked).toBe(true);
+    expect(listToText("a", "string").locked).toBe(true);
+    expect(listToText([{ a: 1 }], "string").locked).toBe(true);
+  });
+
+  it("items.enum text is typed by the items type and locks tuple items", () => {
+    expect(itemsEnumText({ type: "array", items: { type: "integer", enum: [1, 2] } })).toEqual({
+      text: "1, 2",
+      locked: false,
+    });
+    expect(itemsEnumText({ type: "array" })).toEqual({ text: "", locked: false });
+    expect(itemsEnumText({ type: "array", items: [{ type: "string" }] }).locked).toBe(true);
   });
 });
 
@@ -770,85 +976,5 @@ describe("writers emit canonical AFPS keys", () => {
     const m: Record<string, unknown> = { runtime_tools: ["output"] };
     setRuntimeTools(m, []);
     expect(m).not.toHaveProperty("runtime_tools");
-  });
-
-  it("fieldsToSchema — wrapper output has NO camelCase keys (non-canonical fileConstraints/uiHints/propertyOrder/maxSize)", () => {
-    const fields: SchemaField[] = [
-      {
-        _id: "1",
-        key: "doc",
-        type: "string",
-        isFile: true,
-        description: "Document",
-        required: false,
-        accept: ".pdf",
-        maxSize: "10485760",
-        multiple: false,
-        maxFiles: "",
-        placeholder: "",
-        default: "",
-      },
-      {
-        _id: "2",
-        key: "q",
-        type: "string",
-        description: "Query",
-        required: true,
-        placeholder: "type…",
-        default: "",
-      },
-    ];
-    const wrapper = fieldsToSchema(fields, "input");
-    expect(wrapper).not.toBeNull();
-    // Canonical snake_case keys present
-    expect(wrapper).toHaveProperty("file_constraints");
-    expect(wrapper).toHaveProperty("ui_hints");
-    expect(wrapper).toHaveProperty("property_order");
-    // Non-canonical camelCase keys absent at the wrapper level
-    expect(wrapper).not.toHaveProperty("fileConstraints");
-    expect(wrapper).not.toHaveProperty("uiHints");
-    expect(wrapper).not.toHaveProperty("propertyOrder");
-    // And per-property maxSize is NOT in any FileConstraint
-    for (const fc of Object.values(wrapper!.file_constraints ?? {})) {
-      expect(fc).not.toHaveProperty("maxSize");
-      expect(fc).toHaveProperty("max_size");
-    }
-  });
-
-  it("fieldsToSchema — when caller replaces the wrapper wholesale, non-canonical camelCase keys vanish from the persisted manifest", () => {
-    // Simulates: previous manifest carries non-canonical camelCase wrapper
-    // keys; editor computes a fresh wrapper via `fieldsToSchema` and the
-    // caller does `updateManifest({ input: wrapper })` (replace, not merge).
-    const camelCaseManifest: Record<string, unknown> = {
-      input: {
-        schema: { type: "object", properties: { x: { type: "string" } } },
-        fileConstraints: { x: { accept: ".pdf", maxSize: 1000 } },
-        uiHints: { x: { placeholder: "old" } },
-        propertyOrder: ["x"],
-      },
-    };
-    const wrapper = fieldsToSchema(
-      [
-        {
-          _id: "1",
-          key: "x",
-          type: "string",
-          description: "X",
-          required: false,
-          placeholder: "new",
-          default: "",
-        },
-      ],
-      "input",
-    );
-    camelCaseManifest.input = wrapper;
-    // Round-trip via JSON to mimic persistence
-    const persisted = JSON.parse(JSON.stringify(camelCaseManifest)) as Record<string, unknown>;
-    const input = persisted.input as Record<string, unknown>;
-    expect(input).not.toHaveProperty("fileConstraints");
-    expect(input).not.toHaveProperty("uiHints");
-    expect(input).not.toHaveProperty("propertyOrder");
-    expect(input).toHaveProperty("ui_hints");
-    expect(input).toHaveProperty("property_order");
   });
 });

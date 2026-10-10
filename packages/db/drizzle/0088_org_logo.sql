@@ -8,7 +8,8 @@
 -- #1437 merge the same day took `0063` through `0068`, so it moved to `0069`;
 -- the 30 September merge found main at `0077`, so it moved to `0078`; the
 -- 8 October merge found main at `0081`, so it moved to `0082`; the 9 October
--- merge found main at `0086`, so it moves here.
+-- merge found main at `0086`, so it moved to `0087`; the 10 October merge
+-- found main at `0087`, so it moves here.
 --
 -- `IF NOT EXISTS` because the databases that ran either earlier copy already
 -- hold the column, and they must migrate rather than abort.

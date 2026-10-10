@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BrainCircuit, KeyRound, Plus } from "lucide-react";
+import { useStore } from "zustand";
+import { BrainCircuit, Plus } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -19,7 +20,6 @@ import {
   useCreateModelProviderCredential,
   useUpdateModelProviderCredential,
   useDeleteModelProviderCredential,
-  useTestModelProviderCredential,
   useProvidersRegistry,
   deduplicateLabel,
   type ModelProviderCredentialInfo,
@@ -28,14 +28,17 @@ import { useConnectionTest } from "../../hooks/use-connection-test";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
+import { CredentialsSection } from "../../components/model-credentials-section";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
-import { useCredentialColumns, useModelColumns } from "./model-columns";
+import { useModelColumns } from "./model-columns";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
+import { credentialUpdateBody } from "../../lib/personal-model-credentials";
+import { authStore } from "../../stores/auth-store";
 
-function ModelsList({
+export function ModelsList({
   models,
   isLoading,
   error,
@@ -46,6 +49,7 @@ function ModelsList({
   settingDefaultId,
   canWrite,
   canDelete,
+  credentialLabels,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -60,6 +64,8 @@ function ModelsList({
   // step with the route that already gates this screen.
   canWrite: boolean;
   canDelete: boolean;
+  /** The organization credentials' labels by id, for those the caller may read. */
+  credentialLabels: ReadonlyMap<string, string>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -79,6 +85,7 @@ function ModelsList({
     onSetDefault,
     canWrite,
     canDelete,
+    credentialLabels,
   });
 
   return (
@@ -109,82 +116,6 @@ function ModelsList({
   );
 }
 
-function CredentialsSection({
-  credentials,
-  isLoading,
-  error,
-  onCreate,
-  onEdit,
-  onDelete,
-  onRename,
-  onConnectOAuth,
-  canWrite,
-  canDelete,
-}: {
-  credentials: ModelProviderCredentialInfo[] | undefined;
-  isLoading: boolean;
-  error: unknown;
-  onCreate: () => void;
-  onEdit: (pk: ModelProviderCredentialInfo) => void;
-  onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
-  onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  canWrite: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModelProviderCredential();
-  const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry();
-
-  const columns = useCredentialColumns({
-    canWrite,
-    canDelete,
-    registry,
-    testingIds,
-    testResults,
-    onTest: handleTest,
-    onEdit,
-    onDelete,
-    onRename,
-    onConnectOAuth,
-  });
-
-  return (
-    <div className="mb-8">
-      {/* Single entry point — the unified modal handles both API-key and OAuth
-          flows. Removing a module from `MODULES` hides its OAuth tile from the
-          in-modal provider picker with zero UI footprint here. */}
-      <SettingsPageActions>
-        <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create-credential" onSelect={onCreate}>
-            <Plus />
-            {t("credentials.add")}
-          </DropdownMenuItem>
-        </PageActionsMenu>
-      </SettingsPageActions>
-
-      <DataTable
-        label={t("credentials.title")}
-        columns={columns}
-        rows={credentials ?? []}
-        rowKey={(pk) => pk.id}
-        isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
-        empty={
-          <EmptyState
-            message={t("credentials.empty")}
-            hint={t("credentials.emptyHint")}
-            icon={KeyRound}
-            compact
-          />
-        }
-      />
-    </div>
-  );
-}
-
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
@@ -194,12 +125,15 @@ export function OrgSettingsModelsPage() {
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canDeleteCredentials = can("model-provider-credentials:delete");
+  const userId = useStore(authStore, (s) => s.user?.id);
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
     type: "deleteModel" | "deleteCredential";
     label: string;
     id: string;
+    /** A member's own credential, not the organization's. */
+    personal?: boolean;
   } | null>(null);
 
   const [modelModalOpen, setModelModalOpen] = useState(false);
@@ -253,6 +187,7 @@ export function OrgSettingsModelsPage() {
       {activeTab === "models-list" && (
         <ModelsList
           models={models}
+          credentialLabels={new Map((credentials ?? []).map((k) => [k.id, k.label]))}
           isLoading={modelsLoading}
           error={modelsError}
           onCreate={() => {
@@ -276,35 +211,59 @@ export function OrgSettingsModelsPage() {
       )}
 
       {activeTab === "credentials" && (
-        <CredentialsSection
-          credentials={credentials}
-          isLoading={pkLoading}
-          error={pkError}
-          onCreate={() => {
-            setEditPk(null);
-            setPkModalOpen(true);
-          }}
-          onEdit={(pk) => {
-            setEditPk(pk);
-            setPkModalOpen(true);
-          }}
-          onDelete={(pk) =>
-            setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
-          }
-          // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
-          onRename={async (pk, newLabel) => {
-            await updatePkMutation.mutateAsync({
-              params: { path: { id: pk.id } },
-              body: { label: newLabel },
-            });
-          }}
-          onConnectOAuth={(credential) => {
-            setEditPk(credential);
-            setPkModalOpen(true);
-          }}
-          canWrite={canWriteCredentials}
-          canDelete={canDeleteCredentials}
-        />
+        <>
+          {/* Single entry point: the unified modal handles both API-key and OAuth
+              flows. Removing a module from `MODULES` hides its OAuth tile from the
+              in-modal provider picker with zero UI footprint here. */}
+          {canWriteCredentials && (
+            <SettingsPageActions>
+              <PageActionsMenu>
+                <DropdownMenuItem
+                  data-page-action="create-credential"
+                  onSelect={() => {
+                    setEditPk(null);
+                    setPkModalOpen(true);
+                  }}
+                >
+                  <Plus />
+                  {t("credentials.add")}
+                </DropdownMenuItem>
+              </PageActionsMenu>
+            </SettingsPageActions>
+          )}
+          <CredentialsSection
+            credentials={credentials}
+            isLoading={pkLoading}
+            error={pkError}
+            onEdit={(pk) => {
+              setEditPk(pk);
+              setPkModalOpen(true);
+            }}
+            onDelete={(pk) =>
+              setConfirmState({
+                type: "deleteCredential",
+                label: pk.label,
+                id: pk.id,
+                personal: pk.owner_type === "user",
+              })
+            }
+            // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
+            onRename={async (pk, newLabel) => {
+              await updatePkMutation.mutateAsync({
+                params: { path: { id: pk.id } },
+                body: { label: newLabel },
+              });
+            }}
+            onConnectOAuth={(credential) => {
+              setEditPk(credential);
+              setPkModalOpen(true);
+            }}
+            canWrite={canWriteCredentials}
+            canDelete={canDeleteCredentials}
+            userId={userId}
+            showOwner
+          />
+        </>
       )}
 
       <ModelFormModal
@@ -323,12 +282,11 @@ export function OrgSettingsModelsPage() {
         onSubmit={(data) => {
           if (editPk) {
             // The PATCH body only accepts mutable fields — the protocol and
-            // endpoint are pinned by `providerId` at create time. Strip them
-            // here even though the form disables those inputs on edit.
+            // endpoint are pinned by `providerId` at create time.
             updatePkMutation.mutate(
               {
                 params: { path: { id: editPk.id } },
-                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
+                body: credentialUpdateBody(editPk, data),
               },
               {
                 onSuccess: () => setPkModalOpen(false),
@@ -366,7 +324,9 @@ export function OrgSettingsModelsPage() {
                     label: confirmState.label,
                     count: modelsOnCredential,
                   })
-                : t("credentials.deleteConfirm", { label: confirmState.label })
+                : confirmState.personal
+                  ? t("credentials.deleteMemberConfirm", { label: confirmState.label })
+                  : t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
         confirmDisabled={modelsOnCredential > 0}

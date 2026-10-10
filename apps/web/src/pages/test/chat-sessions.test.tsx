@@ -60,6 +60,7 @@ function hostWith(granted: string[]): ChatHost {
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
+    personalModelCredentials: true,
     formatBytes: String,
   };
 }

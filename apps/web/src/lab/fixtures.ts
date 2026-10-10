@@ -3429,13 +3429,14 @@ export const agentProxy: Json200<"/api/agents/{scope}/{name}/proxy", "get"> = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The provider catalogue the model picker reads. Two entries, no `models`
- * catalogue: this fixture exists so the picker can be OPENED, and the per
- * provider model list is the heavy half of the real payload.
+ * The provider catalogue the model picker reads. Each entry lists a single
+ * model: this fixture exists so the picker and the model form can be OPENED, and
+ * the per provider model list is the heavy half of the real payload. The
+ * OpenAI-compatible endpoint lists none, as a self-hosted server has no catalogue.
  */
 export const providerRegistry: Json200<"/api/model-provider-credentials/registry", "get"> = {
   object: "list",
-  total: 2,
+  total: 4,
   hasMore: false,
   data: [
     {
@@ -3446,6 +3447,20 @@ export const providerRegistry: Json200<"/api/model-provider-credentials/registry
       baseUrlOverridable: false,
       authMode: "api_key",
       featured: true,
+      models: [
+        {
+          id: "claude-sonnet-5",
+          label: "Claude Sonnet 5",
+          contextWindow: 200000,
+          capabilities: ["text"],
+          generation: {
+            temperature: "supported",
+            reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+          },
+          cost: null,
+          featured: true,
+        },
+      ],
     },
     {
       providerId: "openai-compatible",
@@ -3456,6 +3471,53 @@ export const providerRegistry: Json200<"/api/model-provider-credentials/registry
       baseUrlOverridable: true,
       authMode: "api_key",
       featured: false,
+    },
+    {
+      providerId: "openai",
+      displayName: "OpenAI",
+      apiShape: "openai-responses",
+      defaultBaseUrl: "https://api.openai.com/v1",
+      baseUrlOverridable: false,
+      authMode: "api_key",
+      featured: true,
+      models: [
+        {
+          id: "gpt-5-mini",
+          label: "GPT-5 mini",
+          contextWindow: 200000,
+          capabilities: ["text"],
+          generation: {
+            temperature: "supported",
+            reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+          },
+          cost: null,
+          featured: true,
+        },
+      ],
+    },
+    {
+      providerId: "claude-code",
+      displayName: "Claude Code",
+      description: "Abonnement Claude, connecté par la CLI.",
+      apiShape: "anthropic-messages",
+      defaultBaseUrl: "https://api.anthropic.com",
+      baseUrlOverridable: false,
+      authMode: "oauth2",
+      featured: true,
+      models: [
+        {
+          id: "claude-sonnet-5",
+          label: "Claude Sonnet 5",
+          contextWindow: 200000,
+          capabilities: ["text"],
+          generation: {
+            temperature: "supported",
+            reasoning: { supported: "unsupported", adaptive: null, levels: {} },
+          },
+          cost: null,
+          featured: true,
+        },
+      ],
     },
   ],
 };
@@ -4391,7 +4453,7 @@ export const models: Json200<"/api/models", "get"> = {
       id: "mdl_sonnet",
       label: "Claude Sonnet 5",
       modelId: "claude-sonnet-5",
-      apiShape: "anthropic",
+      apiShape: "anthropic-messages",
       base_url: null,
       iconUrl: null,
       providerId: "anthropic",
@@ -4400,6 +4462,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: "cred_builtin",
+      billed_to: "org",
       created_by: null,
       source: "built-in",
       enabled: true,
@@ -4413,7 +4476,7 @@ export const models: Json200<"/api/models", "get"> = {
       id: "mdl_opus",
       label: "Claude Opus 5",
       modelId: "claude-opus-5",
-      apiShape: "anthropic",
+      apiShape: "anthropic-messages",
       base_url: null,
       iconUrl: null,
       providerId: "anthropic",
@@ -4422,6 +4485,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: "cred_openai",
+      billed_to: "org",
       created_by: "Olivier Tarbès",
       source: "custom",
       enabled: true,
@@ -4435,7 +4499,7 @@ export const models: Json200<"/api/models", "get"> = {
       id: "mdl_local",
       label: "Mistral local",
       modelId: "mistral-small",
-      apiShape: "openai-compatible",
+      apiShape: "openai-completions",
       base_url: "http://localhost:11434/v1",
       iconUrl: null,
       providerId: null,
@@ -4443,7 +4507,8 @@ export const models: Json200<"/api/models", "get"> = {
       pi_provider: null,
       pi_dialect: null,
       generation: null,
-      credentialId: null,
+      credentialId: "cred_openai",
+      billed_to: "org",
       created_by: "Pierre",
       source: "custom",
       enabled: false,
@@ -4454,10 +4519,65 @@ export const models: Json200<"/api/models", "get"> = {
       createdAt: "2026-07-30T08:15:00.000Z",
       updatedAt: "2026-08-14T09:00:00.000Z",
     },
+    {
+      // A model each member serves with their own credential. The lab member holds a
+      // personal Anthropic key, so it is paid for by them.
+      id: "mdl_haiku",
+      label: "Claude Haiku 5",
+      modelId: "claude-haiku-5",
+      apiShape: "anthropic-messages",
+      base_url: null,
+      iconUrl: null,
+      providerId: "anthropic",
+      provider_name: "Anthropic",
+      pi_provider: "anthropic",
+      pi_dialect: null,
+      generation: null,
+      credentialId: null,
+      billed_to: "user",
+      created_by: "Olivier Tarbès",
+      source: "custom",
+      enabled: true,
+      is_default: false,
+      aliased: false,
+      needs_reconnection: false,
+      createdAt: "2026-09-20T09:00:00.000Z",
+      updatedAt: "2026-09-20T09:00:00.000Z",
+    },
+    {
+      // Same choice, on a provider the lab member has no credential for: refused
+      // until they add one.
+      id: "mdl_gpt",
+      label: "GPT-5 mini",
+      modelId: "gpt-5-mini",
+      apiShape: "openai-responses",
+      base_url: null,
+      iconUrl: null,
+      providerId: "openai",
+      provider_name: "OpenAI",
+      pi_provider: "openai",
+      pi_dialect: null,
+      generation: null,
+      credentialId: null,
+      billed_to: null,
+      created_by: "Pierre",
+      source: "custom",
+      enabled: true,
+      is_default: false,
+      aliased: false,
+      needs_reconnection: false,
+      createdAt: "2026-09-22T09:00:00.000Z",
+      updatedAt: "2026-09-22T09:00:00.000Z",
+    },
   ],
 };
 
-/** Provider credentials: built-in, API key, and both OAuth action variants. */
+/**
+ * Provider credentials, as an administrator reads them: the organization's own
+ * (built-in, API key) and every member's personal ones (the lab member's key and
+ * subscription, a teammate's subscription). A member holding only `connect` is
+ * served just their own rows (see the handler).
+ */
 export const modelCredentials: Json200<"/api/model-provider-credentials", "get"> = {
   object: "list",
   hasMore: false,
@@ -4472,6 +4592,9 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       providerId: null,
       oauth_email: null,
       needs_reconnection: false,
+      owner_type: "org",
+      owner_id: null,
+      owner_name: null,
       created_by: null,
       createdAt: "2026-05-02T10:00:00.000Z",
       updatedAt: "2026-05-02T10:00:00.000Z",
@@ -4486,11 +4609,15 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       providerId: null,
       oauth_email: null,
       needs_reconnection: false,
+      owner_type: "org",
+      owner_id: null,
+      owner_name: null,
       created_by: "Olivier Tarbès",
       createdAt: "2026-06-11T16:45:00.000Z",
       updatedAt: "2026-06-11T16:45:00.000Z",
     },
     {
+      // The lab member's own subscription, dead: the reconnect is theirs to do.
       id: "cred_oauth",
       label: "Claude Code",
       apiShape: "anthropic",
@@ -4500,11 +4627,15 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       providerId: "claude-code",
       oauth_email: "olivier@tractr.net",
       needs_reconnection: true,
+      owner_type: "user",
+      owner_id: USER_ID,
+      owner_name: "Olivier Tarbès",
       created_by: "Olivier Tarbès",
       createdAt: "2026-08-01T11:00:00.000Z",
       updatedAt: "2026-08-19T07:20:00.000Z",
     },
     {
+      // A teammate's subscription: an administrator reads it and can only delete it.
       id: "cred_oauth_healthy",
       label: "Claude Code, équipe",
       apiShape: "anthropic",
@@ -4514,9 +4645,30 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       providerId: "claude-code",
       oauth_email: "pierre@tractr.net",
       needs_reconnection: false,
+      owner_type: "user",
+      owner_id: "user_lab_2",
+      owner_name: "Pierre",
       created_by: "Pierre",
       createdAt: "2026-08-03T14:30:00.000Z",
       updatedAt: "2026-08-21T09:45:00.000Z",
+    },
+    {
+      // The lab member's own key: it pays "Claude Haiku 5".
+      id: "cred_personal_key",
+      label: "Ma clé Anthropic",
+      apiShape: "anthropic",
+      base_url: null,
+      source: "custom",
+      authMode: "api_key",
+      providerId: "anthropic",
+      oauth_email: null,
+      needs_reconnection: false,
+      owner_type: "user",
+      owner_id: USER_ID,
+      owner_name: "Olivier Tarbès",
+      created_by: "Olivier Tarbès",
+      createdAt: "2026-09-21T08:30:00.000Z",
+      updatedAt: "2026-09-21T08:30:00.000Z",
     },
   ],
 };

@@ -12,8 +12,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
+import { addOrgMember, createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
 import {
+  cancelPairing,
   cleanupExpiredPairings,
   consumePairing,
   createPairing,
@@ -70,6 +71,46 @@ describe("createPairing", () => {
     expect(row!.tokenHash).not.toContain(result.token);
     expect(row!.providerId).toBe("test-oauth");
     expect(row!.consumedAt).toBeNull();
+  });
+
+  it("refuses a user who is not a member of the organization with 403, inserting no pairing row", async () => {
+    const stranger = await createTestUser();
+
+    const refusal = await createPairing({
+      userId: stranger.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    }).catch((err: unknown) => err);
+
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect((refusal as ApiError).status).toBe(403);
+    expect(
+      await db
+        .select({ id: modelProviderPairings.id })
+        .from(modelProviderPairings)
+        .where(eq(modelProviderPairings.orgId, fix.org.id)),
+    ).toEqual([]);
+  });
+
+  it("mints a pairing for a member of the organization", async () => {
+    const member = await createTestUser();
+    await addOrgMember(fix.org.id, member.id, "member");
+
+    const { id } = await createPairing({
+      userId: member.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+
+    const rows = await db
+      .select({ userId: modelProviderPairings.userId })
+      .from(modelProviderPairings)
+      .where(eq(modelProviderPairings.id, id));
+    expect(rows).toEqual([{ userId: member.id }]);
   });
 });
 
@@ -154,7 +195,7 @@ describe("getPairing", () => {
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
-    const row = await getPairing(id, fix.org.id);
+    const row = await getPairing(id, fix.org.id, fix.userId);
     expect(row).not.toBeNull();
     expect(row!.id).toBe(id);
   });
@@ -169,8 +210,22 @@ describe("getPairing", () => {
     });
     const otherUser = await createTestUser();
     const { org: otherOrg } = await createTestOrg(otherUser.id);
-    const row = await getPairing(id, otherOrg.id);
+    const row = await getPairing(id, otherOrg.id, fix.userId);
     expect(row).toBeNull();
+  });
+
+  it("returns null and cancels nothing for another member of the same org", async () => {
+    const { id } = await createPairing({
+      userId: fix.userId,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+    const otherMember = await createTestUser();
+    expect(await getPairing(id, fix.org.id, otherMember.id)).toBeNull();
+    await cancelPairing(id, fix.org.id, otherMember.id);
+    expect(await getPairing(id, fix.org.id, fix.userId)).not.toBeNull();
   });
 });
 
@@ -213,8 +268,8 @@ describe("cleanupExpiredPairings", () => {
     const deleted = await cleanupExpiredPairings();
     expect(deleted).toBe(1);
 
-    expect(await getPairing(fresh.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(recent.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(old.id, fix.org.id)).toBeNull();
+    expect(await getPairing(fresh.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(recent.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(old.id, fix.org.id, fix.userId)).toBeNull();
   });
 });

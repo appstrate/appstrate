@@ -11,8 +11,9 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useModels } from "../hooks/use-models";
-import { isModelSelectable } from "../lib/model-selectability";
+import { isMemberPaid, isModelSelectable } from "../lib/model-selectability";
 import { ModelUnselectableNote } from "./model-availability-badge";
+import { ModelBillingHint } from "./model-billing-hint";
 import { useProxies } from "../hooks/use-proxies";
 import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
 import { getModelIcon } from "./icons";
@@ -74,6 +75,11 @@ interface RunOverridesPanelProps {
    * of the agent's own Modèle and Proxy sections.
    */
   layout?: "launch" | "settings";
+  /**
+   * For a schedule: it spends organization credentials only, so a model each
+   * member pays for themselves cannot be picked, and nobody's credential is named.
+   */
+  scheduled?: boolean;
 }
 
 /** One override: a labelled field in a launch form, a settings row elsewhere. */
@@ -129,6 +135,7 @@ export function RunOverridesPanel({
   onChange,
   version,
   layout = "launch",
+  scheduled = false,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
@@ -251,10 +258,23 @@ export function RunOverridesPanel({
               {orgModels.map((m) => {
                 const MIcon = getModelIcon(m, registry ?? []);
                 return (
-                  <SelectItem key={m.id} value={m.id} disabled={!isModelSelectable(m)}>
+                  <SelectItem
+                    key={m.id}
+                    value={m.id}
+                    disabled={!isModelSelectable(m) || (scheduled && isMemberPaid(m))}
+                  >
                     <span className="inline-flex items-center gap-1.5">
                       {MIcon && <MIcon className="size-3.5" />}
                       {m.label}
+                      {scheduled ? (
+                        isMemberPaid(m) && (
+                          <span className="text-muted-foreground text-xs">
+                            {t("models.billing.notSchedulable", { ns: "settings" })}
+                          </span>
+                        )
+                      ) : (
+                        <ModelBillingHint billedTo={m.billed_to} />
+                      )}
                       <ModelUnselectableNote model={m} />
                     </span>
                   </SelectItem>

@@ -67,6 +67,10 @@ export function OrgSettingsGeneralPage() {
   const { can, orgRole } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
+  // Unknown until the settings load: the toggle then reads neither as on nor off.
+  const personalModelCredentialsAllowed = orgSettings
+    ? orgSettings.personal_model_credentials !== false
+    : undefined;
   const updateSettingsMutation = useUpdateOrgSettings();
   const canUpdateOrg = can("org:update");
   const queryClient = useQueryClient();
@@ -332,6 +336,45 @@ export function OrgSettingsGeneralPage() {
                 params: { path: { orgId: currentOrg.id } },
                 body: { restrict_package_copy: checked === true },
               })
+            }
+          />
+        </SettingRow>
+      </SettingsGroup>
+
+      {/* Opt-out: absent means allowed. The switch reads neither on nor off until
+          the settings load, so a click can never send a value read off a default. */}
+      <SettingsGroup title={t("models.tabTitle")}>
+        <SettingRow
+          variant="toggle"
+          label={
+            <Label htmlFor="personal-model-credentials" className="cursor-pointer">
+              {t("orgSettings.personalModelCredentialsTitle")}
+            </Label>
+          }
+          description={t("orgSettings.personalModelCredentialsDesc")}
+          status={updateSettingsMutation.isPending && <Spinner />}
+        >
+          <Switch
+            id="personal-model-credentials"
+            checked={personalModelCredentialsAllowed ?? false}
+            disabled={!can("org:settings") || !orgSettings || updateSettingsMutation.isPending}
+            onCheckedChange={(checked) =>
+              updateSettingsMutation.mutate(
+                {
+                  params: { path: { orgId: currentOrg.id } },
+                  body: { personal_model_credentials: checked === true },
+                },
+                {
+                  // The flag changes which models each member pays for and which
+                  // credentials serve a call: refresh both lists.
+                  onSuccess: () => {
+                    void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+                    void queryClient.invalidateQueries({
+                      queryKey: ["get", "/api/model-provider-credentials"],
+                    });
+                  },
+                },
+              )
             }
           />
         </SettingRow>

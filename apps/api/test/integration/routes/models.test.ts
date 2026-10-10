@@ -858,7 +858,8 @@ describe("Models API", () => {
       // Regression: PUT used to write `data` (incl. `aliased`) with no
       // invariant check, so a non-aliased oauth model could become aliased by
       // update — a state POST rejects, caught only late at run launch.
-      const oauth = await seedOrgModelProviderOAuth({
+      // A subscription is the member's own credential, so the model is unbound.
+      await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
         label: "Test OAuth",
@@ -866,6 +867,7 @@ describe("Models API", () => {
         refreshToken: "test-refresh",
         expiresAt: null,
         createdBy: ctx.user.id,
+        ownerUserId: ctx.user.id,
       });
       const createRes = await app.request("/api/models", {
         method: "POST",
@@ -873,7 +875,8 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Subscribed",
           modelId: TEST_OAUTH_MODEL_ID,
-          credentialId: oauth.id,
+          credentialId: null,
+          providerId: TEST_OAUTH_PROVIDER_ID,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -2052,6 +2055,20 @@ describe("Models API", () => {
       expect(
         seen.some((line) => line.startsWith("https://9.9.9.9/") && line.includes("sk-caller")),
       ).toBe(true);
+    });
+
+    it("refuses a personal credential, the caller's own included: a model binds organization credentials only", async () => {
+      const mine = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai-completions",
+        baseUrl: "https://9.9.9.9/v1",
+        apiKey: "sk-mine",
+        ownerUserId: ctx.user.id,
+      });
+
+      const res = await probe({ credentialId: mine.id, modelId: "any-model" });
+      expect(res.status).toBe(404);
+      expect(seen).toEqual([]);
     });
   });
 });

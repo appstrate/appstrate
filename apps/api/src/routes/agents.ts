@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isUserPrincipal } from "../lib/principal.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
@@ -414,6 +415,7 @@ export function createAgentsRouter() {
           canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
           wholeReach: isUserPrincipal(c),
+          payerUserId: requestPayerUserId(c),
           version: c.req.query("version"),
         }),
       );
@@ -470,7 +472,7 @@ export function createAgentsRouter() {
       const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
-        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
         generation = validateGenerationOverride(generation, selectedModel, "generation");

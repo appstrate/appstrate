@@ -93,6 +93,8 @@ const ORG_MEMBER = [
   "models:read",
   "proxies:read",
   "llm-proxy:call",
+  // Brings their own key: spends their own money, never picks the model.
+  "model-provider-credentials:connect",
 ];
 // A guest sees no billing either: `@appstrate/module-ee` grants `billing:read`
 // to owner, admin and member only.

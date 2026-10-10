@@ -57,15 +57,40 @@ import {
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import { useModalParam } from "../../hooks/use-modal-param";
+import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
 import { toLiveSlug, toSlug } from "../../lib/strings";
 import { Modal } from "../modal";
 import { EmptyState } from "../page-states";
 import { TableRowActions } from "../table-row-actions";
 import type { SchemaField } from "./schema-section";
+import { DraftInput, KeywordInput, NumberKeywordInput } from "./keyword-inputs";
+import {
+  changeType,
+  fieldType,
+  fileKind,
+  isTextType,
+  itemsEnumText,
+  itemType,
+  listToText,
+  setFileKind,
+  setItemsEnum,
+  setKeyword,
+  textToList,
+  textToValue,
+  toKeywordNumber,
+  valueToText,
+} from "./utils";
 
 type SchemaMode = "input" | "output";
 
-const TYPE_OPTIONS = ["string", "number", "integer", "boolean", "array", "object"];
+const TYPE_OPTIONS: JSONSchema7TypeName[] = [
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "array",
+  "object",
+];
 const STRING_FORMATS = ["", "email", "password", "date", "date-time", "time", "color", "uri"];
 
 export function SchemaFieldList({
@@ -87,9 +112,7 @@ export function SchemaFieldList({
     useSensor(KeyboardSensor),
   );
   const target =
-    editing.value === "new"
-      ? blankField(mode)
-      : fields.find((field) => field._id === editing.value);
+    editing.value === "new" ? blankField() : fields.find((field) => field._id === editing.value);
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -141,6 +164,7 @@ export function SchemaFieldList({
                     <FieldRow
                       key={field._id}
                       field={field}
+                      mode={mode}
                       onEdit={() => editing.open(field._id)}
                       onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
                     />
@@ -174,23 +198,18 @@ export function SchemaFieldList({
   );
 }
 
-function blankField(mode: SchemaMode): SchemaField {
-  return {
-    _id: crypto.randomUUID(),
-    key: "",
-    type: "string",
-    description: "",
-    required: false,
-    ...(mode === "input" ? { placeholder: "", default: "", enumValues: "" } : {}),
-  };
+function blankField(): SchemaField {
+  return { _id: crypto.randomUUID(), key: "", required: false, prop: { type: "string" } };
 }
 
 function FieldRow({
   field,
+  mode,
   onEdit,
   onRemove,
 }: {
   field: SchemaField;
+  mode: SchemaMode;
   onEdit: () => void;
   onRemove: () => void;
 }) {
@@ -220,14 +239,16 @@ function FieldRow({
       <TableCell className="text-sm">{field.key || "—"}</TableCell>
       <TableCell>
         <Badge variant="outline" className="font-normal">
-          {field.isFile ? t("editor.fieldTypeFile") : field.type}
+          {fileKind(field.prop, mode) !== "none"
+            ? t("editor.fieldTypeFile")
+            : fieldType(field.prop, mode)}
         </Badge>
       </TableCell>
       <TableCell className="text-muted-foreground text-sm">
         {field.required ? t("editor.fieldRequiredYes") : "—"}
       </TableCell>
       <TableCell className="text-muted-foreground max-w-[20rem] truncate text-sm">
-        {field.description || "—"}
+        {field.prop.description || "—"}
       </TableCell>
       <TableCell className="text-right">
         <TableRowActions menuLabel={t("editor.fieldActions", { name: field.key })}>
@@ -265,15 +286,21 @@ function FieldModal({
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<SchemaField>) => setDraft((d) => ({ ...d, ...patch }));
 
+  const { prop } = draft;
+  const setProp = (next: JSONSchema7) => set({ prop: next });
   const key = toSlug(draft.key);
   const keyError = !key
     ? t("editor.fieldKeyRequired")
     : takenKeys.includes(key)
       ? t("editor.fieldKeyTaken")
       : null;
-  const isFile = mode === "input" && Boolean(draft.isFile);
-  const isString = draft.type === "string" && !isFile;
-  const isNumeric = draft.type === "number" || draft.type === "integer";
+  const type = fieldType(prop, mode);
+  const kind = fileKind(prop, mode);
+  const isFile = kind !== "none";
+  const isString = type === "string" && !isFile;
+  const isNumeric = type === "number" || type === "integer";
+  const isArray = type === "array";
+  const itemsEnum = itemsEnumText(prop);
 
   return (
     <Modal
@@ -308,20 +335,23 @@ function FieldModal({
           </Row>
           <Row label={t("editor.fieldTypeLabel")}>
             <Select
-              value={isFile ? "file" : draft.type}
-              onValueChange={(v) =>
-                v === "file"
-                  ? set({ type: "string", isFile: true })
-                  : set({ type: v, isFile: false })
-              }
+              value={isFile ? "file" : type}
+              onValueChange={(v) => {
+                if (v === "file") {
+                  if (!isFile) setProp(setFileKind(prop, "single"));
+                  return;
+                }
+                const next = TYPE_OPTIONS.find((o) => o === v);
+                if (next && (isFile || next !== type)) setProp(changeType(prop, next));
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TYPE_OPTIONS.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {type}
+                {TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
                   </SelectItem>
                 ))}
                 {mode === "input" && (
@@ -332,7 +362,10 @@ function FieldModal({
           </Row>
         </div>
         <Row label={t("editor.fieldDescLabel")}>
-          <Input value={draft.description} onChange={(e) => set({ description: e.target.value })} />
+          <Input
+            value={prop.description ?? ""}
+            onChange={(e) => setProp(setKeyword(prop, "description", e.target.value || undefined))}
+          />
         </Row>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
@@ -342,7 +375,7 @@ function FieldModal({
           {t("editor.fieldRequired")}
         </label>
 
-        {mode === "input" && draft.type !== "boolean" && draft.type !== "object" && (
+        {mode === "input" && (
           <div className="border-border border-t pt-3">
             <button
               type="button"
@@ -364,62 +397,88 @@ function FieldModal({
                       />
                     </Row>
                     <Row label={t("editor.fieldMaxSizeLabel")}>
-                      <Input
-                        value={draft.maxSize ?? ""}
-                        onChange={(e) => set({ maxSize: e.target.value })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
+                      <DraftInput
+                        text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
+                        onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
                       />
                     </Row>
                     <label className="flex items-center gap-2 text-sm">
                       <Checkbox
-                        checked={draft.multiple ?? false}
-                        onCheckedChange={(v) => set({ multiple: Boolean(v) })}
+                        checked={kind === "multiple"}
+                        onCheckedChange={(v) =>
+                          setProp(setFileKind(prop, v ? "multiple" : "single"))
+                        }
                       />
                       {t("editor.fieldMultipleLabel")}
                     </label>
-                    {draft.multiple && (
+                    {kind === "multiple" && (
                       <Row label={t("editor.fieldMaxFilesLabel")}>
-                        <Input
-                          value={draft.maxFiles ?? ""}
-                          onChange={(e) => set({ maxFiles: e.target.value })}
+                        <NumberKeywordInput
+                          prop={prop}
+                          keyword="maxItems"
+                          placeholder=""
+                          className=""
+                          onChange={setProp}
                         />
                       </Row>
                     )}
                   </>
                 ) : (
                   <>
-                    <Row label={t("editor.fieldDefaultLabel")}>
-                      <Input
-                        value={draft.default ?? ""}
-                        onChange={(e) => set({ default: e.target.value })}
-                      />
-                    </Row>
+                    {(isTextType(type) || prop.default !== undefined) && (
+                      <Row label={t("editor.fieldDefaultLabel")}>
+                        <KeywordInput
+                          value={valueToText(prop.default, type)}
+                          onCommit={(text) =>
+                            setProp(setKeyword(prop, "default", textToValue(text, type)))
+                          }
+                          placeholder=""
+                          className=""
+                        />
+                      </Row>
+                    )}
                     <Row label={t("editor.fieldPlaceholderLabel")}>
                       <Input
                         value={draft.placeholder ?? ""}
                         onChange={(e) => set({ placeholder: e.target.value })}
                       />
                     </Row>
-                    {draft.type === "array" ? (
-                      <Row label={t("editor.fieldEnumLabel")}>
-                        <Input
-                          value={draft.arrayEnumItems ?? ""}
-                          onChange={(e) => set({ arrayEnumItems: e.target.value })}
-                        />
-                      </Row>
-                    ) : (
-                      <Row label={t("editor.fieldEnumLabel")}>
-                        <Input
-                          value={draft.enumValues ?? ""}
-                          onChange={(e) => set({ enumValues: e.target.value })}
-                        />
-                      </Row>
-                    )}
+                    {isArray
+                      ? (isTextType(itemType(prop)) || itemsEnum.locked) && (
+                          <Row label={t("editor.fieldEnumLabel")}>
+                            <KeywordInput
+                              value={itemsEnum}
+                              onCommit={(text) =>
+                                setProp(setItemsEnum(prop, textToList(text, itemType(prop))))
+                              }
+                              placeholder=""
+                              className=""
+                            />
+                          </Row>
+                        )
+                      : (isTextType(type) || prop.enum !== undefined) && (
+                          <Row label={t("editor.fieldEnumLabel")}>
+                            <KeywordInput
+                              value={listToText(prop.enum, type)}
+                              onCommit={(text) => {
+                                const values = textToList(text, type);
+                                setProp(
+                                  setKeyword(prop, "enum", values.length > 0 ? values : undefined),
+                                );
+                              }}
+                              placeholder=""
+                              className=""
+                            />
+                          </Row>
+                        )}
                     {isString && (
                       <>
                         <Row label={t("editor.fieldFormat")}>
                           <Select
-                            value={draft.format || "__none"}
-                            onValueChange={(v) => set({ format: v === "__none" ? undefined : v })}
+                            value={prop.format || "__none"}
+                            onValueChange={(v) =>
+                              setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
+                            }
                           >
                             <SelectTrigger>
                               <SelectValue />
@@ -434,21 +493,29 @@ function FieldModal({
                           </Select>
                         </Row>
                         <Row label="minLength">
-                          <Input
-                            value={draft.minLength ?? ""}
-                            onChange={(e) => set({ minLength: e.target.value })}
+                          <NumberKeywordInput
+                            prop={prop}
+                            keyword="minLength"
+                            placeholder=""
+                            className=""
+                            onChange={setProp}
                           />
                         </Row>
                         <Row label="maxLength">
-                          <Input
-                            value={draft.maxLength ?? ""}
-                            onChange={(e) => set({ maxLength: e.target.value })}
+                          <NumberKeywordInput
+                            prop={prop}
+                            keyword="maxLength"
+                            placeholder=""
+                            className=""
+                            onChange={setProp}
                           />
                         </Row>
                         <Row label="pattern">
                           <Input
-                            value={draft.pattern ?? ""}
-                            onChange={(e) => set({ pattern: e.target.value })}
+                            value={prop.pattern ?? ""}
+                            onChange={(e) =>
+                              setProp(setKeyword(prop, "pattern", e.target.value || undefined))
+                            }
                             className="font-mono"
                           />
                         </Row>
@@ -457,21 +524,30 @@ function FieldModal({
                     {isNumeric && (
                       <>
                         <Row label="min">
-                          <Input
-                            value={draft.minimum ?? ""}
-                            onChange={(e) => set({ minimum: e.target.value })}
+                          <NumberKeywordInput
+                            prop={prop}
+                            keyword="minimum"
+                            placeholder=""
+                            className=""
+                            onChange={setProp}
                           />
                         </Row>
                         <Row label="max">
-                          <Input
-                            value={draft.maximum ?? ""}
-                            onChange={(e) => set({ maximum: e.target.value })}
+                          <NumberKeywordInput
+                            prop={prop}
+                            keyword="maximum"
+                            placeholder=""
+                            className=""
+                            onChange={setProp}
                           />
                         </Row>
                         <Row label="step">
-                          <Input
-                            value={draft.step ?? ""}
-                            onChange={(e) => set({ step: e.target.value })}
+                          <NumberKeywordInput
+                            prop={prop}
+                            keyword="multipleOf"
+                            placeholder=""
+                            className=""
+                            onChange={setProp}
                           />
                         </Row>
                       </>

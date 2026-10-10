@@ -1,5 +1,5 @@
 {
-  "id": "848cbea6-7beb-4f34-b2cf-fbae39d1cb9c",
+  "id": "2c0a7710-6638-49e7-b732-24e14a20a072",
   "prevId": "b90ff3e2-cccb-466d-9bb9-a471abe1e444",
   "version": "7",
   "dialect": "postgresql",
@@ -630,6 +630,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -657,6 +663,21 @@
             },
             {
               "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_model_provider_credentials_owner": {
+          "name": "idx_model_provider_credentials_owner",
+          "columns": [
+            {
+              "expression": "owner_user_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -716,6 +737,15 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "model_provider_credentials_owner_user_id_user_id_fk": {
+          "name": "model_provider_credentials_owner_user_id_user_id_fk",
+          "tableFrom": "model_provider_credentials",
+          "tableTo": "user",
+          "columnsFrom": ["owner_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1049,11 +1079,17 @@
           "primaryKey": false,
           "notNull": true
         },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "credential_id": {
           "name": "credential_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "input": {
           "name": "input",
@@ -1182,6 +1218,34 @@
           ],
           "isUnique": true,
           "where": "\"org_models\".\"aliased\" = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_org_models_unbound": {
+          "name": "uq_org_models_unbound",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "model_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"org_models\".\"credential_id\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1513,12 +1577,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3077,6 +3135,12 @@
           "name": "credential_source",
           "type": "credential_source",
           "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credential_id": {
+          "name": "credential_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },

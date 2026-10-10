@@ -49,6 +49,7 @@ import {
   manifestToMetadata,
   metadataToManifestPatch,
   manifestToSchemaFields,
+  manifestSchemaWrapper,
   getResourceEntries,
   setResourceEntries,
   getRuntimeTools,
@@ -229,7 +230,7 @@ function AgentEditorInner({
 
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     setSchemaFields((prev) => ({ ...prev, [key]: fields }));
-    const wrapper = fieldsToSchema(fields, key);
+    const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
       updateManifest({ [key]: wrapper });
     } else {

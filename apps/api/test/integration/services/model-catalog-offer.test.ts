@@ -123,9 +123,9 @@ describe("live model catalog — what an org and a system model get", () => {
         models: [{ id: "m-next", modelId: id }],
       },
     ]);
-    expect(await loadModel(ctx.orgId, "m-next")).toMatchObject({
+    expect(await loadModel(ctx.orgId, "m-next", null)).toMatchObject({
       modelId: id,
-      isSystemModel: true,
+      credentialSource: "system",
       dialect: null,
       cost: null,
     });

@@ -17,6 +17,7 @@ import type { LlmProxyAdapter } from "../../../src/services/llm-proxy/types.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedOrgModelProviderOAuth, seedOrgModel } from "../../helpers/seed.ts";
 
 // Minimal adapter for the `test-oauth` provider's apiShape. None of its
@@ -33,6 +34,7 @@ const adapter: LlmProxyAdapter = {
 beforeEach(async () => {
   await truncateAll();
   seedTestModelProviders();
+  initSystemModelProviderKeys([]);
 });
 
 describe("proxyLlmCall — OAuth-subscription rejection", () => {
@@ -65,6 +67,7 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
           orgId: ctx.orgId,
           userId: ctx.user.id,
         },
+        payerUserId: null,
         runId: null,
         chatSessionId: null,
         requestId: "req_test",

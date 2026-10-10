@@ -123,6 +123,12 @@ export interface ChatHost {
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;
+  /**
+   * Whether the organization lets members bring personal model credentials. The
+   * shell reads it from the org settings; when off, a refusal that a personal
+   * credential would fix names no link to add one.
+   */
+  personalModelCredentials: boolean;
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
 }

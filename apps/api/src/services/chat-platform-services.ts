@@ -27,7 +27,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import { loadModel, modelNeedsReconnection } from "./org-models.ts";
+import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
 import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
@@ -39,15 +39,18 @@ import { db } from "@appstrate/db/client";
 
 /**
  * Resolve the chosen chat model preset to its real upstream binding for one
- * chat turn. Only oauth-subscription (authMode `oauth2`) models take the Pi
- * chat-engine path; everything else returns `{ subscription: false }` so the
- * chat module binds the same engine to the llm-proxy instead.
+ * chat turn, for the session user `userId` (their own subscription serves a model
+ * the organization leaves unbound). Only oauth-subscription (authMode `oauth2`)
+ * models take the Pi chat-engine path; everything else returns
+ * `{ subscription: false }` so the chat module binds the same engine to the
+ * llm-proxy instead.
  */
 export async function resolveChatModel(
   orgId: string,
   presetId: string,
+  userId: string,
 ): Promise<ChatModelResolution> {
-  const resolved = await loadModel(orgId, presetId);
+  const resolved = await loadModel(orgId, presetId, userId);
   if (!resolved) {
     // A model that resolves to nothing because its stored credential is dead —
     // oauth flagged needs-reconnection, or (either auth mode) a secret that no
@@ -57,7 +60,7 @@ export async function resolveChatModel(
     // already returned null, so nothing is resolvable and no spend can happen
     // on either branch: this only decides which error the user is shown, and
     // "reconnect that credential" is the actionable one.
-    if (await modelNeedsReconnection(orgId, presetId)) {
+    if (await modelNeedsReconnection(orgId, presetId, userId)) {
       return { subscription: true, needsReconnection: true };
     }
     return { subscription: false };
@@ -84,16 +87,22 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // An oauth2 model with no credential can never be spent — a reconnect (which
-  // creates the credential) is the fix, so surface the reconnect prompt rather
-  // than a raw error.
-  if (!resolved.credentialId) {
+  // An unbound subscription model names no credential the user can spend: a dead
+  // one of theirs asks for a reconnect, none at all for a credential to add.
+  if (
+    resolved.credentialSource === null &&
+    (await modelNeedsReconnection(orgId, presetId, userId))
+  ) {
+    return { subscription: true, needsReconnection: true };
+  }
+  const { credentialId } = requireBoundModel(resolved, userId);
+  if (!credentialId) {
     return { subscription: true, needsReconnection: true };
   }
 
   let token: Awaited<ReturnType<typeof resolveOAuthTokenForSidecar>>;
   try {
-    token = await resolveOAuthTokenForSidecar(resolved.credentialId, orgId);
+    token = await resolveOAuthTokenForSidecar(credentialId, orgId);
   } catch (err) {
     // `gone()` (HTTP 410) is a refresh-time revocation — surface as reconnect.
     if (err instanceof ApiError && err.status === 410) {
@@ -113,6 +122,7 @@ export async function resolveChatModel(
       maxTokens: resolved.maxTokens ?? null,
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
+      credentialId,
       accessToken: token.accessToken,
     },
   };
@@ -200,6 +210,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
+        credentialId: record.credentialId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -250,6 +261,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     inline in the platform's process, so the platform funds its compute and a
  *     module gating on subscription status must be able to refuse it.
  *
+ * A turn on an unbound model (no credential the session user can spend) is
+ * refused with `model_credential_required` before dispatch.
+ *
  * Returns null when no module provides the hook (OSS mode allows everything),
  * except for a reserved deletion, which refuses whatever the deployment loads.
  */
@@ -258,10 +272,28 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
   subscription: boolean;
+  userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
+
+  // A platform rule, not an admission decision: it holds with or without a module.
+  // A model the organization leaves to each member, which the session user holds
+  // no credential for, is refused here (a subscription turn was refused upstream).
+  if (!args.subscription) {
+    const resolved = await loadModel(args.orgId, args.presetId, args.userId);
+    if (resolved?.credentialSource === null) {
+      try {
+        requireBoundModel(resolved, args.userId);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          return { code: err.code, message: err.message, status: err.status };
+        }
+        throw err;
+      }
+    }
+  }
 
   if (!hasHook("beforeUsage")) return null;
   // Fail-closed on a caller that omits `subscription` — the flag became

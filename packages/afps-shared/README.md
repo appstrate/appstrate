@@ -39,6 +39,7 @@ import each module by subpath.
 | `./backoff`                          | Retry backoff computation.                                                                                                                                  |
 | `./jsonpath`                         | The single-value RFC 9535 JSONPath subset every integration-manifest path field is read with (`identity_claims`, login-engine selectors).                   |
 | `./runtime-expression`               | The Arazzo runtime expressions a `connect.login` block reads its response with (`$statusCode`, `$response.body[#ptr]`, `$response.header.<name>`).          |
+| `./json-text`                        | `jsonText`: a string passes through, any other JSON value is JSON-encoded (never `[object Object]`).                                                        |
 
 ```ts
 import { guardedFetch } from "@appstrate/afps-shared/guarded-fetch";

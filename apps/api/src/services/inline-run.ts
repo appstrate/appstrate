@@ -344,7 +344,7 @@ export function normalizeContextFileUris(value: unknown): string[] {
     if (!isFileUri(entry)) {
       throw invalidRequest(
         "`context_files` entries must be appfile:// URIs (typically taken from a previous " +
-          `run's files result) — got '${String(entry)}'`,
+          `run's files result) — got ${JSON.stringify(entry)}`,
         "context_files",
       );
     }
@@ -369,6 +369,8 @@ export async function triggerInlineRun(params: {
   orgId: string;
   spaceId: string;
   actor: Actor | null;
+  /** Whose personal model credentials may serve the run (the route's `requestPayerUserId(c)`). */
+  payerUserId: string | null;
   /** Pre-minted run id — input files already live in its workspace namespace. */
   runId: string;
   /** Preflight result the route computed BEFORE streaming any input file. */
@@ -379,7 +381,8 @@ export async function triggerInlineRun(params: {
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
-  const { orgId, spaceId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
+  const { orgId, spaceId, actor, payerUserId, runId, preflight, parsed, apiKeyId, traceparent } =
+    params;
   const { manifest, prompt, modelIdOverride, proxyIdOverride, launchOverrides } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
@@ -413,6 +416,7 @@ export async function triggerInlineRun(params: {
       agent: shadowAgent,
       orgId,
       actor,
+      payerUserId,
       input: effectiveInput,
       // File metadata for prompt context — the file bytes were already
       // streamed into the run workspace by `parseRequestInput`.

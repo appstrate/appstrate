@@ -5,7 +5,7 @@
 // Single- and multi-selects both use react-select so we get a rich,
 // consistent dropdown in every Appstrate surface.
 
-import type { WidgetProps } from "@rjsf/utils";
+import { deepEquals, type WidgetProps } from "@rjsf/utils";
 import Select, { type StylesConfig } from "react-select";
 import { cn } from "../cn.ts";
 import { LABEL_CLASS } from "./primitives.tsx";
@@ -89,11 +89,17 @@ function noOptionsMessage(props: WidgetProps): () => string {
   return () => labels?.noOptions ?? "No options";
 }
 
+/** Primitives compare by text ("1" matches 1); objects deeply, since jsonb reorders keys. */
+function sameOptionValue(a: unknown, b: unknown): boolean {
+  if (typeof a === "object" || typeof b === "object") return deepEquals(a, b);
+  return String(a) === String(b);
+}
+
 export function SelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options, placeholder } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
-  const selected = enumOptions.find((o) => String(o.value) === String(value)) ?? null;
+  const selected = enumOptions.find((o) => sameOptionValue(o.value, value)) ?? null;
 
   return (
     <Select<EnumOption, false>
@@ -117,7 +123,7 @@ export function MultiSelectWidget(props: WidgetProps) {
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
   const raw = Array.isArray(value) ? value : [];
-  const selected = enumOptions.filter((o) => raw.some((v) => String(v) === String(o.value)));
+  const selected = enumOptions.filter((o) => raw.some((v) => sameOptionValue(v, o.value)));
 
   return (
     <Select<EnumOption, true>

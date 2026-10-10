@@ -32,6 +32,7 @@ import {
   createFakeOrchestrator,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
 
@@ -252,13 +253,9 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "",
       });
-      const modelDbId = await createOrgModel(
-        ctx.orgId,
-        "Blank GPT",
-        "gpt-5.5",
-        ctx.user.id,
+      const modelDbId = await createOrgModel(ctx.orgId, "Blank GPT", "gpt-5.5", ctx.user.id, {
         credentialId,
-      );
+      });
       // First org model auto-defaults, but pin it explicitly so the test is
       // robust to that behavior changing.
       await setDefaultModel(ctx.orgId, modelDbId);
@@ -329,7 +326,7 @@ describe("Runs API", () => {
         providerId: "openai",
         apiKey: "sk-test-not-a-real-key",
       });
-      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, credentialId);
+      return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, { credentialId });
     }
 
     it("echoes the org default's model_label and model_source 'org'", async () => {
@@ -421,13 +418,19 @@ describe("Runs API", () => {
 
     it("leaves an OAuth subscription run's inference with its sidecar", async () => {
       await seedRunnableAgent();
-      const credential = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+      // The subscription is the launching member's own credential; the model is unbound,
+      // so the run's payer serves it with that subscription.
+      const credential = await seedOrgModelProviderOAuth({
+        orgId: ctx.orgId,
+        ownerUserId: ctx.user.id,
+        createdBy: ctx.user.id,
+      });
       const modelDbId = await createOrgModel(
         ctx.orgId,
         "Echo Subscription",
-        "gpt-5.5",
+        TEST_OAUTH_MODEL_ID,
         ctx.user.id,
-        credential.id,
+        { credentialId: null, providerId: TEST_OAUTH_PROVIDER_ID },
       );
       await setDefaultModel(ctx.orgId, modelDbId);
 
@@ -442,6 +445,8 @@ describe("Runs API", () => {
       const [row] = await db.select().from(runs).where(eq(runs.id, id));
       expect(row!.inferenceRoute).toBe("sidecar");
       expect(row!.modelId).toBe(modelDbId);
+      // The run froze the payer's own subscription as its credential.
+      expect(row!.modelCredentialId).toBe(credential.id);
 
       await waitForRunPipelineSettled();
     });

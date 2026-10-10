@@ -2,11 +2,10 @@
 
 /**
  * Where an `integration_connections` row may be used. A row's scope is the tier of the client that
- * minted it: `space_id` set serves that space only, `space_id` NULL serves every space of its org —
- * except a space whose default OAuth client for the row's auth is its own manual one, unless the
- * row was connected from there (`origin_space_id`). Within that reach, an actor uses their own rows
- * and the rows shared into the space; `block_user_connections` restricts their own rows to the
- * shared ones and those made in the space (which passed its creation gate, or predate the block).
+ * minted it: `space_id` set serves that space only, `space_id` NULL serves every space of its org.
+ * Within that reach, an actor uses their own rows and the rows shared into the space;
+ * `block_user_connections` restricts their own rows to the shared ones and those made in the space
+ * (`coalesce(space_id, origin_space_id)`: they passed its creation gate, or predate the block).
  *
  * Every predicate is over the unaliased `integration_connections` table.
  */
@@ -24,7 +23,6 @@ import {
 } from "drizzle-orm";
 import {
   integrationConnections as c,
-  integrationOauthClients as o,
   packageShares,
   packages,
   spacePackages,
@@ -37,37 +35,9 @@ function orgOf(spaceId: string): SQL {
   return sql`(SELECT ${spaces.orgId} FROM ${spaces} WHERE ${spaces.id} = ${spaceId})`;
 }
 
-/**
- * Over `integration_oauth_clients`: a space's own manual default client for (integration, auth).
- * The space holding one is closed to org rows of that auth not connected from it.
- */
-export function ownManualDefaultClient(
-  integrationId: SQLWrapper | string,
-  authKey: SQLWrapper | string,
-): SQL {
-  return and(
-    eq(o.integrationId, integrationId),
-    eq(o.authKey, authKey),
-    sql`${o.isDefault} AND NOT ${o.autoProvisioned}`,
-  )!;
-}
-
 /** The rows that may serve space `spaceId`, whoever owns them. */
 export function connectionInSpace(spaceId: string): SQL {
-  return and(
-    eq(c.orgId, orgOf(spaceId)),
-    or(
-      eq(c.spaceId, spaceId),
-      and(
-        isNull(c.spaceId),
-        or(
-          eq(c.originSpaceId, spaceId),
-          sql`NOT EXISTS (SELECT 1 FROM ${o} WHERE ${o.spaceId} = ${spaceId}
-            AND ${ownManualDefaultClient(c.integrationId, c.authKey)})`,
-        ),
-      ),
-    ),
-  )!;
+  return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), isNull(c.spaceId)))!;
 }
 
 function sharedInto(spaceId: string): SQL {

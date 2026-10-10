@@ -34,3 +34,8 @@ export function isModelPinUnavailable(
   const pinned = orgModels.find((m) => m.id === pinnedModelId);
   return !pinned || !isModelSelectable(pinned);
 }
+
+/** A model each member serves with their own credential: never one a schedule may run on. */
+export function isMemberPaid(model: OrgModelInfo): boolean {
+  return model.source === "custom" && !model.aliased && model.credentialId === null;
+}

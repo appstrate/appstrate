@@ -473,11 +473,14 @@ function TurnLimitNotice() {
  * not reached a finish chunk yet.
  */
 export function MessageError() {
-  const { t, can } = useChatHost();
+  const { t, can, personalModelCredentials } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const errorState = React.useMemo(() => turnErrorState(message, t, can), [message, t, can]);
+  const errorState = React.useMemo(
+    () => turnErrorState(message, t, can, personalModelCredentials),
+    [message, t, can, personalModelCredentials],
+  );
   if (!errorState) return null;
   return (
     <div

@@ -157,9 +157,11 @@ export async function getAgentDiagnostics(args: {
   canConfigureIntegrations: boolean;
   /** A user credential reaches the connections of every space it belongs to; a delegated one only this space. */
   wholeReach: boolean;
+  /** Who would pay the model of a launch: `requestPayerUserId(c)`, computed at the door. */
+  payerUserId: string | null;
   version?: string;
 }): Promise<AgentDiagnosticsResult> {
-  const { scope, actor, canConnect, canConfigureIntegrations, wholeReach } = args;
+  const { scope, actor, canConnect, canConfigureIntegrations, wholeReach, payerUserId } = args;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
@@ -182,7 +184,7 @@ export async function getAgentDiagnostics(args: {
       wholeReach,
       version: versionRef,
     }),
-    resolveModel(scope.orgId, agent.id, packageConfig.modelId),
+    resolveModel(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
     listPackageSchedules(scope, agent.id, actor, undefined),
   ]);
 

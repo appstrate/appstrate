@@ -129,8 +129,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from this release together. An image built from this tree pulls the new
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
+- **Model credentials: `pg_dump` before the deploy, then script `0042` after
+  it** (#1875). Migration `0087` runs at boot (`model_provider_credentials.owner_user_id`,
+  `org_models.provider_id` backfilled from each bound credential, a nullable
+  `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
+  rolling back past it means restoring the dump. Then, app up, run
+  `scripts/migration/0042-personal-model-subscriptions.ts` dry, read its report,
+  and run it with `--apply`: it makes existing subscriptions personal to their
+  creator and unbinds the models bound to them, and refuses an organization it
+  cannot migrate safely (`scripts/migration/README.md`). Production never
+  enables a subscription module, so its report should show none.
+
 ### Changed
 
+- **BREAKING (API): members bring their own model credentials for the models
+  the organization leaves to them** (#1875). A model bound to an organization
+  credential is paid by the organization, and a built-in model by the platform,
+  whoever calls. A model with no organization credential (`credentialId: null`,
+  "each member uses their own credential") is served only by the payer's own
+  applicable credential (a subscription first, then the oldest API key on a
+  fixed endpoint), else refused with `409 model_credential_required`. Only a
+  user principal pays (session, CLI, MCP instance token, chat loopback): an API
+  key, a third-party OAuth token, an end user and a schedule never spend a
+  personal credential. The rules: `docs/architecture/MODEL_ALIASES.md`,
+  "Who pays".
+  - Model DTO: `credentialId` is nullable, and `billed_to` (`user` | `org` |
+    `null`, for the caller) is added. `POST /api/models` takes `providerId`, which a `null`
+    `credentialId` requires; binding a personal credential is refused with
+    `400 personal_credential_not_bindable`. One unbound model per provider and
+    model id.
+  - Credential DTO: `owner_type` (`org` | `user`), `owner_id`, `owner_name`.
+    `POST /api/model-provider-credentials` takes `owner_type` (default `org`);
+    `user` needs the new `model-provider-credentials:connect` action (granted to
+    member and guest) and refuses a custom endpoint
+    (`400 personal_credential_custom_endpoint`). `read` lists every organization
+    credential; without it a caller lists only its own. Deleting an
+    organization credential, or a member's (break-glass), takes `delete`. An
+    administrator sees no `oauth_email` on a member's subscription, and labels
+    are deduplicated within their owner's scope.
+  - Org setting `personal_model_credentials` (default on). Off, personal
+    credentials can be neither created, reconnected, probed nor spent, and a run
+    pinned to one is refused at its next call.
+  - A run's proxy calls on a member-paid model serve the personal credential
+    frozen at launch; one deleted mid-run is never replaced by another payer's.
+    The public LLM proxy never serves a subscription. The sidecar's token door
+    serves a subscription only to a run its owner launched without an API key.
+  - Schedules spend organization credentials only: a member-paid model cannot be
+    a schedule's `model_id_override` (`409 model_credential_required`), a model
+    a schedule overrides with cannot be unbound (`409 model_scheduled`), and a
+    schedule firing one through an agent's or the organization's default fails.
+  - A subscription is reconnected only by its holder, judged at redeem time.
+  - `llm_usage.credential_id` (uuid, no foreign key) records the credential that
+    served a call (NULL for a platform key or an alias).
+  - `needs_reconnection` is read for the caller on an unbound model: true when
+    nothing of theirs serves it and one of their own credentials for it is dead.
+- **BREAKING (modules): the chat platform services take the session user**
+  (#1875). `resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ ..., userId })`. See `packages/core/CHANGELOG.md`.
+
+- **`@appstrate/twilio` 1.1.0 reaches Twilio's product API hosts** (#1904):
+  `messaging`, `conversations`, `studio`, `serverless`, `numbers`, `voice`
+  and every other host in Twilio's OpenAPI specs: 38 hosts, the former
+  `api`, `lookups` and `verify` among them. Calls to Messaging Services,
+  Conversations, Studio or Serverless were refused before. The list names
+  each host, not a `*.twilio.com` wildcard: some `twilio.com` subdomains are
+  run by third parties (`status`, `support`, `community`) and must never
+  receive the credential. The connect form is in French. An agent with a
+  version range resolves to 1.1.0 and gets the wider allowlist; one pinned
+  to 1.0.3 keeps the old one.
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).
   - `shared_with_org` is gone from the connection DTOs (connection list,
@@ -164,10 +230,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   system client, an org client or none (API key, basic, fields) makes it
   usable by its owner in every space of the org; a space's own OAuth client,
   an end user, or a delegated credential (API key, third-party token)
-  keeps it in that space. A space whose default OAuth client
-  for that auth is its own uses only the org-wide connections connected from
-  it. The
-  owner shares a connection with chosen spaces; losing access to a space
+  keeps it in that space. Registering a space's own OAuth client changes
+  which client mints its new connections, never which existing ones serve
+  it. The owner shares a connection with chosen spaces; losing access to a space
   withdraws that share only, and deleting a space withdraws it from every
   share. With several of their own connections, a member's run binds the one
   made in the run's space. Promoting a space OAuth client to the org widens
@@ -442,6 +507,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Personal model credentials** (#1875). A member brings their own model
+  credential (an API key for a fixed-endpoint provider, or a subscription where
+  a subscription module is enabled) from Préférences → Identifiants de modèle,
+  for the models the organization sets to « Chaque membre utilise son propre
+  identifiant ». Every other model stays paid by the organization. The run and
+  chat pickers say « Votre identifiant » or « Identifiant requis », the chat
+  links to the fix, and an organization setting can switch the feature off.
+  Leaving the organization deletes the member's personal credentials.
+
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
   the agent needs at least one connection of that integration to run (#1830).
   The agent editor has a "required" toggle per integration, and the
@@ -518,6 +592,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with other tools); a self-hosted browser is #1827. `tools/list` is public, so
   the weekly conformance monitor checks tool parity without a credential.
 
+- **Browserless — headless browsers over Browserless's MCP server, Cloud or
+  self-hosted (#1893).** `@appstrate/browserless@1.0.0` speaks `streamable-http`
+  to a `base_url` connection variable defaulting to the Cloud
+  (`https://mcp.browserless.io/mcp`), as `twenty-mcp` and `gitlab-mcp` do.
+  Self-hosted is `@browserless.io/mcp` (SSPL-1.0, for operators who run it)
+  started with `TRANSPORT=httpStream` and pointed at the operator's Browserless
+  by `BROWSERLESS_API_URL`. One `api_key` auth, sent as `Authorization: Bearer`,
+  valid on both. Not OAuth: Browserless Cloud's dynamic client registration
+  accepts only a fixed allowlist of redirect URIs and refuses Appstrate's
+  callback (`invalid_redirect_uri`, observed live). Tools mirror the Cloud's
+  live `tools/list`. `hidden_tools` holds `browserless_link_connect` and
+  `browserless_link_checkout` (Stripe Link wallet, payment checkout), and
+  `browserless_agent`, whose input schema exceeds the sidecar's 8 KB
+  tool-schema cap, so it could never reach an agent. No
+  `allow_undeclared_tools`: a new upstream tool is reviewed first. On the
+  open-source image, `browserless_function` (Puppeteer code) and
+  `browserless_skill` (local recipes) work; the Cloud account tools are not
+  served; scraping, export, map, search and crawl need Cloud/Enterprise routes.
+  `tools/list` requires a token: the weekly conformance monitor checks parity
+  once a Cloud token for `@appstrate/browserless` is in `CONFORMANCE_TOKENS`.
+  Cloud calls consume units.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
@@ -529,6 +625,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the payload Pi builds.
 
 ### Fixed
+
+- **The connect form lists credential fields in the schema's `required`
+  order, required fields first** (#1904). jsonb storage reorders a schema's
+  `properties` keys, so the form followed that order, not the author's. This
+  puts Twilio's Account SID before its Auth Token, and reorders the
+  `@appstrate/zendesk` and `@appstrate/activecampaign` forms.
 
 - **The OAuth consent and device-activation pages introduce the scope list
   with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover

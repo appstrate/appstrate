@@ -315,9 +315,10 @@ export const runs = pgTable(
     /**
      * The `model_provider_credentials` row this run is allowed to fetch
      * tokens for (via `/internal/oauth-token/:credentialId`). Snapshotted
-     * at run creation time. Stamped only for platform-origin runs that
-     * resolve to an OAuth model provider — null otherwise (API-key model,
-     * remote-origin run, scheduler synthesis pre-resolution).
+     * at run creation time. Stamped for every platform-origin run whose
+     * non-aliased model resolves to a DB credential, OAuth or API key. Null
+     * for aliased models, remote-origin runs and scheduler synthesis
+     * pre-resolution.
      *
      * Defense-in-depth: without this binding, a leaked run token could be
      * used to enumerate ALL OAuth credentials of the run's org. With it,
@@ -635,6 +636,10 @@ export const llmUsage = pgTable(
     // run rows are backfilled from `runs.model_source`; chat / un-attributed
     // rows stay NULL (a downstream consumer treats NULL as non-attributable).
     credentialSource: credentialSourceEnum("credential_source"),
+    // The credential that served the call, personal or organization. NULL on
+    // platform-key calls and on rows predating this column. No FK: the ledger
+    // is append-only and a credential can be deleted after the fact.
+    credentialId: uuid("credential_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),

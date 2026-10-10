@@ -17,6 +17,19 @@
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptViewUpload } from "./prompt-renderer.ts";
+import { jsonText } from "@appstrate/afps-shared/json-text";
+
+/**
+ * CommonMark inline code span: the fence is one backtick longer than the
+ * longest run inside the text, padded with spaces when the text starts or
+ * ends with a backtick so the fence cannot merge with it.
+ */
+function inlineCode(text: string): string {
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -367,7 +380,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         if (isFileField(prop)) continue;
         const req = inputRequired.includes(key) ? "required" : "optional";
         const value = input[key];
-        const valueStr = value !== undefined ? ` — \`${String(value)}\`` : "";
+        const valueStr = value !== undefined ? ` — ${inlineCode(jsonText(value))}` : "";
         const propRec = (prop as Record<string, unknown>) ?? {};
         const type = propRec.type;
         const description = typeof propRec.description === "string" ? propRec.description : "";
@@ -377,7 +390,8 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       }
     } else {
       for (const [key, value] of nonFileInputEntries) {
-        sections.push(`- **${key}**: ${String(value)}`);
+        if (value === undefined) continue;
+        sections.push(`- **${key}**: ${jsonText(value)}`);
       }
     }
     sections.push("");

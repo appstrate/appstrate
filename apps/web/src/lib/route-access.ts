@@ -100,6 +100,11 @@ export const ROUTE_ACCESS = {
   "/preferences/devices": OWN_ACCOUNT,
   "/preferences/connections": OWN_ACCOUNT,
   "/preferences/mcp-access": OWN_ACCOUNT,
+  // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.
+  "/preferences/models": {
+    anyOf: ["model-provider-credentials:read", "model-provider-credentials:connect"],
+    operations: ["listModelProviderCredentials"],
+  },
 
   "/chat": { feature: "chat", anyOf: ["chat:read"], operations: ["listChatSessions"] },
   "/chat/:conversationId": {

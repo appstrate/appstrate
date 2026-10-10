@@ -40,6 +40,7 @@ export function useModelColumns({
   onSetDefault,
   canWrite,
   canDelete,
+  credentialLabels,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
   testingIds: ReadonlySet<string>;
@@ -52,8 +53,18 @@ export function useModelColumns({
   /** Resolved once by the page: a row action absent here 403s if clicked. */
   canWrite: boolean;
   canDelete: boolean;
+  /** The organization credentials' labels by id, for those the caller may read. */
+  credentialLabels: ReadonlyMap<string, string>;
 }): DataColumn<OrgModelInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
+  // A managed (aliased) row hides its binding, so it names no credential.
+  // An unbound one is paid by whoever uses it: each member brings their own.
+  const credentialText = (m: OrgModelInfo) =>
+    m.aliased
+      ? "—"
+      : m.credentialId === null
+        ? t("models.credentialEachMember")
+        : (credentialLabels.get(m.credentialId) ?? "—");
 
   return [
     {
@@ -104,6 +115,17 @@ export function useModelColumns({
             : m.source === "built-in"
               ? t("source.builtIn")
               : t("source.custom")}
+        </span>
+      ),
+    },
+    {
+      id: "credential",
+      header: t("models.col.credential"),
+      width: "minmax(84px,1fr)",
+      tier: 3,
+      cell: (m) => (
+        <span className="text-muted-foreground block truncate text-xs" title={credentialText(m)}>
+          {credentialText(m)}
         </span>
       ),
     },
@@ -219,6 +241,8 @@ export function useCredentialColumns({
   onConnectOAuth,
   canWrite,
   canDelete,
+  userId,
+  showOwner = false,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
   testingIds: ReadonlySet<string>;
@@ -231,9 +255,19 @@ export function useCredentialColumns({
   /** Resolved once by the page: a row action absent here 403s if clicked. */
   canWrite: boolean;
   canDelete: boolean;
+  /** The caller: a personal credential is changed by its holder alone. */
+  userId: string | undefined;
+  /** Whether the owner column shows; a personal-only list has one owner, the caller. */
+  showOwner?: boolean;
 }): DataColumn<ModelProviderCredentialInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
   const isOauth = (pk: ModelProviderCredentialInfo) => pk.authMode === "oauth2";
+  const isOwn = (pk: ModelProviderCredentialInfo) =>
+    pk.owner_type === "user" && pk.owner_id === userId;
+  // A personal credential is changed by its holder alone (404 to anyone else),
+  // so an administrator's write right covers the organization's rows only.
+  const canEdit = (pk: ModelProviderCredentialInfo) =>
+    pk.owner_type === "org" ? canWrite : isOwn(pk);
 
   return [
     {
@@ -250,7 +284,9 @@ export function useCredentialColumns({
             <div className="relative z-10 min-w-0">
               <InlineEditableLabel
                 value={pk.label}
-                editable={pk.source === "custom" && !isOauth(pk)}
+                // A subscription is renamed here too: its connection changes only
+                // through the reconnect, never its label.
+                editable={pk.source === "custom" && canEdit(pk)}
                 onSave={(newLabel) => onRename(pk, newLabel)}
               />
               {testResults[pk.id] && (
@@ -267,6 +303,21 @@ export function useCredentialColumns({
         );
       },
     },
+    ...(showOwner
+      ? [
+          {
+            id: "owner",
+            header: t("credentials.col.owner"),
+            width: "minmax(72px,0.8fr)" as const,
+            tier: 3 as const,
+            cell: (pk: ModelProviderCredentialInfo) => (
+              <span className="text-muted-foreground block truncate text-xs">
+                {pk.owner_type === "org" ? t("source.org") : (pk.owner_name ?? "—")}
+              </span>
+            ),
+          },
+        ]
+      : []),
     {
       id: "account",
       header: t("credentials.col.account"),
@@ -327,16 +378,19 @@ export function useCredentialColumns({
       cell: (pk) => {
         const oauth = isOauth(pk);
         const isCustomKey = !oauth && pk.source === "custom";
-        const canReconnect = oauth && pk.needs_reconnection && Boolean(pk.providerId);
+        // Reconnecting is the holder's own act: the helper pairs an account to them.
+        const canReconnect =
+          oauth && pk.needs_reconnection && Boolean(pk.providerId) && isOwn(pk) && canWrite;
+        const canEditKey = isCustomKey && canEdit(pk);
         const isTesting = testingIds.has(pk.id);
         if (!isCustomKey && !oauth) return null;
         return (
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
               primary={
-                isCustomKey && canWrite
+                canEditKey
                   ? { label: t("credentials.edit"), onSelect: () => onEdit(pk) }
-                  : canReconnect && canWrite
+                  : canReconnect
                     ? {
                         label: t("credentials.oauth.reconnect"),
                         onSelect: () => onConnectOAuth(pk),
@@ -348,23 +402,25 @@ export function useCredentialColumns({
               isPending={isTesting}
               pendingLabel={t("common:loading")}
             >
-              {isCustomKey && (
+              {(canEditKey || canDelete) && (
                 <>
-                  <DropdownMenuItem onSelect={() => onTest(pk.id)} disabled={isTesting}>
-                    <FlaskConical />
-                    {t("credentials.test")}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                  {canEditKey && (
+                    <DropdownMenuItem onSelect={() => onTest(pk.id)} disabled={isTesting}>
+                      <FlaskConical />
+                      {t("credentials.test")}
+                    </DropdownMenuItem>
+                  )}
+                  {canEditKey && canDelete && <DropdownMenuSeparator />}
+                  {canDelete && (
+                    <DropdownMenuItem
+                      onSelect={() => onDelete(pk)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 />
+                      {oauth ? t("credentials.oauth.disconnect") : t("credentials.delete")}
+                    </DropdownMenuItem>
+                  )}
                 </>
-              )}
-              {canDelete && (
-                <DropdownMenuItem
-                  onSelect={() => onDelete(pk)}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Trash2 />
-                  {oauth ? t("credentials.oauth.disconnect") : t("credentials.delete")}
-                </DropdownMenuItem>
               )}
             </TableRowActions>
           </div>

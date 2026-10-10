@@ -188,6 +188,7 @@ const SETS = {
         onSetDefault: () => {},
         canWrite: true,
         canDelete: true,
+        credentialLabels: new Map(),
       }),
     ),
   credentials: () =>
@@ -203,6 +204,9 @@ const SETS = {
         onConnectOAuth: () => {},
         canWrite: true,
         canDelete: true,
+        userId: undefined,
+        // The administrator's list, the wider of the two: it adds the owner column.
+        showOwner: true,
       }),
     ),
   proxies: () =>

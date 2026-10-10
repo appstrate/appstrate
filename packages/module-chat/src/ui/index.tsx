@@ -168,6 +168,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
+  /** Whether the organization allows personal model credentials (see `ChatHost`). */
+  personalModelCredentials: boolean;
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
 }
@@ -185,6 +187,7 @@ export function ChatPage({
   uploadFile,
   t,
   can,
+  personalModelCredentials,
   formatBytes,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
@@ -278,9 +281,10 @@ export function ChatPage({
       useFileImageSrc,
       t,
       can,
+      personalModelCredentials,
       formatBytes,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, can, formatBytes],
+    [onOpenFile, downloadFile, useFileImageSrc, t, can, personalModelCredentials, formatBytes],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader

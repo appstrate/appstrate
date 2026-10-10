@@ -101,6 +101,11 @@ describe("normalizeContextFileUris", () => {
     expect(() => normalizeContextFileUris(["https://example.com/a.pdf"])).toThrow(ApiError);
     expect(() => normalizeContextFileUris([42])).toThrow(ApiError);
   });
+
+  it("renders a malformed entry as JSON in the error message", () => {
+    expect(() => normalizeContextFileUris([{ uri: DOC_A }])).toThrow(`got {"uri":"${DOC_A}"}`);
+    expect(() => normalizeContextFileUris(["upload://upl_1"])).toThrow(`got "upload://upl_1"`);
+  });
 });
 
 describe("injectContextFiles", () => {

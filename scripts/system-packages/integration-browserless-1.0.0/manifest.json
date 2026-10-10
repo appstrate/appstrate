@@ -1,0 +1,91 @@
+{
+  "name": "@appstrate/browserless",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Browserless",
+  "icon": "mdi:application-outline",
+  "description": "Browserless's MCP server, on Browserless Cloud or on your own instance (its URL is a connection variable): headless browsers for agents. Scrape a page as markdown, HTML, links, a screenshot or a PDF; crawl or map a site; search the web; fetch a page in its native format, optionally zipped with its resources; run a Lighthouse audit or Puppeteer code. On Cloud, also read account usage, sessions and logs, and get a live viewer link. Connect with an API token. A self-hosted open-source Browserless runs only Puppeteer code and the built-in browsing recipes. Cloud calls consume units.",
+  "keywords": ["browser-automation", "web-scraping", "ai"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL du serveur MCP Browserless",
+          "description": "Browserless Cloud : gardez https://mcp.browserless.io. Auto-hébergé : adresse du serveur @browserless.io/mcp lancé avec TRANSPORT=httpStream et relié à votre instance par BROWSERLESS_API_URL, sans /mcp.",
+          "default": "https://mcp.browserless.io"
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "auths": {
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "title": "Jeton d'API",
+              "description": "Sur Browserless Cloud, le jeton d'API de votre compte (https://browserless.io/account) : chaque appel consomme ses unités. Sur une instance auto-hébergée, le TOKEN de cette instance."
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "hidden_tools": ["browserless_agent", "browserless_link_checkout", "browserless_link_connect"],
+  "tools_policy": {
+    "browserless_account": {},
+    "browserless_agent": {},
+    "browserless_crawl": {},
+    "browserless_export": {},
+    "browserless_function": {},
+    "browserless_link_checkout": {},
+    "browserless_link_connect": {},
+    "browserless_live_url": {},
+    "browserless_logs": {},
+    "browserless_map": {},
+    "browserless_performance": {},
+    "browserless_profiles": {},
+    "browserless_search": {},
+    "browserless_sessions": {},
+    "browserless_skill": {},
+    "browserless_smartscraper": {},
+    "browserless_usage": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

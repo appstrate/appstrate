@@ -18,20 +18,22 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { modelProviderCredentials } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import {
+  assertExplicitModelExists,
   listOrgModels,
   loadModel,
   resolveModel,
   setDefaultModel,
   modelNeedsReconnection,
 } from "../../../src/services/org-models.ts";
+import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 // Imported for its module-level boot: `setDefaultModel` and `listOrgModels`
 // read the model and provider registries only the app helper initialises.
 import "../../helpers/app.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
   corruptCredentialBlob,
   seedOrgModel,
@@ -57,6 +59,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "Subscription model",
       modelId: "gpt-5-codex",
       enabled: true,
@@ -75,6 +78,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "GPT-4o",
       modelId: "gpt-4o",
       enabled: true,
@@ -85,7 +89,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   it("lists a model whose OAuth credential needs reconnection, flagged", async () => {
     const { model } = await seedOAuthModel(true);
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     // The regression: this used to be `undefined`.
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(true);
@@ -100,7 +104,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   it("flags a model on a healthy OAuth credential as false", async () => {
     const { model } = await seedOAuthModel(false);
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(false);
     expect(listed!.providerId).toBe("test-oauth");
@@ -110,7 +114,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   it("flags a model on an api-key credential as false, with the decrypt path untouched", async () => {
     const { cred, model } = await seedApiKeyModel();
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(false);
     // Same resolver as before the flag existed — the projection must stay
@@ -120,7 +124,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(listed!.base_url).toBe("https://api.openai.com/v1");
     expect(listed!.credentialId).toBe(cred.id);
 
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.apiKey).toBe("sk-test");
     expect(resolved!.providerId).toBe("openai");
@@ -132,13 +136,13 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const { cred, model } = await seedApiKeyModel();
     await corruptCredentialBlob(cred.id);
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     // Listed (so it can be detached/deleted) but never presented as usable.
     expect(listed).toBeDefined();
     expect(listed!.needs_reconnection).toBe(true);
     expect(listed!.providerId).toBe("openai");
     // Fail-closed at the runtime boundary, exactly like a dead OAuth row.
-    expect(await loadModel(ctx.orgId, model.id)).toBeNull();
+    expect(await loadModel(ctx.orgId, model.id, null)).toBeNull();
   });
 
   it("lists a model whose credential is under a missing kid as it is, and 503s its use", async () => {
@@ -148,10 +152,10 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
       .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
       .where(eq(modelProviderCredentials.id, cred.id));
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed!.needs_reconnection).toBe(false);
     expect(listed!.providerId).toBe("openai");
-    await expect(loadModel(ctx.orgId, model.id)).rejects.toMatchObject({
+    await expect(loadModel(ctx.orgId, model.id, null)).rejects.toMatchObject({
       status: 503,
       code: "encryption_key_unavailable",
     });
@@ -169,7 +173,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
       .set({ providerId: "@gone/provider" })
       .where(eq(modelProviderCredentials.id, cred.id));
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeUndefined();
 
     // …and the predicate agrees with the list on this row. The credential is
@@ -181,16 +185,15 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect(await modelNeedsReconnection(ctx.orgId, model.id)).toBe(false);
   });
 
-  it("refuses to resolve a model whose credential names an unregistered provider", async () => {
-    const { cred, model } = await seedApiKeyModel();
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "google-ai" })
-      .where(eq(modelProviderCredentials.id, cred.id));
+  it("refuses to resolve a model whose stored provider is not registered", async () => {
+    const { model } = await seedApiKeyModel();
+    // The row names its provider (`org_models.provider_id`): a module dropped from
+    // MODULES leaves it naming a provider this instance does not register.
+    await db.update(orgModels).set({ providerId: "google-ai" }).where(eq(orgModels.id, model.id));
 
     // `null` would let `resolveModel` fall through to another model, so the
     // stored provider id surfaces instead.
-    const err = await loadModel(ctx.orgId, model.id).catch((e: unknown) => e);
+    const err = await loadModel(ctx.orgId, model.id, null).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(409);
     expect((err as ApiError).code).toBe("model_provider_unregistered");
@@ -198,15 +201,12 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("refuses to resolve an org default bound to an unregistered provider", async () => {
-    const { cred, model } = await seedApiKeyModel();
+    const { model } = await seedApiKeyModel();
     await setDefaultModel(ctx.orgId, model.id);
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "google-ai" })
-      .where(eq(modelProviderCredentials.id, cred.id));
+    await db.update(orgModels).set({ providerId: "google-ai" }).where(eq(orgModels.id, model.id));
 
     // The org default must not cascade on to the system default.
-    const err = await resolveModel(ctx.orgId, "@acme/agent", null).catch((e: unknown) => e);
+    const err = await resolveModel(ctx.orgId, "@acme/agent", null, null).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(409);
     expect((err as ApiError).code).toBe("model_provider_unregistered");
@@ -227,7 +227,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     expect((thrown as ApiError).code).toBe("model_needs_reconnection");
 
     // The pointer was never written — the org default is untouched.
-    const listed = await listOrgModels(ctx.orgId);
+    const listed = await listOrgModels(ctx.orgId, null);
     expect(listed.find((m) => m.id === model.id)!.is_default).toBe(false);
   });
 
@@ -270,6 +270,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const disabled = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "Disabled on a dead credential",
       // A second binding of the same (credential, model) is refused since
       // `uq_org_models_unaliased_binding`; the disabled row is its own model.
@@ -284,7 +285,7 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
 
     await setDefaultModel(ctx.orgId, model.id);
 
-    const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed!.is_default).toBe(true);
   });
 
@@ -292,6 +293,58 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     const { model } = await seedOAuthModel(true);
     // The security-relevant half: listing the row must NOT make it resolvable
     // for inference. The runtime path is unchanged.
-    expect(await loadModel(ctx.orgId, model.id)).toBeNull();
+    expect(await loadModel(ctx.orgId, model.id, null)).toBeNull();
+  });
+});
+
+describe("org-models — a member's own credential never serves a bound model", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "deadorgcred" });
+  });
+
+  it("flags a model whose organization credential is dead to everyone, own key or not", async () => {
+    const alice = await memberContext(ctx, "member");
+    const bob = await memberContext(ctx, "member");
+    // The organization's key is listed but its blob no longer decrypts: a dead binding.
+    const orgKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "Org OpenAI",
+      providerId: "openai",
+      apiShape: "openai-responses",
+      apiKey: "sk-org",
+    });
+    await corruptCredentialBlob(orgKey.id);
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: orgKey.id,
+      providerId: "openai",
+      label: "GPT",
+      modelId: "gpt-5.5",
+      enabled: true,
+    });
+    // Alice holds her own key of the same family.
+    await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      createdBy: alice.user.id,
+      ownerUserId: alice.user.id,
+      label: "Alice OpenAI",
+      providerId: "openai",
+      apiKey: "sk-alice",
+    });
+    clearResolvedModelCache();
+
+    // The organization pays for a bound model: Alice's own key does not stand in for it.
+    for (const payer of [alice.user.id, bob.user.id]) {
+      const listed = (await listOrgModels(ctx.orgId, payer)).find((m) => m.id === model.id);
+      expect(listed).toMatchObject({ needs_reconnection: true, billed_to: "org" });
+    }
+    const refused = await assertExplicitModelExists(ctx.orgId, model.id).catch(
+      (err: unknown) => err,
+    );
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).status).toBe(404);
   });
 });

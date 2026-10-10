@@ -271,6 +271,11 @@ describe("permission levels", () => {
     expect(ORG_LEVEL_PERMISSIONS.size + SPACE_LEVEL_PERMISSIONS.size).toBe(everyPermission.length);
   });
 
+  it("model-provider-credentials carries connect at org level", () => {
+    expect(CORE_RESOURCE_ACTIONS["model-provider-credentials"]).toContain("connect");
+    expect(CORE_RESOURCE_LEVELS["model-provider-credentials"]).toBe("org");
+  });
+
   it("api-keys is space-level and llm-proxy is org-level", () => {
     // The two resources whose level is not obvious from their name: keys are
     // bound to a space (`api_keys.space_id NOT NULL`), the LLM proxy is

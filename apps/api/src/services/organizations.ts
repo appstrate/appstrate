@@ -21,6 +21,8 @@ import {
   oauthClient,
   oauthAccessToken,
   oauthRefreshToken,
+  modelProviderCredentials,
+  modelProviderPairings,
 } from "@appstrate/db/schema";
 import {
   and,
@@ -43,6 +45,7 @@ import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { orgPackageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { orgApiVersionCache } from "./org-settings-cache.ts";
+import { clearResolvedModelCache } from "./resolved-model-cache.ts";
 import {
   deleteSpaceMembershipsInOrg,
   lockOrgMember,
@@ -271,6 +274,8 @@ export async function updateOrgSettings(
   // row is durable by the time the pin entry is dropped — the next cached
   // read cannot re-cache the pre-update value.
   orgApiVersionCache.invalidate(orgId);
+  // Resolved models carry the payer's personal credentials only while the policy allows them.
+  if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
 
   return (row?.orgSettings as OrgSettings) ?? {};
 }
@@ -478,6 +483,18 @@ async function removeMemberInTx(
       ),
     );
 
+  // A personal model credential is the member's own money and serves only them: it
+  // goes with the membership. Organization credentials stay (they are not owned by anyone).
+  await tx.delete(modelProviderCredentials).where(
+    scopedWhere(modelProviderCredentials, {
+      orgId,
+      extra: [eq(modelProviderCredentials.ownerUserId, userId)],
+    }),
+  );
+  await tx
+    .delete(modelProviderPairings)
+    .where(and(eq(modelProviderPairings.orgId, orgId), eq(modelProviderPairings.userId, userId)));
+
   // Neither these rows nor the keys and tokens below cascade from the membership,
   // and all of them would silently come back to life on a re-invite.
   await deleteSpaceMembershipsInOrg(tx, orgId, userId);
@@ -577,6 +594,8 @@ async function exitOrg(
     if (member.role === "owner") await assertAnotherOwnerRemains(tx, orgId, userId);
     return removeMemberInTx(tx, orgId, userId);
   });
+  // Cached resolutions may still carry the removed member's personal credentials.
+  clearResolvedModelCache();
 
   // Outside the transaction, best-effort: a surviving job's fire finds its row disabled.
   await removeScheduleJobs(disabledScheduleIds);

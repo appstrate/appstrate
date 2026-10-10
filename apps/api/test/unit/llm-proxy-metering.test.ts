@@ -27,7 +27,7 @@ import type { LlmUsageEntry } from "../../src/services/llm-usage-ledger.ts";
 import { anthropicMessagesAdapter } from "../../src/services/llm-proxy/anthropic.ts";
 import { openaiCompletionsAdapter } from "../../src/services/llm-proxy/openai.ts";
 import type { UpstreamUsage } from "../../src/services/llm-proxy/types.ts";
-import type { ResolvedModel } from "../../src/services/org-models.ts";
+import type { BoundModel } from "../../src/services/org-models.ts";
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -329,7 +329,8 @@ function makeCtx(overrides: Partial<MeteredForwardContext> = {}): MeteredForward
     resolved: {
       modelId: "real-model",
       apiShape: "anthropic-messages",
-    } as unknown as ResolvedModel,
+      credentialSource: "system",
+    } as unknown as BoundModel,
     started: 0,
     requestId: "req_test",
     ...overrides,
@@ -754,9 +755,10 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
         resolved: {
           modelId: "gpt-4o",
           apiShape: "openai-completions",
-          isSystemModel: true,
+          credentialSource: "system",
+          credentialId: null,
           cost: { input: 3, output: 15 },
-        } as unknown as ResolvedModel,
+        } as unknown as BoundModel,
         usage: null,
         durationMs: 120,
       },
@@ -787,7 +789,7 @@ describe("forwardMeteredResponse — a paid 2xx never escapes the ledger", () =>
  */
 describe("recordProxyUsage — pricing provenance", () => {
   async function entryFor(
-    resolved: Partial<ResolvedModel>,
+    resolved: Partial<BoundModel>,
     usage: UpstreamUsage | null,
   ): Promise<LlmUsageEntry> {
     const written: LlmUsageEntry[] = [];
@@ -801,7 +803,7 @@ describe("recordProxyUsage — pricing provenance", () => {
           modelId: "gpt-4o",
           apiShape: "openai-completions",
           ...resolved,
-        } as ResolvedModel,
+        } as BoundModel,
         usage,
         durationMs: 10,
       },
@@ -1050,5 +1052,48 @@ describe("drainProxyMetering", () => {
     await drain;
     expect(drained).toBe(true);
     expect(recorded.map((r) => r.usage)).toEqual([{ inputTokens: 5, outputTokens: 3 }]);
+  });
+});
+
+/**
+ * Credential attribution on the proxy row (#1875): a call served by a personal
+ * key is customer-supplied spend (`org`) attributed to that key's row, and a
+ * platform-supplied call names no credential row.
+ */
+describe("recordProxyUsage — credential attribution", () => {
+  async function entryServedBy(resolved: Partial<BoundModel>): Promise<LlmUsageEntry> {
+    const written: LlmUsageEntry[] = [];
+    await recordProxyUsage(
+      {
+        principal: { kind: "jwt_user", userId: "u1", orgId: "org_attr" },
+        runId: null,
+        chatSessionId: null,
+        presetId: "preset_attr",
+        resolved: {
+          modelId: "gpt-4o",
+          apiShape: "openai-responses",
+          cost: null,
+          ...resolved,
+        } as BoundModel,
+        usage: { inputTokens: 10, outputTokens: 2 },
+        durationMs: 10,
+      },
+      async (entry) => {
+        written.push(entry);
+      },
+    );
+    return written[0]!;
+  }
+
+  it("attributes a personal-key call to that credential, as org-supplied spend", async () => {
+    const entry = await entryServedBy({ credentialSource: "org", credentialId: "cred_personal" });
+    expect(entry.credentialSource).toBe("org");
+    expect(entry.credentialId).toBe("cred_personal");
+  });
+
+  it("names no credential row for a platform-supplied call", async () => {
+    const entry = await entryServedBy({ credentialSource: "system" });
+    expect(entry.credentialSource).toBe("system");
+    expect(entry.credentialId).toBeNull();
   });
 });

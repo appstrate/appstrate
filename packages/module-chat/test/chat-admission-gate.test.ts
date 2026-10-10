@@ -276,6 +276,7 @@ describe("chat admission gate (handleChatStream)", () => {
         // Ephemeral turn (no session id in the body) → nothing to attribute.
         sessionId: null,
         subscription: true,
+        userId: ctx.user.id,
       },
     ]);
   });

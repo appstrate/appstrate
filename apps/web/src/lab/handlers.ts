@@ -66,7 +66,13 @@ type AgentUpdate = f.JsonRequest<"/api/packages/agents/{scope}/{name}", "patch">
 
 const changedEndUsers = new Map<string, LabEndUser>();
 const deletedEndUsers = new Set<string>();
-const dashboardSsoByOrg = new Map<string, boolean>();
+/** The organization settings written in this lab session, merged over the fixture's. */
+type OrgSettings = f.Json200<"/api/orgs/{orgId}/settings", "get">;
+const settingsByOrg = new Map<string, Partial<OrgSettings>>();
+/** Model credentials renamed, added or deleted in this lab session. */
+const renamedCredentials = new Map<string, string>();
+const addedCredentials: f.Json200<"/api/model-provider-credentials", "get">["data"] = [];
+const deletedCredentials = new Set<string>();
 /** The sets of spaces the share editor wrote, by connection id: the lab keeps them for the session. */
 const sharedSpacesByConnection = new Map<string, string[]>();
 
@@ -102,7 +108,10 @@ export function resetEndUserLabState(): void {
 export function resetSettingsLabState(): void {
   integrationDefaults.clear();
   oauthClientTiers.clear();
-  dashboardSsoByOrg.clear();
+  settingsByOrg.clear();
+  renamedCredentials.clear();
+  addedCredentials.length = 0;
+  deletedCredentials.clear();
   organizationLogoByOrg.clear();
 }
 
@@ -913,12 +922,72 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 200, body: f.providerRegistry }),
   },
   {
+    // An administrator reads every credential; a member holding only `connect` is served their own.
     method: "GET",
     pattern: /^\/api\/model-provider-credentials$/,
-    handler: (_u, s) => ({
-      status: 200,
-      body: { ...f.modelCredentials, data: list(f.modelCredentials.data, s) },
-    }),
+    handler: (_u, s) => {
+      const all = [...f.modelCredentials.data, ...addedCredentials]
+        .filter((pk) => !deletedCredentials.has(pk.id))
+        .map((pk) => ({ ...pk, label: renamedCredentials.get(pk.id) ?? pk.label }));
+      const readsAll = getRole() === "owner" || getRole() === "admin";
+      const rows = readsAll
+        ? all
+        : all.filter((pk) => pk.owner_type === "user" && pk.owner_id === f.USER_ID);
+      return {
+        status: 200,
+        body: { ...f.modelCredentials, data: list(rows, s) },
+      };
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/model-provider-credentials$/,
+    handler: (_u, _s, _h, body) => {
+      const input = (typeof body === "object" && body !== null ? body : {}) as {
+        label?: string;
+        providerId?: string;
+        owner_type?: "org" | "user";
+      };
+      const personal = input.owner_type === "user";
+      const created = {
+        id: `cred_lab_${addedCredentials.length + 1}`,
+        label: input.label ?? "Nouvel identifiant",
+        apiShape: "anthropic",
+        base_url: null,
+        source: "custom" as const,
+        authMode: "api_key" as const,
+        providerId: input.providerId ?? null,
+        oauth_email: null,
+        needs_reconnection: false,
+        owner_type: personal ? ("user" as const) : ("org" as const),
+        owner_id: personal ? f.USER_ID : null,
+        owner_name: personal ? (f.profile.displayName ?? null) : null,
+        created_by: f.profile.displayName ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      addedCredentials.push(created);
+      return { status: 201, body: created };
+    },
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/model-provider-credentials\/[^/]+$/,
+    handler: (url, _s, _h, body) => {
+      const id = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      const label = (body as { label?: string } | undefined)?.label;
+      if (label) renamedCredentials.set(id, label);
+      const row = [...f.modelCredentials.data, ...addedCredentials].find((pk) => pk.id === id);
+      return { status: 200, body: { ...row, label: renamedCredentials.get(id) ?? row?.label } };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/model-provider-credentials\/[^/]+$/,
+    handler: (url) => {
+      deletedCredentials.add(decodeURIComponent(url.pathname.split("/")[3] ?? ""));
+      return { status: 204, body: null };
+    },
   },
   {
     method: "GET",
@@ -1151,26 +1220,18 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/orgs\/[^/]+\/settings$/,
     handler: (url) => ({
       status: 200,
-      body: {
-        ...f.orgSettings,
-        dashboard_sso_enabled:
-          dashboardSsoByOrg.get(orgIdFromSettingsUrl(url)) ?? f.orgSettings.dashboard_sso_enabled,
-      },
+      body: { ...f.orgSettings, ...settingsByOrg.get(orgIdFromSettingsUrl(url)) },
     }),
   },
   {
+    // Whatever the settings page writes sticks for the session: the switches are the setting.
     method: "PATCH",
     pattern: /^\/api\/orgs\/[^/]+\/settings$/,
     handler: (url, scenario, _headers, body) => {
-      const enabled =
-        typeof body === "object" &&
-        body !== null &&
-        "dashboard_sso_enabled" in body &&
-        typeof body.dashboard_sso_enabled === "boolean"
-          ? body.dashboard_sso_enabled
-          : (f.orgSettings.dashboard_sso_enabled ?? false);
-      if (scenario !== "error") dashboardSsoByOrg.set(orgIdFromSettingsUrl(url), enabled);
-      return { status: 200, body: { ...f.orgSettings, dashboard_sso_enabled: enabled } };
+      const orgId = orgIdFromSettingsUrl(url);
+      const patch = typeof body === "object" && body !== null ? (body as Partial<OrgSettings>) : {};
+      if (scenario !== "error") settingsByOrg.set(orgId, { ...settingsByOrg.get(orgId), ...patch });
+      return { status: 200, body: { ...f.orgSettings, ...settingsByOrg.get(orgId) } };
     },
   },
   {
@@ -1818,7 +1879,16 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/model$/,
-    handler: () => ({ status: 200, body: f.agentModel }),
+    // Two agents pin a model each member pays for: wiki-brain one the lab member holds a
+    // credential for, compta-trimestrielle one they do not (the run is refused until they add it).
+    handler: (url) => ({
+      status: 200,
+      body: url.pathname.includes("wiki-brain")
+        ? { ...f.agentModel, modelId: "mdl_haiku" }
+        : url.pathname.includes("compta-trimestrielle")
+          ? { ...f.agentModel, modelId: "mdl_gpt" }
+          : f.agentModel,
+    }),
   },
   {
     method: "GET",
