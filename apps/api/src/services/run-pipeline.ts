@@ -20,7 +20,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
-import { resolveModel } from "./org-models.ts";
+import { credentialPin, resolveModel, samePin } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -402,6 +402,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // is refused downstream by `requireBoundModel`.
   const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null, payerUserId);
   const credentialSourceForGate = gateModel?.credentialSource ?? null;
+  const gatePin = credentialPin({ ...gateModel, credentialSource: credentialSourceForGate });
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
@@ -585,10 +586,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     throw err;
   }
 
-  // The gate admitted the credential source resolved at Step 0. A credential
-  // removed since (a member's own key deleted, personal credentials switched
-  // off) would hand the run another payer than the one admitted.
-  if (modelSource !== credentialSourceForGate) {
+  // The gate admitted the credential resolved at Step 0. A credential removed
+  // since (a member's own key deleted, personal credentials switched off) would
+  // hand the run another credential, and another payer, than the one admitted.
+  const runPin = credentialPin({ ...plan.llmConfig, credentialSource: modelSource });
+  if (!samePin(gatePin, runPin)) {
     throw conflict(
       "model_credential_changed",
       "The model's credential changed while the run was being admitted. Launch the run again.",
@@ -659,7 +661,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         // credentials → its provider and endpoint — straight to the backing.
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
-        modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+        modelCredentialId: runPin.credentialId,
         consumedFileIds: params.consumedFileIds,
       },
     ),

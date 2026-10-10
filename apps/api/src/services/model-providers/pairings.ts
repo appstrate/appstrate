@@ -29,7 +29,8 @@ import {
   hashPairingSecret,
   randomBase64Url,
 } from "@appstrate/core/pairing-token";
-import { gone } from "../../lib/errors.ts";
+import { forbidden, gone } from "../../lib/errors.ts";
+import { lockOrgMember } from "../space-members.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Generated id prefix — mirrors `apst_` (api keys) and `appp_` (pairing token). */
@@ -105,14 +106,21 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
   const id = generatePairingId();
   const expiresAt = new Date(Date.now() + args.ttlSeconds * 1000);
 
-  await db.insert(modelProviderPairings).values({
-    id,
-    tokenHash,
-    userId: args.userId,
-    orgId: args.orgId,
-    providerId: args.providerId,
-    reconnectCredentialId: args.reconnectCredentialId ?? null,
-    expiresAt,
+  await db.transaction(async (tx) => {
+    // The organization exit holds this lock while it deletes the member's
+    // pairings: one minted during the exit cannot outlive it.
+    if (!(await lockOrgMember(tx, args.orgId, args.userId))) {
+      throw forbidden("Not a member of this organization");
+    }
+    await tx.insert(modelProviderPairings).values({
+      id,
+      tokenHash,
+      userId: args.userId,
+      orgId: args.orgId,
+      providerId: args.providerId,
+      reconnectCredentialId: args.reconnectCredentialId ?? null,
+      expiresAt,
+    });
   });
 
   return { id, token, expiresAt };

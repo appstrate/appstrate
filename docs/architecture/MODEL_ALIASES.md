@@ -248,13 +248,17 @@ credential id). The sidecar's token door (`/internal/oauth-token/{credentialId}`
 gives a subscription's token only to a platform run pinned to that credential,
 launched by its owner with no API key (`runs.api_key_id` NULL); any other run is
 refused. Switching personal credentials off stops them at once: a pinned run's
-next call and the token door are refused.
+next call and the token door are refused. A subscription token a run's sidecar
+already holds keeps serving until its cache entry expires (30 seconds), the same
+bound as for a deleted or revoked credential.
 
-The admission gate (`beforeUsage`) quotes the credential source a run or chat
-turn resolves to when it is admitted. The run's context must resolve the same
-source, and each proxy call of an admitted chat turn too
-(`recordChatTurnAdmission`); otherwise the work is refused with
-`409 model_credential_changed` rather than spent on a payer nobody admitted.
+The admission gate (`beforeUsage`) quotes the credential a run or chat turn
+resolves to when it is admitted, and that exact credential is what gets spent.
+A run whose context resolves another credential is refused with
+`409 model_credential_changed`. A chat turn's proxy calls are served on the
+credential the turn was admitted on (`recordChatTurnAdmission`, keyed by user,
+session and preset, so an unsaved conversation is covered too), and a call that
+no admission covers is refused.
 
 `credential_source` has two values: `system` (a platform credential) and `org`
 (one the customer supplies, an organization's or a member's own).

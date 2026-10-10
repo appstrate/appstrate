@@ -21,8 +21,8 @@
  *   - run context  → one dispatch per proxy call (the call IS the unit).
  *   - chat context → zero dispatches; first-party chat already gated the turn
  *     at admission, and the signed loopback identity validated here proves
- *     this call is that same turn. The call must still spend the credential
- *     source the turn was admitted on (`recordChatTurnAdmission`).
+ *     this call is that same turn, served on the credential the turn was
+ *     admitted on (`recordChatTurnAdmission`).
  *   - run inference → zero dispatches, likewise: the preflight gate admitted
  *     the launch, and the run token proves this is that run's own inference.
  *   - no context   → a platform-supplied call is REFUSED (400
@@ -31,8 +31,7 @@
  */
 
 import { createCache } from "@appstrate/core/cache";
-import type { CredentialSource } from "@appstrate/db/schema";
-import type { BoundModel } from "./org-models.ts";
+import type { BoundModel, PinnedModelCredential } from "./org-models.ts";
 import { getRunningRunCountForOrg, refuseReservedForDeletion } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError, conflict } from "../lib/errors.ts";
@@ -50,7 +49,7 @@ type SystemProxyUsageContext =
        */
       runOrigin: "platform" | "remote";
     }
-  | { context: "chat"; sessionId: string | null; userId: string }
+  | { context: "chat"; sessionId: string | null }
   | { context: "run_inference" }
   | null;
 
@@ -62,10 +61,6 @@ export async function enforceSystemProxyAdmission(args: {
   // Ahead of the hook check: a reserved organization admits no new work whether
   // or not an admission module is loaded.
   await refuseReservedForDeletion(db, args.orgId);
-  // Also hook or no hook: a turn never moves to another payer mid-turn.
-  if (args.usageContext?.context === "chat") {
-    assertAdmittedChatSource(args.orgId, args.usageContext, args.resolved.credentialSource);
-  }
 
   // OSS deployments may intentionally expose system presets without a metering
   // module. No hook → nothing to admit and no context requirement to enforce
@@ -167,46 +162,46 @@ export async function enforceSystemProxyAdmission(args: {
 }
 
 /**
- * The credential source each chat turn was admitted on, kept for the turn's
- * calls. The chat engine reaches the proxy through this process's own loopback,
- * so a process-local entry sees every call of the turn; it lives as long as the
- * engine's loopback bearer.
+ * The credential each chat turn was admitted on, served to the turn's proxy calls
+ * instead of a fresh chain resolution. The chat engine reaches the proxy through
+ * this process's own loopback, so a process-local entry sees every call of the
+ * turn; it lives as long as the engine's loopback bearer. Keyed by the preset as
+ * well, so a turn needs no session: two concurrent turns of one user on one
+ * preset are admitted on the same credential.
  */
-const admittedChatTurns = createCache<CredentialSource>({
+const admittedChatTurns = createCache<PinnedModelCredential>({
   name: "chat-turn-admission",
   ttlMs: 30 * 60_000,
   max: 10_000,
 });
 
-const chatTurnKey = (orgId: string, userId: string, sessionId: string) =>
-  `${orgId}:${userId}:${sessionId}`;
+interface ChatTurnKey {
+  orgId: string;
+  userId: string;
+  sessionId: string | null;
+  presetId: string;
+}
 
-/** Remember what a chat turn was admitted on (a turn with no session is not metered per session). */
-export function recordChatTurnAdmission(
-  orgId: string,
-  userId: string,
-  sessionId: string | null,
-  credentialSource: CredentialSource,
-): void {
-  if (sessionId) admittedChatTurns.set(chatTurnKey(orgId, userId, sessionId), credentialSource);
+const chatTurnKey = (turn: ChatTurnKey) =>
+  `${turn.orgId}:${turn.userId}:${turn.sessionId ?? ""}:${turn.presetId}`;
+
+/** Remember the credential a chat turn was admitted on. */
+export function recordChatTurnAdmission(turn: ChatTurnKey, pin: PinnedModelCredential): void {
+  admittedChatTurns.set(chatTurnKey(turn), pin);
 }
 
 /**
- * A call of an admitted turn that resolves to another credential source (the
- * member's own key deleted mid-turn, personal credentials switched off) would
- * spend on a payer the admission never quoted: refused, never re-routed.
+ * The credential a chat turn's proxy call must spend. A call no admission covers
+ * is refused: it would otherwise resolve a credential, and a payer, nobody admitted.
  */
-function assertAdmittedChatSource(
-  orgId: string,
-  turn: { sessionId: string | null; userId: string },
-  credentialSource: CredentialSource,
-): void {
-  if (!turn.sessionId) return;
-  const admitted = admittedChatTurns.peek(chatTurnKey(orgId, turn.userId, turn.sessionId));
-  if (admitted !== undefined && admitted !== credentialSource) {
+export function admittedChatTurnPin(turn: ChatTurnKey): PinnedModelCredential {
+  const pin = admittedChatTurns.peek(chatTurnKey(turn));
+  if (!pin) {
+    // The chat classifies a proxied failure by its wording: no "credential" here.
     throw conflict(
       "model_credential_changed",
-      "Who pays for this model changed during this chat turn. Send the message again.",
+      "This chat turn was not admitted on this model. Send the message again.",
     );
   }
+  return pin;
 }

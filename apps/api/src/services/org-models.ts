@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, eq, getTableColumns } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels, type CredentialSource } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
@@ -594,13 +594,9 @@ async function asDuplicateBinding(
   binding: { credentialId: string | null; providerId: string },
   modelId: string,
 ): Promise<never> {
-  if (!isUniqueViolation(err)) throw err;
-  // One row per binding: an organization credential, or each member's own
-  // credential of a provider (`credential_id IS NULL`).
-  const sameBinding =
-    binding.credentialId === null
-      ? [isNull(orgModels.credentialId), eq(orgModels.providerId, binding.providerId)]
-      : [eq(orgModels.credentialId, binding.credentialId)];
+  // Only a bound model can collide: unbound rows may repeat (script 0042 unbinds
+  // models that were bound to distinct subscriptions of one provider).
+  if (!isUniqueViolation(err) || binding.credentialId === null) throw err;
   const [existing] = await db
     .select({ id: orgModels.id })
     .from(orgModels)
@@ -608,9 +604,9 @@ async function asDuplicateBinding(
       scopedWhere(orgModels, {
         orgId,
         extra: [
-          ...sameBinding,
+          eq(orgModels.credentialId, binding.credentialId),
           eq(orgModels.modelId, modelId),
-          // The indexes are partial on `aliased = false`; an alias sharing the
+          // The index is partial on `aliased = false`; an alias sharing the
           // binding is legal and is never the row that refused this write.
           eq(orgModels.aliased, false),
         ],
@@ -619,9 +615,7 @@ async function asDuplicateBinding(
     .limit(1);
   throw conflict(
     "model_already_added",
-    binding.credentialId === null
-      ? `Model '${modelId}' is already added for each member's own credential`
-      : `Model '${modelId}' is already added for this credential`,
+    `Model '${modelId}' is already added for this credential`,
     existing ? { existing_model_id: existing.id } : undefined,
   );
 }
@@ -1381,6 +1375,26 @@ export async function loadModel(
 export interface PinnedModelCredential {
   credentialId: string | null;
   source: CredentialSource | null;
+}
+
+/**
+ * The credential a resolution spends, as a pin: none for a system model or an
+ * alias (an alias's credential id cross-references to its backing, so it is never
+ * recorded), else the credential that served it.
+ */
+export function credentialPin(resolved: {
+  aliased?: boolean;
+  credentialId?: string | null;
+  credentialSource: CredentialSource | null;
+}): PinnedModelCredential {
+  return {
+    credentialId: resolved.aliased ? null : (resolved.credentialId ?? null),
+    source: resolved.credentialSource,
+  };
+}
+
+export function samePin(a: PinnedModelCredential, b: PinnedModelCredential): boolean {
+  return a.credentialId === b.credentialId && a.source === b.source;
 }
 
 /**

@@ -7,5 +7,4 @@ ALTER TABLE "org_models" ADD COLUMN "provider_id" text;--> statement-breakpoint
 UPDATE "org_models" m SET "provider_id" = c."provider_id" FROM "model_provider_credentials" c WHERE c."id" = m."credential_id";--> statement-breakpoint
 ALTER TABLE "org_models" ALTER COLUMN "provider_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "org_models" ALTER COLUMN "credential_id" DROP NOT NULL;--> statement-breakpoint
-ALTER TABLE "llm_usage" ADD COLUMN "credential_id" uuid;--> statement-breakpoint
-CREATE UNIQUE INDEX "uq_org_models_unbound" ON "org_models" USING btree ("org_id","provider_id","model_id") WHERE "org_models"."credential_id" IS NULL;
+ALTER TABLE "llm_usage" ADD COLUMN "credential_id" uuid;

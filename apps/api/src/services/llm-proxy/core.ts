@@ -18,6 +18,7 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
+import { admittedChatTurnPin } from "../system-proxy-admission.ts";
 import {
   loadModel,
   loadPinnedModel,
@@ -66,6 +67,8 @@ interface ProxyCallInputs {
    * (`runs.model_credential_id`, `runs.model_source`), never by a chain.
    */
   pinned?: PinnedModelCredential;
+  /** A first-party chat turn: its preset is served by the credential the turn was admitted on. */
+  chatTurn?: { userId: string; sessionId: string | null };
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -420,9 +423,12 @@ async function resolvePresetForOrg(
 ): Promise<BoundModel> {
   const orgId = inputs.principal.orgId;
   let loaded: Awaited<ReturnType<typeof loadModel>>;
+  const pin =
+    inputs.pinned ??
+    (inputs.chatTurn ? admittedChatTurnPin({ orgId, presetId, ...inputs.chatTurn }) : undefined);
   try {
-    loaded = inputs.pinned
-      ? await loadPinnedModel(orgId, presetId, inputs.pinned)
+    loaded = pin
+      ? await loadPinnedModel(orgId, presetId, pin)
       : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)

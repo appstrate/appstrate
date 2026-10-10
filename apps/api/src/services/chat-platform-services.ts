@@ -28,7 +28,12 @@ import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
 import { recordChatTurnAdmission } from "./system-proxy-admission.ts";
-import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
+import {
+  credentialPin,
+  loadModel,
+  modelNeedsReconnection,
+  requireBoundModel,
+} from "./org-models.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
@@ -293,12 +298,24 @@ export async function checkUsageAllowed(args: {
     }
   }
 
-  // What the turn is admitted on: its proxy calls must keep spending that source.
   const credentialSource = args.subscription ? "org" : (resolved?.credentialSource ?? "org");
-  if (!hasHook("beforeUsage")) {
-    recordChatTurnAdmission(args.orgId, args.userId, args.sessionId, credentialSource);
+  // The credential the turn is admitted on, which its proxy calls then spend. A
+  // subscription turn talks to its provider directly, never through the proxy.
+  const admit = () => {
+    if (resolved && !args.subscription) {
+      recordChatTurnAdmission(
+        {
+          orgId: args.orgId,
+          userId: args.userId,
+          sessionId: args.sessionId,
+          presetId: args.presetId,
+        },
+        credentialPin(resolved),
+      );
+    }
     return null;
-  }
+  };
+  if (!hasHook("beforeUsage")) return admit();
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
   // against an older core can reach here without it (in-tree callers are
@@ -325,7 +342,5 @@ export async function checkUsageAllowed(args: {
     // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",
   });
-  if (rejection) return rejection;
-  recordChatTurnAdmission(args.orgId, args.userId, args.sessionId, credentialSource);
-  return null;
+  return rejection ?? admit();
 }

@@ -212,12 +212,13 @@ async function handleProxy(
         runOrigin: runAttribution.runOrigin,
       } as const)
     : c.get("firstPartyLoopback")
-      ? ({ context: "chat", sessionId: chatSessionId, userId } as const)
+      ? ({ context: "chat", sessionId: chatSessionId } as const)
       : null;
 
   return proxyAndLog(c, apiShape, limits, {
     principal,
     payerUserId: requestPayerUserId(c),
+    chatTurn: c.get("firstPartyLoopback") ? { userId, sessionId: chatSessionId } : undefined,
     runId,
     chatSessionId,
     beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),
@@ -227,7 +228,14 @@ async function handleProxy(
 /** The caller-specific half of a proxy call; the rest is shared by both entries. */
 type ProxyCaller = Pick<
   Parameters<typeof proxyLlmCall>[0],
-  "principal" | "payerUserId" | "pinned" | "runId" | "chatSessionId" | "presetId" | "beforeUpstream"
+  | "principal"
+  | "payerUserId"
+  | "pinned"
+  | "chatTurn"
+  | "runId"
+  | "chatSessionId"
+  | "presetId"
+  | "beforeUpstream"
 >;
 
 /**
