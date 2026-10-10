@@ -1507,6 +1507,8 @@ describe("personal spaces — offboarding", () => {
     expect(event.after).toEqual({
       orphanedSpaceIds: [personalId],
       revokedApiKeyIds: [],
+      // The member created no model credential in this fixture.
+      deletedModelCredentialIds: [],
     });
   });
 });

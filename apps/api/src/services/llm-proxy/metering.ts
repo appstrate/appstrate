@@ -459,6 +459,7 @@ export async function recordProxyUsage(
     // and the credential row that served it, as a run pins it: none for a
     // platform key or an alias (whose backing is never disclosed).
     credentialSource: inputs.resolved.credentialSource,
+    payerUserId: inputs.resolved.payerUserId ?? null,
     credentialId:
       inputs.resolved.credentialSource === "system" || inputs.resolved.aliased
         ? null

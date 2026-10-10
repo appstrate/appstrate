@@ -33,6 +33,7 @@ export type ProviderRegistryEntry = RawProviderRegistryEntry &
       | "featured"
       | "live_model_search"
       | "models"
+      | "personal_allowed"
     >
   >;
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Context, Next } from "hono";
-import type { OrgSettings } from "@appstrate/shared-types";
+import { orgSettingsReadSchema } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -68,7 +68,7 @@ export function requireOrgContext() {
     c.set("orgRole", rows[0].role);
     c.set("orgSlug", rows[0].slug);
     c.set("orgName", rows[0].name);
-    c.set("orgSettings", (rows[0].orgSettings ?? {}) as OrgSettings);
+    c.set("orgSettings", orgSettingsReadSchema.parse(rows[0].orgSettings ?? {}));
     return next();
   };
 }

@@ -131,18 +131,31 @@ describe("organizations service", () => {
       expect(orgSettingsPatchSchema.safeParse({ future_key: 1 }).success).toBe(false);
     });
 
-    it("getOrgSettings casts the stored row — it does not parse it", async () => {
-      const org = await createOrganization("Cast Org", "cast-org", userId);
+    it("getOrgSettings parses the stored row through orgSettingsReadSchema — defaults applied, unknown keys kept", async () => {
+      const org = await createOrganization("Parse Org", "parse-org", userId);
+
+      // An empty stored row reads the schema default: personal model
+      // credentials are allowed unless the organization turned them off.
+      await db.update(organizations).set({ orgSettings: {} }).where(eq(organizations.id, org.id));
+      expect((await getOrgSettings(org.id)).personal_model_credentials).toBe(true);
+
+      // A stored value is served as-is, not overridden by the default.
+      await db
+        .update(organizations)
+        .set({ orgSettings: { personal_model_credentials: false } })
+        .where(eq(organizations.id, org.id));
+      expect((await getOrgSettings(org.id)).personal_model_credentials).toBe(false);
+
+      // A key no schema declares survives the read verbatim (`.loose()`).
+      // The read is a parse with defaults, not a strip: an unknown key is
+      // kept, never dropped on the way out.
       await db
         .update(organizations)
         .set({ orgSettings: { api_version: CURRENT_API_VERSION, future_key: "kept" } })
         .where(eq(organizations.id, org.id));
-
-      // A key no schema declares survives the read verbatim. If this ever
-      // starts failing, a parse was introduced on the read path and the
-      // rationale on `orgSettingsPatchSchema` needs revisiting.
       expect(await getOrgSettings(org.id)).toEqual({
         api_version: CURRENT_API_VERSION,
+        personal_model_credentials: true,
         future_key: "kept",
       } as never);
     });

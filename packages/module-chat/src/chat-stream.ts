@@ -477,18 +477,16 @@ export async function handleChatStream(
   const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id);
   const isSubscription = subscription.subscription;
 
-  // Admission gate — EVERY turn. The platform
-  // resolves system-provided vs. org-owned server-side and dispatches
-  // `beforeUsage` (chat context) with that fact; a metering module quotes it and
-  // decides.
+  // Admission gate — EVERY turn. The platform resolves the chosen model for the
+  // session user server-side and dispatches `beforeUsage` (chat context) with
+  // who pays it; a metering module quotes it and decides.
   //
-  // A subscription turn used to skip this entirely, on the reasoning that it
-  // spends the user's OWN credential (`credentialSource` `org`) and therefore
-  // costs nothing. That is the module's call to make, not the platform's: the
-  // turn is driven by the IN-PROCESS Pi engine, so the platform funds its
-  // compute even when it funds no inference, and a module gating on
-  // subscription status must be able to refuse it. `subscription` reports the
-  // credential mode, and the platform derives the credential source from it.
+  // A subscription turn is gated like any other. Its `credentialSource` is the
+  // owner of the credential it spends — `user` for the member's own
+  // subscription, `org` for the organization's — and the turn is driven by the
+  // IN-PROCESS Pi engine: the platform funds its compute even when it funds no
+  // inference, and a module gating on subscription status must be able to
+  // refuse it.
   //
   // Gated BEFORE the caller-context block is consumed, the model binding is
   // resolved and capacity is reserved, so a rejected turn opens no MCP session
@@ -498,7 +496,6 @@ export async function handleChatStream(
     orgId,
     presetId: chosen.id,
     sessionId: meteringSessionId,
-    subscription: isSubscription,
     userId: user.id,
   });
   if (rejection) {

@@ -8,7 +8,7 @@ export const modelProvidersOAuthPaths = {
       operationId: "createOAuthModelProviderPairing",
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
-      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Pass \`credentialId\` to reconnect that exact personal credential in place (one the caller owns; another member's answers \`404\`); omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. The credential the pairing produces is personal, owned by the caller (a subscription is never shared). **Permission:** \`model-provider-credentials:connect\`; \`403 personal_model_credentials_disabled\` when the organization turned \`personal_model_credentials\` off. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
+      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Pass \`credentialId\` to reconnect that exact personal credential in place: the caller's own OAuth credential of \`providerId\`, the one rule behind the credential's \`reconnect\` action (anything else answers \`404\`); omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. The credential the pairing produces is personal, owned by the caller (a subscription is never shared). **Permission:** \`model-provider-credentials:connect\`; \`403 personal_model_credentials_disabled\` when the organization turned \`personal_model_credentials\` off. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -28,7 +28,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing personal OAuth credential of the caller to reconnect in place. It must match `providerId`; omit it when connecting a new account.",
+                    "Existing personal OAuth credential of the caller to reconnect in place, of provider `providerId` (anything else is a 404); omit it when connecting a new account.",
                 },
               },
               additionalProperties: false,

@@ -518,11 +518,8 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
   const orgId = c.req.param("orgId")!;
   const targetUserId = c.req.param("userId")!;
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares } = await removeMember(
-    orgId,
-    targetUserId,
-    memberActor(c),
-  );
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
+    await removeMember(orgId, targetUserId, memberActor(c));
   await recordAuditFromContext(c, {
     action: "org.member_removed",
     resourceType: "member",
@@ -532,7 +529,7 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
     // §3.6). Named here because this is the event an owner comes back to when
     // deciding whether to convert one or sweep it: the sweeper's own log line
     // arrives 30 days later, and by then the space is gone.
-    after: { orphanedSpaceIds, revokedApiKeyIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
@@ -601,16 +598,14 @@ router.post("/:orgId/leave", async (c) => {
 
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares } = await leaveOrganization(
-    orgId,
-    user.id,
-  );
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
+    await leaveOrganization(orgId, user.id);
   await recordAuditFromContext(c, {
     action: "org.member_left",
     resourceType: "member",
     resourceId: user.id,
     orgIdOverride: orgId,
-    after: { orphanedSpaceIds, revokedApiKeyIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);

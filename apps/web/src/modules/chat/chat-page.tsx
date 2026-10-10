@@ -142,7 +142,7 @@ export function ChatModulePage() {
           uploadFile={uploadFile}
           t={translate}
           can={can}
-          personalModelCredentials={orgSettings?.personal_model_credentials !== false}
+          personalModelCredentials={orgSettings?.personal_model_credentials}
           formatBytes={formatBytes}
         />
       </div>

@@ -173,7 +173,10 @@ export async function updateOrganization(
 // Re-exporting `orgSettingsSchema` from here died with the second
 // `.partial()`: the two readers it had now take the base straight from
 // `@appstrate/core/permissions` or the patch schema below.
-import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/permissions";
+import {
+  orgSettingsReadSchema,
+  orgSettingsSchema as orgSettingsBaseSchema,
+} from "@appstrate/core/permissions";
 
 /**
  * Body of `PATCH /api/orgs/{orgId}/settings` — an RFC 7396 merge over the org settings
@@ -188,13 +191,9 @@ import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/perm
  * schema in `@appstrate/core/permissions` never parses anything. It has
  * exactly two consumers — this `.partial().strict()` derivation, and the
  * `OrgSettings` type alias in `packages/shared-types` (`z.infer`, erased at
- * runtime). Nothing validates a stored row through it: `getOrgSettings` below
- * CASTS the JSONB column and returns it. So the base being a plain
- * `z.object()` is not a read-path affordance — a plain `z.object()` STRIPS
- * unknown keys rather than tolerating them, and would drop exactly the
- * newer-writer keys such a rationale would be protecting. Its strictness is
- * simply unobservable, and the closure that matters is the one on this line.
- * `test/integration/services/organizations.test.ts` pins both halves.
+ * runtime). The read side is `orgSettingsReadSchema` (the same base with its
+ * defaults applied, unknown keys kept), which `getOrgSettings` parses every
+ * stored row through. `test/integration/services/organizations.test.ts` pins both halves.
  */
 export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
 import type { OrgSettings } from "@appstrate/shared-types";
@@ -211,7 +210,7 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return (row?.orgSettings as OrgSettings) ?? {};
+  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
 }
 
 /**
@@ -275,7 +274,7 @@ export async function updateOrgSettings(
   // Resolved models carry the payer's personal credentials only while the policy allows them.
   if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
 
-  return (row?.orgSettings as OrgSettings) ?? {};
+  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
 }
 
 export async function getOrgMembers(orgId: string) {
@@ -407,6 +406,7 @@ interface MemberExitResult {
   orphanedSpaceIds: string[];
   revokedApiKeyIds: string[];
   unsharedShares: ConnectionShare[];
+  deletedModelCredentialIds: string[];
 }
 
 /**
@@ -483,12 +483,15 @@ async function removeMemberInTx(
 
   // A personal model credential is the member's own money and serves only them: it
   // goes with the membership. Organization credentials stay (they are not owned by anyone).
-  await tx.delete(modelProviderCredentials).where(
-    scopedWhere(modelProviderCredentials, {
-      orgId,
-      extra: [eq(modelProviderCredentials.ownerUserId, userId)],
-    }),
-  );
+  const deletedModelCredentials = await tx
+    .delete(modelProviderCredentials)
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [eq(modelProviderCredentials.ownerUserId, userId)],
+      }),
+    )
+    .returning({ id: modelProviderCredentials.id });
   await tx
     .delete(modelProviderPairings)
     .where(and(eq(modelProviderPairings.orgId, orgId), eq(modelProviderPairings.userId, userId)));
@@ -573,6 +576,7 @@ async function removeMemberInTx(
     orphanedSpaceIds,
     revokedApiKeyIds: revokedKeys.map((row) => row.id),
     unsharedShares: unshared.shares,
+    deletedModelCredentialIds: deletedModelCredentials.map((row) => row.id),
     disabledScheduleIds: [...unshared.disabledScheduleIds, ...disabled.map((row) => row.id)],
   };
 }

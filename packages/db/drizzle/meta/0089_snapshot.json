@@ -1,6 +1,6 @@
 {
-  "id": "0598cf8f-bf02-412b-bc43-e1e5c3231f27",
-  "prevId": "2c0a7710-6638-49e7-b732-24e14a20a072",
+  "id": "cfc088dd-ec7c-4844-a1c2-0f997d8b1c6e",
+  "prevId": "37b5be8b-a5b2-4972-b71e-fc3e0f0f73db",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3165,6 +3165,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payer_user_id": {
+          "name": "payer_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "input_tokens": {
           "name": "input_tokens",
           "type": "integer",
@@ -4145,6 +4151,12 @@
         "model_credential_id": {
           "name": "model_credential_id",
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payer_user_id": {
+          "name": "payer_user_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -9474,7 +9486,7 @@
     "public.credential_source": {
       "name": "credential_source",
       "schema": "public",
-      "values": ["system", "org"]
+      "values": ["system", "org", "user"]
     },
     "public.file_purpose": {
       "name": "file_purpose",

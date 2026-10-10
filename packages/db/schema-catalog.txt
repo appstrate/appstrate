@@ -188,6 +188,7 @@ column llm_usage.input_tokens integer not null default 0
 column llm_usage.model text
 column llm_usage.org_id uuid not null
 column llm_usage.output_tokens integer not null default 0
+column llm_usage.payer_user_id text
 column llm_usage.pricing_status text
 column llm_usage.real_model text
 column llm_usage.request_id text
@@ -510,6 +511,7 @@ column runs.model_label text
 column runs.model_source credential_source
 column runs.org_id uuid not null
 column runs.package_id text
+column runs.payer_user_id text
 column runs.proxy_label text
 column runs.resolved_connections jsonb
 column runs.resolved_integration_versions jsonb
@@ -919,7 +921,7 @@ constraint webhooks webhooks_payload_mode_valid CHECK ((payload_mode = ANY (ARRA
 constraint webhooks webhooks_pkey PRIMARY KEY (id)
 constraint webhooks webhooks_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 enum chat_skill_mode auto,manual,strict
-enum credential_source system,org
+enum credential_source system,org,user
 enum file_purpose user_upload,agent_output
 enum inference_route proxy,sidecar
 enum invitation_status pending,accepted,expired,cancelled

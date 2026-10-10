@@ -219,6 +219,79 @@ describe("personal model credentials — routes", () => {
     });
   });
 
+  describe("allowed actions and bindability", () => {
+    interface ActionRow extends CredentialRow {
+      bindable: boolean;
+      allowed_actions: string[];
+    }
+
+    async function listRows(ctx: TestContext): Promise<ActionRow[]> {
+      const res = await app.request(CREDENTIALS, { headers: authHeaders(ctx) });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: ActionRow[] }).data;
+    }
+
+    it("the admin sees an organization key as bindable and editable, a member's personal one as delete only", async () => {
+      await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: admin.user.id,
+        label: "Org key",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-org",
+      });
+      await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: member.user.id,
+        label: "Member key",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-member",
+        ownerUserId: member.user.id,
+      });
+
+      const rows = await listRows(admin);
+      const org = rows.find((c) => c.label === "Org key");
+      const personal = rows.find((c) => c.label === "Member key");
+      expect(org!.bindable).toBe(true);
+      expect(org!.allowed_actions).toContain("edit");
+      expect(personal!.bindable).toBe(false);
+      expect(personal!.allowed_actions).toEqual(["delete"]);
+    });
+
+    it("a member sees its own personal credential with edit, delete and test", async () => {
+      await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: member.user.id,
+        label: "Member key",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-member",
+        ownerUserId: member.user.id,
+      });
+
+      const [own] = await listRows(member);
+      expect(own!.allowed_actions).toEqual(["edit", "delete", "test"]);
+    });
+
+    it("refuses an api_key on a member's OAuth credential with 400 on param api_key", async () => {
+      const id = await createOAuthCredential({
+        orgId: admin.orgId,
+        userId: member.user.id,
+        label: "Member subscription",
+        providerId: OAUTH_PROVIDER,
+        accessToken: "at-member",
+        refreshToken: "rt-member",
+      });
+      const res = await app.request(`${CREDENTIALS}/${id}`, {
+        method: "PATCH",
+        headers: jsonHeaders(member),
+        body: JSON.stringify({ api_key: "sk-rotated" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; param: string };
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("api_key");
+    });
+  });
+
   describe("privacy", () => {
     it("an admin sees no email on a member's personal OAuth credential", async () => {
       await createOAuthCredential({

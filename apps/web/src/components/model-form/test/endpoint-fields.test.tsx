@@ -44,6 +44,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   featured: false,
   live_model_search: false,
   models: [],
+  personal_allowed: false,
 };
 
 const LOCAL_KEY: ModelProviderCredentialInfo = {
@@ -57,6 +58,8 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   owner_id: null,
   owner_name: null,
   created_by: null,
+  allowed_actions: [],
+  bindable: true,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
 };
@@ -68,6 +71,7 @@ const DIRECT_PROVIDER: ProviderRegistryEntry = {
   displayName: "OpenAI",
   defaultBaseUrl: "https://api.openai.com/v1",
   baseUrlOverridable: false,
+  personal_allowed: true,
 };
 
 /** A subscription: personal, so a model on it is left to each member. */
