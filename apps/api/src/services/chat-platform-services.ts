@@ -23,12 +23,18 @@
 import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import { parseTokenUsage, type TokenUsage } from "@appstrate/afps-shared/token-usage";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
-import { isSystemModel } from "./model-registry.ts";
+import {
+  credentialPayer,
+  loadModel,
+  modelNeedsReconnection,
+  requireBoundModel,
+} from "./org-models.ts";
+import { loadCredentialBinding } from "./model-providers/credentials.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
@@ -134,9 +140,11 @@ export async function resolveChatModel(
  * streamed), so DB errors are logged and swallowed — same posture as
  * `recordProxyUsage`.
  *
- * The subscription chat path spends the user's OWN provider subscription
- * (oauth2 claude-code/codex), so the row is always stamped
- * `credentialSource="org"`. Cost is derived here from the token counts + the
+ * The in-process engine serves subscriptions only (oauth2 claude-code/codex).
+ * The row's payer is derived here from the credential that served the turn, never
+ * taken from the module: a member's own subscription stamps `credentialSource="user"`
+ * with that member as `payerUserId`, an organization subscription `"org"` with no
+ * payer. Cost is derived here from the token counts + the
  * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
  * Its tier bands (`record.tiers`) price each model call at its tier.
  *
@@ -200,6 +208,11 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
     context: { source: "chat", chatSessionId: record.chatSessionId, realModel: record.modelId },
   });
   try {
+    const { credentialSource, payerUserId } = record.credentialId
+      ? credentialPayer(
+          (await loadCredentialBinding(record.orgId, record.credentialId))?.ownerUserId,
+        )
+      : { credentialSource: null, payerUserId: undefined };
     await recordLlmUsageReliably(
       {
         source: "proxy",
@@ -209,8 +222,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         model: record.presetId,
         realModel: record.modelId,
         api: record.apiShape,
-        credentialSource: "org",
         credentialId: record.credentialId,
+        credentialSource,
+        payerUserId: payerUserId ?? null,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -237,9 +251,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
  * The chat module calls this before starting ANY turn — built-in, API-key, or
- * oauth-subscription. The gate resolves system-provided vs. org-owned
- * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
- * dumb — it has no model-registry access — but that resolution is REPORTED as
+ * oauth-subscription. The gate resolves who pays SERVER-SIDE (`loadModel` and
+ * `requireBoundModel` for the session user) so the chat module stays dumb — it
+ * has no model-registry access — but that resolution is REPORTED as
  * the `credentialSource` fact, not used to pre-filter:
  *
  *   - every turn dispatches `beforeUsage` (chat context) with
@@ -251,18 +265,15 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     even when it funds no inference. A module that meters only
  *     platform-supplied inference quotes that turn at zero and admits it — same
  *     outcome as the old early return, but decided by the module.
- *   - a SUBSCRIPTION turn (`args.subscription`) is `"org"` whatever its preset
- *     resolves to: it spends the organization's own OAuth provider
- *     subscription. That is the single fact the chat module reports here
- *     (it owns the engine choice, the platform owns the registry), and it is
- *     what stops the derivation below from mislabelling such a turn — a
- *     subscription preset that happened to be registered system-side would
- *     otherwise read as `"system"`. The turn dispatches like any other: it runs
- *     inline in the platform's process, so the platform funds its compute and a
- *     module gating on subscription status must be able to refuse it.
+ *   - a turn on the session user's own credential (key or subscription)
+ *     reports `"user"`. A subscription turn dispatches like any other: it runs
+ *     inline in the platform's process, so the platform funds its compute and
+ *     a module gating on subscription status must be able to refuse it.
  *
  * A turn on an unbound model (no credential the session user can spend) is
- * refused with `model_credential_required` before dispatch.
+ * refused with `model_credential_required` before dispatch. A model that
+ * resolves to nothing reports nothing: no spend can happen, and the turn is
+ * refused downstream.
  *
  * Returns null when no module provides the hook (OSS mode allows everything),
  * except for a reserved deletion, which refuses whatever the deployment loads.
@@ -271,7 +282,6 @@ export async function checkUsageAllowed(args: {
   orgId: string;
   presetId: string;
   sessionId: string | null;
-  subscription: boolean;
   userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
@@ -280,39 +290,22 @@ export async function checkUsageAllowed(args: {
 
   // A platform rule, not an admission decision: it holds with or without a module.
   // A model the organization leaves to each member, which the session user holds
-  // no credential for, is refused here (a subscription turn was refused upstream).
-  if (!args.subscription) {
-    const resolved = await loadModel(args.orgId, args.presetId, args.userId);
-    if (resolved?.credentialSource === null) {
-      try {
-        requireBoundModel(resolved, args.userId);
-      } catch (err) {
-        if (err instanceof ApiError) {
-          return { code: err.code, message: err.message, status: err.status };
-        }
-        throw err;
-      }
+  // no credential for, is refused here.
+  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
+  // Nothing resolves, so nothing can be spent: the turn is refused downstream
+  // (unknown model, or a credential to reconnect) and there is no payer to report.
+  if (resolved === null) return null;
+  let credentialSource: ModelPayer;
+  try {
+    credentialSource = requireBoundModel(resolved, args.userId).credentialSource;
+  } catch (err) {
+    if (err instanceof ApiError) {
+      return { code: err.code, message: err.message, status: err.status };
     }
+    throw err;
   }
 
   if (!hasHook("beforeUsage")) return null;
-  // Fail-closed on a caller that omits `subscription` — the flag became
-  // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
-  // against an older core can reach here without it (in-tree callers are
-  // typechecked). Denying the turn beats defaulting: a missing flag would fall
-  // through as `false`, reading a subscription turn as platform-funded — silent
-  // mispricing with no error and no log. A thrown turn is visible and
-  // recoverable; a mispriced one is neither.
-  //
-  // BELOW the early return, not above it: the guard exists to stop a fabricated
-  // fact from reaching an admission hook, so it only has to fire when there IS
-  // a hook. In OSS mode nothing prices a turn, and a stale caller must keep
-  // getting the `null` it always got.
-  if (typeof args.subscription !== "boolean") {
-    throw new Error(
-      "checkUsageAllowed: `subscription` is required (boolean) — caller built against @appstrate/core < 6.0.0",
-    );
-  }
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,
     context: "chat",
@@ -320,7 +313,7 @@ export async function checkUsageAllowed(args: {
     // A chat turn resolves its model on the platform before admission, so the
     // credential source is always determinable here (never `null`, unlike a
     // remote-origin run).
-    credentialSource: args.subscription || !isSystemModel(args.presetId) ? "org" : "system",
+    credentialSource,
     // A turn executes in the platform's own process — never on a
     // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",

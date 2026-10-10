@@ -47,6 +47,21 @@ describe("Model Provider Keys API", () => {
   });
 
   describe("GET /api/model-provider-credentials/registry", () => {
+    it("says which providers accept a personal credential", async () => {
+      const res = await app.request(
+        "/api/model-provider-credentials/registry?fields=providerId,personal_allowed",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { providerId: string; personal_allowed: boolean }[];
+      };
+      const allowed = (id: string) => body.data.find((p) => p.providerId === id)!.personal_allowed;
+      // An overridable endpoint is the organization's to choose; a fixed OAuth provider is personal.
+      expect(allowed("openai-compatible")).toBe(false);
+      expect(allowed("test-oauth")).toBe(true);
+    });
+
     it("serves each model's catalog cost, tiers included", async () => {
       const res = await app.request("/api/model-provider-credentials/registry", {
         headers: authHeaders(ctx),
@@ -415,7 +430,7 @@ describe("Model Provider Keys API", () => {
             eq(auditEvents.resourceId, id),
           ),
         );
-      expect(audit?.after).toEqual({ label: "Updated Label" });
+      expect(audit?.after).toEqual({ label: "Updated Label", rotated: true });
     });
   });
 

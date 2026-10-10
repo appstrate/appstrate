@@ -67,9 +67,10 @@ export function placementShareJoin(packageIdColumn: AnyPgColumn, spaceId: string
  * Owned here, and narrowed on the space, for the reason
  * {@link placementShareJoin} is — drop that narrowing and `activeHereSql` reads
  * another space's `enabled` while a listing projects its model and proxy
- * overrides, silently.
+ * overrides, silently. `spaceId` is a column when each left row names its own
+ * space (a schedule's).
  */
-export function placementRowJoin(packageIdColumn: AnyPgColumn, spaceId: string) {
+export function placementRowJoin(packageIdColumn: AnyPgColumn, spaceId: string | AnyPgColumn) {
   return and(eq(spacePackages.packageId, packageIdColumn), eq(spacePackages.spaceId, spaceId));
 }
 

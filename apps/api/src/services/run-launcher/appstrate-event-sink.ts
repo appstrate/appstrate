@@ -20,7 +20,7 @@ import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
 import { cumulativeCostUsd } from "../token-cost.ts";
@@ -49,7 +49,8 @@ export async function persistRunEvent(
     | { writeLedger?: false }
     | {
         writeLedger: true;
-        modelSource: CredentialSource | null;
+        modelSource: ModelPayer | null;
+        payerUserId: string | null;
         modelCredentialId: string | null;
         inferenceRoute: InferenceRoute | null;
         modelCost?: ModelCost | null;
@@ -156,6 +157,7 @@ export async function persistRunEvent(
             cost,
             usage,
             modelSource: opts.modelSource,
+            payerUserId: opts.payerUserId,
             modelCredentialId: opts.modelCredentialId,
             inferenceRoute: opts.inferenceRoute,
             modelCost: opts.modelCost,
@@ -209,7 +211,9 @@ export async function writeRunnerLedgerRow(
     cost: number | null;
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
-    modelSource: CredentialSource | null;
+    modelSource: ModelPayer | null;
+    /** Run's payer (`runs.payer_user_id`) — stamped as the ledger `payerUserId`. */
+    payerUserId: string | null;
     /** Run's pinned credential (`runs.model_credential_id`) — stamped as the ledger `credentialId`. */
     modelCredentialId: string | null;
     /** Run's inference route — see {@link isServedByLlmProxy}. */
@@ -257,6 +261,7 @@ export async function writeRunnerLedgerRow(
         orgId: scope.orgId,
         runId,
         credentialSource: row.modelSource,
+        payerUserId: row.payerUserId,
         credentialId: row.modelCredentialId,
         inputTokens: row.usage?.input_tokens ?? 0,
         outputTokens: row.usage?.output_tokens ?? 0,
@@ -315,7 +320,7 @@ function resolveRunnerCost(
   row: {
     cost: number | null;
     usage: TokenUsage | null;
-    modelSource: CredentialSource | null;
+    modelSource: ModelPayer | null;
     modelCost?: ModelCost | null;
   },
 ): RunnerCostVerdict {

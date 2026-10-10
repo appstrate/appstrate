@@ -37,17 +37,33 @@ const cache = createCache<ResolvedModel | null>({
 });
 
 /**
- * Resolve one model under `slot`: the payer (`payerUserId`, `""` for none, `:proxy`
- * suffixed on the LLM proxy's chain) or a run's launch credential (`run:<id>`).
- * `null` (unknown / disabled model, dead credential) is answered but never stored.
+ * What a resolution is keyed by: the payer's chain (`viaProxy` for the LLM proxy,
+ * which never serves a subscription) or a run's launch credential. The payer is
+ * part of the key, so two members never share an entry.
+ */
+export type ResolvedModelSlot =
+  | { readonly kind: "payer"; readonly payerUserId: string | null; readonly viaProxy: boolean }
+  | { readonly kind: "run"; readonly credentialId: string; readonly payerUserId: string | null };
+
+function slotKey(orgId: string, modelDbId: string, slot: ResolvedModelSlot): string {
+  const parts =
+    slot.kind === "payer"
+      ? ["payer", slot.payerUserId, slot.viaProxy]
+      : ["run", slot.credentialId, slot.payerUserId];
+  return JSON.stringify([orgId, modelDbId, ...parts]);
+}
+
+/**
+ * Resolve one model under `slot`. `null` (unknown / disabled model, dead credential)
+ * is answered but never stored.
  */
 export function resolveModelCached(
   orgId: string,
   modelDbId: string,
-  slot: string,
+  slot: ResolvedModelSlot,
   loader: () => Promise<ResolvedModel | null>,
 ): Promise<ResolvedModel | null> {
-  return cache.get(`${orgId}:${modelDbId}:${slot}`, loader, {
+  return cache.get(slotKey(orgId, modelDbId, slot), loader, {
     store: (value) => value !== null,
   });
 }

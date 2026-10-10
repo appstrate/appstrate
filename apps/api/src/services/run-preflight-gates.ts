@@ -20,6 +20,7 @@
  */
 
 import type { LoadedPackage } from "../types/index.ts";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { getPlatformRunLimits, resolveRunTimeout } from "./run-limits.ts";
 import { checkOrgRunRateLimit } from "./org-run-rate-limit.ts";
 import { getRunningRunCountForOrg } from "./state/runs.ts";
@@ -75,7 +76,7 @@ interface PreflightGatesInput {
    * module reconciles against. The `runs.model_source` DB column is the same
    * concept under an older, persisted name — deliberately not renamed.
    */
-  credentialSource: "system" | "org" | null;
+  credentialSource: ModelPayer | null;
   /**
    * Whose compute runs the work — the other neutral fact `beforeUsage` quotes
    * against. `"platform"` for a run executing in platform-operated isolation (a

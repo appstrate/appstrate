@@ -12,6 +12,7 @@
  * covered end-to-end by `parity-e2e.test.ts`.
  */
 
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -26,7 +27,7 @@ import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-me
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { ModelCost } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
-import { runLogs, llmUsage, runs, type CredentialSource } from "@appstrate/db/schema";
+import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 describe("persistRunEvent", () => {
@@ -197,6 +198,7 @@ describe("persistRunEvent", () => {
       inferenceRoute: null,
       modelSource: "org",
       modelCredentialId: null,
+      payerUserId: null,
       modelCost: UPSERT_RATES,
     });
   }
@@ -324,12 +326,13 @@ describe("persistRunEvent", () => {
   describe("runner row pricing provenance", () => {
     function persistLedger(
       e: RunEvent,
-      opts: { modelSource: CredentialSource | null; modelCost: ModelCost | null },
+      opts: { modelSource: ModelPayer | null; modelCost: ModelCost | null },
     ) {
       return persist(e, {
         writeLedger: true,
         inferenceRoute: null,
         modelCredentialId: null,
+        payerUserId: null,
         ...opts,
       });
     }
@@ -422,6 +425,27 @@ describe("persistRunEvent", () => {
       expect(row!.inputTokens).toBe(42);
       expect(row!.pricingStatus).toBe("unpriced");
     });
+
+    it("a member-paid run stamps credential_source 'user' and its payer on the ledger row", async () => {
+      await writeRunnerLedgerRow(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        runId,
+        {
+          cost: 0.3,
+          usage: { input_tokens: 100_000, output_tokens: 0 },
+          modelSource: "user",
+          modelCredentialId: null,
+          payerUserId: "u_1",
+          inferenceRoute: null,
+          modelCost: { input: 3, output: 15 },
+        },
+        { required: true },
+      );
+
+      const row = await runnerRow();
+      expect(row!.credentialSource).toBe("user");
+      expect(row!.payerUserId).toBe("u_1");
+    });
   });
 
   /**
@@ -440,12 +464,13 @@ describe("persistRunEvent", () => {
 
     function persistLedger(
       e: RunEvent,
-      opts: { modelSource: CredentialSource | null; modelCost: ModelCost | null },
+      opts: { modelSource: ModelPayer | null; modelCost: ModelCost | null },
     ) {
       return persist(e, {
         writeLedger: true,
         inferenceRoute: null,
         modelCredentialId: null,
+        payerUserId: null,
         ...opts,
       });
     }
@@ -529,6 +554,7 @@ describe("persistRunEvent", () => {
             },
             modelSource: "org",
             modelCredentialId: null,
+            payerUserId: null,
             inferenceRoute: null,
             modelCost: tiered,
           },
@@ -715,6 +741,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 300_000, output_tokens: 0 },
               modelSource: "org",
               modelCredentialId: null,
+              payerUserId: null,
               inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
@@ -747,6 +774,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 100_000, output_tokens: 0 },
               modelSource: "org",
               modelCredentialId: null,
+              payerUserId: null,
               inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
@@ -764,6 +792,7 @@ describe("persistRunEvent", () => {
               usage: { input_tokens: 500_000, output_tokens: 0 },
               modelSource: null,
               modelCredentialId: null,
+              payerUserId: null,
               inferenceRoute: null,
               modelCost: null,
             },

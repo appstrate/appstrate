@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useStore } from "zustand";
 import { toast } from "sonner";
 import { BrainCircuit, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -47,7 +46,6 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
-import { authStore } from "../../stores/auth-store";
 import { isModelUnpriced } from "./model-pricing";
 
 export function ModelsList({
@@ -144,15 +142,17 @@ export function ModelsList({
                     </TableCell>
                     <TableCell className="text-sm">
                       {/* A managed (aliased) row hides its binding, so it names no credential. */}
-                      {m.aliased ? (
+                      {m.binding === "managed" ? (
                         <span className="text-muted-foreground">—</span>
-                      ) : m.credentialId === null ? (
+                      ) : m.binding === "member" ? (
                         <span className="text-muted-foreground">
                           {t("models.credentialEachMember")}
                         </span>
                       ) : (
                         <span className="truncate">
-                          {credentialLabels.get(m.credentialId) ?? "—"}
+                          {m.credentialId === null
+                            ? "—"
+                            : (credentialLabels.get(m.credentialId) ?? "—")}
                         </span>
                       )}
                     </TableCell>
@@ -260,8 +260,6 @@ export function OrgSettingsModelsPage() {
   const canDeleteModels = can("models:delete");
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
-  const canDeleteCredentials = can("model-provider-credentials:delete");
-  const userId = useStore(authStore, (s) => s.user?.id);
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
@@ -362,9 +360,7 @@ export function OrgSettingsModelsPage() {
             setEditPk(credential);
             setPkModalOpen(true);
           }}
-          canWrite={canWriteCredentials}
-          canDelete={canDeleteCredentials}
-          userId={userId}
+          canAdd={canWriteCredentials}
           showOwner
         />
       )}

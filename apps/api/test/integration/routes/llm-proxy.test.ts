@@ -488,6 +488,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       readsOrg: true,
       writesOrg: true,
       deletesOrg: true,
+      connects: true,
     });
     expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
     expect((await call()).status).not.toBe(401);
@@ -1438,6 +1439,12 @@ describe("POST /api/llm-proxy/* — model-alias swap", () => {
 describe("POST /api/llm-proxy/* — personal model credentials", () => {
   const UPSTREAM_BASE = "https://api.openai.test/v1";
 
+  /** A run's payment as the run router passes it: the payer the run recorded, and its launch credential. */
+  const runPayment = (runCredentialId: string | null, payerUserId: string | null) => ({
+    payerUserId,
+    runCredentialId,
+  });
+
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -1537,14 +1544,14 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
   }
 
   /**
-   * Proxy one non-streaming call as `principal`, paid as `payer` (the public
-   * route's `requestPayerUserId(c)`, or a run's launch credential). Returns the
-   * key the upstream saw.
+   * Proxy one non-streaming call as `principal`, paid by `payerUserId` (the public
+   * route's `requestPayerUserId(c)`, or the payer a run recorded), served by a run's
+   * launch credential when `runCredentialId` is set. Returns the key the upstream saw.
    */
   async function proxyAs(
     principal: LlmProxyPrincipal,
     presetId: string,
-    payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "runCredentialId">,
+    payment: { payerUserId: string | null; runCredentialId?: string | null },
     onUpstream: () => void = () => {},
   ): Promise<{ status: number; authorization: string | null }> {
     let authorization: string | null = null;
@@ -1559,7 +1566,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const response = await proxyLlmCall({
       adapter: openaiResponsesAdapter,
       principal,
-      ...payer,
+      ...payment,
       runId: null,
       chatSessionId: null,
       presetId,
@@ -1573,7 +1580,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     return { status: response.status, authorization };
   }
 
-  it("a jwt_user's personal key serves an unbound model, and the ledger reads it as org spend", async () => {
+  it("a jwt_user's personal key serves an unbound model, and the ledger reads it as the payer's own spend", async () => {
     const h = await buildPersonalHarness();
 
     const result = await proxyAs(
@@ -1585,8 +1592,9 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     expect(result.status).toBe(200);
     expect(result.authorization).toBe("Bearer sk-personal");
     const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
-    // A personal key is customer-supplied, so the row reads as the org's own spend.
-    expect(row!.credentialSource).toBe("org");
+    // A personal key is the payer's own, so the row reads as their spend, attributed to them.
+    expect(row!.credentialSource).toBe("user");
+    expect(row!.payerUserId).toBe(h.ctx.user.id);
   });
 
   it("a jwt_user holding a personal key is served by the org key on a bound model", async () => {
@@ -1633,23 +1641,40 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
 
-    const personal = await proxyAs(run, h.presetId, {
-      payerUserId: null,
-      runCredentialId: h.personalCredentialId,
-    });
+    const personal = await proxyAs(
+      run,
+      h.presetId,
+      runPayment(h.personalCredentialId, h.ctx.user.id),
+    );
     expect(personal.authorization).toBe("Bearer sk-personal");
 
-    const org = await proxyAs(run, h.boundPresetId, {
-      payerUserId: null,
-      runCredentialId: h.orgCredentialId,
-    });
+    const org = await proxyAs(run, h.boundPresetId, runPayment(h.orgCredentialId, null));
     expect(org.authorization).toBe("Bearer sk-org");
+  });
+
+  it("refuses a run whose recorded payer is not the owner of the personal credential it launched on", async () => {
+    const h = await buildPersonalHarness();
+    const bob = await memberContext(h.ctx, "member");
+
+    let upstreamCalls = 0;
+    await expect(
+      proxyAs(
+        { kind: "run", orgId: h.ctx.orgId },
+        h.presetId,
+        runPayment(h.personalCredentialId, bob.user.id),
+        () => {
+          upstreamCalls++;
+        },
+      ),
+    ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
+    expect(upstreamCalls).toBe(0);
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
   });
 
   it("a run keeps its launch credential after its payer adds a key and after an admin binds the model", async () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
-    const launched = { payerUserId: null, runCredentialId: h.personalCredentialId };
+    const launched = runPayment(h.personalCredentialId, h.ctx.user.id);
     expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
 
     // The payer adds a key that ranks ahead of the launch one (personal keys rank oldest first).
@@ -1692,7 +1717,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
 
     let upstreamCalls = 0;
     await expect(
-      proxyAs(run, h.presetId, { payerUserId: null, runCredentialId: null }, () => {
+      proxyAs(run, h.presetId, runPayment(null, h.ctx.user.id), () => {
         upstreamCalls++;
       }),
     ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
@@ -1701,15 +1726,15 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
 
     await bindToOrgKey(h);
     clearResolvedModelCache();
-    expect(
-      (await proxyAs(run, h.presetId, { payerUserId: null, runCredentialId: null })).authorization,
-    ).toBe("Bearer sk-org");
+    expect((await proxyAs(run, h.presetId, runPayment(null, h.ctx.user.id))).authorization).toBe(
+      "Bearer sk-org",
+    );
   });
 
   it("a run on a personal credential is refused once the organization switches personal credentials off", async () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
-    const launched = { payerUserId: null, runCredentialId: h.personalCredentialId };
+    const launched = runPayment(h.personalCredentialId, h.ctx.user.id);
     expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
 
     await updateOrgSettings(h.ctx.orgId, { personal_model_credentials: false });
