@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/twilio",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Twilio (API)",
@@ -15,22 +15,20 @@
   "auths": {
     "primary": {
       "type": "api_key",
-      "authorized_uris": [
-        "https://api.twilio.com/**",
-        "https://lookups.twilio.com/**",
-        "https://verify.twilio.com/**"
-      ],
+      "authorized_uris": ["https://*.twilio.com/**"],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "account_sid": {
               "type": "string",
-              "description": "Twilio Account SID (starts with AC)"
+              "title": "Account SID ou SID de clé d'API",
+              "description": "Account SID (AC…, page d'accueil de la console, Account Info) ou, recommandé, SID d'une clé d'API (SK…, Console → Account → API keys & tokens → Create API key, type Standard), révocable seule sans toucher à l'Auth Token."
             },
             "auth_token": {
               "type": "string",
-              "description": "Twilio Auth Token"
+              "title": "Auth Token ou secret de clé d'API",
+              "description": "Secret associé : l'Auth Token du compte (accès complet, le renouveler coupe tous ses clients) ou le secret de la clé d'API, affiché une seule fois à sa création."
             }
           },
           "required": ["account_sid", "auth_token"]
