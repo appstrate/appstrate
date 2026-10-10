@@ -518,6 +518,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with other tools); a self-hosted browser is #1827. `tools/list` is public, so
   the weekly conformance monitor checks tool parity without a credential.
 
+- **Browserless — headless browsers over Browserless's MCP server, Cloud or
+  self-hosted (#1893).** `@appstrate/browserless@1.0.0` speaks `streamable-http`
+  to a `base_url` connection variable defaulting to the Cloud
+  (`https://mcp.browserless.io/mcp`), as `twenty-mcp` and `gitlab-mcp` do.
+  Self-hosted is `@browserless.io/mcp` (SSPL-1.0, for operators who run it)
+  started with `TRANSPORT=httpStream` and pointed at the operator's Browserless
+  by `BROWSERLESS_API_URL`. One `api_key` auth, sent as `Authorization: Bearer`,
+  valid on both. Not OAuth: Browserless Cloud's dynamic client registration
+  accepts only a fixed allowlist of redirect URIs and refuses Appstrate's
+  callback (`invalid_redirect_uri`, observed live). Tools mirror the Cloud's
+  live `tools/list`. `hidden_tools` holds `browserless_link_connect` and
+  `browserless_link_checkout` (Stripe Link wallet, payment checkout), and
+  `browserless_agent`, whose input schema exceeds the sidecar's 8 KB
+  tool-schema cap, so it could never reach an agent. No
+  `allow_undeclared_tools`: a new upstream tool is reviewed first. On the
+  open-source image, `browserless_function` (Puppeteer code) and
+  `browserless_skill` (local recipes) work; the Cloud account tools are not
+  served; scraping, export, map, search and crawl need Cloud/Enterprise routes.
+  `tools/list` requires a token: the weekly conformance monitor checks parity
+  once a Cloud token for `@appstrate/browserless` is in `CONFORMANCE_TOKENS`.
+  Cloud calls consume units.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
