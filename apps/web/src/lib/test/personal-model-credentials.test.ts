@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  credentialUpdateBody,
   personalApiKeyBody,
   personalCredentialProviders,
   ownPersonalCredentials,
@@ -73,5 +74,25 @@ describe("modelsPaidByCaller", () => {
       { id: "unbound", billed_to: null },
     ];
     expect(modelsPaidByCaller(models).map((m) => m.id)).toEqual(["paid_by_me"]);
+  });
+});
+
+describe("credentialUpdateBody", () => {
+  it("sends the new label alone when no key is entered", () => {
+    expect(credentialUpdateBody({ authMode: "api_key" }, { label: "Perso" })).toEqual({
+      label: "Perso",
+    });
+  });
+
+  it("sends the entered key for a key-based credential", () => {
+    expect(
+      credentialUpdateBody({ authMode: "api_key" }, { label: "Perso", apiKey: "sk-new" }),
+    ).toEqual({ label: "Perso", api_key: "sk-new" });
+  });
+
+  it("drops a key typed against a subscription, which has none to send", () => {
+    expect(
+      credentialUpdateBody({ authMode: "oauth2" }, { label: "Abonnement", apiKey: "sk-new" }),
+    ).toEqual({ label: "Abonnement" });
   });
 });

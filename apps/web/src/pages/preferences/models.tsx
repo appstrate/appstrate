@@ -4,12 +4,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { CredentialsSection } from "../../components/model-credentials-section";
-import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
+import { ErrorState, LoadingState } from "../../components/page-states";
+import { Spinner } from "../../components/spinner";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
@@ -22,6 +21,7 @@ import { useModels } from "../../hooks/use-models";
 import { usePermissions } from "../../hooks/use-permissions";
 import { errorMessage } from "../../lib/mutation-error";
 import {
+  credentialUpdateBody,
   modelsPaidByCaller,
   ownPersonalCredentials,
   personalApiKeyBody,
@@ -78,12 +78,7 @@ export function PreferencesModelsPage() {
       updateCredential.mutate(
         {
           params: { path: { id: editCredential.id } },
-          body: {
-            label: data.label,
-            ...(data.apiKey && editCredential.authMode !== "oauth2"
-              ? { api_key: data.apiKey }
-              : {}),
-          },
+          body: credentialUpdateBody(editCredential, data),
         },
         { onSuccess: closeForm },
       );
@@ -93,7 +88,7 @@ export function PreferencesModelsPage() {
       {
         body: personalApiKeyBody({
           providerId: data.providerId,
-          label: deduplicateLabel(data.label, allCredentials),
+          label: deduplicateLabel(data.label, credentials),
           apiKey: data.apiKey ?? "",
         }),
       },
@@ -101,42 +96,35 @@ export function PreferencesModelsPage() {
     );
   };
 
-  const addButton = canConnect ? (
-    <Button onClick={openCreate}>{t("credentials.add")}</Button>
-  ) : null;
-
   return (
     <>
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
-      {credentials.length > 0 ? (
-        <CredentialsSection
-          credentials={credentials}
-          isLoading={false}
-          error={null}
-          onCreate={openCreate}
-          onEdit={openEdit}
-          onDelete={(credential) => setConfirmDelete(credential)}
-          onConnectOAuth={openEdit}
-          canWrite={canConnect}
-          canDelete={canConnect}
-          userId={userId}
-          showOwner={false}
-        />
-      ) : (
-        <EmptyState
-          message={t("modelCredentials.empty")}
-          hint={t("modelCredentials.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          {addButton}
-        </EmptyState>
-      )}
+      <CredentialsSection
+        credentials={credentials}
+        isLoading={false}
+        error={null}
+        onCreate={openCreate}
+        onEdit={openEdit}
+        onDelete={(credential) => setConfirmDelete(credential)}
+        onConnectOAuth={openEdit}
+        canWrite={canConnect}
+        canDelete={canConnect}
+        userId={userId}
+        showOwner={false}
+        empty={{
+          message: t("modelCredentials.empty"),
+          hint: t("modelCredentials.emptyHint"),
+        }}
+      />
 
       <div className="border-border bg-card mt-6 rounded-lg border p-5">
         <h3 className="text-sm font-medium">{t("modelCredentials.billedTitle")}</h3>
-        {modelsQuery.error ? (
+        {modelsQuery.isLoading ? (
+          <div className="mt-2">
+            <Spinner />
+          </div>
+        ) : modelsQuery.error ? (
           <p className="text-destructive mt-2 text-xs">{errorMessage(modelsQuery.error)}</p>
         ) : paidByCaller.length > 0 ? (
           <ul className="mt-3 flex flex-col gap-1.5">

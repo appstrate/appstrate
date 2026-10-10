@@ -392,7 +392,7 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
   });
 
   it("offers no pairing from here: a personal connection cannot serve the org model", () => {
-    expect(html).not.toContain(settingsFr["models.form.connectProviderHint"]);
+    expect(html).not.toContain("Connecter Claude Code");
   });
 
   it("offers neither listing nor a way back to one", () => {

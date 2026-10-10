@@ -34,7 +34,10 @@ export function OrgSettingsGeneralPage() {
   const { features } = useAppConfig();
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
-  const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials !== false;
+  // Unknown until the settings load: the toggle then reads neither as on nor off.
+  const personalModelCredentialsAllowed = orgSettings
+    ? orgSettings.personal_model_credentials !== false
+    : undefined;
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
@@ -255,10 +258,11 @@ export function OrgSettingsGeneralPage() {
                 {t("orgSettings.personalModelCredentialsDesc")}
               </span>
             </div>
-            {/* Absent means allowed: the setting is opt-out, not opt-in. */}
+            {/* Absent means allowed: the setting is opt-out, not opt-in. Disabled
+                until loaded, so a click can never send a value read off a default. */}
             <Button
               variant={personalModelCredentialsAllowed ? "default" : "outline"}
-              disabled={updateSettingsMutation.isPending}
+              disabled={!orgSettings || updateSettingsMutation.isPending}
               onClick={() =>
                 updateSettingsMutation.mutate(
                   {

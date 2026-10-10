@@ -46,6 +46,7 @@ import { TestResultSpan } from "../../components/test-result-span";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import { authStore } from "../../stores/auth-store";
 import { isModelUnpriced } from "./model-pricing";
 
@@ -262,6 +263,8 @@ export function OrgSettingsModelsPage() {
     type: "deleteModel" | "deleteCredential";
     label: string;
     id: string;
+    /** A member's own credential, not the organization's. */
+    personal?: boolean;
   } | null>(null);
 
   const [modelModalOpen, setModelModalOpen] = useState(false);
@@ -342,7 +345,12 @@ export function OrgSettingsModelsPage() {
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
-            setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
+            setConfirmState({
+              type: "deleteCredential",
+              label: pk.label,
+              id: pk.id,
+              personal: pk.owner_type === "user",
+            })
           }
           onConnectOAuth={(credential) => {
             setEditPk(credential);
@@ -371,15 +379,11 @@ export function OrgSettingsModelsPage() {
         onSubmit={(data) => {
           if (editPk) {
             // The PATCH body only accepts mutable fields — the protocol and
-            // endpoint are pinned by `providerId` at create time. A subscription
-            // has no key to send: its label is the only thing that changes here.
+            // endpoint are pinned by `providerId` at create time.
             updatePkMutation.mutate(
               {
                 params: { path: { id: editPk.id } },
-                body: {
-                  label: data.label,
-                  ...(data.apiKey && editPk.authMode !== "oauth2" ? { api_key: data.apiKey } : {}),
-                },
+                body: credentialUpdateBody(editPk, data),
               },
               { onSuccess: () => setPkModalOpen(false) },
             );
@@ -413,7 +417,9 @@ export function OrgSettingsModelsPage() {
                     label: confirmState.label,
                     count: modelsOnCredential,
                   })
-                : t("credentials.deleteConfirm", { label: confirmState.label })
+                : confirmState.personal
+                  ? t("credentials.deleteMemberConfirm", { label: confirmState.label })
+                  : t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
         confirmDisabled={modelsOnCredential > 0}

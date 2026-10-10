@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The oauth2 half of the endpoint block, rendered on its own.
+ * The oauth2 row of the endpoint block, rendered on its own.
  *
- * There is no secret to type for a subscription provider, so the row offers
- * exactly two answers — a connection the org already has, or the pairing
- * dialog. Which of the two the button names depends on whether the first one
- * exists, and that is the whole behaviour worth pinning here. The chip a
- * selected connection turns into belongs to the host (`EndpointFields`), so it
+ * It offers exactly one control: a picker over the connections the org already
+ * has, plus the "each member" choice where the model may be left to each
+ * member. With neither there is nothing to bind, so no control renders. The chip
+ * a selected connection turns into belongs to the host (`EndpointFields`), so it
  * is deliberately not part of this component.
  */
 
@@ -39,57 +38,40 @@ const CONNECTION: ModelProviderCredentialInfo = {
 };
 
 function row(connections: ModelProviderCredentialInfo[]): string {
-  return render(
-    <ConnectionRow
-      connections={connections}
-      providerName="Claude Code"
-      invalid={false}
-      onSelect={() => {}}
-      onConnect={() => {}}
-    />,
-  );
+  return render(<ConnectionRow connections={connections} invalid={false} onSelect={() => {}} />);
 }
 
-describe("ConnectionRow — nothing connected yet", () => {
+describe("ConnectionRow — nothing to bind", () => {
   const html = row([]);
 
-  it("offers connecting, and no picker for connections that do not exist", () => {
-    expect(html).toContain("Connecter Claude Code");
-    expect(html).not.toContain(settingsFr["models.form.useExistingConnection"]);
-  });
-
-  it("says what the button will actually do", () => {
-    expect(html).toContain(settingsFr["models.form.connectProviderHint"]);
+  it("renders no picker when the org has no connection and no each-member choice", () => {
+    expect(html).not.toContain('role="combobox"');
   });
 });
 
 describe("ConnectionRow — connections the org already has", () => {
   const html = row([CONNECTION]);
 
-  it("offers picking one, and names the button as an addition", () => {
+  it("offers picking one", () => {
     // Select ITEMS are portalled and render nothing here, so the picker shows
     // up as its trigger; its contents are the host's `existingKeys` list.
+    expect(html).toContain('role="combobox"');
     expect(html).toContain(settingsFr["models.form.useExistingConnection"]);
-    expect(html).toContain("Connecter un autre compte Claude Code");
-    expect(html).not.toContain("Connecter Claude Code");
   });
 });
 
-describe("ConnectionRow — a model left to each member, with nothing to pair from here", () => {
+describe("ConnectionRow — a model left to each member, with nothing to pick", () => {
   const html = render(
     <ConnectionRow
       connections={[]}
-      providerName="Claude Code"
       invalid={false}
       onSelect={() => {}}
       eachMember={{ onSelect: () => {} }}
     />,
   );
 
-  it("offers the each-member choice as the picker, and no pairing button", () => {
+  it("offers the each-member choice as the picker", () => {
     expect(html).toContain('role="combobox"');
     expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
-    expect(html).not.toContain("Connecter Claude Code");
-    expect(html).not.toContain(settingsFr["models.form.connectProviderHint"]);
   });
 });

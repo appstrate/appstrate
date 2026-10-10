@@ -190,7 +190,6 @@ export function EndpointFields({
   apiKeyHint,
   existingKeys,
   eachMember,
-  onConnect,
 }: {
   /** Namespaces the field ids so two forms can render this on one page. */
   idPrefix: string;
@@ -210,8 +209,6 @@ export function EndpointFields({
   existingKeys?: ExistingKeys;
   /** Offered where a member's own credential may serve the model. */
   eachMember?: EachMemberChoice;
-  /** Opens the pairing dialog. Required wherever an oauth2 entry offers connecting. */
-  onConnect?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const selectedKey = existingKeys?.selected ?? null;
@@ -285,11 +282,9 @@ export function EndpointFields({
         ) : isOauth ? (
           <ConnectionRow
             connections={existingKeys?.items ?? []}
-            providerName={provider.displayName}
             invalid={!!apiKeyError}
             eachMember={eachMember}
             onSelect={(id) => existingKeys?.onSelect(id)}
-            onConnect={onConnect}
           />
         ) : (
           <ApiKeyRow

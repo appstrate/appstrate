@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Pencil, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -14,7 +15,6 @@ export function InlineLabelEditor({
   editTitle,
   placeholder,
   className,
-  iconClassName,
   inputClassName,
 }: {
   current: string;
@@ -24,11 +24,10 @@ export function InlineLabelEditor({
   placeholder: string;
   /** Text styling of the label button. */
   className?: string;
-  /** Pencil colour; inherits the button's when absent. */
-  iconClassName?: string;
   /** Input width. */
   inputClassName?: string;
 }) {
+  const { t } = useTranslation("common");
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(current);
 
@@ -44,7 +43,7 @@ export function InlineLabelEditor({
         title={editTitle}
       >
         <span>{current}</span>
-        <Pencil className={cn("h-3 w-3", iconClassName)} />
+        <Pencil className="h-3 w-3" />
       </button>
     );
   }
@@ -59,6 +58,7 @@ export function InlineLabelEditor({
     <div className="flex items-center gap-1">
       <Input
         autoFocus
+        aria-label={editTitle}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -69,7 +69,14 @@ export function InlineLabelEditor({
         disabled={saving}
         placeholder={placeholder}
       />
-      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={commit} disabled={saving}>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6"
+        onClick={commit}
+        disabled={saving}
+        aria-label={t("btn.save")}
+      >
         <Check className="h-3 w-3" />
       </Button>
       <Button
@@ -78,6 +85,7 @@ export function InlineLabelEditor({
         className="h-6 w-6"
         onClick={() => setEditing(false)}
         disabled={saving}
+        aria-label={t("btn.cancel")}
       >
         <X className="h-3 w-3" />
       </Button>

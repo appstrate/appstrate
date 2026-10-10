@@ -44,6 +44,7 @@ export function CredentialsSection({
   canDelete,
   userId,
   showOwner,
+  empty,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
   isLoading: boolean;
@@ -58,6 +59,8 @@ export function CredentialsSection({
   userId: string | undefined;
   /** Whether the owner column shows; a personal-only list has one owner, the caller. */
   showOwner: boolean;
+  /** Empty-state copy; the organization's by default. */
+  empty?: { message: string; hint?: string };
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
@@ -78,6 +81,7 @@ export function CredentialsSection({
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
   // in-modal provider picker with zero UI footprint here.
   const addButton = canWrite ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
+  const emptyCopy = empty ?? { message: t("credentials.empty"), hint: t("credentials.emptyHint") };
 
   return (
     <div className="mb-8">
@@ -235,14 +239,7 @@ export function CredentialsSection({
           </Table>
         </div>
       ) : (
-        <EmptyState
-          message={t("credentials.empty")}
-          hint={t("credentials.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          {addButton}
-        </EmptyState>
+        <EmptyState message={emptyCopy.message} hint={emptyCopy.hint} icon={KeyRound} compact />
       )}
     </div>
   );

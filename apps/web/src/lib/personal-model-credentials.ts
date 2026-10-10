@@ -36,3 +36,17 @@ export function personalApiKeyBody(input: { providerId: string; label: string; a
     owner_type: "user" as const,
   };
 }
+
+/**
+ * Body of a credential's PATCH: its label, and the key only for a key-based
+ * credential. A subscription has no key to send, so an entered one is ignored.
+ */
+export function credentialUpdateBody(
+  credential: { readonly authMode: string },
+  data: { label: string; apiKey?: string },
+) {
+  return {
+    label: data.label,
+    ...(data.apiKey && credential.authMode !== "oauth2" ? { api_key: data.apiKey } : {}),
+  };
+}
