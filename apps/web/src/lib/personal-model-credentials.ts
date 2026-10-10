@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Providers a personal API key can be added for: key-based, never a custom endpoint. */
-export function personalApiKeyProviders<
+/**
+ * Providers a member may own a credential for: subscriptions, and key-based
+ * providers at their fixed endpoint. A custom endpoint is organization-only.
+ */
+export function personalCredentialProviders<
   T extends { authMode: "api_key" | "oauth2"; baseUrlOverridable: boolean },
 >(registry: readonly T[]): T[] {
-  return registry.filter((p) => p.authMode === "api_key" && !p.baseUrlOverridable);
+  return registry.filter(
+    (p) => p.authMode === "oauth2" || (p.authMode === "api_key" && !p.baseUrlOverridable),
+  );
 }
 
 /** The caller's own personal credentials, out of an org-wide list (a reader gets every member's). */

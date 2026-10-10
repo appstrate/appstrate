@@ -9,13 +9,13 @@
 import { describe, it, expect } from "bun:test";
 import {
   personalApiKeyBody,
-  personalApiKeyProviders,
+  personalCredentialProviders,
   ownPersonalCredentials,
   modelsPaidByCaller,
 } from "../personal-model-credentials.ts";
 
-describe("personalApiKeyProviders", () => {
-  it("offers key-based providers only, never a subscription or a custom endpoint", () => {
+describe("personalCredentialProviders", () => {
+  it("offers subscriptions and fixed-endpoint key providers, never a custom endpoint", () => {
     const registry: {
       providerId: string;
       authMode: "api_key" | "oauth2";
@@ -25,7 +25,10 @@ describe("personalApiKeyProviders", () => {
       { providerId: "openai-compatible", authMode: "api_key", baseUrlOverridable: true },
       { providerId: "claude-code", authMode: "oauth2", baseUrlOverridable: false },
     ];
-    expect(personalApiKeyProviders(registry).map((p) => p.providerId)).toEqual(["openai"]);
+    expect(personalCredentialProviders(registry).map((p) => p.providerId)).toEqual([
+      "openai",
+      "claude-code",
+    ]);
   });
 });
 

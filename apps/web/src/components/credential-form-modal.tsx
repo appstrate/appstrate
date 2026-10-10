@@ -54,6 +54,7 @@ import {
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { parsesAsUrl } from "@/lib/model-discovery";
+import { personalCredentialProviders } from "@/lib/personal-model-credentials";
 import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
@@ -78,6 +79,8 @@ interface CredentialFormModalProps {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
+  /** The caller's own credential: the picker offers only what a member may own. */
+  personal?: boolean;
 }
 
 interface CredentialFormFields {
@@ -118,16 +121,18 @@ function CredentialFormBody({
   isPending,
   onSubmit,
   onClose,
+  personal,
 }: {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
+  personal: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(registry);
+  const options = buildOptions(personal ? personalCredentialProviders(registry) : registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (credential?.providerId) {
@@ -491,6 +496,7 @@ export function CredentialFormModal({
   credential,
   isPending,
   onSubmit,
+  personal = false,
 }: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
@@ -503,6 +509,7 @@ export function CredentialFormModal({
       isPending={isPending}
       onSubmit={onSubmit}
       onClose={onClose}
+      personal={personal}
     />
   );
 }

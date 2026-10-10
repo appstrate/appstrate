@@ -17,7 +17,8 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { CredentialsSection, ModelsList } = await import("../org-settings/models.tsx");
+const { ModelsList } = await import("../org-settings/models.tsx");
+const { CredentialsSection } = await import("../../components/model-credentials-section.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 
@@ -92,6 +93,7 @@ function credentialsPage(credentials: ModelProviderCredentialInfo[], userId: str
       canWrite
       canDelete
       userId={userId}
+      showOwner
     />,
     { queryClient: seededClient() },
   );

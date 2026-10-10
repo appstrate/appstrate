@@ -2,167 +2,107 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  ApiKeyForm,
-  SubscriptionPairing,
-} from "../../components/personal-model-credential-dialogs";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { PROVIDER_ICONS } from "../../components/icons";
-import { InlineLabelEditor } from "../../components/inline-label-editor";
+import { CredentialFormModal } from "../../components/credential-form-modal";
+import { CredentialsSection } from "../../components/model-credentials-section";
 import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import {
+  deduplicateLabel,
+  useCreateModelProviderCredential,
   useDeleteModelProviderCredential,
   useModelProviderCredentials,
-  useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
-  type ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials";
 import { useModels } from "../../hooks/use-models";
-import { useAuth } from "../../hooks/use-auth";
 import { usePermissions } from "../../hooks/use-permissions";
-import { formatDateField } from "../../lib/format-date";
 import { errorMessage } from "../../lib/mutation-error";
 import {
   modelsPaidByCaller,
   ownPersonalCredentials,
-  personalApiKeyProviders,
+  personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
-import { quickConnectProviders, resolveProviderEntry } from "../../lib/provider-registry-helpers";
-
-// ─────────────────────────────────────────────
-// Credential row
-// ─────────────────────────────────────────────
-
-function CredentialRow({
-  credential,
-  registry,
-  editable,
-  saving,
-  onRename,
-  onDelete,
-}: {
-  credential: ModelProviderCredentialInfo;
-  registry: readonly ProviderRegistryEntry[];
-  editable: boolean;
-  saving: boolean;
-  onRename: (label: string, onSuccess: () => void) => void;
-  onDelete: () => void;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  // Inline lookup, as `react-hooks/static-components` requires (see credential-form-modal).
-  const ProviderIcon = PROVIDER_ICONS[resolveProviderEntry(credential, registry)?.iconUrl ?? ""];
-  const isOauth = credential.authMode === "oauth2";
-
-  return (
-    <div
-      className="border-border bg-card flex items-start justify-between gap-4 rounded-md border p-3"
-      data-testid={`model-credential-row-${credential.id}`}
-    >
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          {ProviderIcon && <ProviderIcon className="text-muted-foreground size-4 shrink-0" />}
-          {editable ? (
-            <InlineLabelEditor
-              current={credential.label}
-              saving={saving}
-              onSave={onRename}
-              editTitle={t("credentials.edit")}
-              placeholder={t("modelCredentials.labelPlaceholder")}
-              className="text-foreground text-sm font-medium"
-              iconClassName="text-muted-foreground"
-              inputClassName="w-44"
-            />
-          ) : (
-            <span className="text-sm font-medium">{credential.label}</span>
-          )}
-          <Badge variant="secondary">
-            {isOauth ? t("credentials.oauth.badgeOauth") : t("credentials.form.apiKey")}
-          </Badge>
-          {credential.needs_reconnection && (
-            <Badge variant="destructive">
-              {isOauth
-                ? t("credentials.oauth.needsReconnection")
-                : t("models.credentialUnavailable")}
-            </Badge>
-          )}
-        </div>
-        {isOauth && credential.oauth_email && (
-          <span className="text-muted-foreground text-xs">
-            {t("credentials.oauth.connectedAs", { email: credential.oauth_email })}
-          </span>
-        )}
-        {credential.createdAt && (
-          <span className="text-muted-foreground text-xs">
-            {t("connections.connectedAtLabel")} {formatDateField(credential.createdAt)}
-          </span>
-        )}
-      </div>
-      {editable && (
-        <Button
-          variant="destructive"
-          size="sm"
-          className="shrink-0"
-          onClick={onDelete}
-          disabled={saving}
-        >
-          {t("credentials.delete")}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────
-// Page
-// ─────────────────────────────────────────────
+import { authStore } from "../../stores/auth-store";
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const { user } = useAuth();
+  const userId = useStore(authStore, (s) => s.user?.id);
   const queryClient = useQueryClient();
 
   const canConnect = can("model-provider-credentials:connect");
   const credentialsQuery = useModelProviderCredentials();
-  const registryQuery = useProvidersRegistry();
   const modelsQuery = useModels();
+  const createCredential = useCreateModelProviderCredential();
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
 
-  const [apiKeyOpen, setApiKeyOpen] = useState(false);
-  const [subscriptionOpen, setSubscriptionOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editCredential, setEditCredential] = useState<ModelProviderCredentialInfo | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
   if (credentialsQuery.isLoading) return <LoadingState />;
   if (credentialsQuery.error) return <ErrorState error={credentialsQuery.error} />;
 
-  const registry = registryQuery.data ?? [];
-  const apiKeyProviders = personalApiKeyProviders(registry);
-  const subscriptionProviders = quickConnectProviders(registry);
-  const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], user?.id);
+  const allCredentials = credentialsQuery.data ?? [];
+  const credentials = ownPersonalCredentials(allCredentials, userId);
   const paidByCaller = modelsPaidByCaller(modelsQuery.data ?? []);
 
-  // A credential's add, rename or delete changes which models the caller pays for.
+  // A credential's add, rename, delete or pairing changes which models the caller pays for.
   const refreshModels = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
   };
 
-  const addButtons = canConnect ? (
-    <>
-      {apiKeyProviders.length > 0 && (
-        <Button onClick={() => setApiKeyOpen(true)}>{t("modelCredentials.add")}</Button>
-      )}
-      {subscriptionProviders.length > 0 && (
-        <Button variant="outline" onClick={() => setSubscriptionOpen(true)}>
-          {t("modelCredentials.connect")}
-        </Button>
-      )}
-    </>
+  const closeForm = () => {
+    setFormOpen(false);
+    refreshModels();
+  };
+
+  const openCreate = () => {
+    setEditCredential(null);
+    setFormOpen(true);
+  };
+
+  const openEdit = (credential: ModelProviderCredentialInfo) => {
+    setEditCredential(credential);
+    setFormOpen(true);
+  };
+
+  const submitForm = (data: { label: string; providerId: string; apiKey?: string }) => {
+    if (editCredential) {
+      // The provider is pinned at create time: only the label and the key change.
+      updateCredential.mutate(
+        {
+          params: { path: { id: editCredential.id } },
+          body: {
+            label: data.label,
+            ...(data.apiKey && editCredential.authMode !== "oauth2"
+              ? { api_key: data.apiKey }
+              : {}),
+          },
+        },
+        { onSuccess: closeForm },
+      );
+      return;
+    }
+    createCredential.mutate(
+      {
+        body: personalApiKeyBody({
+          providerId: data.providerId,
+          label: deduplicateLabel(data.label, allCredentials),
+          apiKey: data.apiKey ?? "",
+        }),
+      },
+      { onSuccess: closeForm },
+    );
+  };
+
+  const addButton = canConnect ? (
+    <Button onClick={openCreate}>{t("credentials.add")}</Button>
   ) : null;
 
   return (
@@ -170,29 +110,19 @@ export function PreferencesModelsPage() {
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       {credentials.length > 0 ? (
-        <>
-          {canConnect && (
-            <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{addButtons}</div>
-          )}
-          <div className="flex flex-col gap-3">
-            {credentials.map((credential) => (
-              <CredentialRow
-                key={credential.id}
-                credential={credential}
-                registry={registry}
-                editable={canConnect}
-                saving={updateCredential.isPending || deleteCredential.isPending}
-                onRename={(label, onSuccess) =>
-                  updateCredential.mutate(
-                    { params: { path: { id: credential.id } }, body: { label } },
-                    { onSuccess },
-                  )
-                }
-                onDelete={() => setConfirmDelete(credential)}
-              />
-            ))}
-          </div>
-        </>
+        <CredentialsSection
+          credentials={credentials}
+          isLoading={false}
+          error={null}
+          onCreate={openCreate}
+          onEdit={openEdit}
+          onDelete={(credential) => setConfirmDelete(credential)}
+          onConnectOAuth={openEdit}
+          canWrite={canConnect}
+          canDelete={canConnect}
+          userId={userId}
+          showOwner={false}
+        />
       ) : (
         <EmptyState
           message={t("modelCredentials.empty")}
@@ -200,7 +130,7 @@ export function PreferencesModelsPage() {
           icon={KeyRound}
           compact
         >
-          {addButtons}
+          {addButton}
         </EmptyState>
       )}
 
@@ -224,22 +154,14 @@ export function PreferencesModelsPage() {
         )}
       </div>
 
-      {apiKeyOpen && (
-        <ApiKeyForm
-          onClose={() => setApiKeyOpen(false)}
-          providers={apiKeyProviders}
-          onCreated={refreshModels}
-        />
-      )}
-      {subscriptionOpen && (
-        <SubscriptionPairing
-          onClose={() => {
-            setSubscriptionOpen(false);
-            refreshModels();
-          }}
-          providers={subscriptionProviders}
-        />
-      )}
+      <CredentialFormModal
+        open={formOpen}
+        onClose={closeForm}
+        credential={editCredential}
+        isPending={createCredential.isPending || updateCredential.isPending}
+        onSubmit={submitForm}
+        personal
+      />
 
       <ConfirmModal
         open={!!confirmDelete}

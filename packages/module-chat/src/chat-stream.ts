@@ -546,11 +546,11 @@ export async function handleChatStream(
     mintBearer: mintInferenceAuth,
   });
   if (resolution.status === "needs-reconnection") {
-    // The oauth credential is dead → tell the client to reconnect rather than
-    // launching a session that would 401 upstream (409: the model's, not the caller's).
+    // The caller's own subscription is dead → tell them to reconnect it rather
+    // than launching a session that would 401 upstream.
     throw conflict(
       "needs_reconnection",
-      "The selected model's subscription credential expired or was revoked.",
+      "Your subscription for the selected model expired or was revoked: reconnect it under Preferences → Model credentials.",
     );
   }
   if (resolution.status !== "ready") {
