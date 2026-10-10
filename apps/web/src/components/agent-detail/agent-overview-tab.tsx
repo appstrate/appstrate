@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Wrench,
 } from "lucide-react";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { cn } from "@appstrate/ui/cn";
 import { Badge as StatusPill } from "@appstrate/ui/components/badge";
 import {
@@ -62,6 +63,7 @@ function AgentHealthSection({
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
+  const { features } = useAppConfig();
   const diagnostics = useAgentDiagnostics(packageId, version);
   const result = diagnostics.data;
   const [issuesOpen, setIssuesOpen] = useState(false);
@@ -149,16 +151,19 @@ function AgentHealthSection({
                       >
                         {t("detail.diagnostics.fix")}
                       </HealthAction>
-                      <HealthAction
-                        to={agentDiagnosticLocateTarget(
-                          diagnostic,
-                          location.pathname,
-                          location.search,
-                        )}
-                        secondary
-                      >
-                        {t("detail.diagnostics.locate")}
-                      </HealthAction>
+                      {/* "Locate" opens the map, served by the opt-in agent-map module. */}
+                      {features.agentMap && (
+                        <HealthAction
+                          to={agentDiagnosticLocateTarget(
+                            diagnostic,
+                            location.pathname,
+                            location.search,
+                          )}
+                          secondary
+                        >
+                          {t("detail.diagnostics.locate")}
+                        </HealthAction>
+                      )}
                     </>
                   }
                 />

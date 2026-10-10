@@ -21,6 +21,7 @@ import {
   packageKeys,
   agentsKeys,
   scheduleKeys,
+  persistenceKeys,
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
@@ -327,6 +328,9 @@ function handleSSEMessage(
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.
     qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+    // So has its memory: the pinned slots and notes it wrote count on the run
+    // page and list in the agent's Mémoire tab.
+    qc.invalidateQueries({ queryKey: persistenceKeys.all });
     // openapi-react-query keys are [method, path, init] — invalidating the
     // literal spec path reaches the entry whatever org rides in its init.
     qc.invalidateQueries({ queryKey: ["get", "/api/billing"] });

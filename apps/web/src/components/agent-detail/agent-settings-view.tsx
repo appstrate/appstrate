@@ -24,6 +24,7 @@ import type { Versioned } from "../../hooks/use-packages";
 import { RoleLimitNotice } from "../role-limit-notice";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
@@ -139,9 +140,13 @@ export function AgentSettingsView({
   // Every section stays in the rail for every role; one the role does not open
   // is marked with a lock and its panel says why (`RoleLimitNotice`). Only a
   // section that does not apply to this agent at all leaves the rail.
+  // The map is served by the opt-in `agent-map` module: without it the
+  // section has nothing to show and leaves the rail.
+  const { features } = useAppConfig();
   const applies = (section: AgentSettingsSection) =>
     // A system agent has no history of its own to browse.
-    section !== "versions" || detail.source !== "system";
+    (section !== "versions" || detail.source !== "system") &&
+    (section !== "map" || !!features.agentMap);
   const visible = (section: AgentSettingsSection) => {
     if (section === "model" || section === "proxy" || section === "inputs") {
       return can("agents:configure");

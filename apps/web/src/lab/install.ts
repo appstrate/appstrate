@@ -40,6 +40,7 @@ window.__APP_CONFIG__ = {
     webhooks: true,
     oidc: true,
     custom_roles: true,
+    agentMap: true,
   },
   trustedOrigins: [],
 };
