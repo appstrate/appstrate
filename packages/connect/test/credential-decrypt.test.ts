@@ -67,18 +67,24 @@ describe("decryptCredentialsToStringMap — outputs-only projection", () => {
     expect(JSON.stringify(outputs)).not.toContain("s3cr3t");
   });
 
-  it("drops non-string output values during projection", () => {
+  it("JSON-encodes non-string output values instead of dropping them (#1897)", () => {
     const blob = encryptCredentialEnvelope({
       outputs: {
         access_token: "TOK",
-        // Non-string values are not injectable as headers/body params.
-        expires_in: 3600 as unknown as string,
-        active: true as unknown as string,
-        nested: { a: 1 } as unknown as string,
+        expires_in: 3600,
+        active: false,
+        nested: { a: 1 },
+        scopes: ["a", "b"],
+        cleared: null,
       },
     });
-    const outputs = decryptCredentialsToStringMap(blob);
-    expect(outputs).toEqual({ access_token: "TOK" });
+    expect(decryptCredentialsToStringMap(blob)).toEqual({
+      access_token: "TOK",
+      expires_in: "3600",
+      active: "false",
+      nested: '{"a":1}',
+      scopes: '["a","b"]',
+    });
   });
 
   it("rejects a flat encrypted blob", () => {
@@ -105,14 +111,16 @@ describe("decryptCredentialInputsToStringMap — inputs-only projection", () => 
     expect(() => decryptCredentialInputsToStringMap(flat)).toThrow();
   });
 
-  it("drops non-string input values during projection", () => {
+  it("JSON-encodes non-string input values, as the first login received them (#1897)", () => {
     const blob = encryptCredentialEnvelope({
       outputs: { access_token: "TOK" },
-      inputs: {
-        password: "p@ss",
-        attempts: 2 as unknown as string,
-      },
+      inputs: { password: "p@ss", attempts: 2, remember: true, hosts: ["a"], otp: null },
     });
-    expect(decryptCredentialInputsToStringMap(blob)).toEqual({ password: "p@ss" });
+    expect(decryptCredentialInputsToStringMap(blob)).toEqual({
+      password: "p@ss",
+      attempts: "2",
+      remember: "true",
+      hosts: '["a"]',
+    });
   });
 });

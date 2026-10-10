@@ -33,6 +33,7 @@ import type {
   SidecarLaunchSpec,
 } from "@appstrate/core/platform-types";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
 import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
@@ -275,6 +276,32 @@ describe("buildConnectLoginSpec", () => {
       declaredUris: ["https://api.example.test/**"],
       allowAllUris: false,
     });
+  });
+
+  it("hands the login tool non-string inputs by the rule the re-bootstrap reads them back with (#1897)", async () => {
+    const ex = execution();
+    ex.inputs = {
+      email: "a@b.c",
+      password: "pw",
+      port: 5432,
+      remember: false,
+      hosts: ["a", "b"],
+      opts: { tls: true },
+      otp: null,
+    };
+    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    const expected = {
+      email: "a@b.c",
+      password: "pw",
+      port: "5432",
+      remember: "false",
+      hosts: '["a","b"]',
+      opts: '{"tls":true}',
+    };
+    expect(spec.connectLogin!.inputs).toEqual(expected);
+    // The run-start re-bootstrap decrypts the persisted inputs through this same
+    // function: both readers of one login input agree on it.
+    expect(toCredentialStringMap(ex.inputs)).toEqual(expected);
   });
 
   it("carries allow_all_uris onto egress", async () => {
