@@ -26,6 +26,7 @@ import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const integrationCreds = (token = "tok-abc"): CredentialsResponse => ({
   credentials: { access_token: token },
@@ -40,6 +41,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {

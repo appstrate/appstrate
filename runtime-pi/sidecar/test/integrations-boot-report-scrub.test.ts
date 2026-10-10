@@ -24,6 +24,7 @@ import { bootIntegrations, scrubStderrLine } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -57,7 +58,12 @@ async function boot(spec: IntegrationSpawnSpec, fetchFn: typeof fetch) {
   try {
     return await bootIntegrations(
       [spec],
-      { platformApiUrl: "http://platform.local", runToken: "run-token", fetchFn },
+      {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
+        fetchFn,
+      },
       undefined,
     );
   } finally {
@@ -131,6 +137,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
         {
           platformApiUrl: "http://platform.local",
           runToken: "run-token",
+          egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
           fetchFn: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
         },
         undefined,

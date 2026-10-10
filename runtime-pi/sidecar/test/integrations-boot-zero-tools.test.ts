@@ -21,6 +21,7 @@ import type { ApiCallToolDeps } from "../mcp.ts";
 import { TokenBudget } from "../token-budget.ts";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -34,6 +35,7 @@ const apiCallDeps: ApiCallToolDeps = {
   proxyDeps: {
     config: { runToken: "run-token", platformApiUrl: "http://platform.local" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: unreachableFetch,
     reportedAuthFailures: new Set(),
   },
@@ -130,6 +132,7 @@ async function boot(spec: IntegrationSpawnSpec) {
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
+        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
         fetchFn: platformFetch,
       },
       apiCallDeps,

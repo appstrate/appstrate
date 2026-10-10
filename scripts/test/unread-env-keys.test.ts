@@ -11,27 +11,26 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { envSchema, findUnreadEnvKeys } from "../../packages/env/src/index.ts";
-import { SIDECAR_OPERATOR_ENV_KEYS } from "../../packages/runner-pi/src/index.ts";
+import ts from "typescript";
+import { platformReadEnvKeys } from "../../apps/api/src/lib/platform-env-keys.ts";
+import { findUnreadEnvKeys } from "../../packages/env/src/index.ts";
 import { moduleEnvSchemas } from "../lib/module-env-schemas.ts";
 import { trackedFiles } from "../lib/tracked-files.ts";
 import { readEnvExampleVars } from "../verify-env-docs.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
 
-/**
- * Mirrors `platformReadEnvKeys()` in apps/api/src/lib/unread-env-keys.ts. The
- * API module is not imported here because it constructs the platform logger,
- * which reads the validated env at import time.
- */
-const READ: ReadonlySet<string> = new Set([
-  ...Object.keys(envSchema.shape),
-  ...SIDECAR_OPERATOR_ENV_KEYS,
-]);
+const READ = platformReadEnvKeys();
 
 const EXAMPLES = [".env.example", "deploy/.env.example", "examples/self-hosting/.env.example"];
 
 const PROCESS_ENV_READ = /process\.env(?:\.([A-Z][A-Z0-9_]*)|\[["']([A-Z][A-Z0-9_]*)["']\])/g;
+
+/** The source reprinted without comments, so a key named in prose is not a read. */
+const COMMENTLESS = ts.createPrinter({ removeComments: true });
+function codeOf(file: string, content: string): string {
+  return COMMENTLESS.printFile(ts.createSourceFile(file, content, ts.ScriptTarget.Latest));
+}
 
 describe("unread-env-keys over this repository", () => {
   it.each(EXAMPLES)("%s triggers no unread-key finding", (relative) => {
@@ -54,14 +53,14 @@ describe("unread-env-keys over this repository", () => {
 
   it("every process.env read in platform source is a read key", () => {
     const files = trackedFiles(
-      ["apps/api/src/**/*.ts", "packages/*/src/**/*.ts"],
+      [":(glob)apps/api/src/**/*.ts", ":(glob)packages/*/src/**/*.ts"],
       "platform source",
       "fail",
     ).filter((file) => !file.includes("/test/") && !file.includes("/scripts/"));
     const reads: { file: string; key: string }[] = [];
     for (const file of files) {
-      const content = readFileSync(join(REPO_ROOT, file), "utf-8");
-      for (const match of content.matchAll(PROCESS_ENV_READ)) {
+      const code = codeOf(file, readFileSync(join(REPO_ROOT, file), "utf-8"));
+      for (const match of code.matchAll(PROCESS_ENV_READ)) {
         reads.push({ file, key: (match[1] ?? match[2])! });
       }
     }

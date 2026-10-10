@@ -28,6 +28,8 @@ export interface SidecarEnv {
   outputSchema?: Record<string, unknown>;
   /** `CONNECT_RESULT_KEY`, required with `CONNECT_LOGIN_JSON` (connect mode). */
   connectResultKey?: Buffer;
+  /** `EGRESS_ALLOW_INTERNAL_HOSTS`, lower-cased; same parser as the platform. */
+  egressAllowInternalHosts: ReadonlySet<string>;
 }
 
 export class SidecarEnvError extends Error {
@@ -68,7 +70,10 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null,
   );
   const connectResultKey = parseConnectResultKey(source, issues);
-  for (const m of parseEgressAllowInternalHosts(source.EGRESS_ALLOW_INTERNAL_HOSTS).invalid) {
+  const egressAllowInternalHosts = parseEgressAllowInternalHosts(
+    source.EGRESS_ALLOW_INTERNAL_HOSTS,
+  );
+  for (const m of egressAllowInternalHosts.invalid) {
     issues.push(`EGRESS_ALLOW_INTERNAL_HOSTS: ${m}`);
   }
 
@@ -85,6 +90,7 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     runtimeToolNames: runtimeTools ?? [],
     ...(outputSchema ? { outputSchema } : {}),
     ...(connectResultKey ? { connectResultKey } : {}),
+    egressAllowInternalHosts: egressAllowInternalHosts.hosts,
   };
 }
 

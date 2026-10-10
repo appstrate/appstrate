@@ -33,11 +33,13 @@ import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
 import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     // bun:test Mock lacks fetch.preconnect — cross-lib friction with DOM `typeof fetch`.
     fetchFn: mock(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
     isReady: () => true,
@@ -100,6 +102,7 @@ async function buildTestApp(opts: {
   const proxyDeps = {
     config: opts.deps.config,
     cookieJar: opts.deps.cookieJar,
+    egressAllowInternalHosts: opts.deps.egressAllowInternalHosts,
     fetchFn: opts.deps.fetchFn ?? fetch,
     reportedAuthFailures: new Set<string>(),
   };

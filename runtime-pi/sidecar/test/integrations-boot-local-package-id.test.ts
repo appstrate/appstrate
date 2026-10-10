@@ -20,6 +20,7 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -55,7 +56,12 @@ async function boot(spec: IntegrationSpawnSpec) {
   try {
     const result = await bootIntegrations(
       [spec],
-      { platformApiUrl: "http://platform.local", runToken: "run-token", fetchFn },
+      {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
+        fetchFn,
+      },
       undefined,
     );
     return { result, bundleUrls };

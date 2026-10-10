@@ -25,6 +25,7 @@ import { describe, it, expect, mock } from "bun:test";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { createApp, type AppDeps } from "../app.ts";
 import { RuntimeEventJournal } from "../runtime-event-journal.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const TOKEN = "s3cr3t-agent-token";
 /** Same LENGTH as {@link TOKEN} — the comparison must not pass on length alone. */
@@ -44,6 +45,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
       },
     },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {

@@ -158,6 +158,7 @@ if (connectLoginJson) {
     const bundle = await runConnectOnce(spec, {
       platformApiUrl: env.platformApiUrl,
       runToken: env.runToken,
+      egressAllowInternalHosts: env.egressAllowInternalHosts,
     });
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
@@ -214,6 +215,7 @@ const oauthTokenCache = new OAuthTokenCache({
 const runtimeDeps = buildSidecarRuntimeDeps({
   config,
   cookieJar,
+  egressAllowInternalHosts: env.egressAllowInternalHosts,
   ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
 });
 
@@ -258,6 +260,7 @@ const integrationBootPromise =
         {
           platformApiUrl: config.platformApiUrl,
           runToken: config.runToken,
+          egressAllowInternalHosts: env.egressAllowInternalHosts,
         },
         runtimeDeps,
         (adapter) => {
@@ -299,6 +302,7 @@ const integrationBootPromise =
 const app = createApp({
   config,
   cookieJar,
+  egressAllowInternalHosts: env.egressAllowInternalHosts,
   runtimeDeps,
   isReady: () => proxy.readySync,
   oauthTokenCache,

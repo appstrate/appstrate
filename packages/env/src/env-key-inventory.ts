@@ -38,7 +38,7 @@ export const INFRA_ENV_KEYS: Readonly<Record<string, string>> = {
  * one of these segments is never reported as an unread platform key, because
  * the platform cannot know which of them a foreign tool reads.
  */
-export const FOREIGN_ENV_SEGMENTS: Readonly<Record<string, string>> = {
+const FOREIGN_ENV_SEGMENTS: Readonly<Record<string, string>> = {
   NODE: "the Node/Bun runtime (NODE_OPTIONS, NODE_EXTRA_CA_CERTS)",
   GIT: "git's own environment",
   GITHUB: "the GitHub Actions runner namespace, where the e2e job boots the API with inherited env",

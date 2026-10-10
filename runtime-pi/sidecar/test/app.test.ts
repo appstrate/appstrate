@@ -18,11 +18,13 @@ import { SIDECAR_IDLE_TIMEOUT_SECONDS, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import type { LlmProxyConfig } from "../helpers.ts";
 import { logger } from "../logger.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {

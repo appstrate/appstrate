@@ -7,6 +7,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 import type { IntegrationCredentialsWire } from "@appstrate/connect";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -103,6 +104,7 @@ function makeDeps(
     },
   } as unknown as IntegrationCredentialsSource;
   const deps: ConnectRemoteHttpDeps = {
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     createClient: (async (_url: string | URL, opts: { fetch?: typeof fetch }) => {
       captured = opts.fetch;
       return {} as AppstrateMcpClient;
@@ -440,10 +442,8 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
    * the first passes if the guard is off entirely, the second if the
    * exemption never fires.
    *
-   * `ssrf.ts` snapshots the env into a module-level Set at IMPORT time, so a
-   * test cannot vary the list at run time; the list is the preload's fixture
-   * one. The precondition asserts state that dependency out loud rather than
-   * leaving the coupling implicit.
+   * The list is the preload's fixture one, handed in through `makeDeps`; the
+   * precondition states that dependency out loud.
    */
   describe("operator-trusted host exemption", () => {
     const bearerWire = () =>
@@ -454,7 +454,9 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const resolvesPrivate = async () => ["10.0.0.5"];
 
     it("permits an allowlisted host that resolves to a private address", async () => {
-      expect(isOperatorTrustedEgressHost("mcp.example.com")).toBe(true);
+      expect(isOperatorTrustedEgressHost(TEST_EGRESS_ALLOW_INTERNAL_HOSTS, "mcp.example.com")).toBe(
+        true,
+      );
 
       const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
       await connectRemoteHttpIntegration(spec(), source, deps);
@@ -473,7 +475,9 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     });
 
     it("still blocks a non-allowlisted host resolving to the same private address", async () => {
-      expect(isOperatorTrustedEgressHost("internal-mcp.invalid")).toBe(false);
+      expect(
+        isOperatorTrustedEgressHost(TEST_EGRESS_ALLOW_INTERNAL_HOSTS, "internal-mcp.invalid"),
+      ).toBe(false);
 
       const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
       await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, deps);

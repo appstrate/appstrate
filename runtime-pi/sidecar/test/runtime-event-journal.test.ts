@@ -8,11 +8,13 @@ import {
   buildRuntimeToolDefs,
   RUNTIME_TOOL_EVENTS_META_KEY,
 } from "@appstrate/core/runtime-tool-defs";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     isReady: () => true,
     ...overrides,
   };

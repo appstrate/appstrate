@@ -401,6 +401,21 @@ export interface RunOptions {
 /** Injectable so tests exercise the tool logic without an sshd. */
 export type Runner = (argv: string[], opts: RunOptions) => Promise<RunResult>;
 
+/** Children `runProcess` has not settled yet, killed by `killLiveChildren` before an early exit. */
+const liveChildren = new Set<{ kill(): void }>();
+
+/** Kills every child still running, so an exit that cannot wait for its calls leaks no ssh client. */
+function killLiveChildren(): void {
+  for (const child of liveChildren) {
+    try {
+      child.kill();
+    } catch {
+      // already gone
+    }
+  }
+  liveChildren.clear();
+}
+
 export const runProcess: Runner = (argv, opts) => {
   // `Bun.spawn({ env })` REPLACES the environment. The proxy variables the
   // sidecar sets must reach ssh, and through it the ProxyCommand helper —
@@ -411,6 +426,7 @@ export const runProcess: Runner = (argv, opts) => {
     stdout: "pipe",
     stderr: "pipe",
   });
+  liveChildren.add(proc);
   const budget = opts.outputBytes ?? EXEC_OUTPUT_BYTES;
   const out = new OutputCapture(budget);
   const err = new OutputCapture(budget);
@@ -434,6 +450,7 @@ export const runProcess: Runner = (argv, opts) => {
       clearTimeout(timer);
       clearTimeout(graceTimer);
       opts.signal?.removeEventListener("abort", onAbort);
+      liveChildren.delete(proc);
       try {
         proc.kill();
       } catch {
@@ -1249,9 +1266,9 @@ export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11
 /** A quarter of the MCP SDK's 60 s default request timeout. */
 export const PROGRESS_INTERVAL_MS = 15_000;
 /** Above the sidecar's 16 MiB envelope cap. */
-export const STDIN_LINE_MAX_CHARS = 32 * 1024 * 1024;
+const STDIN_LINE_MAX_CHARS = 32 * 1024 * 1024;
 /** Calls stopping at shutdown get this long: under the MCP SDK's 2 s between SIGTERM and SIGKILL. */
-export const SHUTDOWN_CEILING_MS = 1_500;
+const SHUTDOWN_CEILING_MS = 1_500;
 
 export function negotiateProtocolVersion(requested: unknown): string {
   return (SUPPORTED_PROTOCOL_VERSIONS as readonly unknown[]).includes(requested)
@@ -1665,7 +1682,10 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
   return { acceptLine, idle, stopAll, send: write };
 }
 
-/** Cancels every call, so a running ssh_exec is stopped on the target; false when the ceiling hit first. */
+/**
+ * Cancels every call, so a running ssh_exec is stopped on the target; false when the ceiling hit
+ * first, after killing the children still running so the exit leaks no ssh client.
+ */
 async function stopCalls(dispatcher: Dispatcher, reason: string): Promise<boolean> {
   dispatcher.stopAll(reason);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1674,6 +1694,7 @@ async function stopCalls(dispatcher: Dispatcher, reason: string): Promise<boolea
   });
   const done = await Promise.race([dispatcher.idle().then(() => true as const), ceiling]);
   clearTimeout(timer);
+  if (!done) killLiveChildren();
   return done;
 }
 

@@ -29,6 +29,7 @@ describe("parseSidecarEnv", () => {
       forwardProxyPort: 8081,
       listenHost: "0.0.0.0",
       runtimeToolNames: [],
+      egressAllowInternalHosts: new Set(),
     });
   });
 
@@ -124,10 +125,11 @@ describe("parseSidecarEnv", () => {
     );
   });
 
-  it("accepts a valid EGRESS_ALLOW_INTERNAL_HOSTS list without adding a field", () => {
+  it("parses a valid EGRESS_ALLOW_INTERNAL_HOSTS list into lower-cased hosts", () => {
     expect(
-      parseSidecarEnv({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "keycloak.internal, llm_svc" }),
-    ).toEqual(parseSidecarEnv(VALID));
+      parseSidecarEnv({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "Keycloak.internal, llm_svc" })
+        .egressAllowInternalHosts,
+    ).toEqual(new Set(["keycloak.internal", "llm_svc"]));
   });
 
   it("renders a single-line message (connect mode relays it on one stdout sentinel)", () => {

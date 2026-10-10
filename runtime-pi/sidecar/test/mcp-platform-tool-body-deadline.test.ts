@@ -25,6 +25,7 @@
 import { describe, it, expect } from "bun:test";
 import { createTestApp } from "./helpers/authed-app.ts";
 import type { AppDeps } from "../app.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 /** JSON-RPC envelope, either shape. */
 interface RpcEnvelope {
@@ -36,6 +37,7 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn,
     isReady: () => true,
   };

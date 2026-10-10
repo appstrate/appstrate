@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { envSchema, findUnreadEnvKeys } from "@appstrate/env";
-import { SIDECAR_OPERATOR_ENV_KEYS } from "@appstrate/runner-pi";
+import { findUnreadEnvKeys } from "@appstrate/env";
 import { logger } from "./logger.ts";
+import { platformReadEnvKeys } from "./platform-env-keys.ts";
 
 export type UnreadKeyWarn = (msg: string, fields: Record<string, unknown>) => void;
-
-/**
- * Every environment key the platform itself consumes: the schema keys and the
- * operator keys forwarded into sidecar containers. Infra keys are known to
- * `findUnreadEnvKeys` without defining a namespace.
- */
-function platformReadEnvKeys(): ReadonlySet<string> {
-  return new Set([...Object.keys(envSchema.shape), ...SIDECAR_OPERATOR_ENV_KEYS]);
-}
 
 /**
  * Logs one warning naming the set keys that fall in a platform namespace but

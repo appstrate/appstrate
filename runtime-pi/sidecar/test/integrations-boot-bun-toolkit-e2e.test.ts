@@ -27,6 +27,7 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -104,6 +105,7 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
       boot = await bootIntegrations([spec()], {
         platformApiUrl: "http://platform.local",
         runToken: "run-tok-toolkit",
+        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
         fetchFn: makePlatformFetch(),
       });
 

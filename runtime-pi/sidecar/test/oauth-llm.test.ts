@@ -20,6 +20,7 @@ import { logger } from "../logger.ts";
 import { OAuthTokenCache } from "../oauth-token-cache.ts";
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { LlmProxyOauthConfig } from "../helpers.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const PLATFORM_API = "http://platform-mock:3000";
 const RUN_TOKEN = "run-tok";
@@ -83,6 +84,7 @@ function makeDeps(fetchFn: ReturnType<typeof mock>): AppDeps {
   return {
     config: { platformApiUrl: PLATFORM_API, runToken: RUN_TOKEN },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: fetchFn as unknown as typeof fetch,
     isReady: () => true,
     oauthTokenCache: cache,

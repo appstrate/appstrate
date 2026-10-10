@@ -1196,8 +1196,6 @@ describe("ssh_write_file", () => {
     expect(host.written["/data/new.txt"]).toBe("x");
   });
 
-  // Measured: `put` onto a directory drops the scratch file INSIDE it under its
-  // random name and reports success.
   it("does nothing for a call cancelled before it starts", async () => {
     restoreEnv = withEnv(ENV);
     const host = fakeHost({ files: { "/etc/app.conf": "a\n" } });
@@ -1216,6 +1214,8 @@ describe("ssh_write_file", () => {
     expect(host.files["/etc/app.conf"]).toBe("a\n");
   });
 
+  // Measured: `put` onto a directory drops the scratch file INSIDE it under its
+  // random name and reports success.
   it("refuses a directory target, writing nothing", async () => {
     restoreEnv = withEnv(ENV);
     const host = fakeHost({ dirs: { "/srv": ["app"] } });
@@ -2072,7 +2072,8 @@ describe("session directory", () => {
 // calls used. The real entry point runs with a fake `ssh` on PATH: it records
 // each invocation and, like a master, leaves a file at the ControlPath.
 describe("server shutdown", () => {
-  // A command ending in a `block` line reports pid 4242 and runs on until killed.
+  // A command ending in a `block` line reports pid 4242 and runs on until killed; one ending in
+  // `hang` records its own pid and runs on without reporting any.
   const FAKE_SSH = `#!/bin/sh
 printf '%s\\n' "$@" ::end:: >> "$FAKE_SSH_LOG"
 for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; last="$a"; done
@@ -2080,6 +2081,10 @@ for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl
 case "$last" in *"
 block")
   printf '%s4242\\n' "$(printf '%s\\n' "$last" | sed -n "1s/^sh -c 'echo \\(appstrate-ssh-pid-[0-9a-f]*=\\).*/\\1/p")"
+  exec sleep 30 ;;
+*"
+hang")
+  echo $$ > "$FAKE_SSH_LOG.pid"
   exec sleep 30 ;;
 esac
 exit 0
@@ -2165,6 +2170,33 @@ exit 0
     const last = records.at(-1)!;
     expect(last.slice(last.indexOf("-O"), last.indexOf("-O") + 2)).toEqual(["-O", "exit"]);
     expect(stop).toBeLessThan(records.length - 1);
+  });
+
+  // A command cancelled before it reports its pid waits longer than the shutdown ceiling allows:
+  // the ssh client is killed before the exit instead of outliving the server.
+  it("kills an ssh client still waiting for its pid when the shutdown ceiling hits", async () => {
+    const { child } = await spawnServer();
+    const call = { name: "ssh_exec", arguments: { command: "hang" } };
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: call })}\n`,
+    );
+    child.stdin.flush();
+    const pidFile = join(scratch, "ssh.log.pid");
+    for (let i = 0; i < 250 && !existsSync(pidFile); i++) await Bun.sleep(20);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive()).toBe(true);
+    child.kill("SIGTERM");
+    expect(await child.exited).toBe(143);
+    for (let i = 0; i < 50 && alive(); i++) await Bun.sleep(20);
+    expect(alive()).toBe(false);
   });
 
   // The master binds `<ControlPath>.<16 characters>`, and the bind fails past

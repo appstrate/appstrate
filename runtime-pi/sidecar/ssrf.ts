@@ -9,35 +9,21 @@ import {
   compileEgressPolicy,
   parseAuthorizedUriPattern,
 } from "@appstrate/afps-shared/authorized-uris";
-import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { isSelfHost, ownAddresses, type RunnerEgressPolicy } from "./helpers.ts";
 
 /**
- * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated); empty exempts nothing. Who may skip the floor
- * on these hosts: docs/architecture/SIDECAR.md. Validated at boot by parseSidecarEnv; same parser
- * as the platform.
+ * Whether `host` is in `trusted`, the `EGRESS_ALLOW_INTERNAL_HOSTS` set `parseSidecarEnv` parsed at
+ * boot (empty exempts nothing). Who may skip the floor on these hosts:
+ * docs/architecture/SIDECAR.md.
  */
-let trustedEgressHosts: ReadonlySet<string> | undefined;
-
-function trustedEgressHostSet(): ReadonlySet<string> {
-  if (trustedEgressHosts === undefined) {
-    const { hosts, invalid } = parseEgressAllowInternalHosts(
-      process.env.EGRESS_ALLOW_INTERNAL_HOSTS,
-    );
-    if (invalid.length > 0) throw new Error(`EGRESS_ALLOW_INTERNAL_HOSTS: ${invalid.join("; ")}`);
-    trustedEgressHosts = hosts;
-  }
-  return trustedEgressHosts;
-}
-
-export function isOperatorTrustedEgressHost(host: string): boolean {
-  return trustedEgressHostSet().has(host.toLowerCase());
+export function isOperatorTrustedEgressHost(trusted: ReadonlySet<string>, host: string): boolean {
+  return trusted.has(host.toLowerCase());
 }
 
 /** Literal check of an operator-configured URL (LLM baseUrl); trusted hosts skip the blocklist. */
-export function isBlockedEgressUrl(url: string): boolean {
-  return isBlockedUrl(url, isOperatorTrustedEgressHost);
+export function isBlockedEgressUrl(url: string, trusted: ReadonlySet<string>): boolean {
+  return isBlockedUrl(url, (host) => isOperatorTrustedEgressHost(trusted, host));
 }
 
 /**
@@ -46,7 +32,7 @@ export function isBlockedEgressUrl(url: string): boolean {
  */
 export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,
-  internalHost: (host: string) => boolean = isOperatorTrustedEgressHost,
+  internalHost: (host: string) => boolean,
   addresses: () => ReadonlySet<string> = ownAddresses,
 ): RunnerEgressPolicy {
   const isSelf = (host: string) => isSelfHost(host, addresses);

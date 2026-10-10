@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { AppDeps } from "../app.ts";
 import type { LlmProxyConfig } from "../helpers.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const PLATFORM = "http://127.0.0.1:3000";
 const RUN_TOKEN = "run_abc.signature";
@@ -37,6 +38,7 @@ function deps(llm: LlmProxyConfig, fetchFn: typeof fetch): AppDeps {
   return {
     config: { platformApiUrl: PLATFORM, runToken: RUN_TOKEN, proxyUrl: "", llm },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn,
     isReady: () => true,
   };

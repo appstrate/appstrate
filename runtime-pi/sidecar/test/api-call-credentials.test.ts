@@ -10,6 +10,7 @@ import {
   type IntegrationCredentialsSource,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 function fakeSource(
   payload: {
@@ -369,6 +370,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
     const deps = {
       config: { runToken: "rt", platformApiUrl: "http://platform" },
       cookieJar: new Map(),
+      egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
       fetchFn: (async (url: string | URL, init?: RequestInit) => {
         hits.push(String(url));
         cookies.push(new Headers(init?.headers).get("cookie"));

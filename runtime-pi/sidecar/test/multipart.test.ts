@@ -26,6 +26,7 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 // The multipart body shape is exercised through the generic
 // `{ns}__api_call` integration tool — the credential-injecting MCP tool.
@@ -44,6 +45,7 @@ function makeMultipartDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
+    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     // bun:test `mock()` lacks the `preconnect` member of `typeof fetch`; cast
     // through the same shim the per-test fetchFn overrides use.
     fetchFn: mock(
