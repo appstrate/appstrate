@@ -74,8 +74,10 @@ What happens under the hood:
    `WWW-Authenticate: Bearer resource_metadata="…", scope="mcp:read mcp:invoke"`
    (RFC 9728 §5.1).
 2. The client fetches the Protected Resource Metadata at
-   `/.well-known/oauth-protected-resource/api/mcp/o/<orgId>`, which points at
-   this instance's authorization server and advertises the per-org resource URI.
+   `/.well-known/oauth-protected-resource/api/mcp/o/<orgId>` (or
+   `…/s/<spc_…>` for a space's endpoint). It points at this instance's
+   authorization server and advertises the endpoint's own URL as `resource`
+   (RFC 9728 §3.3).
 3. The client identifies itself **without prior registration**, via one of:
    - **CIMD** (Client ID Metadata Documents, the MCP-spec-preferred default) —
      the client's `client_id` is an HTTPS URL the AS fetches and validates. The
@@ -84,11 +86,11 @@ What happens under the hood:
      that can't host a metadata document. Self-service registration is bounded
      to identity + MCP scopes and rate-limited.
 4. The user logs in and consents in the browser; the client receives an access
-   token **audience-bound** to `https://YOUR_INSTANCE/api/mcp/o/<orgId>`
-   (RFC 8707). The MCP server rejects any token not issued for this org's
-   endpoint, and the token is rejected on every OTHER platform route (and every
-   other org's MCP endpoint) — it can only ever drive `/api/mcp/o/<orgId>` for
-   the one org it was issued for.
+   token **audience-bound** to the resource it asked for (RFC 8707): the org's
+   endpoint, `https://YOUR_INSTANCE/api/mcp/o/<orgId>`, or one space's endpoint,
+   `https://YOUR_INSTANCE/api/mcp/o/<orgId>/s/<spc_…>`. Each endpoint rejects
+   any token not issued for it, and the token is rejected on every OTHER
+   platform route (and every other org's MCP endpoint).
 
 > **Organization & space context.** The organization is fixed by the
 > endpoint: the token is bound to the org in the URL, so an OAuth-onboarded
@@ -101,24 +103,49 @@ What happens under the hood:
 > Every tool that acts in a space requires a `space_id` argument, reads and
 > writes alike: there is no default space. The argument's schema lists your
 > spaces (name, `spc_…` id, your role there), since clients may truncate the
-> server instructions. A `resources/read` of an `appfile://` link needs no
-> argument: the file's own space is used. A tool or an operation your roles
-> allow in only some spaces names them (`Available in: …` on the tool,
-> `createAgent [gestion]` in the operation index, `granted_in` in results). A
-> refusal in one space is final: it carries `granted_in` and asks the model to
-> report it rather than redo the action in another space.
+> server instructions. Space names are not unique, so every machine field names
+> a space by its id: `granted_in` in results, and the bracketed ids in the
+> operation index (`createAgent [spc_…]`). Names appear in prose only, such as
+> `Available in: …` on a tool. A `resources/read` of an `appfile://` link needs
+> no argument: the file's own space is used. A file you cannot reach is the
+> JSON-RPC error `-32002` (resource not found), a malformed URI `-32602`.
+>
+> A refused tool call is a tool result with `isError: true` whose text is JSON
+> `{ code, error, … }`, not a JSON-RPC error. `missing_argument`,
+> `unknown_argument`, `invalid_argument`, `unknown_operation`, `unknown_space`
+> and `space_mismatch` mean the call itself is wrong: `arguments` names the
+> faulty arguments, `accepted` lists what is valid, and the call can be
+> retried. `not_granted` is final: your role in the space named by `space` does
+> not allow the action, `granted_in` lists the spaces where it does, and the
+> result asks the model to report the refusal rather than redo the action in
+> another space. Only an unknown tool name is a JSON-RPC `-32602`.
+>
+> A refusal is about the call itself. An operation the route answered with an
+> HTTP error (an `invoke_operation` call, or a `run_and_wait` launch the route
+> rejected) is an outcome, not a refusal: it comes back as `{ status, body }`
+> with `isError: true`, and `body` is the route's own problem document. The one
+> exception is an `invoke_operation` `403` that your permissions explain: it is
+> a `not_granted` refusal that also carries `status` and `body`.
 >
 > To confine a client to one space, use the space's URL,
 > `/api/mcp/o/<org>/s/<spc_…>`. It must name a space of the org where you hold
 > a role: the connection is then pinned, `space_id` is not declared, and every
 > call enters that space. An operation whose path names another space
 > (`updateSpace`, member management) still reaches it when your role there
-> allows it, exactly as over REST. The URL needs no other setup — it is the same OAuth
-> resource and token as the organization's endpoint — and any client can use
-> it, a header-less one (a claude.ai connector) included. Settings → General →
-> "MCP connection" builds both URLs. The MCP endpoint reads no `X-Space-Id`: a
-> request carrying one is a `400` naming the URL form. An API key is always
-> pinned to its own space, and a URL naming another one is a `403`.
+> allows it, exactly as over REST. The space's URL is its own OAuth resource.
+> A token for it is accepted on that URL only: not on the organization's
+> endpoint and not on another space's URL. A token for the organization is
+> accepted on every space URL of that organization. A space-bound token also
+> pins its space on the REST API, where a request naming another space is
+> refused, as it is for a space API key. It is also capped like a space API
+> key: an organization-level permission (member management, organization
+> settings) is out of its reach whatever your organization role, so use the
+> organization's URL for that work. The URL needs no other setup, and any
+> client can use it, a header-less one (a claude.ai connector) included.
+> Settings → General → "MCP connection" builds both URLs. The MCP endpoint
+> reads no `X-Space-Id`: a request carrying one is a `400` naming the URL form.
+> An API key is always pinned to its own space, and a URL naming another one is
+> a `403`.
 
 ### Self-hosting requirements for Path B
 
@@ -134,15 +161,18 @@ What happens under the hood:
 
 ### Security notes
 
-- **Audience binding (RFC 8707), both directions, per organization:** tokens are
-  bound to one org's resource URI `<APP_URL>/api/mcp/o/<orgId>`. A token issued
-  for a different resource — including another org's MCP endpoint — is rejected
-  at `/api/mcp/o/<orgId>` with `401` (inbound); and an MCP token presented to any
-  other platform route is also rejected with `401` (outbound confinement). An
-  OAuth MCP client carries the connecting user's full authority but can exercise
-  it **only** through the MCP surface of the one org it authenticated for — the
-  token cannot be lifted and replayed against the rest of the REST API or against
-  another organization. Self-service (CIMD/DCR) clients are additionally
+- **Audience binding (RFC 8707), both directions, per organization and per
+  space:** a token is bound to one resource, either the org's
+  `<APP_URL>/api/mcp/o/<orgId>` or a space's
+  `<APP_URL>/api/mcp/o/<orgId>/s/<spc_…>`. The org endpoint accepts only the
+  org's token; a space endpoint accepts its own space's token or its org's
+  token. A token issued for any other resource (another org's endpoint, another
+  space's endpoint) is rejected with `401` (inbound), and an MCP token presented
+  to any other platform route is also rejected with `401` (outbound
+  confinement). An OAuth MCP client carries the connecting user's full authority
+  but can exercise it **only** through the MCP surface of the org, or the space,
+  it authenticated for — the token cannot be lifted and replayed against the
+  rest of the REST API or against another organization. Self-service (CIMD/DCR) clients are additionally
   forbidden at the token endpoint from requesting any audience other than a
   protected resource, so they can never obtain a platform-wide token in the first
   place. Cookie- and API-key-authenticated callers carry no token audience and
@@ -247,16 +277,18 @@ for an operation authorized by ownership rather than a role, such as deleting
 your own connection. A session is never filtered on them; a delegated credential
 whose scopes omit one sees the operation as not granted, and its
 `search_operations` `denied[]` entry and `403` answer name them as
-`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `403`
+`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `not_granted`
 hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission
-missing from your own space comes back with `required_permissions` and a hint to
-report it rather than retry; a refusal decided by the row, or by the space the
-path names, keeps the route's own error.
+missing from your own space comes back as a `not_granted` refusal (see above)
+with `required_permissions` and a hint to report it rather than retry; a
+refusal decided by the row, or by the space the path names, is the route's own
+`403`, returned as `status` and `body` of the tool result.
 
 This server advertises `tools: { listChanged: false }`, so a client that listed
 its tools before an upgrade — or before its role changed — is never told the set
-moved, and a name that is no longer registered answers `-32602 Unknown tool`.
+moved, and a name that is no longer registered answers the JSON-RPC error
+`-32602 Unknown tool`.
 **Re-list your tools after upgrading the platform or changing your
 permissions** — that is the supported recovery, and it is one round trip.
 

@@ -33,7 +33,12 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  getMcpOrgResourceUri,
+  parseMcpResourceUri,
+} from "../../../../../lib/audiences.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -142,12 +147,9 @@ describe("RFC 8707 resource gate on the AS", () => {
     // isolating the `oauth_resources` lookup as the discriminator.
     resetProtectedResources();
     registerProtectedResourceFamily({
-      prefix: "/api/mcp/o",
-      deriveUri: (path) => {
-        const id = path.slice("/api/mcp/o/".length).split("/")[0];
-        return id ? getMcpOrgResourceUri(id) : undefined;
-      },
-      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+      prefix: MCP_RESOURCE_PREFIX,
+      deriveUri: deriveMcpResourceUri,
+      ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
     });
   });
 

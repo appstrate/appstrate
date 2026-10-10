@@ -24,7 +24,7 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getEndUserVerifyAudiences } from "../../../lib/audiences.ts";
+import { isEndUserVerifyAudience } from "../../../lib/audiences.ts";
 
 /** Normalize a JWT `aud` (string | string[] | undefined) to a string array. */
 function normalizeAudiences(aud: unknown): string[] {
@@ -109,25 +109,23 @@ export async function verifyEndUserAccessToken(
   // (see `packages/db/src/auth.ts` basePath). Verifying against `APP_URL`
   // alone rejects every real token.
   const issuer = `${env.APP_URL}/api/auth`;
-  // Audience validation mirrors what the AS will mint (its `oauth_resources`
-  // rows) — RFC 8707 enforcement already happens at the token endpoint, but the
-  // local verifier adds defense-in-depth so a future plugin update that mints
-  // tokens with an unexpected `aud` cannot slip through unchecked.
+  // Audience validation mirrors what the AS mints (its `oauth_resources` rows)
+  // — RFC 8707 enforcement already happens at the token endpoint, but the local
+  // verifier adds defense-in-depth so a token with an unexpected `aud` cannot
+  // slip through unchecked.
   //
-  // The platform + AS base audiences plus one per-org MCP resource URI each
-  // (`…/api/mcp/o/:org`), so an RFC 8707 audience-bound MCP token
-  // (`resource=<…>/api/mcp/o/<id>` → `aud: <…>/api/mcp/o/<id>`) verifies here.
-  // The list is owned + cached by the audiences module (base computed locally,
-  // so verification never depends on the AS plugin having run; cache rebuilt
-  // only when the org set changes, so this hot path stays O(1)). jose passes
-  // when the token's `aud` intersects the list; the per-org MCP resource server
-  // then additionally requires ITS exact URI in `aud` (RFC 8707 MUST),
-  // confining the token to that one org, and an MCP-scoped token reaching other
+  // The token must carry at least one audience `isEndUserVerifyAudience`
+  // accepts: the platform or AS base URI, or an MCP resource (org or space) of
+  // a known org. MCP space resources cannot be enumerated, so the accepted
+  // subset of the token's own `aud` becomes the list jose checks against: the
+  // verified token passes exactly when that subset is non-empty. The MCP
+  // resource server then additionally requires its own URI (or the enclosing
+  // org's) in `aud` (RFC 8707 MUST), and an MCP-scoped token reaching other
   // routes is contained by the outbound audience guard + RBAC.
-  const audience = getEndUserVerifyAudiences();
-
   let payload: jose.JWTPayload;
   try {
+    const audience = normalizeAudiences(jose.decodeJwt(token).aud).filter(isEndUserVerifyAudience);
+    if (audience.length === 0) return null;
     payload = await verifyJwsAccessToken(token, {
       jwksFetch: deps?.jwks ?? jwksFetch,
       // An injected source belongs to its caller: keep it out of the cache the

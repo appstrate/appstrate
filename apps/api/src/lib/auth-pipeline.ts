@@ -169,6 +169,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
             `auth strategy '${strategy.id}': principal '${resolution.principalKind}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
           );
         }
+        if (
+          resolution.deferOrgResolution &&
+          resolution.orgRole === undefined &&
+          resolution.permissions.length > 0
+        ) {
+          throw new Error(
+            `auth strategy '${strategy.id}': a deferred resolution declares its ceiling in scopeCeiling, not permissions`,
+          );
+        }
         c.set("principalKind", resolution.principalKind);
         c.set("user", resolution.user);
         if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
@@ -194,10 +203,14 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));
+        } else if (resolution.scopeCeiling !== undefined) {
+          // Deferring: the grant arrives with the org role the org-context
+          // middleware resolves, under the ceiling the strategy declared.
+          c.set("scopeCeiling", new Set<string>(resolution.scopeCeiling));
         }
-        // No org role + `deferOrgResolution` writes NO ceiling: the OIDC
-        // instance token (CLI as the full user) picks its org via `X-Org-Id`
-        // like a cookie session. A strategy meaning "nothing" must not defer.
+        // Deferring without a declared ceiling writes NONE: the OIDC instance
+        // token (CLI as the full user) picks its org via `X-Org-Id` like a
+        // cookie session. A strategy meaning "nothing" must not defer.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);

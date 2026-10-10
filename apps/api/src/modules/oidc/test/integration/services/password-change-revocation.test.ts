@@ -28,7 +28,12 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  getMcpOrgResourceUri,
+  parseMcpResourceUri,
+} from "../../../../../lib/audiences.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 import { ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { createClient, _resetClientCache } from "../../../services/oauth-admin.ts";
@@ -346,12 +351,9 @@ describe("a password change or reset revokes the account's other access", () => 
     await ensureCliClient();
     resetProtectedResources();
     registerProtectedResourceFamily({
-      prefix: "/api/mcp/o",
-      deriveUri: (path) => {
-        const orgId = path.slice("/api/mcp/o/".length).split("/")[0];
-        return orgId ? getMcpOrgResourceUri(orgId) : undefined;
-      },
-      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+      prefix: MCP_RESOURCE_PREFIX,
+      deriveUri: deriveMcpResourceUri,
+      ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
     });
   });
 

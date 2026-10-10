@@ -6,7 +6,6 @@
  */
 
 import type { Context } from "hono";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppEnv } from "../../types/index.ts";
 import { listSpacesForPrincipal } from "../../services/spaces.ts";
 import { loadFileForPreview } from "../../services/files.ts";
@@ -20,6 +19,7 @@ import {
 } from "../../lib/view-as.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { McpSurface } from "./tools.ts";
+import type { Refusal } from "./tool-results.ts";
 
 /** A space this connection may act in, with the caller's permissions there. */
 export interface McpSpace {
@@ -100,14 +100,23 @@ export function describeSpace(space: McpSpace): string {
   return `${space.name} (\`${space.id}\`, role ${space.role})`;
 }
 
-/** `granted_in`: the spaces where `granted` holds, absent when it holds in all (or pinned). */
+/** The reachable spaces where `granted` holds; undefined when not org-wide or when all hold. */
+export function grantedSpaces(
+  spaces: OrgWideSpaces | undefined,
+  granted: (space: McpSpace) => boolean,
+): McpSpace[] | undefined {
+  if (!spaces) return undefined;
+  const matching = spaces.reachable.filter(granted);
+  return matching.length === spaces.reachable.length ? undefined : matching;
+}
+
+/** `granted_in` by space ID. */
 export function grantedIn(
   spaces: OrgWideSpaces | undefined,
   granted: (space: McpSpace) => boolean,
 ): { granted_in?: string[] } {
-  if (!spaces) return {};
-  const names = spaces.reachable.filter(granted).map((s) => s.name);
-  return names.length === spaces.reachable.length ? {} : { granted_in: names };
+  const matching = grantedSpaces(spaces, granted);
+  return matching ? { granted_in: matching.map((s) => s.id) } : {};
 }
 
 /** The space a result was produced in, by id and name. */
@@ -120,25 +129,35 @@ export const NO_FALLBACK_HINT =
   "Do not retry this action in another space to get around the refusal; report it to the " +
   "user, who decides which space the action belongs in.";
 
-/** A call's `space_id` must name the space the request entered; else -32602 listing them. */
-export function assertSpaceArgument(spaces: OrgWideSpaces, spaceId: unknown): void {
+/** The refusal a call's `space_id` earns, or undefined when it names the entered space. */
+export function spaceArgumentRefusal(spaces: OrgWideSpaces, spaceId: unknown): Refusal | undefined {
+  const accepted = spaces.reachable.map((s) => s.id);
   const list = spaces.reachable.map(describeSpace).join("; ");
   if (spaceId === undefined) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `space_id is required. Spaces you can act in: ${list}.`,
-    );
+    return {
+      code: "missing_argument",
+      error: `space_id is required. Spaces you can act in: ${list}.`,
+      arguments: ["space_id"],
+      accepted,
+    };
   }
-  if (typeof spaceId !== "string" || !spaces.reachable.some((s) => s.id === spaceId)) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `Unknown space_id: ${String(spaceId)}. Spaces you can act in: ${list}.`,
-    );
+  if (typeof spaceId !== "string" || !accepted.includes(spaceId)) {
+    return {
+      code: "unknown_space",
+      error: `Unknown space_id: ${String(spaceId)}. Spaces you can act in: ${list}.`,
+      arguments: ["space_id"],
+      accepted,
+    };
   }
   if (spaceId !== spaces.current.id) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      `This request acts in ${spaces.current.name}; send a call for another space as its own request.`,
-    );
+    return {
+      code: "space_mismatch",
+      error:
+        `This request acts in ${describeSpace(spaces.current)}; ` +
+        "send a call for another space as its own request.",
+      arguments: ["space_id"],
+      space: spaceRef(spaces.current),
+    };
   }
+  return undefined;
 }

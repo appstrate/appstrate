@@ -23,10 +23,11 @@ import {
   oauthRefreshToken,
   modelProviderCredentials,
   modelProviderPairings,
+  spaces,
 } from "@appstrate/db/schema";
 import {
   and,
-  arrayContains,
+  arrayOverlaps,
   eq,
   ne,
   inArray,
@@ -56,7 +57,7 @@ import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
-import { getMcpOrgResourceUri } from "../lib/audiences.ts";
+import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
@@ -507,14 +508,18 @@ async function removeMemberInTx(
     .returning({ id: apiKeys.id });
 
   // Tokens that grant only this org: its own clients' (a refresh through an
-  // `allowSignup` one re-provisions the member) and those bound to its MCP
-  // resource. Only opaque tokens are rows; a JWT lives until its TTL, stopped by
-  // the per-request membership check.
+  // `allowSignup` one re-provisions the member) and those bound to one of its
+  // MCP resources (the org's or a space's). Only opaque tokens are rows; a JWT
+  // lives until its TTL, stopped by the per-request membership check.
   const orgClientIds = tx
     .select({ clientId: oauthClient.clientId })
     .from(oauthClient)
     .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
-  const mcpResource = [getMcpOrgResourceUri(orgId)];
+  const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
+  const mcpResources = [
+    getMcpOrgResourceUri(orgId),
+    ...orgSpaces.map((s) => getMcpSpaceResourceUri(orgId, s.id)),
+  ];
   const revokedAt = new Date();
   await tx
     .update(oauthRefreshToken)
@@ -525,7 +530,7 @@ async function removeMemberInTx(
         isNull(oauthRefreshToken.revoked),
         or(
           inArray(oauthRefreshToken.clientId, orgClientIds),
-          arrayContains(oauthRefreshToken.resources, mcpResource),
+          arrayOverlaps(oauthRefreshToken.resources, mcpResources),
         ),
       ),
     );
@@ -538,7 +543,7 @@ async function removeMemberInTx(
         isNull(oauthAccessToken.revoked),
         or(
           inArray(oauthAccessToken.clientId, orgClientIds),
-          arrayContains(oauthAccessToken.resources, mcpResource),
+          arrayOverlaps(oauthAccessToken.resources, mcpResources),
         ),
       ),
     );

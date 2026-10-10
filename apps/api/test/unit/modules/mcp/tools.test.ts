@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
@@ -203,6 +202,7 @@ describe("buildMcpTools declarations", () => {
       kinds: null,
     },
   ];
+
   for (const { who, permissions, extra, kinds } of cases) {
     it(`declares exactly what the routes grant ${who}`, () => {
       const { byName } = makeTools(permissions);
@@ -257,11 +257,16 @@ describe("operationIdGranted", () => {
 });
 
 describe("validate_package_file arguments", () => {
-  it("refuses an argument other than `file_uri`", async () => {
+  it("refuses an argument other than `file_uri` as an isError tool result", async () => {
     const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
-    await expect(
-      byName.get("validate_package_file")!.handler({ document_uri: "appfile://file_x" }, noExtra),
-    ).rejects.toThrow("Unknown argument(s): document_uri");
+    const res = await byName
+      .get("validate_package_file")!
+      .handler({ document_uri: "appfile://file_x" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({
+      code: "unknown_argument",
+      arguments: ["document_uri"],
+    });
   });
 });
 
@@ -517,29 +522,23 @@ describe("describe_operation", () => {
     });
   });
 
-  it("throws InvalidParams (-32602) on an unknown operationId — protocol error, not tool error", async () => {
+  it("refuses an unknown operationId as an isError tool result", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    let caught: unknown;
-    try {
-      await byName.get("describe_operation")!.handler({ operation_id: "doesNotExist" }, noExtra);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
-    expect((caught as McpError).message).toContain("doesNotExist");
+    const res = await byName
+      .get("describe_operation")!
+      .handler({ operation_id: "doesNotExist" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({
+      code: "unknown_operation",
+      arguments: ["operation_id"],
+    });
   });
 
-  it("throws InvalidParams (-32602) when operation_id is missing", async () => {
+  it("refuses a missing operation_id as an isError tool result", async () => {
     const { byName } = makeTools(["mcp:read"]);
-    let caught: unknown;
-    try {
-      await byName.get("describe_operation")!.handler({}, noExtra);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    const res = await byName.get("describe_operation")!.handler({}, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({ code: "missing_argument" });
   });
 });
 
@@ -840,7 +839,7 @@ describe("invoke_operation", () => {
     expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
     expect(body.hint).toContain("do not retry");
     // A session has no credential scopes to blame.
-    expect(body.hint).toStartWith("Your role does not hold this permission.");
+    expect(body.error).toStartWith("Your role does not hold this permission.");
     expect(body).not.toHaveProperty("ceiling_permissions");
   });
 
@@ -920,7 +919,7 @@ describe("invoke_operation", () => {
       const body = await invokeDelete(new Set(["integrations:read"]));
       expect(body.status).toBe(403);
       expect(body.ceiling_permissions).toEqual(["integrations:disconnect"]);
-      expect(body.hint).toStartWith(
+      expect(body.error).toStartWith(
         "Your role, or your credential's scopes, do not hold this permission.",
       );
     });
@@ -947,32 +946,24 @@ describe("invoke_operation", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("throws InvalidParams (-32602) when operation_id is missing — protocol error", async () => {
+  it("refuses a missing operation_id as an isError tool result", async () => {
     const { byName, calls } = makeTools(["mcp:invoke"]);
-    let caught: unknown;
-    try {
-      await byName.get("invoke_operation")!.handler({}, noExtra);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
+    const res = await byName.get("invoke_operation")!.handler({}, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({ code: "missing_argument" });
     expect(calls.length).toBe(0);
   });
 
-  it("throws InvalidParams (-32602) on an unknown operationId — protocol error", async () => {
+  it("refuses an unknown operationId as an isError tool result", async () => {
     const { byName, calls } = makeTools(["mcp:invoke"]);
-    let caught: unknown;
-    try {
-      await byName
-        .get("invoke_operation")!
-        .handler({ operation_id: "doesNotExistAnywhere" }, noExtra);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(McpError);
-    expect((caught as McpError).code).toBe(ErrorCode.InvalidParams);
-    expect((caught as McpError).message).toContain("doesNotExistAnywhere");
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: "doesNotExistAnywhere" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({
+      code: "unknown_operation",
+      arguments: ["operation_id"],
+    });
     expect(calls.length).toBe(0);
   });
 
@@ -1214,11 +1205,12 @@ describe("undeclared tool arguments", () => {
     expect(closed.map((t) => t.descriptor.name).sort()).toEqual([...byName.keys()].sort());
     expect(byName.has("run_and_wait")).toBe(true);
     for (const tool of closed) {
-      const call = tool.handler({ stray_key: 1 }, noExtra);
-      await expect(call).rejects.toBeInstanceOf(McpError);
-      await expect(call).rejects.toMatchObject({
-        code: ErrorCode.InvalidParams,
-        message: expect.stringContaining("Unknown argument(s): stray_key"),
+      const res = await tool.handler({ stray_key: 1 }, noExtra);
+      expect(res.isError).toBe(true);
+      expect(parseResult(res)).toMatchObject({
+        code: "unknown_argument",
+        arguments: ["stray_key"],
+        accepted: Object.keys(tool.descriptor.inputSchema.properties ?? {}),
       });
     }
     expect(calls).toHaveLength(0);
@@ -1235,9 +1227,9 @@ describe("undeclared tool arguments", () => {
 
   it("refuses list_files' `run_id` — its filter is `runId`", async () => {
     const { byName, calls } = makeTools(ADMIN_LIKE);
-    await expect(byName.get("list_files")!.handler({ run_id: "run_1" }, noExtra)).rejects.toThrow(
-      "Unknown argument(s): run_id",
-    );
+    const refused = await byName.get("list_files")!.handler({ run_id: "run_1" }, noExtra);
+    expect(refused.isError).toBe(true);
+    expect(parseResult(refused)).toMatchObject({ code: "unknown_argument", arguments: ["run_id"] });
     await byName.get("list_files")!.handler({ runId: "run_1" }, noExtra);
     expect(new URL(calls[0]!.url).searchParams.get("runId")).toBe("run_1");
   });

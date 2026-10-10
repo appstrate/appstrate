@@ -49,14 +49,15 @@ therefore reads no `X-Space-Id`: a request carrying one is a `400` naming the
 URL form, never a header silently ignored (`docs/NO_TRANSITIONAL_CODE.md`). The
 CLI's Claude Code plugin and the in-process chat both pin by URL.
 
-It is the same OAuth resource: `deriveOrgResourceUri` reads the org segment
-only, so the org's token is valid there, and the PRM served at
-`/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` is the org's
-document. An MCP client accepts a PRM `resource` that is a path prefix of the
-server URL (`checkResourceAllowed` in the SDK) and requests that resource, so a
-token obtained through either URL is valid on both. A URL pin confines the
-connection, not the token: real least privilege for a delegated client is
-still a space API key.
+It is its own OAuth resource, `<APP_URL>/api/mcp/o/:org/s/:space`, with its own
+PRM at `/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` whose
+`resource` is that endpoint's URL (RFC 9728 §3.3). The authorization server
+mints it on first request (`ensureMcpResourceMintable`), and it accepts a token
+bound to the space or the organization's token. A token bound to the space is
+accepted on that URL only, and it pins the space on the REST API as a space API
+key does (`requireSpaceContext`, `pinnedSpaceScopeGuard`). It is also capped
+like a space API key: no organization-level permission is in its reach,
+whatever the subject's organization role.
 
 ### 2. Discovering the spaces
 
@@ -98,8 +99,8 @@ entered. `get_runtime_capabilities` alone acts in none.
 - **`resources/read`** carries no arguments: an `appfile://` URI names its
   file, and a file belongs to one space, so the router enters that space
   (`fileSpaceId`). The read then runs under that space's ACL like any other.
-- **Validation:** an id outside the reachable list is a `-32602` naming the
-  reachable spaces. The argument is never trusted as such: the router admits
+- **Validation:** an id outside the reachable list is an `unknown_space` refusal
+  naming the reachable spaces. The argument is never trusted as such: the router admits
   the space with the caller's membership, as for the header.
 - **Dispatched tools** carry `X-Space-Id` for the space entered, pinned or
   org-wide alike, so the re-entered `requireSpaceContext` decides with the role
@@ -110,15 +111,15 @@ entered. `get_runtime_capabilities` alone acts in none.
   space whose role lacks `mcp:invoke` is refused there, naming the spaces that
   grant it. Same for `run_and_wait` (and `kind:"inline"` as its own act,
   `composes`), `list_files` and `import_package_file`.
-- **In pinned mode** `space_id` is not declared at all, so passing one is the
-  usual `-32602` for an unknown argument.
+- **In pinned mode** `space_id` is not declared at all, so passing one is an
+  `unknown_argument` refusal.
 
 ### 4. Every call names its space
 
 `space_id` is **required** on every tool that acts in a space, reads and writes
 alike, whether the caller reaches one space or several: one schema, no default
-space, no single-space exception. A missing one is a `-32602` naming the spaces
-and the caller's role in each, so a model recovers in one turn.
+space, no single-space exception. A missing one is a `missing_argument` refusal
+naming the spaces and the caller's role in each, so a model recovers in one turn.
 `invoke_operation`, `run_and_wait` and `describe_operation` results name the
 space they ran in (`space: { id, name }`; `run_and_wait`'s `outputSchema`
 declares it).
@@ -141,9 +142,9 @@ same rule once.
 - **Tools:** a tool is declared when its act holds in at least one space. This
   is safe because of the rule #1493 set: the surface informs, the guard
   decides. A tool granted in only some spaces opens its description with
-  `Available in: team, gestion.`.
+  `Available in: Team (spc_…, role admin); Gestion (spc_…, role member).`
 - **Operation index:** one grouping, by tag. An operation granted in only some
-  spaces names them after its id (`createAgent [gestion]`); one granted
+  spaces names them by id (`createAgent [spc_…]`); one granted
   everywhere carries nothing, so when every space grants the same operations
   the index is the pinned one.
 - `search_operations` and `describe_operation` answer for the space named and

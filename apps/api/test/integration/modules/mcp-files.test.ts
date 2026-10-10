@@ -199,7 +199,11 @@ describe("mcp list_files", () => {
       method: "tools/call",
       params: { name: "list_files", arguments: { run_id: runA } },
     });
-    expect(undeclared.envelope.error?.message).toContain("Unknown argument(s): run_id");
+    expect(undeclared.envelope.error).toBeUndefined();
+    const refused = toolData(undeclared.envelope);
+    expect(refused.isError).toBe(true);
+    expect(refused.data).toMatchObject({ code: "unknown_argument", arguments: ["run_id"] });
+    expect(refused.data.error as string).toContain("Unknown argument(s): run_id");
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {
@@ -464,8 +468,11 @@ describe("mcp resources/read (appfile://)", () => {
       method: "resources/read",
       params: { uri: `appfile://${foreignDoc}` },
     });
-    // A cross-org id resolves to a 404 in the route → surfaced as an MCP error.
-    expect(envelope.error).toBeDefined();
+    // A file the caller cannot resolve is MCP's "resource not found".
+    expect(envelope.error).toMatchObject({
+      code: -32002,
+      data: { uri: `appfile://${foreignDoc}` },
+    });
     expect(envelope.error!.message).toContain("not found");
   });
 
@@ -476,7 +483,7 @@ describe("mcp resources/read (appfile://)", () => {
       method: "resources/read",
       params: { uri: "appfile://not-a-doc-id" },
     });
-    expect(envelope.error).toBeDefined();
+    expect(envelope.error).toMatchObject({ code: -32602 });
   });
 
   it("returns metadata only (no bytes) for another member's user_upload the caller cannot download", async () => {

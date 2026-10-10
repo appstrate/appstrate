@@ -94,13 +94,11 @@ describe("observe — describe_operation", () => {
     expect(events[0]!.operationId).toBe(op.operationId);
   });
 
-  it("does not emit when the operationId is unknown (protocol error, thrown)", async () => {
+  it("does not emit when the operationId is unknown (refused as an isError result)", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
-    // Unknown operationId is now a thrown -32602 InvalidParams protocol
-    // error; telemetry still must NOT record a describe event for it.
-    await expect(
-      byName.get("describe_operation")!.handler({ operation_id: "nope" }, noExtra),
-    ).rejects.toThrow("Unknown operationId");
+    // Telemetry still must NOT record a describe event for an unknown operationId.
+    const res = await byName.get("describe_operation")!.handler({ operation_id: "nope" }, noExtra);
+    expect(res.isError).toBe(true);
     expect(events.length).toBe(0);
   });
 });
@@ -128,11 +126,12 @@ describe("observe — invoke_operation", () => {
     expect(events[0]!.status).toBe(503);
   });
 
-  it("emits outcome=rejected for an unknown operationId (before the protocol error throws)", async () => {
+  it("resolves an unknown operationId to an isError result and emits outcome=rejected", async () => {
     const { byName, events } = makeTools(["mcp:read", "mcp:invoke"]);
-    await expect(
-      byName.get("invoke_operation")!.handler({ operation_id: "doesNotExist" }, noExtra),
-    ).rejects.toThrow("Unknown operationId");
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: "doesNotExist" }, noExtra);
+    expect(res.isError).toBe(true);
     expect(events[0]!.outcome).toBe("rejected");
   });
 

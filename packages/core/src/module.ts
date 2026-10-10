@@ -964,6 +964,13 @@ export interface AuthResolution {
   spaceId?: string;
   /** Permission strings already resolved by the strategy. */
   permissions: readonly string[];
+  /**
+   * The scope ceiling of a `deferOrgResolution` resolution without `orgRole`,
+   * applied over the org role resolved later. Absent, the caller is uncapped.
+   * Other resolutions take `permissions` as their ceiling; a deferred
+   * resolution without `orgRole` must leave `permissions` empty.
+   */
+  scopeCeiling?: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */

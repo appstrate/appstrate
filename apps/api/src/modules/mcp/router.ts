@@ -2,17 +2,19 @@
 
 /**
  * `/api/mcp/o/:org` — the platform's inbound MCP server, exposed ONCE PER
- * ORGANIZATION (Streamable HTTP, stateless). `:org` is the organization id
- * (uuid).
+ * ORGANIZATION (Streamable HTTP, stateless), and `/api/mcp/o/:org/s/:space`,
+ * the same server pinned to one space. `:org` is the organization id (uuid).
  *
  * There is no bare `/api/mcp` endpoint: a token is RFC 8707 audience-bound to
- * ONE org's canonical resource URI (`${APP_URL}/api/mcp/o/<orgId>`), so it is
- * confined to that organization — least privilege by construction. Multi-org
- * access means several MCP server entries client-side, each with its own token.
+ * ONE canonical resource URI — the org's (`${APP_URL}/api/mcp/o/<orgId>`) or a
+ * space's (`…/o/<orgId>/s/<spaceId>`) — so it is confined to that organization
+ * or space — least privilege by construction. A space endpoint also accepts
+ * its org's token. Multi-org access means several MCP server entries
+ * client-side, each with its own token.
  *
  * Mounted under `/api`, so the platform auth pipeline runs first: the caller is
  * authenticated (session cookie, API key, or OIDC Bearer), the audience check
- * confirms a Bearer token is bound to THIS org's resource, and the org-context
+ * confirms a Bearer token is bound to THIS endpoint's resource, and the org-context
  * middleware membership-checks and pins the org — all before any tool runs. An
  * unauthenticated request is rejected with the standard platform 401.
  * `requireModulePermission("mcp", "read")` then gates access, and an org guard
@@ -21,12 +23,12 @@
  * token audience). Tool invocation re-enters the platform in-process
  * (`app.fetch`) with the caller's auth forwarded — see ./tools.ts.
  *
- * Also serves RFC 9728 Protected Resource Metadata PER ORG so spec-compliant
+ * Also serves RFC 9728 Protected Resource Metadata PER ENDPOINT so spec-compliant
  * MCP clients can discover this instance's authorization server, and registers
  * a `WWW-Authenticate: Bearer resource_metadata="…", scope="…"` challenge
  * (RFC 9728 §5.1) emitted on the 401 (no/invalid token) and the 403
  * (insufficient scope) via the generic auth-challenge registry — the trigger
- * that lets a tokenless client start the OAuth flow against the right org.
+ * that lets a tokenless client start the OAuth flow against the right resource.
  */
 
 import { authorizeBundlePackages, holdsPackageShareAuthority } from "../../lib/package-access.ts";
@@ -74,7 +76,16 @@ import { registerProtectedResourceFamily } from "../../lib/protected-resources.t
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  enclosingMcpResourceUris,
+  getMcpOrgResourceUri,
+  getMcpSpaceResourceUri,
+  parseMcpResourceUri,
+} from "../../lib/audiences.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
+import { ensureMcpResourceMintable } from "./oauth-resources.ts";
 import {
   buildMcpTools,
   buildFileResourceProvider,
@@ -99,20 +110,18 @@ import {
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
-/** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
-const MCP_PREFIX = "/api/mcp/o";
 /** The per-org POST endpoint, parameterised on the org id. */
-const MCP_PATH = `${MCP_PREFIX}/:org`;
+const MCP_PATH = `${MCP_RESOURCE_PREFIX}/:org`;
 /**
- * The endpoint pinned to one space — the only client-side pin. Same resource
- * and token: `deriveOrgResourceUri` ignores sub-paths.
+ * The endpoint pinned to one space — the only client-side pin. Its own OAuth
+ * resource (`getMcpSpaceResourceUri`), which also accepts the org's token.
  */
 const MCP_SPACE_PATH = `${MCP_PATH}/s/:space`;
 /**
- * RFC 9728 §3.1 path-insertion well-known for the per-org resource: the
- * metadata URL is built by inserting the well-known segment BEFORE the
- * resource's path, so a strict client probes `…/oauth-protected-resource` +
- * `/api/mcp/o/:org`. The bare well-known is gone (no single generic resource).
+ * RFC 9728 §3.1 path-insertion well-known for each resource: the metadata URL
+ * is built by inserting the well-known segment BEFORE the resource's path, so a
+ * strict client probes `…/oauth-protected-resource` + `/api/mcp/o/:org` (or
+ * `…/s/:space`). There is no bare well-known (no single generic resource).
  */
 const PRM_PATH_PREFIX = "/.well-known/oauth-protected-resource";
 const PRM_PATH = `${PRM_PATH_PREFIX}${MCP_PATH}`;
@@ -140,26 +149,6 @@ function isCanonicalOrgId(org: string | undefined): org is string {
   return org !== undefined && orgIdSchema.safeParse(org).success;
 }
 
-/**
- * Parse the org-id segment out of a path under the per-org family
- * (`/api/mcp/o/<id>` and any sub-path), returning the canonical per-org
- * resource URI or `undefined` when the path is malformed (no org segment, or an
- * org segment that is itself empty). Used by `registerProtectedResourceFamily`
- * to derive a request path's resource URI for inbound audience enforcement.
- *
- * Path forms it accepts: exactly `/api/mcp/o/<id>` and `/api/mcp/o/<id>/...`.
- * The first path segment after the prefix is the org id; anything after it
- * (the stateless transport never uses sub-paths, but be defensive) is ignored
- * for URI derivation. The derived URI is always the canonical org URI, so it
- * matches the token `aud` byte-for-byte regardless of trailing structure.
- */
-function deriveOrgResourceUri(path: string): string | undefined {
-  const prefix = `${MCP_PREFIX}/`;
-  if (!path.startsWith(prefix)) return undefined;
-  const orgId = path.slice(prefix.length).split("/")[0] ?? "";
-  if (orgId.length === 0) return undefined;
-  return getMcpOrgResourceUri(orgId);
-}
 // JSON-RPC envelope-granularity limit per caller per minute. Sized for
 // interactive agent loops (search → describe → invoke, repeated) while still
 // bounding cheap abuse of search/describe, which touch no rate-limited route.
@@ -302,6 +291,7 @@ ${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
+- A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${
     authors
       ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
@@ -322,7 +312,8 @@ const pinnedSpaceContext =
 
 const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
 - Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request; when it is ambiguous, ask.
-- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}`;
+- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
+- Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -362,40 +353,46 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   const recordAudit = deps.recordAudit ?? recordAuditFromContext;
   const app = new Hono<McpEnv>();
 
-  // Register the per-org protected-resource FAMILY (RFC 8707 audience binding).
-  // The concrete resources are dynamic (one URI per org, orgs created at
-  // runtime) so they cannot be enumerated at registration time — the family
+  // Register the MCP protected-resource FAMILY (RFC 8707 audience binding).
+  // The concrete resources are dynamic (one URI per org and per space, created
+  // at runtime) so they cannot be enumerated at registration time — the family
   // owns the whole `/api/mcp/o` sub-tree:
-  //   - `deriveUri(path)` maps a request path to its canonical per-org URI, so
-  //     `enforceResourceAudience` (inbound) requires that exact URI in the
-  //     token `aud` — a token for org A presented on `/api/mcp/o/B` is a
-  //     mismatch and 401s.
-  //   - `ownsUri(uri)` recognises a per-org URI as protected without a request
-  //     path, for outbound confinement (a per-org token may not be replayed on
-  //     a non-resource route) and the AS mint-time self-service gate.
-  // `ownsUri` accepts exactly the URIs `deriveUri` emits: `orgIdFromMcpAudience`
-  // returns an org id iff the URI is the canonical `${APP_URL}/api/mcp/o/<id>`.
+  //   - `deriveUri(path)` maps an endpoint path to its canonical org or space
+  //     URI, and `enclosingUris` adds the org URI a space endpoint also accepts,
+  //     so `enforceResourceAudience` (inbound) requires one of those in the
+  //     token `aud`: a token for org A on `/api/mcp/o/B`, or for space S on the
+  //     org endpoint or on another space, is a mismatch and 401s.
+  //   - `ownsUri(uri)` recognises an MCP URI as protected without a request
+  //     path, for outbound confinement (an MCP token may not be replayed on a
+  //     non-resource route) and the AS mint-time self-service gate.
+  //   - `ensureMintable(uri)` writes a live space's `oauth_resources` row when
+  //     the AS is asked for it, so the provider can resolve it.
+  // `ownsUri` accepts exactly the URIs `deriveUri` emits: `parseMcpResourceUri`
+  // binds only a canonical org or space URI.
   registerProtectedResourceFamily({
-    prefix: MCP_PREFIX,
-    deriveUri: deriveOrgResourceUri,
-    ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    prefix: MCP_RESOURCE_PREFIX,
+    deriveUri: deriveMcpResourceUri,
+    ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
+    enclosingUris: enclosingMcpResourceUris,
+    ensureMintable: ensureMcpResourceMintable,
   });
 
-  // RFC 9728 Protected Resource Metadata, served PER ORG — public (declared in
-  // module publicPaths). Points clients at this instance's OAuth authorization
+  // RFC 9728 Protected Resource Metadata, served PER ORG and PER SPACE — public
+  // (outside `/api/*`). Points clients at this instance's OAuth authorization
   // server (served by the oidc module at /.well-known/oauth-authorization-server).
   //
   // Served at the path-insertion variant only
-  // (`/.well-known/oauth-protected-resource/api/mcp/o/:org`): RFC 9728 §3.1 has
-  // a client derive the metadata URL by inserting the well-known segment before
-  // the resource's path. There is no bare well-known — there is no single
-  // generic resource to describe.
+  // (`/.well-known/oauth-protected-resource/api/mcp/o/:org[/s/:space]`): RFC
+  // 9728 §3.1 has a client derive the metadata URL by inserting the well-known
+  // segment before the resource's path, and §3.3 requires the `resource` it
+  // reads back to be the endpoint it started from. There is no bare well-known
+  // — there is no single generic resource to describe.
   //
-  // The advertised `resource` MUST be the canonical APP_URL-derived per-org URI
-  // (`getMcpOrgResourceUri(:org)`), NOT the request origin: it is the exact
-  // string the client echoes back as the RFC 8707 `resource` at the token
-  // endpoint, where it must match the org's `oauth_resources` row (also
-  // APP_URL-derived) and the resource-server audience check. Behind a reverse
+  // The advertised `resource` MUST be the canonical APP_URL-derived URI
+  // (`getMcpOrgResourceUri` / `getMcpSpaceResourceUri`), NOT the request
+  // origin: it is the exact string the client echoes back as the RFC 8707
+  // `resource` at the token endpoint, where it must match an `oauth_resources`
+  // row (also APP_URL-derived) and the resource-server audience check. Behind a reverse
   // proxy where the public origin differs from an internal request host, an
   // origin-derived value would silently break audience binding. Doc URLs derive
   // from the same APP_URL base so discovery stays consistent.
@@ -415,9 +412,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // param as optional — guard so the resource URI is never built from a
     // non-canonical id (and a malformed segment never resolves to a resource).
     if (!isCanonicalOrgId(org)) throw notFound("Organization not found");
+    const space = c.req.param("space");
+    if (space !== undefined && !SPACE_ID_RE.test(space)) throw notFound("Space not found");
     const appBase = getPublicAppOrigin();
     return c.json({
-      resource: getMcpOrgResourceUri(org),
+      resource: space ? getMcpSpaceResourceUri(org, space) : getMcpOrgResourceUri(org),
       authorization_servers: [`${appBase}/api/auth`],
       scopes_supported: [...MCP_SCOPES],
       bearer_methods_supported: ["header"],
@@ -430,12 +429,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // RFC 9728 §5.1 challenge: on a 401 (no/invalid token) or 403 (insufficient
   // scope) the generic responder attaches this so a spec-compliant client
   // (Claude Code, …) discovers the PRM URL and starts/steps-up an OAuth flow.
-  // Registered for the per-org PREFIX so it fires on every org's endpoint,
-  // while the resource is derived from the ACTUAL request path — the tokenless
-  // client is pointed at the requested org's well-known and gets a token bound
-  // to the right org. Anchored on the canonical APP_URL base (via
-  // `getMcpOrgResourceUri`) for the same proxy-safety reason as the PRM
-  // `resource` above.
+  // Registered for the family PREFIX so it fires on every org and space
+  // endpoint, while the resource is derived from the ACTUAL request path — the
+  // tokenless client is pointed at the requested endpoint's well-known and gets
+  // a token bound to that org or space. Anchored on the canonical APP_URL base
+  // for the same proxy-safety reason as the PRM `resource` above.
   //
   // `createResourceServerChallenge` owns the serialization: it inserts the
   // well-known segment ahead of the resource path per RFC 9728 §3.1, quotes
@@ -445,8 +443,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // off: a bare 401 for "no or invalid token", and — because reaching this
   // prefix at all is gated on `mcp:read` — an insufficient-scope error for the
   // 403, which is the step-up signal an MCP client acts on.
-  registerAuthChallenge(MCP_PREFIX, ({ status, path }) => {
-    const resource = deriveOrgResourceUri(path);
+  registerAuthChallenge(MCP_RESOURCE_PREFIX, ({ status, path }) => {
+    const resource = deriveMcpResourceUri(path);
     if (!resource) return undefined;
     const error =
       status === 403
@@ -461,8 +459,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   // Rate-limit before the permission check so repeated probing (including by a
   // caller that will 403) is bounded too. Auth + audience binding run earlier
   // in the global pipeline, so the identity is already resolved here and an
-  // audience-mismatched token was already rejected. Applied to the per-org
-  // POST path.
+  // audience-mismatched token was already rejected. Applied to both
+  // POST paths.
   for (const path of [MCP_PATH, MCP_SPACE_PATH]) {
     app.use(path, rateLimitMcp(MCP_RATE_LIMIT_PER_MIN));
   }
@@ -536,9 +534,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
 
   const serveMcp = async (c: Context<McpEnv>) => {
     // Org guard. By here the global pipeline has resolved the caller's org into
-    // `c.get("orgId")`: for a Bearer caller it was pinned from the token's
-    // per-org audience (and the audience check already rejected a token for a
-    // different org on this path); for an API-key/session caller it comes from
+    // `c.get("orgId")`: for a Bearer caller it was pinned from the token's MCP
+    // audience (and the audience check already rejected a token for a
+    // different org or space on this path); for an API-key/session caller it comes from
     // the key / X-Org-Id, NOT the URL. Require the resolved org to equal the
     // `:org` path param so an API-key caller cannot reach a DIFFERENT org's
     // endpoint than the one its key authorises, and as defence in depth for
@@ -601,6 +599,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         method: event.method,
         path: event.path,
         status: event.status,
+        runStatus: event.runStatus,
         outcome: event.outcome,
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,

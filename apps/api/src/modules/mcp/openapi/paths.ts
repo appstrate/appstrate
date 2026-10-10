@@ -8,6 +8,8 @@
  * `run_and_wait` as the run-launch shortcut.
  */
 
+import { SPACE_ID_RE } from "@appstrate/db/ids";
+
 const jsonRpcRequestBody = {
   required: true,
   content: {
@@ -69,8 +71,31 @@ const spacePathParameter = {
   in: "path",
   required: true,
   description: "Space id (`spc_…`) of the organization, where the caller holds a role.",
-  schema: { type: "string" },
+  schema: { type: "string", pattern: SPACE_ID_RE.source },
 } as const;
+
+/** The tool surface, shared by the organization and space endpoints. */
+const MCP_TOOLS_DESCRIPTION =
+  "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
+  "declares follow the caller's permissions: the read-only set (`search_operations`, " +
+  "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
+  "`get_runtime_capabilities`, " +
+  "and `get_me` unless the client injects its own caller context) is always present, " +
+  "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
+  "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
+  "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
+  "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
+  "role. Together they let an MCP client discover and call platform API operations, " +
+  "plus launch and wait for agent runs, with the caller's own credentials.";
+
+/** Permissions and the refusal shapes, shared by the organization and space endpoints. */
+const MCP_REFUSALS_DESCRIPTION =
+  "Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool " +
+  "call (missing, unknown or invalid argument, unknown operation or space, missing grant) is " +
+  "a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an " +
+  "operation the route answered with an HTTP error is returned as `{ status, body }` with " +
+  "`isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` " +
+  "refusal. Only an unknown tool name is a JSON-RPC `-32602`.";
 
 const orgEndpoint = {
   post: {
@@ -79,25 +104,15 @@ const orgEndpoint = {
     summary: "Per-organization MCP Streamable HTTP endpoint",
     description:
       "Model Context Protocol server (Streamable HTTP, stateless) for a single organization. " +
-      "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
-      "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-      "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
-      "`get_runtime_capabilities`, " +
-      "and `get_me` unless the client injects its own caller context) is always present, " +
-      "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
-      "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
-      "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
-      "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
-      "role. Together they let an MCP client discover and call platform API operations, " +
-      "plus launch and wait for agent runs, with the caller's own credentials and confined to " +
-      "the organization in the path. Each organization has its own endpoint: a " +
-      "token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource " +
-      "URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several " +
-      "organizations, configure one MCP server entry per organization. Without a pinned space " +
-      "(no space-bound credential, no `/s/{space}` in the URL) the connection " +
-      "reaches every space where the caller holds a role, and every tool that acts in a space " +
-      "requires a `space_id` argument whose schema lists them. Requires the `mcp:read` " +
-      "permission (and `mcp:invoke` to call operations).",
+      MCP_TOOLS_DESCRIPTION +
+      " Each organization has its own endpoint: a token obtained for this endpoint is " +
+      "audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and " +
+      "cannot drive any other organization. To use several organizations, configure one MCP " +
+      "server entry per organization. Without a pinned space (no space-bound credential, no " +
+      "`/s/{space}` in the URL) the connection reaches every space where the caller holds a " +
+      "role, and every tool that acts in a space requires a `space_id` argument whose schema " +
+      "lists them. " +
+      MCP_REFUSALS_DESCRIPTION,
     security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
     parameters: [orgPathParameter],
     requestBody: jsonRpcRequestBody,
@@ -229,37 +244,61 @@ const orgMetadata = {
   },
 } as const;
 
-/** An operation of the space-pinned URL: the org's, with `{space}` and its own id. */
+/** An operation of the space-pinned URL: the org's, with `{space}`, its own id and description. */
 function pinnedToSpace(
   op: { operationId: string; description: string; parameters: readonly unknown[] },
-  note: string,
+  description: string,
 ) {
   return {
     ...op,
     operationId: `${op.operationId}InSpace`,
-    description: `${note} ${op.description}`,
+    description,
     parameters: [...op.parameters, spacePathParameter],
   };
 }
 
-const SPACE_PINNED_NOTE =
-  "The per-organization MCP endpoint pinned to one space by its URL — the endpoint's one " +
-  "client-side space pin, usable by any client. Every call acts in `{space}`, tools take no " +
-  "`space_id`, and a space-bound credential naming another space is a 403. Same token as " +
-  "the organization's endpoint.";
+const SPACE_ENDPOINT_DESCRIPTION =
+  "Model Context Protocol server (Streamable HTTP, stateless) for one space of an " +
+  "organization: the organization's endpoint pinned to `{space}` by its URL, usable by any " +
+  "client. Every call acts in `{space}`, and tools take no `space_id`. " +
+  MCP_TOOLS_DESCRIPTION +
+  " The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` " +
+  "(RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's " +
+  "resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another " +
+  "space nor the organization's endpoint, and it is capped like a space API key: no " +
+  "organization-level permission (member management, organization settings) is in its " +
+  "reach. A space-bound credential (API key or token) naming another space is a 403. " +
+  MCP_REFUSALS_DESCRIPTION;
+
+const SPACE_ENDPOINT_GET_DESCRIPTION =
+  "The GET channel of the space-pinned MCP Streamable HTTP transport. This server runs in " +
+  "stateless mode (no standalone server-initiated SSE stream), so GET returns 405; clients " +
+  "POST JSON-RPC messages instead. Requires the `mcp:read` permission in `{space}`.";
 
 export const mcpPaths = {
   "/api/mcp/o/{org}": orgEndpoint,
   "/api/mcp/o/{org}/s/{space}": {
-    post: pinnedToSpace(orgEndpoint.post, SPACE_PINNED_NOTE),
-    get: pinnedToSpace(orgEndpoint.get, SPACE_PINNED_NOTE),
+    post: {
+      ...pinnedToSpace(orgEndpoint.post, SPACE_ENDPOINT_DESCRIPTION),
+      summary: "Space-pinned MCP Streamable HTTP endpoint",
+    },
+    get: {
+      ...pinnedToSpace(orgEndpoint.get, SPACE_ENDPOINT_GET_DESCRIPTION),
+      summary: "Space-pinned MCP Streamable HTTP (GET)",
+    },
   },
   "/.well-known/oauth-protected-resource/api/mcp/o/{org}": orgMetadata,
   "/.well-known/oauth-protected-resource/api/mcp/o/{org}/s/{space}": {
-    get: pinnedToSpace(
-      orgMetadata.get,
-      "The space-pinned endpoint's metadata: the organization's document, `resource` included " +
-        "(a path prefix of the endpoint URL, which MCP clients accept).",
-    ),
+    get: {
+      ...pinnedToSpace(
+        orgMetadata.get,
+        "Metadata of the space-pinned endpoint (RFC 9728 §3.3): `resource` is the endpoint URL " +
+          "itself, `<APP_URL>/api/mcp/o/{org}/s/{space}`. 404 for a malformed `{space}`.",
+      ),
+      responses: {
+        ...orgMetadata.get.responses,
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
   },
 } as const;

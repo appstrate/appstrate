@@ -3,7 +3,9 @@
 /**
  * RFC 8707 resource-server audience binding via the generic
  * `enforceResourceAudience` middleware + protected-resource registry, for the
- * PER-ORG MCP resource family (`/api/mcp/o/:org`, one canonical URI per org).
+ * MCP resource family (`/api/mcp/o/:org` and `/api/mcp/o/:org/s/:space`, one
+ * canonical URI per org and per space; a space endpoint also accepts its org's
+ * token).
  *
  * Exercised over a throwaway Hono app: a stub middleware seeds `authExtra`
  * exactly as the OIDC strategy would (it surfaces the token's `aud` as
@@ -27,7 +29,14 @@ import {
   restoreProtectedResources,
 } from "../../../../lib/protected-resources.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  enclosingMcpResourceUris,
+  getMcpOrgResourceUri,
+  getMcpSpaceResourceUri,
+  parseMcpResourceUri,
+} from "../../../../lib/audiences.ts";
 
 // The protected-resource registry is a process-wide singleton shared with the
 // live app. Snapshot before this file mutates it and restore afterwards so a
@@ -46,22 +55,22 @@ afterAll(() => {
 const ORG_ID = "00000000-0000-0000-0000-0000000000a1";
 const ORG_PATH = `/api/mcp/o/${ORG_ID}`;
 const mcpUri = getMcpOrgResourceUri(ORG_ID);
+const SID = `spc_${crypto.randomUUID()}`;
+const SID2 = `spc_${crypto.randomUUID()}`;
+const SPACE_PATH = `${ORG_PATH}/s/${SID}`;
+const SPACE2_PATH = `${ORG_PATH}/s/${SID2}`;
+const spaceUri = getMcpSpaceResourceUri(ORG_ID, SID);
 
 /**
- * Register the per-org family exactly as `mcp/router.ts` does: derive a request
- * path's canonical org URI, and recognise a URI as owned iff it parses back to
- * an org id. Centralised so both describe blocks register identically.
+ * Register the family from the same pieces `mcp/router.ts` uses. Centralised so
+ * every describe block registers identically.
  */
 function registerOrgFamily(): void {
   registerProtectedResourceFamily({
-    prefix: "/api/mcp/o",
-    deriveUri: (path) => {
-      const prefix = "/api/mcp/o/";
-      if (!path.startsWith(prefix)) return undefined;
-      const orgId = path.slice(prefix.length).split("/")[0] ?? "";
-      return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
-    },
-    ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    prefix: MCP_RESOURCE_PREFIX,
+    deriveUri: deriveMcpResourceUri,
+    ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
+    enclosingUris: enclosingMcpResourceUris,
   });
 }
 
@@ -124,9 +133,34 @@ describe("enforceResourceAudience — inbound (RFC 8707)", () => {
     expect((await req(ORG_PATH, [])).status).toBe(401);
   });
 
-  it("matches sub-paths of the per-org resource", async () => {
-    expect((await req(`${ORG_PATH}/anything`, [mcpUri])).status).toBe(200);
-    expect((await req(`${ORG_PATH}/anything`, ["https://other.example"])).status).toBe(401);
+  it("treats an unknown sub-path of the org resource as a non-resource route", async () => {
+    expect((await req(`${ORG_PATH}/anything`, [mcpUri])).status).toBe(401);
+  });
+});
+
+describe("enforceResourceAudience — space resources", () => {
+  beforeEach(() => {
+    resetProtectedResources();
+    registerOrgFamily();
+  });
+
+  it("a space token reaches its space and nothing else", async () => {
+    expect((await req(SPACE_PATH, [spaceUri])).status).toBe(200);
+    expect((await req(ORG_PATH, [spaceUri])).status).toBe(401);
+    expect((await req(SPACE2_PATH, [spaceUri])).status).toBe(401);
+  });
+
+  it("an org token reaches a space of its org", async () => {
+    expect((await req(SPACE_PATH, [mcpUri])).status).toBe(200);
+  });
+
+  it("rejects a token bound to both the org and one of its spaces", async () => {
+    expect((await req(SPACE_PATH, [mcpUri, spaceUri])).status).toBe(401);
+    expect((await req(ORG_PATH, [mcpUri, spaceUri])).status).toBe(401);
+  });
+
+  it("rejects a space token replayed on a non-resource route", async () => {
+    expect((await req("/api/agents", [spaceUri])).status).toBe(401);
   });
 });
 
