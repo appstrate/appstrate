@@ -615,6 +615,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   once a Cloud token for `@appstrate/browserless` is in `CONFORMANCE_TOKENS`.
   Cloud calls consume units.
 
+- **Playwright MCP — a self-hosted Chromium driven through Microsoft's
+  Playwright MCP server (#1917).** `@appstrate/playwright-mcp@1.0.0` speaks
+  `streamable-http` to a `base_url` connection variable with no default, as
+  `coolify-mcp` does: the operator runs `mcr.microsoft.com/playwright/mcp`
+  (Apache-2.0) with `--port`, `--host 0.0.0.0` and `--allowed-hosts` listing
+  the host Appstrate calls. The agent drives the page through accessibility
+  snapshots (navigate, click, type, forms, dialogs, tabs, console, network,
+  JavaScript evaluation, screenshots); `--caps vision` adds coordinate mouse
+  tools and `--caps pdf` adds `browser_pdf_save`, both declared. With
+  `--cdp-endpoint` the server drives an existing Chromium instead, for example
+  a headful one whose live view lets a person watch or take over. Playwright
+  MCP has no authentication of its own, so the one `api_key` auth, sent as
+  `Authorization: Bearer`, is for a token-checking reverse proxy the operator
+  puts in front of it; anyone who reaches the port directly drives the
+  browser. `hidden_tools` holds `browser_run_code_unsafe`, which runs arbitrary
+  JavaScript in the server process, and `browser_file_upload`, which reads
+  files from the server's disk, never the agent's. No `allow_undeclared_tools`:
+  a new upstream tool is reviewed first.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off

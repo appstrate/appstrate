@@ -1,0 +1,105 @@
+{
+  "name": "@appstrate/playwright-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Playwright MCP",
+  "icon": "logos:playwright",
+  "description": "Microsoft's Playwright MCP server on your own infrastructure (its URL is a connection variable): a real Chromium per connection, driven step by step through accessibility snapshots. Navigate, click, type, fill forms, select options, hover, drag, handle dialogs, manage tabs, wait, read console and network traffic, evaluate JavaScript and take screenshots; started with --caps vision it adds coordinate mouse tools, with --caps pdf it saves pages as PDF. Started with --cdp-endpoint it drives an existing Chromium instead. Playwright MCP has no authentication of its own: put a reverse proxy that checks the token in front of it. Running arbitrary code in the server process and uploading files from the server's disk are hidden.",
+  "keywords": ["browser-automation", "web-scraping", "testing"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL du serveur Playwright MCP",
+          "description": "Adresse de votre serveur Playwright MCP (image mcr.microsoft.com/playwright/mcp lancée avec --port et --host 0.0.0.0), sans /mcp. Son option --allowed-hosts doit lister cet hôte. Il n'a aucune authentification propre : ne l'exposez que derrière un proxy inverse qui vérifie le jeton ci-dessous."
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "auths": {
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "title": "Jeton d'accès",
+              "description": "Jeton que votre proxy inverse attend dans l'en-tête Authorization: Bearer. Playwright MCP lui-même l'ignore : sur un réseau privé sans proxy, n'importe quelle valeur convient."
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "hidden_tools": ["browser_file_upload", "browser_run_code_unsafe"],
+  "tools_policy": {
+    "browser_click": {},
+    "browser_close": {},
+    "browser_console_messages": {},
+    "browser_drag": {},
+    "browser_drop": {},
+    "browser_emulate_media": {},
+    "browser_evaluate": {},
+    "browser_file_upload": {},
+    "browser_fill_form": {},
+    "browser_find": {},
+    "browser_handle_dialog": {},
+    "browser_hover": {},
+    "browser_mouse_click_xy": {},
+    "browser_mouse_down": {},
+    "browser_mouse_drag_xy": {},
+    "browser_mouse_move_xy": {},
+    "browser_mouse_up": {},
+    "browser_mouse_wheel": {},
+    "browser_navigate": {},
+    "browser_navigate_back": {},
+    "browser_network_request": {},
+    "browser_network_requests": {},
+    "browser_pdf_save": {},
+    "browser_press_key": {},
+    "browser_resize": {},
+    "browser_run_code_unsafe": {},
+    "browser_select_option": {},
+    "browser_snapshot": {},
+    "browser_tabs": {},
+    "browser_take_screenshot": {},
+    "browser_type": {},
+    "browser_wait_for": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}
