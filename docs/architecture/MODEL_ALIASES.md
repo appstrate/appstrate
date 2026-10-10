@@ -218,6 +218,12 @@ returns the caller's id when `isUserPrincipal(c)` holds (`apps/api/src/lib/princ
   organization credentials only;
 - a run: the payer its launch door computed, by the same rule.
 
+A schedule's `model_id_override` may not name a model that only each member's
+own credential serves (`credential_id` NULL): it is refused with
+`409 model_credential_required`. For a door with no payer (a schedule, an API
+key, an end user) that message says the launch spends organization credentials
+only.
+
 For a payer, the call is served by, in order:
 
 1. the payer's personal credentials that serve the model: the same catalog
@@ -242,7 +248,10 @@ agent's or a space's model) are validated with no payer.
 The public LLM proxy (`/api/llm-proxy`) never serves a subscription: its chain
 runs with `viaProxy`, which skips oauth2 credentials, so a call falls to the
 caller's other personal credential or to the organization binding, and is
-refused when that binding is itself a subscription. A run's
+refused when that binding is itself a subscription. For a member whose only
+applicable credential is a subscription, a proxy call therefore falls to the
+organization binding or is refused (`billed_to` describes runs and chat, not the
+proxy). A run's
 inference through the LLM proxy serves the credential frozen at launch
 (`runs.model_credential_id`) and is not re-resolved during the run: a credential
 the payer adds mid-run changes nothing, and one removed mid-run stops serving
@@ -259,10 +268,16 @@ bound as for a deleted or revoked credential.
 The admission gate (`beforeUsage`) quotes the credential a run or chat turn
 resolves to when it is admitted, and that exact credential is what gets spent.
 A run resolves its model once, before the gate, and its context reuses that
-resolution. A chat turn's proxy calls are served on the credential the turn was
-admitted on (`recordChatTurnAdmission`, keyed by the turn id the chat signs into
-its inference bearer); a call no admission covers is refused with
-`409 model_credential_changed`.
+resolution. A chat turn is admitted on the exact subscription credential `resolveChatModel`
+hands the engine (`recordChatTurnAdmission`, keyed by the turn id the chat signs
+into its inference bearer), re-validated at admission through the pinned-model
+loader. If that credential no longer serves (deleted, or personal credentials
+switched off), the turn is refused with `409 model_credential_changed`; a proxy
+call no admission covers is refused the same way.
+
+`llm_usage.credential_id` (uuid, no foreign key) records the credential that
+served each proxy, run and subscription-chat call, and survives that credential's
+deletion; it is NULL for platform keys.
 
 `credential_source` has two values: `system` (a platform credential) and `org`
 (one the customer supplies, an organization's or a member's own).

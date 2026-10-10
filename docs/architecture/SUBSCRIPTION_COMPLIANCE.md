@@ -2,8 +2,8 @@
 
 # Subscription Credential Compliance Posture
 
-**Last reviewed: 2026-10-09.** The Anthropic facts come from Anthropic's primary
-page (§2.1); the OpenAI sharing-scope facts still come from a secondary source
+**Last reviewed: 2026-10-10.** The Anthropic facts come from Anthropic's primary
+page (§2.1); the OpenAI facts come from OpenAI's developer and help pages
 (§2.2). The third-party-subscription ToS landscape shifted repeatedly through
 2026 (ban → enforce → reverse → pause for Anthropic; a plan-usage sharing scope
 for OpenAI). **Re-verify the current vendor terms before relying on this
@@ -231,25 +231,30 @@ but that confers no approval. Treat `claude-code` as a risk a self-hoster may
 take by enabling the module, not as a sanctioned integration, and never enable it
 in production. Re-verify the live page (§4) before relying on this reading.
 
-### 2.2 OpenAI / `codex` — a sharing scope exists, the Codex client path is still a grey zone
+### 2.2 OpenAI / `codex` — a plan-usage program exists for registered apps; the Codex client path is outside it
 
-- **Since 2026-09-29**, "Sign in with ChatGPT" has a **plan-usage sharing scope**
-  (`chatgpt.tokens.use.direct`) for Plus and Pro subscribers. The user sets a
-  weekly cap per app; when the cap is reached the API answers
-  `429 subscription_sharing_usage_limit_exceeded`. Hosted commercial apps go
-  through an interest form. Per the same source, Pi and OpenCode are among the 16
-  launch partners.
-- **Source status: reported by a secondary source (WorkOS), primary page not
-  verified.** OpenAI's help page answered 403 when checked. Verify the scope on
-  OpenAI's own documentation before relying on it.
-- `module-codex` uses the Codex `client_id` and a synthesized `auth.json`, outside
-  that program. It stays in the grey zone described below.
+- **OpenAI's primary documentation** separates two permissions: identity
+  sign-in, and optional use of the user's ChatGPT plan through the
+  `chatgpt.tokens.use.direct` scope. The developer cookbook
+  (`developers.openai.com/cookbook/articles/sign-in-with-chatgpt`) states that
+  a successful identity sign-in alone "does not grant permission to use the
+  user's ChatGPT plan". At launch, plan usage is open to open-source projects,
+  personal projects that run locally and selected private apps; commercial
+  developers apply through an interest form. The help article "Using your
+  ChatGPT plan in other apps and sites"
+  (`help.openai.com/en/articles/20001542`) describes the user side: plan use is
+  opt-in per app. The Sign in with ChatGPT Terms
+  (`openai.com/policies/sign-in-with-chatgpt-terms`) limit plan use to the
+  application the user connected.
+- `module-codex` uses the Codex CLI's fixed `client_id` and scopes, and a
+  synthesized `auth.json`. That is outside the registered program above, so it
+  stays in the grey zone described below.
 - OpenAI has **not** banned subscription-OAuth in third-party/headless tools
-  (unlike Anthropic in Feb), and it works. But outside the sharing scope there is
-  **no official endorsement** for automated/third-party use. The path relies on
-  the Codex `client_id` OAuth flow plus a synthesized `auth.json` outside the
-  official login. This is policy-fragile and could be closed at any time, as
-  Anthropic did.
+  (unlike Anthropic in Feb), and it works. But outside the registered program
+  there is **no official endorsement** for automated/third-party use. The path
+  relies on the Codex `client_id` OAuth flow plus a synthesized `auth.json`
+  outside the official login. This is policy-fragile and could be closed at any
+  time, as Anthropic did.
 - This grey-zone status is self-documented in `packages/module-codex/src/index.ts`.
 - For headless/automated work, OpenAI's clean contract is **API-key billing**.
 

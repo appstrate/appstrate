@@ -388,15 +388,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
   // --- Step 0: Resolve the model, once ---
   //
-  // The `beforeUsage` gate fires for EVERY run; this resolution supplies the
-  // fact the module quotes the MODEL component against (platform-supplied
-  // credential vs. one the customer supplies), and the run context reuses it, so
-  // the run spends the very credential the gate admitted. `modelId` is the
-  // effective preset (per-run override and space setting folded in by the
-  // route/scheduler/inline callers). A run with no resolvable model reports
-  // `null` and then fails with `ModelNotConfiguredError` — it never reaches
-  // inference. An unbound model (`credentialSource` null) is refused by
-  // `requireBoundModel` when the context is built.
+  // The admission gate and the run context share this resolution, so the run
+  // spends the credential the gate admitted.
   const modelCascade = await resolveModelCascade(
     orgId,
     params.agent.id,
@@ -426,14 +419,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
 
   // --- Step 2a: Integration manifest version snapshot (#686) ---
   //
-  // Validate `dependency_overrides` keys and freeze every declared
-  // integration's manifest version against PUBLISHED versions honoring its
-  // `dependencies.integrations.<id>` pin (+ any `dependency_overrides`), BEFORE
-  // the connection cascade and the spawn resolver run. Seeding the shared
-  // `manifestCache` makes both honor the pin transparently; the frozen map is
-  // persisted so the runtime credential path resolves the SAME version. An
-  // unsatisfiable pin fails loud (422), never a silent draft spawn. Shared with
-  // the remote origin (`run-creation.ts`) via `freezeRunSpawnDependencies`.
+  // Freezes each integration to the published version its pin names; an
+  // unsatisfiable pin is a 422, never a silent draft spawn.
   const freezeStart = Date.now();
   const resolvedIntegrationVersions: ResolvedIntegrationVersionMap = await runWithSpan(
     "appstrate.run.freeze",
@@ -450,20 +437,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
 
   // --- Step 2b: Connection resolution snapshot (#199) ---
   //
-  // Apply the cascade (integration-connection-resolver.ts) once at kickoff so:
-  //  - the spawn loader (run-context-builder) spawns the set the cascade bound,
-  //  - the credentials route (sidecar MITM refresh) authorises only that set
-  //    long after kickoff via runs.resolved_connections.
-  //
-  // Readiness already ran in resolveRunPreflight WITH the same overrides
-  // (so the must_choose retry exits its loop). This second pass produces
-  // the persisted resolution snapshot and re-checks under the current DB
-  // state — any error here is hard 409: either the override points at an
-  // invalid id (caller's mistake), or a race after readiness mutated DB
-  // state (connection deleted / pin shifted). Either way the caller
-  // needs structured feedback, not a silent fallback. The cascade reads the
-  // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
-  // Its warnings repeat the preflight's; the run records them as `integrationsUnbound`.
+  // Persists the cascade's result in `runs.resolved_connections`: the spawn and
+  // the sidecar's credentials route use only that set. Any error is a 409.
   let resolvedConnections: ResolvedConnectionMap | null = null;
   let integrationsUnbound: RunIntegrationUnbound[] | undefined;
   let connectionsMs = 0;
@@ -536,6 +511,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         spaceId,
         actor,
         modelCascade,
+        payerUserId,
         input: input ?? undefined,
         files,
         modelId,
@@ -645,12 +621,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,
         runnerKind: params.runnerKind ?? null,
-        // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
-        // emits `modelCredentialId` to any dashboard user who can read the run,
-        // and a credential id cross-references — via GET /api/model-provider-
-        // credentials → its provider and endpoint — straight to the backing.
-        // Drop it for aliases; the operator audit trail already recorded the
-        // create. Non-aliased runs keep it for the connections/credentials panel.
+        // Aliases withhold the credential id (#727, Threat A); the audit trail keeps it.
         modelCredentialId: credentialPin({ ...plan.llmConfig, credentialSource: modelSource })
           .credentialId,
         consumedFileIds: params.consumedFileIds,
