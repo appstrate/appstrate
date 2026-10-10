@@ -26,7 +26,6 @@ import {
 } from "../../hooks/use-models";
 import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
-import { ModelBillingHint } from "../model-billing-hint";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
@@ -278,7 +277,6 @@ function ModelSectionEditor({
                 <span className="inline-flex items-center gap-1.5">
                   {MIcon && <MIcon className="size-3.5" />}
                   {m.label}
-                  <ModelBillingHint billedTo={m.billed_to} />
                   <ModelUnselectableNote model={m} />
                 </span>
               </SelectItem>

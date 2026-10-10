@@ -20,13 +20,6 @@ export function ownPersonalCredentials<
   return credentials.filter((c) => c.owner_type === "user" && c.owner_id === userId);
 }
 
-/** The organization models the caller's own credentials pay for (`billed_to` is computed for the caller). */
-export function modelsPaidByCaller<T extends { billed_to: "user" | "org" | null }>(
-  models: readonly T[],
-): T[] {
-  return models.filter((m) => m.billed_to === "user");
-}
-
 /** Body of a personal API-key credential: owned by the caller, so the server refuses a custom endpoint. */
 export function personalApiKeyBody(input: { providerId: string; label: string; apiKey: string }) {
   return {

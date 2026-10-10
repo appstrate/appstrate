@@ -1235,7 +1235,6 @@ function buildResolvedModel(head: ModelHead, serving: ServingCredentials): Resol
   };
 }
 
-/** The model a run gets, and whether the explicit id supplied it or a default did. */
 /** A resolved model and whether it is the one asked for (`fromExplicit`) or a cascade fallback. */
 export type ModelCascade = { model: ResolvedModel; fromExplicit: boolean } | null;
 
@@ -1267,7 +1266,7 @@ export async function resolveModelCascade(
   // 3. System default.
   for (const [id, def] of getSystemModels()) {
     if (def.isDefault && def.enabled !== false) {
-      const model = await loadModel(orgId, id, payerUserId);
+      const model = await loadModel(orgId, id, null);
       if (model) return { model, fromExplicit: false };
     }
   }
@@ -1485,7 +1484,6 @@ async function loadModelBinding(
   | {
       credentialId: string | null;
       enabled: boolean;
-      aliased: boolean;
       providerId: string;
       modelId: string;
     }
@@ -1497,7 +1495,6 @@ async function loadModelBinding(
       .select({
         credentialId: orgModels.credentialId,
         enabled: orgModels.enabled,
-        aliased: orgModels.aliased,
         providerId: orgModels.providerId,
         modelId: orgModels.modelId,
       })

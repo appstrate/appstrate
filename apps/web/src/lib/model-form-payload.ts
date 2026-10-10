@@ -178,17 +178,14 @@ function resolveCredentialBinding(input: {
     }
     return { ok: true, binding: { credentialId: null, providerId: provider.providerId } };
   }
-  const isOauthProvider = provider?.authMode === "oauth2";
+  // A subscription is personal: an organization model on one is left to each member.
+  if (provider?.authMode === "oauth2") {
+    return { ok: false, field: "credentialId", messageKey: "models.form.eachMemberRequired" };
+  }
   const inlineApiKey = input.inlineApiKey.trim();
   const credentialId = input.selectedCredentialId ?? "";
+  const newCredentialProvider = !credentialId && inlineApiKey ? provider : undefined;
 
-  // OAuth credentials exist before the model is saved (pairing dialog).
-  const newCredentialProvider =
-    !isOauthProvider && !credentialId && inlineApiKey ? provider : undefined;
-
-  if (isOauthProvider && !credentialId) {
-    return { ok: false, field: "credentialId", messageKey: "models.form.connectionRequired" };
-  }
   if (!newCredentialProvider) {
     if (!credentialId) {
       return { ok: false, field: "credentialId", messageKey: "models.form.apiKeyRequired" };

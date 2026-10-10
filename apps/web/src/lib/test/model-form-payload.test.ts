@@ -356,7 +356,7 @@ describe("buildModelFormPayload — the model's name", () => {
 
 describe("buildModelFormPayload — missing credential", () => {
   it.each([
-    ["an OAuth provider with no connection selected", CLAUDE_CODE],
+    ["an OAuth provider not left to each member", CLAUDE_CODE],
     ["an api-key provider with neither a selection nor an inline key", ANTHROPIC],
   ])("builds nothing for %s", (_name, provider) => {
     expect(build({ provider, fields: fields({ modelId: "claude-sonnet-4-5-20250929" }) }).ok).toBe(
@@ -742,7 +742,7 @@ describe("modelFormRefusals", () => {
     });
     expect(
       modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
-    ).toEqual({ credentialId: "settings:models.form.connectionRequired", modelId: null });
+    ).toEqual({ credentialId: "settings:models.form.eachMemberRequired", modelId: null });
     // A typed key answers it; with no provider there is no key row to say it on.
     expect(
       modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,

@@ -376,8 +376,8 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
     [CONNECTION],
   );
 
-  it("shows each member's own connection as the identifier, in place of a connection", () => {
-    expect(html).toContain(settingsFr["models.form.connectionLabel"]);
+  it("shows each member's own credential as the identifier", () => {
+    expect(html).toContain(settingsFr["models.form.identityLabel"]);
     expect(html).toContain(settingsFr["models.form.eachMember"]);
     expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
   });

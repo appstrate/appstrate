@@ -32,7 +32,6 @@ import {
   lookupCatalogModel,
 } from "../../../src/services/model-catalog.ts";
 import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
-import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 
@@ -2058,7 +2057,7 @@ describe("Models API", () => {
       ).toBe(true);
     });
 
-    it("refuses the caller's own personal credential with 403 while personal credentials are off", async () => {
+    it("refuses a personal credential, the caller's own included: a model binds organization credentials only", async () => {
       const mine = await seedOrgModelProviderKey({
         orgId: ctx.orgId,
         apiShape: "openai-completions",
@@ -2066,13 +2065,9 @@ describe("Models API", () => {
         apiKey: "sk-mine",
         ownerUserId: ctx.user.id,
       });
-      await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
 
       const res = await probe({ credentialId: mine.id, modelId: "any-model" });
-      expect(res.status).toBe(403);
-      expect(((await res.json()) as { code?: string }).code).toBe(
-        "personal_model_credentials_disabled",
-      );
+      expect(res.status).toBe(404);
       expect(seen).toEqual([]);
     });
   });

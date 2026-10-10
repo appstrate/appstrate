@@ -70,6 +70,14 @@ const DIRECT_PROVIDER: ProviderRegistryEntry = {
   baseUrlOverridable: false,
 };
 
+/** A subscription: personal, so a model on it is left to each member. */
+const SUBSCRIPTION_PROVIDER: ProviderRegistryEntry = {
+  ...DIRECT_PROVIDER,
+  providerId: "claude-code",
+  displayName: "Claude Code",
+  authMode: "oauth2",
+};
+
 function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): string {
   return render(
     <EndpointFields
@@ -148,6 +156,24 @@ describe("EndpointFields", () => {
     expect(html).toContain('placeholder="sk-..."');
     expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
     expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
+  });
+
+  it("offers a subscription only to each member, under the identifier label", () => {
+    const html = fields({
+      provider: SUBSCRIPTION_PROVIDER,
+      providers: [],
+      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
+    });
+    expect(html).toContain(settingsFr["models.form.identityLabel"]);
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("offers nothing to pick for a subscription where each member is not offered", () => {
+    const html = fields({ provider: SUBSCRIPTION_PROVIDER, providers: [] });
+    expect(html).not.toContain('role="combobox"');
+    expect(html).not.toContain('placeholder="sk-..."');
   });
 
   it("reports the errors its host resolved", () => {

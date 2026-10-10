@@ -33,9 +33,8 @@ import {
 } from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
-  mayProbeCredential,
+  loadCredentialBinding,
   loadInferenceCredentials,
-  requestModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -478,14 +477,13 @@ export function createModelsRouter() {
     if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
-    // A member's own credential is probed by its owner only (never by an API key);
-    // `models:write` stands in for the org-wide read here.
-    const visible = await mayProbeCredential(
-      { ...requestModelCredentialCaller(c), readsOrg: true },
-      data.credentialId,
-    );
-    const creds = visible ? await loadInferenceCredentials(orgId, data.credentialId) : null;
-    if (!creds || !visible) {
+    // A model binds organization credentials only; a personal one is probed on its own route.
+    const binding = await loadCredentialBinding(orgId, data.credentialId);
+    const creds =
+      binding?.ownerUserId === null
+        ? await loadInferenceCredentials(orgId, data.credentialId)
+        : null;
+    if (!creds) {
       throw notFound("Credential not found");
     }
     const apiKey = data.api_key || creds.apiKey;

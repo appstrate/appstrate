@@ -37,8 +37,8 @@ const cache = createCache<ResolvedModel | null>({
 });
 
 /**
- * Resolve one model under `slot`: the payer's chain (`payerUserId`, `""` for none,
- * `:proxy` suffixed on the LLM proxy's chain) or a pinned credential (`pin:<id>`).
+ * Resolve one model under `slot`: the payer (`payerUserId`, `""` for none, `:proxy`
+ * suffixed on the LLM proxy's chain) or a run's launch credential (`run:<id>`).
  * `null` (unknown / disabled model, dead credential) is answered but never stored.
  */
 export function resolveModelCached(

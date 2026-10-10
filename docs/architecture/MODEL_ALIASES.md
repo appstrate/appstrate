@@ -240,8 +240,10 @@ skips oauth2 credentials), so `billed_to` describes runs and chat. A run's proxy
 calls on a member-paid model keep the personal credential it launched with
 (`runs.model_credential_id`, `loadRunModel`), even if the model is bound
 meanwhile; one removed mid-run, or personal credentials switched off, refuses
-the run's next call rather than switching payer. Any other run is served as the
-model is now. The sidecar's token door
+the run's next call while the model stays unbound. Any other run is served as
+the model is now. A payer changes mid-call only through an administrator's act:
+binding or unbinding a model makes the next call of a chat turn, or of a run
+whose launch credential is gone, served as the model now is. The sidecar's token door
 (`/internal/oauth-token/{credentialId}`) gives a subscription's token only to a
 platform run pinned to it and launched by its owner with no API key; a token the
 sidecar already holds lasts up to its 30-second cache, as for a revocation.

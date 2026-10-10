@@ -1122,13 +1122,15 @@ Rollback:
 
 It prints the subscriptions to migrate, then per organization (one transaction each) the owned, orphan, pairing and unbound counts, and the members whose runs used a subscription they do not own (orphans included, since no one owns them). Take the `pg_dump` BEFORE the deploy (`0087` runs at boot, so a later dump cannot roll back past it), then run it after the deploy, app up, while no run is active: `set -a && . ./.env && set +a && bun scripts/migration/0042-personal-model-subscriptions.ts` is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
 
-`--apply` refuses three cases. The dry run lists each one as `blocks --apply`; nothing is committed for the organization concerned:
+`--apply` refuses five cases. The dry run lists each one as `blocks --apply`; nothing is committed for the organization concerned:
 
-- An aliased model still bound to one of its subscriptions. An alias needs an organization credential, so the script leaves it bound and does not unbind it. Rebind the model to an organization credential, or delete it, then re-run.
+- An aliased model still bound to one of its subscriptions. An alias needs an organization credential, so the script leaves it bound. Rebind the model to an organization credential, or delete it, then re-run.
 - A `pending` or `running` run pinned to one of its subscriptions. Wait for the run to finish, then re-run.
+- A schedule whose `model_id_override` names a model it would unbind: a schedule spends organization credentials only. Change the schedule's model, then re-run.
+- Two models it would unbind onto one (provider, model id) pair (`uq_org_models_unbound`). Keep one of each pair, then re-run.
 - An unreadable org-owned blob left after the work. The run fails at the end, after the other organizations have committed, and names it. Repair it or delete it, then re-run.
 
-The first two roll back that organization and exit 1; the third comes last. A re-run is safe: committed organizations are a no-op.
+The first four roll back that organization and exit 1; the last comes last. It also deletes the pending reconnect pairings minted by anyone but a subscription's new owner, and reports the organization default and the agents left on a model it unbinds. A re-run is safe: committed organizations are a no-op.
 
 Rollback: see the table above.
 

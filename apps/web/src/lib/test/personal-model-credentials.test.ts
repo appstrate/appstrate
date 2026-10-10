@@ -12,7 +12,6 @@ import {
   personalApiKeyBody,
   personalCredentialProviders,
   ownPersonalCredentials,
-  modelsPaidByCaller,
 } from "../personal-model-credentials.ts";
 
 describe("personalCredentialProviders", () => {
@@ -63,17 +62,6 @@ describe("ownPersonalCredentials", () => {
 
   it("keeps nothing while the caller is not known yet", () => {
     expect(ownPersonalCredentials(credentials, undefined)).toEqual([]);
-  });
-});
-
-describe("modelsPaidByCaller", () => {
-  it("keeps the models the caller's own credential pays for", () => {
-    const models: { id: string; billed_to: "user" | "org" | null }[] = [
-      { id: "paid_by_me", billed_to: "user" },
-      { id: "paid_by_org", billed_to: "org" },
-      { id: "unbound", billed_to: null },
-    ];
-    expect(modelsPaidByCaller(models).map((m) => m.id)).toEqual(["paid_by_me"]);
   });
 });
 

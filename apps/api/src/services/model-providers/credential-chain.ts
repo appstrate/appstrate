@@ -33,7 +33,7 @@ export function servesModel(
 }
 
 /** A member's personal credential, as applicability and ranking read it. */
-export interface PersonalCredential {
+interface PersonalCredential {
   id: string;
   providerId: string;
   createdAt: Date;

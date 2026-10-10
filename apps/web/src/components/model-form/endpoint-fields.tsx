@@ -2,14 +2,15 @@
 
 /**
  * How a form reaches its provider: API type and base URL where
- * `baseUrlOverridable`, then a key to type or pick, or a connection, per
- * `authMode`. Shared by the model form and the credential form.
+ * `baseUrlOverridable`, then a key to type or pick — or, for a subscription
+ * (`oauth2`), only the "each member" choice. Shared by the model form and the
+ * credential form.
  */
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { UseFormRegisterReturn } from "react-hook-form";
-import { KeyRound, Plug, Users, X } from "lucide-react";
+import { KeyRound, Users, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -22,11 +23,13 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { getProviderIcon } from "../icons";
-import { ConnectionRow, EACH_MEMBER_ITEM } from "./connection-row";
 import type {
   ModelProviderCredentialInfo,
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials";
+
+/** The picker item for "each member" — a UI token, never sent on the wire. */
+const EACH_MEMBER_ITEM = "__each_member__";
 
 /** Keys already saved for this endpoint. Omitted where the form only creates one. */
 interface ExistingKeys {
@@ -105,16 +108,40 @@ function ApiKeyRow({
   );
 }
 
+/**
+ * A subscription is personal, so a model on one has a single choice: each
+ * member serves it. Without that choice there is nothing to pick.
+ */
+function EachMemberRow({
+  invalid,
+  eachMember,
+}: {
+  invalid: boolean;
+  eachMember?: { onSelect: () => void };
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  if (!eachMember) return null;
+
+  return (
+    <Select value="" onValueChange={() => eachMember.onSelect()}>
+      <SelectTrigger className={cn("w-full", invalid && "border-destructive")}>
+        <SelectValue placeholder={t("models.form.chooseIdentity")} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={EACH_MEMBER_ITEM}>{t("models.form.eachMember")}</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** The credential a form is bound to, and the way to unbind it. */
 function CredentialChip({
   label,
   icon,
-  secondary,
   onClear,
 }: {
   label: string;
   icon?: ReactNode;
-  secondary?: string | null;
   onClear: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -124,7 +151,6 @@ function CredentialChip({
       <div className="border-input bg-muted flex h-9 flex-1 items-center gap-2 rounded-md border px-3 text-sm">
         {icon ?? <KeyRound className="text-muted-foreground size-3.5 shrink-0" />}
         <span className="truncate">{label}</span>
-        {secondary && <span className="text-muted-foreground truncate text-xs">({secondary})</span>}
       </div>
       <Button
         type="button"
@@ -262,7 +288,7 @@ export function EndpointFields({
 
       <div className="space-y-2">
         <Label htmlFor={bound || isOauth ? undefined : `${idPrefix}-apiKey`}>
-          {isOauth ? t("models.form.connectionLabel") : t("credentials.form.apiKey")}
+          {isOauth ? t("models.form.identityLabel") : t("credentials.form.apiKey")}
         </Label>
         {eachMember?.selected ? (
           <CredentialChip
@@ -271,21 +297,9 @@ export function EndpointFields({
             onClear={eachMember.onClear}
           />
         ) : selectedKey && existingKeys ? (
-          <CredentialChip
-            label={selectedKey.label}
-            icon={
-              isOauth ? <Plug className="text-muted-foreground size-3.5 shrink-0" /> : undefined
-            }
-            secondary={isOauth ? selectedKey.oauth_email : undefined}
-            onClear={existingKeys.onClear}
-          />
+          <CredentialChip label={selectedKey.label} onClear={existingKeys.onClear} />
         ) : isOauth ? (
-          <ConnectionRow
-            connections={existingKeys?.items ?? []}
-            invalid={!!apiKeyError}
-            eachMember={eachMember}
-            onSelect={(id) => existingKeys?.onSelect(id)}
-          />
+          <EachMemberRow invalid={!!apiKeyError} eachMember={eachMember} />
         ) : (
           <ApiKeyRow
             id={`${idPrefix}-apiKey`}

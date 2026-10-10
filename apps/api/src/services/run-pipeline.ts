@@ -646,7 +646,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
-
         consumedFileIds: params.consumedFileIds,
       },
     ),

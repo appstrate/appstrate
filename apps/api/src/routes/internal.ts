@@ -851,13 +851,11 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  * Verify a `model_provider_credentials` row exists and is reachable by
  * this run. Three layers of checks:
  *
- *   1. Per-run pinning (fail-closed): only platform-origin runs that
- *      resolved to an OAuth model carry a pin (`runs.model_credential_id`),
- *      and the requested credentialId MUST equal it. A run with a NULL pin
- *      (platform-origin API-key-model run) has NO legitimate reason to read
- *      ANY OAuth credential, so it is rejected outright — a leaked run
- *      token from such a run must not be able to enumerate the org's OAuth
- *      credentials.
+ *   1. Per-run pinning (fail-closed): the requested credentialId MUST equal
+ *      the run's launch credential (`runs.model_credential_id`). A run with
+ *      a NULL pin (a built-in model or an alias) has NO legitimate reason to
+ *      read ANY credential, so it is rejected outright — a leaked run token
+ *      from such a run must not be able to enumerate the org's credentials.
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
  *   3. Holder: a personal credential (`owner_user_id` set) serves only its
  *      owner's runs, never one an API key triggered, and nothing while the

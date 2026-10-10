@@ -25,7 +25,6 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { errorMessage } from "../../lib/mutation-error";
 import {
   credentialUpdateBody,
-  modelsPaidByCaller,
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
@@ -57,7 +56,7 @@ export function PreferencesModelsPage() {
 
   const allCredentials = credentialsQuery.data ?? [];
   const credentials = ownPersonalCredentials(allCredentials, userId);
-  const paidByCaller = modelsPaidByCaller(modelsQuery.data ?? []);
+  const paidByCaller = (modelsQuery.data ?? []).filter((m) => m.billed_to === "user");
 
   // A credential's add, rename, delete or pairing changes which models the caller pays for.
   const refreshModels = () => {

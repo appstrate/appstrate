@@ -2012,7 +2012,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: ["user", "org", null],
         description:
-          "Who pays for a call to this model, for the caller. `org` — a built-in model, or a model bound to a usable organization credential: the organization (or the platform) pays whoever calls. `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — nothing serves it for the caller: a spend is refused (`409 model_credential_required` on an unbound model). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
+          "Who pays for a call to this model, for the caller. `org` — a built-in model or a model bound to an organization credential: the organization (or the platform) pays whoever calls (a dead credential is `needs_reconnection`). `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — an unbound model nothing of the caller's serves: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
       },
       cost: {
         type: ["object", "null"],

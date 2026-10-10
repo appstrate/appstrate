@@ -130,43 +130,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
 - **Model credentials: `pg_dump` before the deploy, then script `0042` after
-  it** (#1875). Migration `0087` runs at boot: it adds
-  `model_provider_credentials.owner_user_id`, `org_models.provider_id`
-  (backfilled from each bound credential), makes `org_models.credential_id`
-  nullable, and restores the unique index `uq_org_models_unbound` (one unbound
-  model per organization, provider and model id). An older build cannot insert
-  a model afterwards: rolling back past it means restoring that dump. Then, app
-  up:
-  1. dry run (writes nothing):
-     `set -a && . ./.env && set +a && bun scripts/migration/0042-personal-model-subscriptions.ts`;
-  2. read its report per organization, then run it with `--apply`. It refuses
-     an organization with an aliased model, an active run on one of its
-     subscriptions, a schedule that overrides its model with a model the
-     migration unbinds, or an unbinding that would repeat an unbound (provider,
-     model) pair. It fails at the end while an org-owned credential does not
-     decrypt (`scripts/migration/README.md`).
-
-  Apply while no run is active: a run pinned to a subscription its launcher
-  did not create is refused by the sidecar token door (403) once that
-  subscription becomes personal. Until 0042 is applied, existing
-  organization-owned subscriptions keep serving every member as before.
-
-  It locks the creators' memberships first, in the same order as leaving an
-  organization, so a member leaving mid-run cannot end up owning a credential.
-  It makes every existing subscription (an `oauth` model credential,
-  recognised by its decrypted blob, never by the provider registry) personal
-  to its creator when that creator is still a member of the organization.
-  It deletes the orphans (no creator, or a creator who has left the
-  organization) with their pairings, and deletes the pending pairings that
-  would reconnect a now-personal subscription for anyone but its owner (a
-  member who still needs one mints a new pairing). It unbinds the non-aliased
-  organization models bound to a subscription, so each member brings their own
-  credential for them. It reports the organization default and each agent
-  (`space_packages.model_id`) that points at an unbound model, and lists the
-  members who ran on a subscription they did not own. One transaction per
-  organization; a second run changes nothing. Production never enables a
-  subscription module, so the report should show zero subscriptions there; any
-  it shows is a decision to take before `--apply`.
+  it** (#1875). Migration `0087` runs at boot (`model_provider_credentials.owner_user_id`,
+  `org_models.provider_id` backfilled from each bound credential, a nullable
+  `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
+  rolling back past it means restoring the dump. Then, app up, run
+  `scripts/migration/0042-personal-model-subscriptions.ts` dry, read its report,
+  and run it with `--apply`: it makes existing subscriptions personal to their
+  creator and unbinds the models bound to them, and refuses an organization it
+  cannot migrate safely (`scripts/migration/README.md`). Production never
+  enables a subscription module, so its report should show none.
 
 ### Changed
 
@@ -208,8 +180,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     schedule firing one through an agent's or the organization's default fails.
   - A subscription is reconnected only by its holder, judged at redeem time.
   - `llm_usage.credential_id` (uuid, no foreign key) records the credential that
-    served a call (NULL for a platform key or an alias). `credential_source`
-    keeps two values: `system` and `org` (an organization's or a member's own).
+    served a call (NULL for a platform key or an alias).
   - `needs_reconnection` is read for the caller on an unbound model: true when
     nothing of theirs serves it and one of their own credentials for it is dead.
 - **BREAKING (modules): the chat platform services take the session user**
@@ -528,23 +499,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Personal model credentials** (#1875). A member brings their own model
-  credential: an API key for a fixed-endpoint provider, or a subscription
-  connected through `@appstrate/connect-helper` when a subscription provider is
-  registered. Préférences → Identifiants de modèle adds an API key or connects a
-  subscription, lists, renames and removes them. The member's own credential
-  pays for the organization models they call, ahead of the organization's; a
-  model the organization binds to "each member's own credential" is served by
-  each member's own. Custom endpoints stay organization-only. The run, agent and
-  chat pickers show "Votre identifiant" when the caller's credential pays and
-  "Identifiant requis" when one is needed; the chat offers the fix for
-  `model_credential_required`.
-
-- **Organization setting `personal_model_credentials`** (#1875), in
-  organization settings. Off refuses new personal credentials, and existing
-  ones serve nothing from then on: a run already started on one is refused at
-  its next model call, never moved to another credential (a subscription token
-  a run's sidecar already holds lasts up to 30 seconds). Leaving the
-  organization deletes the member's personal credentials and their pairings.
+  credential (an API key for a fixed-endpoint provider, or a subscription where
+  a subscription module is enabled) from Préférences → Identifiants de modèle,
+  for the models the organization sets to « Chaque membre utilise son propre
+  identifiant ». Every other model stays paid by the organization. The run and
+  chat pickers say « Votre identifiant » or « Identifiant requis », the chat
+  links to the fix, and an organization setting can switch the feature off.
+  Leaving the organization deletes the member's personal credentials.
 
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
   the agent needs at least one connection of that integration to run (#1830).
