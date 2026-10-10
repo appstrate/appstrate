@@ -166,4 +166,38 @@ describe("schedule payer — organization credentials only", () => {
     expect(body.code).toBe("model_credential_required");
     expect(body.detail).toContain("organization credentials only");
   });
+
+  it("refuses to unbind a model a schedule overrides with", async () => {
+    const credentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Org key",
+      providerId: "openai",
+      apiKey: "sk-org-test-key",
+    });
+    const modelDbId = await createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, {
+      credentialId,
+    });
+    const schedule = await seedSchedule({
+      packageId: AGENT_ID,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      modelIdOverride: modelDbId,
+    });
+
+    const res = await app.request(`/api/models/${modelDbId}`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ credentialId: null }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("model_scheduled");
+    expect(body.detail).toContain(schedule.id);
+    const [row] = await db.select().from(orgModels).where(eq(orgModels.id, modelDbId));
+    expect(row!.credentialId).toBe(credentialId);
+  });
 });

@@ -247,13 +247,18 @@ export async function runPersonalModelSubscriptions(options: {
               .from(orgModels)
               .where(and(eq(orgModels.orgId, orgId), isNull(orgModels.credentialId)))
           : [];
-        const seen = new Set(alreadyUnbound.map((m) => `${m.providerId}\u0000${m.modelId}`));
-        const duplicateUnbound: Array<{ id: string; label: string }> = [];
-        for (const m of toUnbind) {
-          const key = `${m.providerId}\u0000${m.modelId}`;
-          if (seen.has(key)) duplicateUnbound.push({ id: m.id, label: m.label });
-          seen.add(key);
+        // Every model it would unbind onto a (provider, model) pair held by another
+        // unbound row, already unbound or unbound now: each collision names all its rows.
+        const pairKey = (m: { providerId: string; modelId: string }) =>
+          `${m.providerId}\u0000${m.modelId}`;
+        const holders = new Map<string, number>();
+        for (const m of [...alreadyUnbound, ...toUnbind]) {
+          holders.set(pairKey(m), (holders.get(pairKey(m)) ?? 0) + 1);
         }
+        const duplicateUnbound = toUnbind
+          .filter((m) => holders.get(pairKey(m))! > 1)
+          .map(({ id, label }) => ({ id, label }))
+          .sort((a, b) => a.id.localeCompare(b.id));
         const scheduleOverrides = toUnbindIds.length
           ? await tx
               .select({ id: schedules.id, modelId: schedules.modelIdOverride })
@@ -295,7 +300,7 @@ export async function runPersonalModelSubscriptions(options: {
             .map((m) => `${m.id} ${JSON.stringify(m.label)}`)
             .join(", ");
           throw new Error(
-            `org ${orgId}: unbinding would repeat a provider and model already unbound, delete one of each pair: ${named}`,
+            `org ${orgId}: unbinding would put several models on one provider and model id, keep one of each: ${named}`,
           );
         }
         if (apply && aliasedModels.length) {
@@ -368,7 +373,10 @@ export async function runPersonalModelSubscriptions(options: {
               .where(and(eq(modelProviderPairings.orgId, orgId), or(...pairingTargets)))
               .returning({ id: modelProviderPairings.id })
           : [];
-        if (orphanIds.length) await tx.delete(c).where(inArray(c.id, orphanIds));
+        // Only `--apply` reaches here with a blocker refused; a dry run that reports one
+        // keeps the orphans, which a model it did not unbind still references.
+        const blocked = aliasedModels.length > 0 || duplicateUnbound.length > 0;
+        if (orphanIds.length && !blocked) await tx.delete(c).where(inArray(c.id, orphanIds));
 
         captured.report = {
           orgId,

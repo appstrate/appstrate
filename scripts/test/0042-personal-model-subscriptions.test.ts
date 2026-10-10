@@ -454,7 +454,7 @@ describe("0042 — model subscriptions become personal", () => {
       providerId: SUBSCRIPTION_PROVIDER,
       createdBy: member.id,
     });
-    await seedOrgModel({
+    const first = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: mine.id,
       providerId: SUBSCRIPTION_PROVIDER,
@@ -469,7 +469,7 @@ describe("0042 — model subscriptions become personal", () => {
 
     const dry = await run(false);
 
-    expect(dry.orgs[0]!.duplicateUnbound.map((m) => m.id)).toEqual([twin.id]);
+    expect(dry.orgs[0]!.duplicateUnbound.map((m) => m.id)).toEqual([first.id, twin.id].sort());
     await expect(run(true)).rejects.toThrow(twin.id);
     expect((await modelOf(twin.id)).credentialId).toBe(theirs.id);
   });
@@ -499,5 +499,26 @@ describe("0042 — model subscriptions become personal", () => {
       { spaceId: ctx.defaultSpaceId, packageId: AGENT, modelId: model.id },
     ]);
     expect((await modelOf(model.id)).credentialId).toBeNull();
+  });
+
+  it("a dry run reports an orphan still bound to an aliased model instead of failing", async () => {
+    const orphan = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: null,
+    });
+    const alias = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: orphan.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-orphan-alias",
+      aliased: true,
+    });
+
+    const dry = await run(false);
+
+    expect(dry.orgs[0]!.orphans.map((r) => r.id)).toEqual([orphan.id]);
+    expect(dry.orgs[0]!.aliasedModels.map((m) => m.id)).toEqual([alias.id]);
+    expect(await rowOf(orphan.id)).toBeDefined();
   });
 });

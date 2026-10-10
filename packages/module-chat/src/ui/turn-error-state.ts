@@ -103,6 +103,7 @@ const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   // Raised for a subscription only, and a subscription is always its holder's own.
   needs_reconnection: { text: "turn.error.needsReconnection", fix: "personalModels" },
   org_deleting: { text: "turn.error.orgDeleting" },
+  model_credential_changed: { text: "turn.error.modelCredentialChanged" },
   model_credential_required: {
     text: "turn.error.modelCredentialRequired",
     policyDisabledText: "turn.error.modelCredentialRequiredPolicy",

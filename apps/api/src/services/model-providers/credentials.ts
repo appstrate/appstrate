@@ -443,10 +443,11 @@ interface ReconnectOAuthCredentialInput {
  * the old blob is still decryptable. A corrupt OAuth blob is recoverable by
  * design — reconnect is the user-facing repair path for that state too.
  *
- * Judged at write time, not at the pairing's mint: the row must be the redeeming
- * member's own subscription, the member still in the organization (their
- * membership lock, the one the organization exit takes) and personal credentials
- * allowed. `false` (the route's 404) otherwise.
+ * Judged at write time, not at the pairing's mint (the pairing is already
+ * consumed): personal credentials must be allowed (else the 403), and the row
+ * must be the redeeming member's own subscription with the member still in the
+ * organization, under the membership lock the exit takes (else `false`, the
+ * route's 404).
  */
 export async function reconnectOAuthCredential(
   input: ReconnectOAuthCredentialInput,
@@ -564,11 +565,15 @@ export async function updateModelProviderCredential(
   clearResolvedModelCache();
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** A credential of the org: the provider it serves and its owner (`null` for an org credential). */
 export async function loadCredentialBinding(
   orgId: string,
   credentialId: string,
 ): Promise<{ providerId: string; ownerUserId: string | null } | null> {
+  // A built-in key's id (`anthropic`, …) is not a uuid: no row, never a 22P02.
+  if (!UUID_RE.test(credentialId)) return null;
   const [row] = await db
     .select({
       providerId: modelProviderCredentials.providerId,

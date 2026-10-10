@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, eq, getTableColumns, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, orgModels, type CredentialSource } from "@appstrate/db/schema";
+import {
+  modelProviderCredentials,
+  orgModels,
+  schedules,
+  type CredentialSource,
+} from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import {
   type CatalogScope,
@@ -645,8 +650,8 @@ async function asDuplicateBinding(
         extra: [
           ...sameBinding,
           eq(orgModels.modelId, modelId),
-          // The indexes are partial on `aliased = false`; an alias sharing the
-          // binding is legal and is never the row that refused this write.
+          // An alias may share a binding (`uq_org_models_unaliased_binding` is
+          // partial on `aliased = false`; an alias is never unbound): never the refuser.
           eq(orgModels.aliased, false),
         ],
       }),
@@ -829,6 +834,20 @@ export async function updateOrgModel(
         data.aliased ?? locked.aliased,
         binding ? binding.credentialId : locked.credentialId,
       );
+      if (binding?.credentialId === null && locked.credentialId !== null) {
+        // A schedule spends organization credentials only: unbinding its model
+        // override would fail every fire.
+        const overriding = await tx
+          .select({ id: schedules.id })
+          .from(schedules)
+          .where(and(eq(schedules.orgId, orgId), eq(schedules.modelIdOverride, modelDbId)));
+        if (overriding.length) {
+          throw conflict(
+            "model_scheduled",
+            `Schedules run this model on the organization credential: ${overriding.map((r) => r.id).join(", ")}. Change their model before letting each member serve it with their own credential.`,
+          );
+        }
+      }
       if (data.enabled === false) {
         // The pointer is read under the row lock `setDefaultModel` also takes
         // before checking `enabled`, so the two refusals cannot both be skipped.

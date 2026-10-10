@@ -268,16 +268,27 @@ bound as for a deleted or revoked credential.
 The admission gate (`beforeUsage`) quotes the credential a run or chat turn
 resolves to when it is admitted, and that exact credential is what gets spent.
 A run resolves its model once, before the gate, and its context reuses that
-resolution. A chat turn is admitted on the exact subscription credential `resolveChatModel`
-hands the engine (`recordChatTurnAdmission`, keyed by the turn id the chat signs
-into its inference bearer), re-validated at admission through the pinned-model
-loader. If that credential no longer serves (deleted, or personal credentials
-switched off), the turn is refused with `409 model_credential_changed`; a proxy
-call no admission covers is refused the same way.
+resolution. A chat turn on the proxy is admitted on the credential its gate
+resolved, recorded for its turn id (`recordChatTurnAdmission`, the id the chat
+signs into its inference bearer): its proxy calls are served on that one, and a
+call no admission covers is refused with `409 model_credential_changed`. A
+subscription turn never reaches the proxy: `resolveChatModel` records the
+subscription it hands the engine under the turn id (`recordSubscriptionTurn`, a
+separate map the proxy never reads), and admission takes that record once and
+re-validates it through the pinned-model loader. If it no longer serves
+(deleted, or personal credentials switched off), the turn is refused with
+`409 model_credential_changed`. A turn answered with a reconnect carries no
+token and is admitted with nothing recorded.
 
 `llm_usage.credential_id` (uuid, no foreign key) records the credential that
-served each proxy, run and subscription-chat call, and survives that credential's
-deletion; it is NULL for platform keys.
+served the call, as a run pins it: NULL for a platform key or an alias. A row
+already written keeps it after the credential is deleted. A run's rows read the
+run's pin (`runs.model_credential_id`, `ON DELETE SET NULL`), so the rows a run
+writes after its credential is deleted mid-run carry NULL (that run's next proxy
+call is refused anyway).
+
+A model a schedule names in `model_id_override` cannot be unbound
+(`PATCH /api/models/{id}` with `credentialId: null`): `409 model_scheduled`.
 
 `credential_source` has two values: `system` (a platform credential) and `org`
 (one the customer supplies, an organization's or a member's own).

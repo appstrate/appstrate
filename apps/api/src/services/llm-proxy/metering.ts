@@ -42,7 +42,7 @@ import {
   withIdleBound,
   STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";
-import type { BoundModel } from "../org-models.ts";
+import { credentialPin, type BoundModel } from "../org-models.ts";
 import { CACHE_STATUS_MISS, storeResponse } from "./response-cache.ts";
 import { asRecord, LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
@@ -456,10 +456,13 @@ export async function recordProxyUsage(
     realModel: inputs.resolved.modelId,
     api: inputs.resolved.apiShape,
     // Which credential set reached the provider (platform vs customer-supplied),
-    // and the credential row that served the call: a personal key is attributed
-    // to its owner's credential id, the platform's own key carries none.
+    // and the credential row that served it, as a run pins it: none for a
+    // platform key or an alias (whose backing is never disclosed).
     credentialSource: inputs.resolved.credentialSource,
-    credentialId: inputs.resolved.credentialId ?? null,
+    credentialId:
+      inputs.resolved.credentialSource === "system"
+        ? null
+        : credentialPin(inputs.resolved).credentialId,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens ?? null,

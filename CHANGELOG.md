@@ -212,9 +212,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     (deleted, or personal credentials switched off), the turn is refused with
     `409 model_credential_changed`. A proxy call no admission covers is refused
     the same way.
-  - `llm_usage.credential_id` is restored (uuid, no foreign key): every proxy,
-    run and subscription-chat usage row records the credential that served the
-    call, and it survives that credential's deletion. NULL for platform keys.
+  - `llm_usage.credential_id` is restored (uuid, no foreign key): proxy, run
+    and subscription-chat usage rows record the credential that served the call
+    (NULL for a platform key or an alias), and a written row keeps it after the
+    credential is deleted.
+  - A model a schedule names in `model_id_override` cannot be unbound:
+    `PATCH /api/models/{id}` with `credentialId: null` answers
+    `409 model_scheduled`.
   - A schedule's `model_id_override` may not name a model served only by each
     member's own credential: `409 model_credential_required` (a schedule spends
     organization credentials only). For a door with no payer (a schedule, an
