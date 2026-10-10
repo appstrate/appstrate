@@ -17,7 +17,7 @@
 import type { ExecutionContext } from "../types/execution-context.ts";
 import { isFileField } from "@appstrate/afps-shared/file-field";
 import type { PromptViewUpload } from "./prompt-renderer.ts";
-import { renderValue } from "../template/render-value.ts";
+import { jsonText } from "@appstrate/afps-shared/json-text";
 
 /**
  * CommonMark inline code span: the fence is one backtick longer than the
@@ -380,7 +380,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         if (isFileField(prop)) continue;
         const req = inputRequired.includes(key) ? "required" : "optional";
         const value = input[key];
-        const valueStr = value !== undefined ? ` — ${inlineCode(renderValue(value))}` : "";
+        const valueStr = value !== undefined ? ` — ${inlineCode(jsonText(value))}` : "";
         const propRec = (prop as Record<string, unknown>) ?? {};
         const type = propRec.type;
         const description = typeof propRec.description === "string" ? propRec.description : "";
@@ -390,7 +390,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       }
     } else {
       for (const [key, value] of nonFileInputEntries) {
-        sections.push(`- **${key}**: ${renderValue(value)}`);
+        sections.push(`- **${key}**: ${jsonText(value)}`);
       }
     }
     sections.push("");

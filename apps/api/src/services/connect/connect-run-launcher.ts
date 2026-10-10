@@ -39,6 +39,7 @@
 
 import { createDecipheriv, randomBytes } from "node:crypto";
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
@@ -123,7 +124,7 @@ function loginToolDiagnostic(msg: string): string | null {
 function stringifyInputs(inputs: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(inputs)) {
-    out[k] = typeof v === "string" ? v : JSON.stringify(v);
+    out[k] = jsonText(v);
   }
   return out;
 }

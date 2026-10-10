@@ -26,6 +26,7 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
@@ -135,11 +136,6 @@ interface InitiateIntegrationOAuthInput {
 interface InitiateIntegrationOAuthResult {
   authUrl: string;
   state: string;
-}
-
-/** OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string. */
-function encodeAuthorizationParam(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 /**
@@ -252,7 +248,8 @@ export async function initiateIntegrationOAuth(
   // so refresh-token issuance is never silently suppressed.
   for (const [key, value] of Object.entries(input.authorizationParams ?? {})) {
     if (value === undefined || value === null) continue;
-    params.set(key, encodeAuthorizationParam(value));
+    // OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string.
+    params.set(key, jsonText(value));
   }
 
   const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;

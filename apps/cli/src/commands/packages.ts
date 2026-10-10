@@ -19,6 +19,7 @@
 import { mkdir, readdir, readFile, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { PackageHome, PackageVersionInfoResponse } from "@appstrate/shared-types";
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import { parseScopedName } from "@appstrate/core/naming";
 import {
   PACKAGE_CONTENT_ENTRY,
@@ -825,9 +826,7 @@ async function createPackage(
   io.stdout.write(`Created ${createdId}${where} and published its first version${version}.\n`);
   if (Array.isArray(created.warnings)) {
     for (const warning of created.warnings) {
-      io.stderr.write(
-        `warning: ${typeof warning === "string" ? warning : JSON.stringify(warning)}\n`,
-      );
+      io.stderr.write(`warning: ${jsonText(warning)}\n`);
     }
   }
 }

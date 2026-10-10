@@ -2,10 +2,10 @@
 // Copyright 2026 Appstrate
 
 import Mustache from "mustache";
-import { renderValue } from "./render-value.ts";
+import { jsonText } from "@appstrate/afps-shared/json-text";
 
 /**
- * Writer that interpolates through {@link renderValue} and never HTML-escapes.
+ * Writer that interpolates through {@link jsonText} and never HTML-escapes.
  * Both value hooks are overridden because `{{{x}}}` / `{{&x}}` go through
  * `unescapedValue`, which bypasses the escape function entirely. A missing or
  * null value renders as the empty string (mustache appends the result as-is,
@@ -23,7 +23,7 @@ class PromptWriter extends Mustache.Writer {
 
 function interpolate(token: string[], context: Mustache.Context): string {
   const value = context.lookup(token[1]!);
-  return value == null ? "" : renderValue(value);
+  return value == null ? "" : jsonText(value);
 }
 
 const writer = new PromptWriter();
