@@ -358,7 +358,7 @@ export function createRunsRouter() {
         // (system key or org-model UUID). Reject unknown/malformed values with a
         // clean 404 rather than letting them silently fall through to the org
         // default downstream (or crash the uuid cast — see loadModel).
-        await assertExplicitModelExists(orgId, modelIdOverride);
+        await assertExplicitModelExists(orgId, modelIdOverride, requestPayerUserId(c));
 
         // Shared preflight: validate readiness. Threading the caller's
         // `connection_overrides` here is what makes the

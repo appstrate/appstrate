@@ -186,9 +186,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     credential.
   - The sidecar's token door serves a subscription only to a platform run
     launched by its owner with no API key; any other run is refused (403).
-    A schedule never spends a personal credential.
+    A schedule never spends a personal credential, so a model served only by
+    each member's own credential cannot be scheduled (refused with 409
+    `model_credential_required` when the schedule fires).
   - `llm_usage.credential_id` records the credential that served each call
-    (proxy, runner and chat rows).
+    (proxy, runner and chat rows). `credential_source` keeps its two values:
+    `system` is a platform credential, `org` one the customer supplies, an
+    organization's or a member's own; `credential_id` tells which.
+  - A run or a chat turn spends the credential source it was admitted on: if a
+    member's key is deleted or personal credentials are switched off between
+    admission and use, it is refused with `409 model_credential_changed`, never
+    moved to another payer.
+  - In `GET /api/models`, `needs_reconnection` is read for the caller: a model
+    whose organization credential is dead stays usable to a member whose own
+    credential serves it.
 - **BREAKING (modules): the chat platform services take the session user**
   (#1875). `resolveChatModel(orgId, presetId, userId)` and
   `checkUsageAllowed({ ..., userId })`; `SubscriptionChatModel` and
@@ -519,9 +530,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Organization setting `personal_model_credentials`** (#1875), in
   organization settings. Off refuses new personal credentials, and existing
-  ones serve no new call or run; a run already started keeps the credential it
-  launched with until it ends. Leaving the organization deletes the member's personal
-  credentials and their pairings.
+  ones serve nothing from then on: a run already started on one is refused at
+  its next model call, never moved to another credential. Leaving the
+  organization deletes the member's personal credentials and their pairings.
 
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
   the agent needs at least one connection of that integration to run (#1830).

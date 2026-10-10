@@ -488,7 +488,11 @@ export function createSchedulesRouter() {
 
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
-      const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      const explicitModel = await assertExplicitModelExists(
+        scope.orgId,
+        data.model_id_override,
+        null,
+      );
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         const selectedModel =
@@ -698,7 +702,11 @@ export function createSchedulesRouter() {
 
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).
-    const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    const explicitModel = await assertExplicitModelExists(
+      scope.orgId,
+      data.model_id_override,
+      null,
+    );
     let generationConfigOverride = data.generation_config_override;
     if (
       (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||

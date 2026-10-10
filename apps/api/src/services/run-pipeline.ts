@@ -42,7 +42,7 @@ import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
-import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
+import { ApiError, conflict, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -583,6 +583,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     const mapped = toBundleApiError(err);
     if (mapped) throw mapped;
     throw err;
+  }
+
+  // The gate admitted the credential source resolved at Step 0. A credential
+  // removed since (a member's own key deleted, personal credentials switched
+  // off) would hand the run another payer than the one admitted.
+  if (modelSource !== credentialSourceForGate) {
+    throw conflict(
+      "model_credential_changed",
+      "The model's credential changed while the run was being admitted. Launch the run again.",
+    );
   }
 
   // --- Step 4: Mint sink credentials ---

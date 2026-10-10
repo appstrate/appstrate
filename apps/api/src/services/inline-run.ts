@@ -402,7 +402,7 @@ export async function triggerInlineRun(params: {
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream
   // uuid-cast crash.
-  await assertExplicitModelExists(orgId, modelIdOverride);
+  await assertExplicitModelExists(orgId, modelIdOverride, payerUserId);
 
   // ----- Insert shadow row (now that we know the manifest is valid). -----
   const createdBy = actor?.type === "user" ? actor.id : null;

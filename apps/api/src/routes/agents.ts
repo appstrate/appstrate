@@ -72,6 +72,7 @@ import {
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
 } from "@appstrate/core/model-generation";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 export const proxyIdSchema = z.object({ proxyId: z.string().nullable() }).strict();
 export const modelIdSchema = z
   .object({
@@ -442,7 +443,11 @@ export function createAgentsRouter() {
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
       const current = await getSpacePackageSettings(scope, agent.id);
-      const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
+      const explicitModel = await assertExplicitModelExists(
+        scope.orgId,
+        data.modelId,
+        requestPayerUserId(c),
+      );
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
       let generation = data.generation;

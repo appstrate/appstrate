@@ -212,7 +212,7 @@ async function handleProxy(
         runOrigin: runAttribution.runOrigin,
       } as const)
     : c.get("firstPartyLoopback")
-      ? ({ context: "chat", sessionId: chatSessionId } as const)
+      ? ({ context: "chat", sessionId: chatSessionId, userId } as const)
       : null;
 
   return proxyAndLog(c, apiShape, limits, {

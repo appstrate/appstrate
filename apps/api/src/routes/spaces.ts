@@ -91,6 +91,7 @@ import {
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 
 /**
  * The wire shape every space response carries: the row plus the CALLER's
@@ -928,7 +929,9 @@ export function createSpacesRouter() {
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
-        data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
+        data.modelId !== undefined
+          ? await assertExplicitModelExists(orgId, data.modelId, requestPayerUserId(c))
+          : null;
       const selectedModel =
         explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, null));
 

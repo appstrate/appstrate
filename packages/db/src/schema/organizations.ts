@@ -492,6 +492,11 @@ export const orgModels = pgTable(
     uniqueIndex("uq_org_models_unaliased_binding")
       .on(table.orgId, table.credentialId, table.modelId)
       .where(sql`${table.aliased} = false`),
+    // The same for a model each member serves with their own credential (no
+    // binding): one row per (org, provider, model). An alias always has a binding.
+    uniqueIndex("uq_org_models_unbound")
+      .on(table.orgId, table.providerId, table.modelId)
+      .where(sql`${table.credentialId} IS NULL`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

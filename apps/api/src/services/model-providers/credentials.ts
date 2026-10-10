@@ -24,7 +24,7 @@ import { modelProviderCredentials, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
 import { mergeSystemAndDb, scopedWhere } from "../../lib/db-helpers.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
-import { ApiError, notFound } from "../../lib/errors.ts";
+import { ApiError, forbidden, notFound } from "../../lib/errors.ts";
 import { getModelProvider } from "./registry.ts";
 import type { ModelApiShape, OAuthTokenResponse } from "@appstrate/core/sidecar-types";
 import type { ModelProviderDefinition, ModelProviderIdentity } from "@appstrate/core/module";
@@ -40,6 +40,7 @@ import {
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 import { getOrgSettings } from "../organizations.ts";
+import { lockOrgMember } from "../space-members.ts";
 
 /**
  * Who is asking about model provider credentials, and what the org grants them.
@@ -331,20 +332,37 @@ export async function createApiKeyCredential(input: CreateApiKeyCredentialInput)
   }
   const baseUrlOverride = resolveBaseUrlOverride(cfg, input.baseUrlOverride);
   const blob: ApiKeyBlob = { kind: "api_key", apiKey: input.apiKey };
-  const [row] = await db
-    .insert(modelProviderCredentials)
-    .values({
-      orgId: input.orgId,
-      label: input.label,
-      providerId: input.providerId,
-      credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      baseUrlOverride,
-      createdBy: input.userId,
-      ownerUserId,
-    })
-    .returning({ id: modelProviderCredentials.id });
+  return insertCredential({
+    orgId: input.orgId,
+    label: input.label,
+    providerId: input.providerId,
+    credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+    baseUrlOverride,
+    createdBy: input.userId,
+    ownerUserId,
+  });
+}
+
+/**
+ * Insert a credential row. A personal one is written under its owner's membership
+ * lock, the one the organization exit holds while it deletes their credentials, so
+ * a credential created during the exit cannot outlive it.
+ */
+async function insertCredential(
+  values: typeof modelProviderCredentials.$inferInsert,
+): Promise<string> {
+  const id = await db.transaction(async (tx) => {
+    if (values.ownerUserId && !(await lockOrgMember(tx, values.orgId, values.ownerUserId))) {
+      throw forbidden("Not a member of this organization");
+    }
+    const [row] = await tx
+      .insert(modelProviderCredentials)
+      .values(values)
+      .returning({ id: modelProviderCredentials.id });
+    return row!.id;
+  });
   clearResolvedModelCache();
-  return row!.id;
+  return id;
 }
 
 export interface CreateOAuthCredentialInput {
@@ -382,23 +400,18 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     ...(input.accountId ? { accountId: input.accountId } : {}),
     ...(input.email ? { email: input.email } : {}),
   };
-  const [row] = await db
-    .insert(modelProviderCredentials)
-    .values({
-      orgId: input.orgId,
-      label: input.label,
-      providerId: input.providerId,
-      credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      // Mirror `blob.expiresAt` onto the dedicated column so the refresh
-      // worker scan can filter at SQL level. Blob remains source of truth.
-      expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
-      createdBy: input.userId,
-      // A subscription is its holder's: never an organization credential.
-      ownerUserId: input.userId,
-    })
-    .returning({ id: modelProviderCredentials.id });
-  clearResolvedModelCache();
-  return row!.id;
+  return insertCredential({
+    orgId: input.orgId,
+    label: input.label,
+    providerId: input.providerId,
+    credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+    // Mirror `blob.expiresAt` onto the dedicated column so the refresh
+    // worker scan can filter at SQL level. Blob remains source of truth.
+    expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+    createdBy: input.userId,
+    // A subscription is its holder's: never an organization credential.
+    ownerUserId: input.userId,
+  });
 }
 
 interface ReconnectOAuthCredentialInput {

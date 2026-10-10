@@ -56,7 +56,10 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-import { serializeOAuthTokenResponse } from "../services/model-providers/credentials.ts";
+import {
+  personalModelCredentialsAllowed,
+  serializeOAuthTokenResponse,
+} from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -856,7 +859,8 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *      credentials.
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
  *   3. Holder: a personal credential (`owner_user_id` set) serves only its
- *      owner's runs, never one an API key triggered. Subscriptions are personal by rule.
+ *      owner's runs, never one an API key triggered, and nothing while the
+ *      organization has personal credentials off. Subscriptions are personal by rule.
  *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
@@ -909,5 +913,8 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   // triggered (an API key pays nothing, see `requestPayerUserId`).
   if (row.ownerUserId !== null && (row.ownerUserId !== run.userId || run.apiKeyId !== null)) {
     throw forbidden(`Credential ${credentialId} is another member's`);
+  }
+  if (row.ownerUserId !== null && !(await personalModelCredentialsAllowed(run.orgId))) {
+    throw forbidden("Personal model credentials are turned off for this organization");
   }
 }

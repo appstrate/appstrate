@@ -27,6 +27,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
+import { recordChatTurnAdmission } from "./system-proxy-admission.ts";
 import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
@@ -292,7 +293,12 @@ export async function checkUsageAllowed(args: {
     }
   }
 
-  if (!hasHook("beforeUsage")) return null;
+  // What the turn is admitted on: its proxy calls must keep spending that source.
+  const credentialSource = args.subscription ? "org" : (resolved?.credentialSource ?? "org");
+  if (!hasHook("beforeUsage")) {
+    recordChatTurnAdmission(args.orgId, args.userId, args.sessionId, credentialSource);
+    return null;
+  }
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
   // against an older core can reach here without it (in-tree callers are
@@ -314,10 +320,12 @@ export async function checkUsageAllowed(args: {
     orgId: args.orgId,
     context: "chat",
     sessionId: args.sessionId,
-    credentialSource: args.subscription ? "org" : (resolved?.credentialSource ?? "org"),
+    credentialSource,
     // A turn executes in the platform's own process — never on a
     // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",
   });
-  return rejection ?? null;
+  if (rejection) return rejection;
+  recordChatTurnAdmission(args.orgId, args.userId, args.sessionId, credentialSource);
+  return null;
 }
