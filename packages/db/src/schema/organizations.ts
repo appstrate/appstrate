@@ -304,11 +304,15 @@ export const modelProviderCredentials = pgTable(
     // did refresh last fail" is ever needed, build the reader first — a column
     // with no reader is not telemetry, it is write amplification.
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    // NULL = organization credential. Set = personal credential of that user: usable only by
+    // them, on their own runs, and deleted with their account.
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index("idx_model_provider_credentials_org_provider").on(t.orgId, t.providerId),
+    index("idx_model_provider_credentials_owner").on(t.ownerUserId),
     // Partial index — only OAuth rows have a non-null expiry. Keeps the
     // index small even on installations with millions of api-key rows.
     index("idx_model_provider_credentials_expires_at_oauth")
@@ -440,18 +444,22 @@ export const orgModels = pgTable(
     label: text("label").notNull(),
     modelId: text("model_id").notNull(),
     /**
+     * The provider serving this model, written from the bound credential and
+     * kept when the binding is removed. `apiShape` and the default `baseUrl`
+     * are resolved from the runtime registry (`getModelProvider`) at read
+     * time; `baseUrlOverride` (on the credential row) is honored when
+     * `baseUrlOverridable: true`.
+     */
+    providerId: text("provider_id").notNull(),
+    /**
      * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
      * deleting a credential while any model still references it is rejected
-     * at the DB level so the API can surface a clear error.
-     *
-     * The credential's `providerId` is the single source of truth for
-     * `apiShape` and the default `baseUrl` — both are resolved from the
-     * runtime registry (`getModelProvider`) at read time. `baseUrlOverride`
-     * (on the credential row) is honored when `baseUrlOverridable: true`.
+     * at the DB level so the API can surface a clear error. NULL: each member
+     * brings their own personal credential for `providerId`.
      */
-    credentialId: uuid("credential_id")
-      .notNull()
-      .references(() => modelProviderCredentials.id, { onDelete: "restrict" }),
+    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
+      onDelete: "restrict",
+    }),
     input: jsonb("input").$type<ModelInputModality[]>(),
     contextWindow: integer("context_window"), // 200000 | null
     maxTokens: integer("max_tokens"), // 16384 | null
@@ -484,6 +492,11 @@ export const orgModels = pgTable(
     uniqueIndex("uq_org_models_unaliased_binding")
       .on(table.orgId, table.credentialId, table.modelId)
       .where(sql`${table.aliased} = false`),
+    // The same for a model each member serves with their own credential (no
+    // binding): one row per (org, provider, model). An alias always has a binding.
+    uniqueIndex("uq_org_models_unbound")
+      .on(table.orgId, table.providerId, table.modelId)
+      .where(sql`${table.credentialId} IS NULL`),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

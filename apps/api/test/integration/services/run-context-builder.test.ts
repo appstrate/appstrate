@@ -24,6 +24,7 @@ import {
   type DroppedGenerationSetting,
 } from "../../../src/services/run-context-builder.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
+import { resolveModelCascade } from "../../../src/services/org-models.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -231,6 +232,7 @@ describe("buildRunContext generation settings", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      modelCascade: await resolveModelCascade(ctx.orgId, agentId, modelId, null),
       input: {},
       modelId,
       generationConfig: stored,

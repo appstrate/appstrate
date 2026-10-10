@@ -34,6 +34,10 @@ export function OrgSettingsGeneralPage() {
   const { features } = useAppConfig();
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
+  // Unknown until the settings load: the toggle then reads neither as on nor off.
+  const personalModelCredentialsAllowed = orgSettings
+    ? orgSettings.personal_model_credentials !== false
+    : undefined;
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
@@ -237,6 +241,58 @@ export function OrgSettingsGeneralPage() {
                 t("orgSettings.restrictCopyDisable")
               ) : (
                 t("orgSettings.restrictCopyEnable")
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {can("org:settings") && (
+        <div className="border-border bg-card mb-4 rounded-lg border p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold">
+                {t("orgSettings.personalModelCredentialsTitle")}
+              </h3>
+              <span className="text-muted-foreground text-sm">
+                {t("orgSettings.personalModelCredentialsDesc")}
+              </span>
+            </div>
+            {/* Absent means allowed: the setting is opt-out, not opt-in. Disabled
+                until loaded, so a click can never send a value read off a default. */}
+            <Button
+              variant={personalModelCredentialsAllowed ? "default" : "outline"}
+              disabled={!orgSettings || updateSettingsMutation.isPending}
+              onClick={() =>
+                updateSettingsMutation.mutate(
+                  {
+                    params: { path: { orgId: currentOrg.id } },
+                    body: { personal_model_credentials: !personalModelCredentialsAllowed },
+                  },
+                  {
+                    onSuccess: (data) => {
+                      // The flag changes which models each member pays for and which
+                      // credentials serve a call: refresh both lists.
+                      void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+                      void queryClient.invalidateQueries({
+                        queryKey: ["get", "/api/model-provider-credentials"],
+                      });
+                      toast.success(
+                        data.personal_model_credentials === false
+                          ? t("orgSettings.personalModelCredentialsDisabled")
+                          : t("orgSettings.personalModelCredentialsEnabled"),
+                      );
+                    },
+                  },
+                )
+              }
+            >
+              {updateSettingsMutation.isPending ? (
+                <Spinner />
+              ) : personalModelCredentialsAllowed ? (
+                t("orgSettings.personalModelCredentialsDisable")
+              ) : (
+                t("orgSettings.personalModelCredentialsEnable")
               )}
             </Button>
           </div>

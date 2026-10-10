@@ -52,6 +52,7 @@ const base: OrgModelInfo = {
   iconUrl: null,
   source: "built-in",
   credentialId: "deepseek-prod",
+  billed_to: "org",
   created_by: null,
   createdAt: "2026-01-10T08:00:00Z",
   updatedAt: "2026-01-10T08:00:00Z",

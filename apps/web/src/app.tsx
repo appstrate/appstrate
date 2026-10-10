@@ -197,6 +197,9 @@ const PreferencesConnectionsPage = lazy(() =>
 const PreferencesDevicesPage = lazy(() =>
   import("./pages/preferences/devices").then((m) => ({ default: m.PreferencesDevicesPage })),
 );
+const PreferencesModelsPage = lazy(() =>
+  import("./pages/preferences/models").then((m) => ({ default: m.PreferencesModelsPage })),
+);
 
 /** Suspense boundary for lazy route elements — same fallback as module pages. */
 function LazyRoute({ children }: { children: React.ReactNode }) {
@@ -353,6 +356,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/preferences/security": <PreferencesSecurityPage />,
   "/preferences/devices": <PreferencesDevicesPage />,
   "/preferences/connections": <PreferencesConnectionsPage />,
+  "/preferences/models": <PreferencesModelsPage />,
   "/webhooks": (
     <LazyRoute>
       <WebhooksPage />

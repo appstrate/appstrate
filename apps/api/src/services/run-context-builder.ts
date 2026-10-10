@@ -16,10 +16,10 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { clampToBackingLevel, resolveModelCascade } from "./org-models.ts";
+import { clampToBackingLevel, requireBoundModel, type ModelCascade } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
-import { appendRunLog, modelSourceOf } from "./state/runs.ts";
+import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -92,6 +92,8 @@ export async function buildRunContext(params: {
   input?: Record<string, unknown>;
   files?: FileReference[];
   modelId?: string | null;
+  /** The model resolved for `modelId` and the payer, admitted by the caller's gate. */
+  modelCascade: ModelCascade;
   /** Persisted agent defaults; undefined asks this service to load them. */
   generationConfig?: ModelGenerationSettings | null;
   /** Invocation layer; null/omitted fields inherit the agent defaults. */
@@ -209,15 +211,16 @@ export async function buildRunContext(params: {
   const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
   const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
-  const [proxyResult, modelCascade] = await Promise.all([
-    resolveProxy(orgId, agent.id, effectiveProxyId),
-    resolveModelCascade(orgId, agent.id, effectiveModelId),
-  ]);
+  const proxyResult = await resolveProxy(orgId, agent.id, effectiveProxyId);
+  // Resolved once, by the caller, before the admission gate: the run spends the
+  // credential the gate admitted.
+  const { modelCascade } = params;
 
   if (!modelCascade) {
     throw new ModelNotConfiguredError();
   }
-  const modelResult = modelCascade.model;
+  // The pipeline refused an unbound model before admission; this narrows the type.
+  const modelResult = requireBoundModel(modelCascade.model, null);
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
@@ -235,7 +238,7 @@ export async function buildRunContext(params: {
   const proxyUrl = proxyResult?.url ?? null;
   const proxyLabel = proxyResult?.label ?? null;
   const modelLabel = modelResult.label;
-  const modelSource = modelSourceOf(modelResult);
+  const modelSource = modelResult.credentialSource;
   // The rates the run LAUNCHES with — the same object `buildRuntimePiEnv`
   // serialises into `MODEL_COST`. Persisted on `runs.model_cost` so the runner's
   // ledger row can be classified server-side: the container reports the cost, so

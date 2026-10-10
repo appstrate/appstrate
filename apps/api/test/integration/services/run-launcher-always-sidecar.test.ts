@@ -142,7 +142,7 @@ function buildRunPlan(overrides: Partial<AppstrateRunPlan> = {}): AppstrateRunPl
       modelId: "claude-3-5-sonnet-latest",
       apiKey: "sk-test-secret",
       label: "Test Model",
-      isSystemModel: false,
+      credentialSource: "org",
       aliased: false,
       aliasId: "claude-3-5-sonnet-latest",
     },
@@ -162,7 +162,7 @@ describe("run-launcher — sidecar wiring", () => {
   });
 
   // One run topology, for every credential source.
-  async function launchWithKey(realKey: string, isSystemModel: boolean) {
+  async function launchWithKey(realKey: string, system: boolean) {
     const { orchestrator, counts } = createCountingFake();
     const resources: AppstrateRunPlan["resources"] = {
       requested: { memoryMb: 768, cpu: 1 },
@@ -171,10 +171,14 @@ describe("run-launcher — sidecar wiring", () => {
       cpuCapped: false,
       workload: { memoryBytes: 805_306_368, nanoCpus: 1_000_000_000 },
     };
-    const runId = `run_placeholder_${isSystemModel ? "system" : "org"}`;
+    const runId = `run_placeholder_${system ? "system" : "org"}`;
     const plan = buildRunPlan({
       resources,
-      llmConfig: { ...buildRunPlan().llmConfig, apiKey: realKey, isSystemModel },
+      llmConfig: {
+        ...buildRunPlan().llmConfig,
+        apiKey: realKey,
+        credentialSource: system ? "system" : "org",
+      },
     });
     await runPlatformContainer({
       runId,
@@ -202,10 +206,10 @@ describe("run-launcher — sidecar wiring", () => {
     return counts;
   }
 
-  for (const isSystemModel of [true, false]) {
-    it(`routes a ${isSystemModel ? "platform-credential" : "BYOK"} run through the platform LLM proxy — the key reaches neither workload`, async () => {
+  for (const system of [true, false]) {
+    it(`routes a ${system ? "platform-credential" : "BYOK"} run through the platform LLM proxy — the key reaches neither workload`, async () => {
       const realKey = "sk-ant-api03-real-secret-5678";
-      const counts = await launchWithKey(realKey, isSystemModel);
+      const counts = await launchWithKey(realKey, system);
       const spec = counts.capturedSidecarSpec;
       expect(spec?.llm).toEqual({
         authMode: "platform",
@@ -241,7 +245,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "kimi-k2.6",
           apiKey: "sk-real-secret",
           label: "Appstrate Kimi",
-          isSystemModel: true,
+          credentialSource: "system",
           aliased: true,
           aliasId: "appstrate-kimi",
         },
@@ -278,7 +282,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "kimi-k2.6",
           apiKey: "sk-real-secret",
           label: "Kimi",
-          isSystemModel: false,
+          credentialSource: "org",
           aliased: false,
           aliasId: "kimi-k2.6",
         },
@@ -306,7 +310,7 @@ describe("run-launcher — sidecar wiring", () => {
       modelId: "vendor/some-model",
       apiKey: "sk-real-secret",
       label: "Gateway",
-      isSystemModel: false,
+      credentialSource: "org",
     } as const;
 
     const direct = createCountingFake();
@@ -365,7 +369,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "claude-sonnet-4-6",
           apiKey: "sk-real-secret",
           label: "Appstrate Fast",
-          isSystemModel: true,
+          credentialSource: "system",
           aliased: true,
           aliasId: "appstrate-fast",
           reasoning: false,
@@ -406,7 +410,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "deepseek-chat", // the hidden backing
           apiKey: "sk-real-secret",
           label: "Appstrate Medium",
-          isSystemModel: true,
+          credentialSource: "system",
           aliased: true,
           aliasId: "appstrate-medium",
         },
@@ -459,7 +463,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "deepseek-chat",
           apiKey: "sk-real-secret",
           label: "Appstrate Medium",
-          isSystemModel: true,
+          credentialSource: "system",
           aliased: true,
           aliasId: "appstrate-medium",
           // A real catalog pair: exact enough to look up, which is the point.
@@ -516,7 +520,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "deepseek-chat",
           apiKey: "sk-real-secret",
           label: "DeepSeek Chat",
-          isSystemModel: false,
+          credentialSource: "org",
           aliased: false,
           aliasId: "deepseek-chat",
           contextWindow: 200_000,
@@ -560,7 +564,7 @@ describe("run-launcher — sidecar wiring", () => {
           modelId: "claude-sonnet-4-6",
           apiKey: "sk-real-secret",
           label: "Appstrate Adaptive",
-          isSystemModel: true,
+          credentialSource: "system",
           aliased: true,
           aliasId: "appstrate-adaptive",
           reasoning: true,
@@ -604,7 +608,7 @@ describe("run-launcher — sidecar wiring", () => {
       modelId: "llama3",
       apiKey: "sk-local",
       label: "Local",
-      isSystemModel: false,
+      credentialSource: "org",
       aliased: false,
       aliasId: "llama3",
     });
@@ -637,14 +641,17 @@ describe("run-launcher — sidecar wiring", () => {
     });
 
     it("refuses a private address, whoever's key the run spends", async () => {
-      for (const isSystemModel of [true, false]) {
+      for (const system of [true, false]) {
         const { orchestrator, counts } = createCountingFake();
         await expect(
           runPlatformContainer({
             runId: "run_private_llm",
             context: buildContext("run_private_llm"),
             plan: buildRunPlan({
-              llmConfig: { ...localModel("http://10.0.0.7:8000/v1"), isSystemModel },
+              llmConfig: {
+                ...localModel("http://10.0.0.7:8000/v1"),
+                credentialSource: system ? "system" : "org",
+              },
             }),
             sinkCredentials: mintSinkCredentials({
               runId: "run_private_llm",

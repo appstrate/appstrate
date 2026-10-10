@@ -20,6 +20,7 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
   can: () => true,
+  personalModelCredentials: true,
   formatBytes: String,
 };
 

@@ -120,6 +120,11 @@ export const ORG_SETTINGS_PROPERTIES = {
     description:
       "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
   },
+  personal_model_credentials: {
+    type: "boolean",
+    description:
+      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call.",
+  },
 };
 
 /**
@@ -1858,6 +1863,9 @@ export const schemas = {
       "base_url",
       "source",
       "authMode",
+      "owner_type",
+      "owner_id",
+      "owner_name",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1884,6 +1892,20 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
+      owner_type: {
+        type: "string",
+        enum: ["org", "user"],
+        description:
+          "`user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.",
+      },
+      owner_id: {
+        type: ["string", "null"],
+        description: "The owning member's user id for a personal credential; `null` for `org`.",
+      },
+      owner_name: {
+        type: ["string", "null"],
+        description: "Display name of `owner_id`; `null` for `org`.",
+      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1909,6 +1931,7 @@ export const schemas = {
       "iconUrl",
       "source",
       "credentialId",
+      "billed_to",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1924,7 +1947,7 @@ export const schemas = {
       providerId: {
         type: ["string", "null"],
         description:
-          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. `null` for managed models — binding not exposed.",
+          "The credential's provider id (e.g. `anthropic`, `claude-code`, `codex`). Distinguishes subscription providers that share an `apiShape` with an API-key provider so clients route them to the right proxy path. Also set on an unbound model (`credentialId: null`), where it names the provider each member's own credential must come from. `null` for managed models — binding not exposed.",
       },
       provider_name: {
         type: ["string", "null"],
@@ -1967,7 +1990,7 @@ export const schemas = {
       needs_reconnection: {
         type: "boolean",
         description:
-          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment.",
+          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. On an unbound model (`credentialId: null`) it is read for the caller, like `billed_to`: true when nothing of the caller's serves it and one of their own credentials for it must be reconnected.",
       },
       aliased: {
         type: "boolean",
@@ -1983,7 +2006,13 @@ export const schemas = {
       credentialId: {
         type: ["string", "null"],
         description:
-          "ID of the `model_provider_credentials` row. `null` for managed models — binding not exposed.",
+          "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed.",
+      },
+      billed_to: {
+        type: ["string", "null"],
+        enum: ["user", "org", null],
+        description:
+          "Who pays for a call to this model, for the caller. `org` — a built-in model or a model bound to an organization credential: the organization (or the platform) pays whoever calls (a dead credential is `needs_reconnection`). `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — an unbound model nothing of the caller's serves: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
       },
       cost: {
         type: ["object", "null"],

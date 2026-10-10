@@ -8,7 +8,7 @@ export const modelProvidersOAuthPaths = {
       operationId: "createOAuthModelProviderPairing",
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
-      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Pass \`credentialId\` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
+      description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Pass \`credentialId\` to reconnect that exact personal credential in place (one the caller owns; another member's answers \`404\`); omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. The credential the pairing produces is personal, owned by the caller (a subscription is never shared). **Permission:** \`model-provider-credentials:connect\`; \`403 personal_model_credentials_disabled\` when the organization turned \`personal_model_credentials\` off. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -28,7 +28,7 @@ export const modelProvidersOAuthPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing OAuth credential to reconnect in place. It must belong to the current organization and match `providerId`; omit it when connecting a new account.",
+                    "Existing personal OAuth credential of the caller to reconnect in place. It must match `providerId`; omit it when connecting a new account.",
                 },
               },
               additionalProperties: false,
@@ -71,13 +71,15 @@ export const modelProvidersOAuthPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
+          description:
+            "Forbidden — caller lacks `model-provider-credentials:connect`, or `personal_model_credentials_disabled` — the organization turned personal model credentials off.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -88,7 +90,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Read pairing status (for dashboard polling)",
       description:
-        "Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. The plaintext token is never re-served — only status + timestamps.",
+        "Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -139,7 +141,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Cancel a pending pairing",
       description:
-        "Idempotent — returns 204 even when the row is already gone (consumed, expired-and-purged, or belongs to another org). Wrong-org cancellations are silent for the same reason GET returns 404 rather than 403.",
+        "Idempotent — returns 204 even when the row is already gone (consumed, expired-and-purged, or belongs to another org). Wrong-org cancellations are silent for the same reason GET returns 404 rather than 403. **Permission:** `model-provider-credentials:connect`; a pairing another member minted answers `404`, as on GET.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -154,6 +156,7 @@ export const modelProvidersOAuthPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },
@@ -163,7 +166,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Redeem a pairing token: post the OAuth credential bundle back to the platform",
       description:
-        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
+        "Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, or credential. The credential it creates or reconnects is personal, owned by the member who minted the pairing. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.",
       requestBody: {
         required: true,
         content: {

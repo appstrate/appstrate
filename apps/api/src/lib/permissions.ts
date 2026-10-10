@@ -112,6 +112,8 @@ const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevel
   "proxies:read",
   // Completions with the org's models (first-party chat, remote CLI); metered per call in `llm_usage`.
   "llm-proxy:call",
+  // Brings its own key: spends the member's money, not the org's, and never picks the model.
+  "model-provider-credentials:connect",
 ]);
 
 /**
@@ -125,6 +127,8 @@ const GUEST_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelP
   "proxies:read",
   // The proxy is org-metered, not space-scoped, so a guest's grant lives here.
   "llm-proxy:call",
+  // Same reason as for members: a guest's own key spends the guest's money, never the org's.
+  "model-provider-credentials:connect",
 ]);
 
 /** Org role → org-level permissions. Module org grants are layered on at resolve time. */

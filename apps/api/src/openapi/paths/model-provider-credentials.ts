@@ -10,7 +10,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "List the in-code model provider registry",
       description:
-        "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=providerId,authMode` to skip the heavy per-provider `models` catalog (the bulk of the payload) when you only need to know which providers exist.",
+        "Returns the catalog of LLM providers Appstrate knows how to talk to. The UI uses this to render the provider picker without hard-coding the catalog client-side. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=providerId,authMode` to skip the heavy per-provider `models` catalog (the bulk of the payload) when you only need to know which providers exist. **Permission:** `model-provider-credentials:read` or `:connect`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -150,9 +150,9 @@ export const modelProviderCredentialsPaths = {
     get: {
       operationId: "listModelProviderCredentials",
       tags: ["Model Provider Credentials"],
-      summary: "List organization model provider credentials",
+      summary: "List model provider credentials",
       description:
-        "Returns all LLM model provider credentials (API-key + OAuth alike) for the current organization. Plaintext keys / OAuth tokens are never exposed.",
+        "Returns the LLM model provider credentials (API-key + OAuth alike) of the current organization. Plaintext keys / OAuth tokens are never exposed. **Permission:** `model-provider-credentials:read` lists every credential of the organization; a caller holding only `model-provider-credentials:connect` lists their own personal credentials and no organization or built-in one. Each credential carries its owner (`owner_type`, `owner_id`, `owner_name`).",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -183,6 +183,9 @@ export const modelProviderCredentialsPaths = {
                     base_url: "https://api.openai.com",
                     source: "custom",
                     authMode: "api_key",
+                    owner_type: "org",
+                    owner_id: null,
+                    owner_name: null,
                     created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
@@ -193,7 +196,15 @@ export const modelProviderCredentialsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "Forbidden — caller holds neither `model-provider-credentials:read` nor `model-provider-credentials:connect`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     post: {
@@ -201,7 +212,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Create a model provider credential",
       description:
-        "Create a new LLM model provider credential for the organization. The plaintext API key is encrypted at rest under a versioned envelope.",
+        "Create a new LLM model provider credential. The plaintext API key is encrypted at rest under a versioned envelope. **Permission:** `model-provider-credentials:write` for an organization credential (`owner_type: org`, the default); `model-provider-credentials:connect` for a personal credential (`owner_type: user`), which belongs to the caller and serves only their own calls. A personal credential is refused with `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off, and with `400 personal_credential_custom_endpoint` for a `baseUrlOverridable` provider or any `base_url_override`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -232,7 +243,14 @@ export const modelProviderCredentialsPaths = {
                   type: ["string", "null"],
                   format: "uri",
                   description:
-                    "Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise.",
+                    "Optional `http(s)` override for self-hosted endpoints. Honored only by providers with `baseUrlOverridable: true` (e.g. `openai-compatible`); ignored otherwise. Refused with `owner_type: user`.",
+                },
+                owner_type: {
+                  type: "string",
+                  enum: ["org", "user"],
+                  default: "org",
+                  description:
+                    "`org` (default) creates an organization credential; `user` creates a personal credential owned by the caller.",
                 },
               },
               additionalProperties: false,
@@ -253,7 +271,7 @@ export const modelProviderCredentialsPaths = {
         },
         "400": {
           description:
-            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead).",
+            "Bad request — `validation_failed` when the body fails Zod validation, or `invalid_request` when `providerId` is unknown or refers to an OAuth-only provider (use the pairing flow instead). `personal_credential_custom_endpoint` — `owner_type: user` on a `baseUrlOverridable` provider or with a `base_url_override`.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -262,13 +280,15 @@ export const modelProviderCredentialsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description: "Forbidden — caller lacks `model-provider-credentials:write`.",
+          description:
+            "Forbidden — caller lacks `model-provider-credentials:write` (organization credential) or `model-provider-credentials:connect` (`owner_type: user`), or `personal_model_credentials_disabled` — the organization turned personal model credentials off.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
@@ -279,7 +299,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
-        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. Rate limited to 5 requests per minute.",
+        "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403, and a personal credential with `403 personal_model_credentials_disabled` while the organization has personal credentials off. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -502,7 +522,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
-        "Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a model provider credential's mutable fields. The `apiShape` and `base_url` of an existing credential are pinned by the canonical `providerId` selected at create time and cannot be changed — delete and re-create the credential to switch providers. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. **Permission:** `model-provider-credentials:write` for an organization credential; `model-provider-credentials:connect` for a personal credential the caller owns. Another member's personal credential answers `404`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -537,7 +557,7 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified.",
+            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC) to change an organization credential, or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -554,7 +574,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Delete a model provider credential",
       description:
-        "Delete a model provider credential. Returns 409 with `credential_in_use` if any `org_models` row still references it (FK ON DELETE RESTRICT) — detach the model first.",
+        "Delete a model provider credential. Returns 409 with `credential_in_use` if any `org_models` row still references it (FK ON DELETE RESTRICT) — detach the model first. **Permission:** `model-provider-credentials:delete` for an organization credential; `model-provider-credentials:connect` for a personal credential the caller owns. A holder of `delete` may also delete any member's personal credential (break-glass). Another member's personal credential otherwise answers `404`. A personal credential is never bound to a model, so it never answers `credential_in_use`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -567,13 +587,14 @@ export const modelProviderCredentialsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
-            "Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be deleted.",
+            "Forbidden — caller lacks `model-provider-credentials:delete` (or `connect` on their own personal credential), or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be deleted.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },
+        "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Credential is still referenced by one or more models (credential_in_use)",
           content: {
@@ -591,7 +612,7 @@ export const modelProviderCredentialsPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential connection",
       description:
-        "Test that the credential's API key (or OAuth token) and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "Test that the credential's API key (or OAuth token) and base URL are valid by making a lightweight request to the provider. **Permission:** the caller must see the credential: an organization or built-in credential needs `model-provider-credentials:read`, a personal credential must be the caller's own (anyone else gets `404`). Rate limited to 5 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

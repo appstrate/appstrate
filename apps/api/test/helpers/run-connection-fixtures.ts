@@ -212,7 +212,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
     "Connection Fixture GPT",
     "gpt-5.5",
     ctx.user.id,
-    credentialId,
+    { credentialId },
   );
   await setDefaultModel(ctx.orgId, modelDbId);
 }

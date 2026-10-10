@@ -45,6 +45,7 @@ import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import {
   assertExplicitModelExists,
+  requireBoundModel,
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
@@ -489,6 +490,9 @@ export function createSchedulesRouter() {
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      // A schedule spends organization credentials only: a model each member serves
+      // with their own credential would fail every fire.
+      if (explicitModel) requireBoundModel(explicitModel, null);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         const selectedModel =
@@ -497,6 +501,7 @@ export function createSchedulesRouter() {
             scope.orgId,
             agent.id,
             data.model_id_override ?? packageSettings.modelId,
+            null,
           ));
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
@@ -698,6 +703,7 @@ export function createSchedulesRouter() {
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).
     const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    if (explicitModel) requireBoundModel(explicitModel, null);
     let generationConfigOverride = data.generation_config_override;
     if (
       (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
@@ -713,6 +719,7 @@ export function createSchedulesRouter() {
           scope.orgId,
           existing.packageId,
           effectiveModelOverride ?? packageSettings.modelId,
+          null,
         ));
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {

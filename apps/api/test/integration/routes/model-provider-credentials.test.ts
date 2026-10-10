@@ -529,6 +529,27 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(404);
     });
 
+    it("probes a built-in key (non-uuid id) without a 500", async () => {
+      initSystemModelProviderKeys([
+        {
+          id: "system-probe-key",
+          providerId: "openai-compatible",
+          apiKey: "sk-system",
+          baseUrl: "http://10.255.255.9:9",
+          models: [],
+        },
+      ]);
+      try {
+        const res = await app.request("/api/model-provider-credentials/system-probe-key/test", {
+          method: "POST",
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+      } finally {
+        initSystemModelProviderKeys([]);
+      }
+    });
+
     it("returns 404 when the key belongs to another org (cross-org isolation)", async () => {
       // Create a key in org A.
       const createRes = await app.request("/api/model-provider-credentials", {

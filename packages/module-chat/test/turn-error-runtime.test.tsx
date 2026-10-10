@@ -55,6 +55,7 @@ const member: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => false,
+  personalModelCredentials: true,
   formatBytes: String,
 };
 

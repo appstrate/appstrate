@@ -930,7 +930,7 @@ export function createSpacesRouter() {
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
-        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
+        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, null));
 
       if (generationConfig && Object.keys(generationConfig).length > 0) {
         generationConfig = validateGenerationOverride(

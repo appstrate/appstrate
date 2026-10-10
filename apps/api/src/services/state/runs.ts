@@ -952,11 +952,6 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
-/** `runs.model_source` of a resolved model: whose credential its inference spends. */
-export function modelSourceOf(model: { isSystemModel: boolean }): CredentialSource {
-  return model.isSystemModel ? "system" : "org";
-}
-
 /**
  * Whether the platform LLM proxy serves a run's inference — and so writes its
  * ledger rows, leaving the runner none to report. `runs_proxy_route_has_model`

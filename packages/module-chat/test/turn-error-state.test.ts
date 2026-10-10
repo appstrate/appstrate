@@ -44,6 +44,7 @@ const member = () => false;
 const manager = () => true;
 const BILLING = { label: "turn.error.manageBilling", href: "/org-settings/billing" };
 const MODELS = { label: "turn.error.manageModels", href: "/org-settings/models" };
+const PERSONAL_MODELS = { label: "turn.error.managePersonalModels", href: "/preferences/models" };
 /** Edits model credentials AND reaches the page that lists them. */
 const modelAdmin = (p: string) => p === "model-provider-credentials:write" || p === "models:read";
 /** May edit a credential but cannot open `/org-settings/models`: no link to a page that refuses them. */
@@ -146,6 +147,17 @@ describe("turnErrorState", () => {
     }
   });
 
+  it("offers no link to add a personal credential while the organization refuses them", () => {
+    // The link leads to a form the server answers 403 to: the sentence stays, the link goes.
+    const refusal = failed(problem({ status: 409, code: "model_credential_required" }));
+    expect(turnErrorState(refusal, t, manager)).toEqual(
+      refused("turn.error.modelCredentialRequired", PERSONAL_MODELS),
+    );
+    expect(turnErrorState(refusal, t, manager, false)).toEqual(
+      refused("turn.error.modelCredentialRequiredPolicy"),
+    );
+  });
+
   it("shows the request id of a live failure, from the marker or the refused request", () => {
     expect(
       turnErrorState(
@@ -222,15 +234,17 @@ describe("turnErrorState", () => {
     expect(turnErrorState(refusal, t, member)).toEqual(refused(`${text} turn.error.contactAdmin`));
   });
 
-  it("links whoever may edit model credentials to a revoked one, and sends anyone else to them", () => {
+  it("links whoever may connect a personal credential to a revoked subscription, and tells anyone else to ask an administrator", () => {
+    // A subscription is its holder's own, so the fix is their Preferences page,
+    // gated by the connect permission alone, never an organization screen.
     const reconnect = failed(problem({ status: 409, code: "needs_reconnection" }));
     expect(turnErrorState(reconnect, t, manager)).toEqual(
-      refused("turn.error.needsReconnection", MODELS),
+      refused("turn.error.needsReconnection", PERSONAL_MODELS),
     );
-    // Billing rights do not reconnect a model, and "reconnect it" is not said
-    // to someone who cannot.
+    // Billing rights do not reconnect a subscription: no link to a page that
+    // refuses them, and the sentence says to ask someone who can.
     expect(turnErrorState(reconnect, t, (p) => p === "billing:manage")).toEqual(
-      refused("turn.error.needsReconnectionMember"),
+      refused("turn.error.needsReconnection turn.error.contactAdmin"),
     );
   });
 

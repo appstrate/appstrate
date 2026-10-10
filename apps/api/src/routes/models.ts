@@ -22,9 +22,9 @@ import {
   deriveModelLabel,
   projectAliasedModel,
   resolveCatalogDefaults,
-  type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import {
   listCatalogModels,
@@ -33,8 +33,8 @@ import {
 } from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
+  loadCredentialBinding,
   loadInferenceCredentials,
-  loadCredentialMetadata,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -65,8 +65,11 @@ export const createModelSchema = z
     // legacy 500 ("invalid input syntax for type uuid") into a clean 400
     // and lets the route handler emit a hint that points operators at the
     // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
-    // credential).
-    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    // credential). `null`: each member serves the model with their own
+    // credential for `providerId`.
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable(),
+    /** The provider of a model without a credential. A bound model takes its credential's. */
+    providerId: z.string().min(1).optional(),
     /**
      * Catalog-derivable overrides. Omit (or send null on update) to let the
      * read path fall back to the catalog — keeps existing rows in sync with
@@ -99,13 +102,18 @@ export const createModelSchema = z
     // edge so the runtime never derives a reserve that swallows the window.
     (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
     { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
-  );
+  )
+  .refine((d) => d.credentialId !== null || d.providerId !== undefined, {
+    message: "providerId is required when credentialId is null",
+    path: ["providerId"],
+  });
 
 export const updateModelSchema = z
   .object({
     label: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),
-    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable().optional(),
+    providerId: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
     input: z.array(modelInputModalitySchema).nullable().optional(),
     contextWindow: z.number().int().positive().nullable().optional(),
@@ -225,7 +233,7 @@ export function createModelsRouter() {
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const models = await listOrgModels(orgId);
+    const models = await listOrgModels(orgId, requestPayerUserId(c));
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
     //
@@ -257,7 +265,7 @@ export function createModelsRouter() {
       // (the operator can declare a UUID in env if they want), then fails at
       // the Postgres FK with a 500 the caller can't act on. Pointing them at
       // the env var instead is the actionable fix.
-      if (getSystemModelProviderCredentials().has(credentialId)) {
+      if (credentialId !== null && getSystemModelProviderCredentials().has(credentialId)) {
         throw invalidRequest(
           "Cannot add custom models against a built-in credential — declare the model in the " +
             "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential via " +
@@ -275,20 +283,26 @@ export function createModelsRouter() {
       // exists to explain a model that WENT dead, not to license minting one
       // dead on arrival — such a row could never run, and could not even
       // become the org default.
-      const creds = await loadInferenceCredentials(orgId, credentialId);
-      if (!creds) {
+      const creds =
+        credentialId === null ? null : await loadInferenceCredentials(orgId, credentialId);
+      if (credentialId !== null && !creds) {
         throw invalidRequest(
           "credentialId is unreachable — the credential needs reconnection or no longer exists",
           "credentialId",
         );
       }
-      throwOnModelOutsideOffer(creds.providerId, modelId);
+      // A bound model takes its credential's provider; an unbound one names it.
+      const providerId = creds ? creds.providerId : data.providerId;
+      if (!providerId || !getModelProvider(providerId)) {
+        throw invalidRequest("providerId must name a registered provider", "providerId");
+      }
+      throwOnModelOutsideOffer(providerId, modelId);
       // Model-alias guards (issue #727, Threat A) — shared invariant rule:
       if (aliased) {
         throwOnAliasViolation(
           checkAliasInvariants({
             label: data.label,
-            authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+            authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
           }),
         );
       }
@@ -296,26 +310,33 @@ export function createModelsRouter() {
       // from the payload falls back to the live catalog at read/run time, so
       // a lone `maxTokens` (or a lone `contextWindow`) must be checked
       // against the catalog value it will be paired with.
-      const catalogDefaults = resolveCatalogDefaults(creds.providerId, modelId);
+      const catalogDefaults = resolveCatalogDefaults(providerId, modelId);
       throwOnTokenBudgetViolation(
         maxTokens ?? catalogDefaults.maxTokens,
         contextWindow ?? catalogDefaults.contextWindow,
       );
       // Label is optional on the wire — derive from the catalog when the
-      // caller omits it. Needs the credential's providerId to pick the
-      // right catalog (handles `catalogProviderId` for OAuth wrappers).
+      // caller omits it. Needs the provider to pick the right catalog
+      // (handles `catalogProviderId` for OAuth wrappers).
       let label = data.label;
       if (!label) {
-        label = await deriveModelLabel(orgId, creds.providerId, modelId);
+        label = await deriveModelLabel(orgId, providerId, modelId);
       }
-      const id = await createOrgModel(orgId, label, modelId, user.id, credentialId, {
-        input,
-        contextWindow,
-        maxTokens,
-        reasoning,
-        cost,
-        aliased,
-      });
+      const id = await createOrgModel(
+        orgId,
+        label,
+        modelId,
+        user.id,
+        { credentialId, providerId: data.providerId },
+        {
+          input,
+          contextWindow,
+          maxTokens,
+          reasoning,
+          cost,
+          aliased,
+        },
+      );
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
@@ -326,7 +347,7 @@ export function createModelsRouter() {
       // see the resolved state without a follow-up fetch (#657). The row was
       // just inserted — failing to re-project it (e.g. credential became
       // unreachable mid-request) is a server-side inconsistency.
-      const model = await getOrgModel(orgId, id);
+      const model = await getOrgModel(orgId, id, requestPayerUserId(c));
       if (!model) throw internalError();
       return c.json(model, 201);
     } catch (err) {
@@ -423,7 +444,7 @@ export function createModelsRouter() {
       // when no DB row is flagged) — so callers see the resulting state
       // without a follow-up GET (#657). When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
-      const all = await listOrgModels(orgId);
+      const all = await listOrgModels(orgId, requestPayerUserId(c));
       const def = all.find((m) => m.is_default);
       // Project in case the effective default is a model alias (Threat A).
       return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
@@ -456,7 +477,12 @@ export function createModelsRouter() {
     if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
-    const creds = await loadInferenceCredentials(orgId, data.credentialId);
+    // A model binds organization credentials only; a personal one is probed on its own route.
+    const binding = await loadCredentialBinding(orgId, data.credentialId);
+    const creds =
+      binding?.ownerUserId === null
+        ? await loadInferenceCredentials(orgId, data.credentialId)
+        : null;
     if (!creds) {
       throw notFound("Credential not found");
     }
@@ -504,7 +530,7 @@ export function createModelsRouter() {
     // `aliased` is already public on the projection, so a 400 here discloses
     // nothing new; the message names no binding detail. Non-aliased models are
     // untouched — their contract is reaching the provider, not hiding it.
-    const existing = await getOrgModel(orgId, modelId);
+    const existing = await getOrgModel(orgId, modelId, requestPayerUserId(c));
     if (existing?.aliased) {
       throw invalidRequest("Connection testing is not available for a managed model.");
     }
@@ -549,8 +575,7 @@ export function createModelsRouter() {
     // that can no longer serve inference is a deliberate move into a broken
     // state: the row would come back flagged `needs_reconnection`, refuse to
     // become the org default, and fail every run. Reject before the write.
-    // `newCreds` is also what the alias invariants and the catalog defaults
-    // below are established against.
+    // `newCreds` is what the offer and catalog checks below run against.
     let newCreds: Awaited<ReturnType<typeof loadInferenceCredentials>> = null;
     if (data.credentialId) {
       newCreds = await loadInferenceCredentials(orgId, data.credentialId);
@@ -571,16 +596,11 @@ export function createModelsRouter() {
     if (!current) {
       throw notFound("Model not found");
     }
+    // The provider after this write: a new credential's, else the row's own
+    // (kept when the binding is removed). Stored on the row, so it reads
+    // without decrypting — a dead credential still names its provider.
+    const providerId = newCreds?.providerId ?? data.providerId ?? current.providerId;
     if (data.aliased ?? current.aliased) {
-      const creds = newCreds ?? (await loadInferenceCredentials(orgId, current.credentialId));
-      if (!creds) {
-        // Keeping the current (dead) credential while the row is/becomes
-        // aliased: the invariants can't be established — reject the write.
-        throw invalidRequest(
-          "The model's credential is unreachable — reconnect it before updating an aliased model",
-          "credentialId",
-        );
-      }
       throwOnAliasViolation(
         checkAliasInvariants({
           // A false→true flip must carry a fresh explicit label: the row's
@@ -588,7 +608,7 @@ export function createModelsRouter() {
           // already-aliased row's label is explicit by construction (POST
           // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
-          authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+          authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
         }),
       );
     }
@@ -598,18 +618,14 @@ export function createModelsRouter() {
     // be disabled or relabelled. The Zod refine only sees the payload: a lone
     // `maxTokens` can exceed the stored (or catalog) contextWindow, and a
     // binding change swaps the catalog defaults under a kept override.
-    const rebinds = data.modelId !== undefined || data.credentialId !== undefined;
+    const rebinds =
+      data.modelId !== undefined ||
+      data.credentialId !== undefined ||
+      data.providerId !== undefined;
     if (rebinds || data.maxTokens !== undefined || data.contextWindow !== undefined) {
       const effectiveModelId = data.modelId ?? current.modelId;
-      // Metadata-only (no decrypt): works even when the row's credential is
-      // dead. A gone credential/provider yields no catalog defaults.
-      const providerId =
-        newCreds?.providerId ??
-        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
-      if (rebinds && providerId) throwOnModelOutsideOffer(providerId, effectiveModelId);
-      const catalogDefaults: CatalogDefaults = providerId
-        ? resolveCatalogDefaults(providerId, effectiveModelId)
-        : {};
+      if (rebinds) throwOnModelOutsideOffer(providerId, effectiveModelId);
+      const catalogDefaults = resolveCatalogDefaults(providerId, effectiveModelId);
       throwOnTokenBudgetViolation(
         (data.maxTokens === undefined ? current.maxTokens : data.maxTokens) ??
           catalogDefaults.maxTokens,
@@ -639,7 +655,7 @@ export function createModelsRouter() {
       // — it rejects env-declared models, while an alias is an ordinary DB row
       // — so without this projection the update route is a read oracle for
       // every backing an org admin (or a `models:write` API key) can name.
-      const model = await getOrgModel(orgId, modelId);
+      const model = await getOrgModel(orgId, modelId, requestPayerUserId(c));
       if (!model) throw notFound("Model not found");
       return c.json(projectAliasedModel(model));
     } catch (err) {

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { toast } from "sonner";
-import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
+import { BrainCircuit, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import {
@@ -29,7 +30,6 @@ import {
   useCreateModelProviderCredential,
   useUpdateModelProviderCredential,
   useDeleteModelProviderCredential,
-  useTestModelProviderCredential,
   useProvidersRegistry,
   deduplicateLabel,
   type ModelProviderCredentialInfo,
@@ -37,9 +37,8 @@ import {
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { getModelIcon, getProviderIcon } from "../../components/icons";
-import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
-import { formatDateField } from "../../lib/format-date";
+import { CredentialsSection } from "../../components/model-credentials-section";
+import { getModelIcon } from "../../components/icons";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
@@ -47,9 +46,11 @@ import { TestResultSpan } from "../../components/test-result-span";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
+import { credentialUpdateBody } from "../../lib/personal-model-credentials";
+import { authStore } from "../../stores/auth-store";
 import { isModelUnpriced } from "./model-pricing";
 
-function ModelsList({
+export function ModelsList({
   models,
   isLoading,
   error,
@@ -59,6 +60,7 @@ function ModelsList({
   onSetDefault,
   canWrite,
   canDelete,
+  credentialLabels,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -69,6 +71,8 @@ function ModelsList({
   onSetDefault: (m: OrgModelInfo) => void;
   canWrite: boolean;
   canDelete: boolean;
+  /** The organization credentials' labels by id, for those the caller may read. */
+  credentialLabels: ReadonlyMap<string, string>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -95,6 +99,7 @@ function ModelsList({
               <TableRow>
                 <TableHead className="text-xs">{t("models.col.source")}</TableHead>
                 <TableHead className="text-xs">{t("models.col.model")}</TableHead>
+                <TableHead className="text-xs">{t("models.col.credential")}</TableHead>
                 <TableHead className="text-xs">{t("models.col.default")}</TableHead>
                 <TableHead className="w-px text-right text-xs">{t("models.col.actions")}</TableHead>
               </TableRow>
@@ -136,6 +141,20 @@ function ModelsList({
                           </div>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {/* A managed (aliased) row hides its binding, so it names no credential. */}
+                      {m.aliased ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : m.credentialId === null ? (
+                        <span className="text-muted-foreground">
+                          {t("models.credentialEachMember")}
+                        </span>
+                      ) : (
+                        <span className="truncate">
+                          {credentialLabels.get(m.credentialId) ?? "—"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* Shown but disabled, not hidden: `PUT /api/models/default`
@@ -233,199 +252,6 @@ function ModelsList({
   );
 }
 
-function CredentialsSection({
-  credentials,
-  isLoading,
-  error,
-  onCreate,
-  onEdit,
-  onDelete,
-  onConnectOAuth,
-  canWrite,
-  canDelete,
-}: {
-  credentials: ModelProviderCredentialInfo[] | undefined;
-  isLoading: boolean;
-  error: unknown;
-  onCreate: () => void;
-  onEdit: (pk: ModelProviderCredentialInfo) => void;
-  onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  canWrite: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModelProviderCredential();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry();
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  // Single entry point — the unified modal handles both API-key and OAuth
-  // flows. Removing a module from `MODULES` hides its OAuth tile from the
-  // in-modal provider picker with zero UI footprint here.
-  const addButton = canWrite ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
-
-  return (
-    <div className="mb-8">
-      <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
-
-      {credentials && credentials.length > 0 ? (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("credentials.col.provider")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.auth")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.created")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.status")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("credentials.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {credentials.map((pk) => {
-                const ProviderIcon = getProviderIcon(resolveProviderEntry(pk, registry ?? []));
-                const isOauth = pk.authMode === "oauth2";
-                return (
-                  <TableRow key={pk.id} data-testid={`credential-row-${pk.id}`}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {ProviderIcon && (
-                          <ProviderIcon className="text-muted-foreground size-4 shrink-0" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{pk.label}</div>
-                          {isOauth && pk.oauth_email && (
-                            <div className="text-muted-foreground truncate text-[0.65rem]">
-                              {t("credentials.oauth.connectedAs", { email: pk.oauth_email })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {isOauth ? (
-                        <Badge variant="secondary">{t("credentials.oauth.badgeOauth")}</Badge>
-                      ) : (
-                        <SourceBadge source={pk.source} />
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {pk.createdAt ? formatDateField(pk.createdAt) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {pk.needs_reconnection ? (
-                        // The flag also fires on a stored secret that no longer
-                        // decrypts, which reaches api-key credentials — where
-                        // the fix is to re-enter the key (Edit), not to
-                        // reconnect an account.
-                        <Badge variant="destructive">
-                          {isOauth
-                            ? t("credentials.oauth.needsReconnection")
-                            : t("models.credentialUnavailable")}
-                        </Badge>
-                      ) : pk.source === "built-in" ? (
-                        <span className="text-muted-foreground text-xs">{t("source.builtIn")}</span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {testResults[pk.id] && (
-                          <TestResultSpan
-                            result={testResults[pk.id]!}
-                            successKey="credentials.testSuccess"
-                            failedKey="credentials.testFailed"
-                          />
-                        )}
-                        {!isOauth && pk.source === "custom" && canWrite && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() => handleTest(pk.id)}
-                            disabled={testingId === pk.id}
-                          >
-                            {testingId === pk.id ? <Spinner /> : t("credentials.test")}
-                          </Button>
-                        )}
-                        {pk.source === "custom" && !isOauth && (
-                          <>
-                            {canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onEdit(pk)}
-                                aria-label={t("credentials.edit")}
-                              >
-                                <Pencil size={14} />
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(pk)}
-                                aria-label={t("credentials.delete")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                        {isOauth && (
-                          <>
-                            {pk.needs_reconnection && pk.providerId && canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => onConnectOAuth(pk)}
-                              >
-                                {t("credentials.oauth.reconnect")}
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(pk)}
-                                aria-label={t("credentials.oauth.disconnect")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState
-          message={t("credentials.empty")}
-          hint={t("credentials.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          {addButton}
-        </EmptyState>
-      )}
-    </div>
-  );
-}
-
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
@@ -435,12 +261,15 @@ export function OrgSettingsModelsPage() {
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
   const canDeleteCredentials = can("model-provider-credentials:delete");
+  const userId = useStore(authStore, (s) => s.user?.id);
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
     type: "deleteModel" | "deleteCredential";
     label: string;
     id: string;
+    /** A member's own credential, not the organization's. */
+    personal?: boolean;
   } | null>(null);
 
   const [modelModalOpen, setModelModalOpen] = useState(false);
@@ -485,6 +314,7 @@ export function OrgSettingsModelsPage() {
       {activeTab === "models-list" && (
         <ModelsList
           models={models}
+          credentialLabels={new Map((credentials ?? []).map((k) => [k.id, k.label]))}
           isLoading={modelsLoading}
           error={modelsError}
           onCreate={() => {
@@ -521,7 +351,12 @@ export function OrgSettingsModelsPage() {
             setPkModalOpen(true);
           }}
           onDelete={(pk) =>
-            setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
+            setConfirmState({
+              type: "deleteCredential",
+              label: pk.label,
+              id: pk.id,
+              personal: pk.owner_type === "user",
+            })
           }
           onConnectOAuth={(credential) => {
             setEditPk(credential);
@@ -529,6 +364,8 @@ export function OrgSettingsModelsPage() {
           }}
           canWrite={canWriteCredentials}
           canDelete={canDeleteCredentials}
+          userId={userId}
+          showOwner
         />
       )}
 
@@ -548,12 +385,11 @@ export function OrgSettingsModelsPage() {
         onSubmit={(data) => {
           if (editPk) {
             // The PATCH body only accepts mutable fields — the protocol and
-            // endpoint are pinned by `providerId` at create time. Strip them
-            // here even though the form disables those inputs on edit.
+            // endpoint are pinned by `providerId` at create time.
             updatePkMutation.mutate(
               {
                 params: { path: { id: editPk.id } },
-                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
+                body: credentialUpdateBody(editPk, data),
               },
               { onSuccess: () => setPkModalOpen(false) },
             );
@@ -587,7 +423,9 @@ export function OrgSettingsModelsPage() {
                     label: confirmState.label,
                     count: modelsOnCredential,
                   })
-                : t("credentials.deleteConfirm", { label: confirmState.label })
+                : confirmState.personal
+                  ? t("credentials.deleteMemberConfirm", { label: confirmState.label })
+                  : t("credentials.deleteConfirm", { label: confirmState.label })
               : ""
         }
         confirmDisabled={modelsOnCredential > 0}

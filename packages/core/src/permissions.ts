@@ -107,7 +107,8 @@ export interface CoreResources {
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
   models: "read" | "write" | "delete";
-  "model-provider-credentials": "read" | "write" | "delete";
+  // `connect` = attach a personal credential; `write` = manage org credentials.
+  "model-provider-credentials": "read" | "write" | "delete" | "connect";
   proxies: "read" | "write" | "delete";
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
@@ -277,7 +278,7 @@ export const CORE_RESOURCE_ACTIONS = {
   schedules: ["read", "write", "delete"],
   persistence: ["read", "delete"],
   models: ["read", "write", "delete"],
-  "model-provider-credentials": ["read", "write", "delete"],
+  "model-provider-credentials": ["read", "write", "delete", "connect"],
   proxies: ["read", "write", "delete"],
   "api-keys": ["read", "create", "revoke"],
   spaces: ["read", "write", "delete"],
@@ -517,6 +518,8 @@ export const orgSettingsSchema = z.object({
   // would protect the link and not the content. SKILLS are exempt: the CLI's
   // `code sync` is a local copy by design and its audience is already the space.
   restrict_package_copy: z.boolean().optional(),
+  // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
+  personal_model_credentials: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

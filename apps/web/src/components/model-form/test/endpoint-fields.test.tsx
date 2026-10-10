@@ -53,9 +53,29 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   base_url: "http://localhost:11434/v1",
   source: "custom",
   authMode: "api_key",
+  owner_type: "org",
+  owner_id: null,
+  owner_name: null,
   created_by: null,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
+};
+
+/** A provider that pins its own endpoint, so "each member" is offered for it. */
+const DIRECT_PROVIDER: ProviderRegistryEntry = {
+  ...OPENAI_COMPATIBLE,
+  providerId: "openai",
+  displayName: "OpenAI",
+  defaultBaseUrl: "https://api.openai.com/v1",
+  baseUrlOverridable: false,
+};
+
+/** A subscription: personal, so a model on it is left to each member. */
+const SUBSCRIPTION_PROVIDER: ProviderRegistryEntry = {
+  ...DIRECT_PROVIDER,
+  providerId: "claude-code",
+  displayName: "Claude Code",
+  authMode: "oauth2",
 };
 
 function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): string {
@@ -113,6 +133,46 @@ describe("EndpointFields", () => {
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
     expect(html).toContain(LOCAL_KEY.label);
     // The key is selected, so there is nothing to type into.
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("shows the each-member choice as the bound identifier, with no key to type", () => {
+    const html = fields({
+      provider: DIRECT_PROVIDER,
+      providers: [],
+      eachMember: { selected: true, onSelect: () => {}, onClear: () => {} },
+    });
+    expect(html).toContain(settingsFr["models.form.eachMember"]);
+    expect(html).toContain(settingsFr["models.form.eachMemberHint"]);
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("offers each member beside the typed key, while none is selected", () => {
+    const html = fields({
+      provider: DIRECT_PROVIDER,
+      providers: [],
+      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
+    });
+    expect(html).toContain('placeholder="sk-..."');
+    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
+  });
+
+  it("offers a subscription only to each member, under the identifier label", () => {
+    const html = fields({
+      provider: SUBSCRIPTION_PROVIDER,
+      providers: [],
+      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
+    });
+    expect(html).toContain(settingsFr["models.form.identityLabel"]);
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("offers nothing to pick for a subscription where each member is not offered", () => {
+    const html = fields({ provider: SUBSCRIPTION_PROVIDER, providers: [] });
+    expect(html).not.toContain('role="combobox"');
     expect(html).not.toContain('placeholder="sk-..."');
   });
 

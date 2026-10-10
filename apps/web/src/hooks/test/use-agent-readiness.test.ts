@@ -36,6 +36,7 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
     iconUrl: null,
     source: "custom",
     credentialId: "c1",
+    billed_to: "org",
     created_by: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

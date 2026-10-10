@@ -15,12 +15,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
-import { chatSessions, llmUsage } from "@appstrate/db/schema";
+import { chatSessions, llmUsage, modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
-import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
@@ -34,9 +36,13 @@ describe("resolveChatModel", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    // Restores the registry baseline, which registers `test-oauth`: this file
+    // does not import the app helper that seeds it at boot.
+    seedTestModelProviders();
     ctx = await createTestContext();
   });
 
+  /** The test user's own subscription: a personal credential, never an organization one. */
   async function seedOauthCredential(): Promise<string> {
     const row = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
@@ -48,44 +54,66 @@ describe("resolveChatModel", () => {
       // refresh endpoint over the network.
       expiresAt: Date.now() + 3_600_000,
       createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
     });
     return row.id;
   }
 
-  it("refuses an aliased oauth-subscription row (invalid legacy state) — falls to the gateway path", async () => {
-    const credentialId = await seedOauthCredential();
-    // Insert through the service layer, which (like a legacy row) carries no
-    // alias invariants — the route guards are what normally forbid this state.
-    const presetId = await createOrgModel(
-      ctx.orgId,
-      "Masked Subscription",
-      "test-model",
-      ctx.user.id,
-      credentialId,
-      { aliased: true },
-    );
+  /** A subscription model is unbound: each member's own subscription serves it. */
+  function createSubscriptionModel(label: string): Promise<string> {
+    return createOrgModel(ctx.orgId, label, TEST_OAUTH_MODEL_ID, ctx.user.id, {
+      credentialId: null,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+    });
+  }
 
-    const resolution = await resolveChatModel(ctx.orgId, presetId);
+  /** Whether the stored blob of a credential is flagged as needing a reconnect. */
+  async function storedNeedsReconnection(credentialId: string): Promise<boolean> {
+    const [row] = await db
+      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, credentialId))
+      .limit(1);
+    return (
+      decryptCredentials<{ needsReconnection?: boolean }>(row!.credentialsEncrypted)
+        .needsReconnection === true
+    );
+  }
+
+  it("refuses an aliased subscription row (invalid legacy state) — falls to the gateway path", async () => {
+    // The member's own subscription is present: it must not serve an aliased row either.
+    await seedOauthCredential();
+    // Creation refuses an alias on an unbound model (refuseUnboundAlias), so the
+    // legacy row is written directly, as a write path without those invariants could leave it.
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        credentialId: null,
+        label: "Masked Subscription",
+        modelId: TEST_OAUTH_MODEL_ID,
+        aliased: true,
+        enabled: true,
+      })
+      .returning();
+
+    const resolution = await resolveChatModel(ctx.orgId, row!.id, ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 
-  it("resolves a non-aliased oauth-subscription row to the Pi chat engine binding", async () => {
+  it("resolves an unbound subscription model through the payer's own subscription, on the Pi chat engine binding", async () => {
     const credentialId = await seedOauthCredential();
-    const presetId = await createOrgModel(
-      ctx.orgId,
-      "Subscribed",
-      "test-model",
-      ctx.user.id,
-      credentialId,
-    );
+    const presetId = await createSubscriptionModel("Subscribed");
 
-    const resolution = await resolveChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id);
     expect(resolution.subscription).toBe(true);
     if (resolution.subscription && "model" in resolution) {
-      expect(resolution.model.modelId).toBe("test-model");
+      expect(resolution.model.modelId).toBe(TEST_OAUTH_MODEL_ID);
+      expect(resolution.model.credentialId).toBe(credentialId);
       expect(resolution.model.accessToken).toBe("test-access");
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
-      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
+      const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
       expect(row?.pi_provider).toBe("openai");
     } else {
       throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
@@ -98,7 +126,10 @@ describe("resolveChatModel", () => {
       globalThis.fetch = realFetch;
     });
 
-    async function expiredSubscription(tokenEndpoint: () => Response): Promise<string> {
+    /** The member's own expired subscription, and an unbound model it serves. */
+    async function expiredSubscription(
+      tokenEndpoint: () => Response,
+    ): Promise<{ presetId: string; credentialId: string }> {
       const row = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
@@ -107,41 +138,87 @@ describe("resolveChatModel", () => {
         refreshToken: "test-refresh",
         expiresAt: Date.now() - 10_000,
         createdBy: ctx.user.id,
+        ownerUserId: ctx.user.id,
       });
       globalThis.fetch = (async () => tokenEndpoint()) as unknown as typeof fetch;
-      return createOrgModel(ctx.orgId, "Subscribed", "test-model", ctx.user.id, row.id);
+      const presetId = await createSubscriptionModel("Subscribed");
+      return { presetId, credentialId: row.id };
     }
 
     it("resolves to a reconnect when the provider refuses the refresh token", async () => {
-      const presetId = await expiredSubscription(() =>
+      const { presetId, credentialId } = await expiredSubscription(() =>
         Response.json({ error: "invalid_grant" }, { status: 400 }),
       );
 
-      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
-      // The flag is stored: the next turn asks for a reconnect without a refresh.
+      // The flag is stored on the member's personal credential.
+      expect(await storedNeedsReconnection(credentialId)).toBe(true);
+      // The next turn asks for a reconnect without a refresh.
       globalThis.fetch = (async () => {
         throw new Error("the token endpoint must not be called again");
       }) as unknown as typeof fetch;
-      expect(await resolveChatModel(ctx.orgId, presetId)).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
     });
 
     it("throws, and asks for no reconnect, when the token endpoint is down", async () => {
-      const presetId = await expiredSubscription(() => new Response("down", { status: 503 }));
+      const { presetId, credentialId } = await expiredSubscription(
+        () => new Response("down", { status: 503 }),
+      );
 
-      await expect(resolveChatModel(ctx.orgId, presetId)).rejects.toThrow();
-      const row = (await listOrgModels(ctx.orgId)).find((m) => m.id === presetId);
-      expect(row?.needs_reconnection ?? false).toBe(false);
+      await expect(resolveChatModel(ctx.orgId, presetId, ctx.user.id)).rejects.toThrow();
+      expect(await storedNeedsReconnection(credentialId)).toBe(false);
+    });
+  });
+
+  it("serves a member-held model from that member's own subscription, never another's", async () => {
+    const other = await createTestUser({ email: `member-${crypto.randomUUID()}@example.test` });
+    await db.insert(modelProviderCredentials).values({
+      orgId: ctx.orgId,
+      ownerUserId: other.id,
+      label: "Other's subscription",
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      credentialsEncrypted: encryptCredentials({
+        kind: "oauth",
+        accessToken: "other-token",
+        refreshToken: "other-refresh",
+        expiresAt: Date.now() + 3_600_000,
+        needsReconnection: false,
+      }),
+      createdBy: other.id,
+    });
+    // Unbound: no org credential, each member brings their own subscription.
+    const [model] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        credentialId: null,
+        label: "Member subscription",
+        // A model the subscription's catalog serves: a personal credential only
+        // serves a model of its own provider family.
+        modelId: TEST_OAUTH_MODEL_ID,
+        enabled: true,
+      })
+      .returning();
+
+    await expect(resolveChatModel(ctx.orgId, model!.id, ctx.user.id)).rejects.toMatchObject({
+      status: 409,
+      code: "model_credential_required",
+    });
+    expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
+      subscription: true,
+      model: { accessToken: "other-token" },
     });
   });
 
   it("returns { subscription: false } for an unknown preset", async () => {
-    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset");
+    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset", ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 });
@@ -179,6 +256,7 @@ describe("recordChatUsage — pricing provenance", () => {
       inputTokens: 1_000,
       outputTokens: 500,
       cost: { input: 3, output: 15, cacheRead: 0.3 },
+      credentialId: null,
       durationMs: 42,
       ...overrides,
     };
@@ -197,6 +275,14 @@ describe("recordChatUsage — pricing provenance", () => {
     expect(row!.pricingStatus).toBe("priced");
     // And the cost is the imputed equivalent, not zero.
     expect(row!.costUsd).toBeGreaterThan(0);
+  });
+
+  it("records the credential that served the turn, kept after that credential is deleted", async () => {
+    const sessionId = await seedSession("chs_credential");
+    const credentialId = crypto.randomUUID();
+    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+
+    expect((await storedRow(sessionId))!.credentialId).toBe(credentialId);
   });
 
   it("marks a turn on a model with no rates `unpriced` instead of a silent $0", async () => {

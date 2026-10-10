@@ -569,6 +569,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   value={overrides}
                   onChange={setOverrides}
                   version={firedVersion}
+                  scheduled
                 />
                 {showActorChoice && (
                   <ScheduleActorConnectionChoice

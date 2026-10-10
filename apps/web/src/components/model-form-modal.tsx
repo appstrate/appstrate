@@ -29,8 +29,6 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { OAuthPairingBody } from "./oauth-pairing-body";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 import { ErrorState, LoadingState } from "./page-states";
 import { ApiError } from "../api/errors";
 import { getProviderById } from "@/lib/provider-registry-helpers";
@@ -159,6 +157,8 @@ function ModelForm({
   });
 
   const credentialsQuery = useModelProviderCredentials();
+  // A model binds an organization API key only: a personal credential or a
+  // subscription serves its holder's calls, reached through "each member" below.
   const availableCredentials = useMemo(
     () =>
       selectableCredentials({
@@ -166,18 +166,24 @@ function ModelForm({
         provider: selectedProvider,
         apiShape,
         baseUrl,
-      }),
+      }).filter((k) => k.owner_type === "org" && k.authMode !== "oauth2"),
     [credentialsQuery.data, selectedProvider, apiShape, baseUrl],
   );
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
 
-  const [oauthDialogOpen, setOauthDialogOpen] = useState(false);
-  const oauthDismiss = usePairingDismissConfirm(() => setOauthDialogOpen(false));
+  // Offered where a member's own credential can serve the model: a custom
+  // endpoint is the operator's to describe, an alias hides its binding, and a
+  // listing that still needs a key to ask with has none to lend.
+  const eachMemberOffered =
+    !!selectedProvider && !overridable && !model?.aliased && source !== "discover";
+  // An unbound row (`credentialId: null`) is the saved form of the same choice.
+  const [eachMember, setEachMember] = useState(() => !!model && model.credentialId === null);
+  const unbound = eachMemberOffered && eachMember;
 
-  /** Step 1 answered: an endpoint that parses, and something that opens it. */
+  /** Step 1 answered: an endpoint that parses, and something that serves it. */
   const endpointReady =
     !!selectedProvider &&
-    (!!selectedCredential || (!isOauth && !!inlineApiKey.trim())) &&
+    (!!selectedCredential || unbound || (!isOauth && !!inlineApiKey.trim())) &&
     (!overridable || parsesAsUrl(baseUrl));
 
   // Discovery persists nothing, so the listing lives here — and only for what
@@ -275,6 +281,7 @@ function ModelForm({
    */
   const switchProvider = (id: string, keepTypedKey: boolean) => {
     setProviderId(id);
+    setEachMember(false);
     clearErrors();
     setValue("credentialId", "");
     if (!keepTypedKey) setValue("inlineApiKey", "");
@@ -293,6 +300,7 @@ function ModelForm({
     items: availableCredentials,
     selected: selectedCredential ?? null,
     onSelect: (id: string) => {
+      setEachMember(false);
       bindCredential(id);
       // The key carries the endpoint it was saved against; the form follows it there.
       const key = availableCredentials.find((k) => k.id === id);
@@ -304,6 +312,22 @@ function ModelForm({
       dropListing();
     },
   };
+
+  /** Every member's own credential serves the model: no organization key, no typed one. */
+  const eachMemberChoice = eachMemberOffered
+    ? {
+        selected: unbound,
+        onSelect: () => {
+          setEachMember(true);
+          bindCredential("");
+          dropListing();
+        },
+        onClear: () => {
+          setEachMember(false);
+          dropListing();
+        },
+      }
+    : undefined;
 
   const switchMode = (next: "list" | "manual") => {
     if (mode !== next) resetModelStep();
@@ -358,6 +382,7 @@ function ModelForm({
         selectedCredentialId: selectedCredential?.id ?? createdCredentialId,
         inlineApiKey: data.inlineApiKey,
         baseUrl: data.baseUrl,
+        unbound,
       });
       if (!batch.ok) {
         setError(batch.field, { message: t(batch.messageKey) });
@@ -385,6 +410,7 @@ function ModelForm({
       capabilities: capabilitiesExplicit ? "explicit" : "auto",
       isEdit: !!model,
       catalogEntry: catalogEntry(data.modelId.trim()),
+      unbound,
     });
     if (!result) return;
     // The host closes on success and reports nothing here.
@@ -418,6 +444,7 @@ function ModelForm({
       inlineApiKey,
       offeredIds:
         source === "catalog" && selectedProvider ? selectedProvider.models.map((m) => m.id) : null,
+      unbound,
     });
   const credentialValidate = () => {
     const key = refusals("").credentialId;
@@ -474,7 +501,7 @@ function ModelForm({
             : undefined
         }
         existingKeys={existingKeys}
-        onConnect={() => setOauthDialogOpen(true)}
+        eachMember={eachMemberChoice}
       />
 
       {endpointReady && source === "discover" && !model && (
@@ -549,29 +576,6 @@ function ModelForm({
           {modelIdError}
         </>
       )}
-
-      {oauthDialogOpen && (
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
-          title={t("credentials.oauth.cliStageTitle")}
-          actions={
-            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
-        >
-          <OAuthPairingBody
-            providerId={providerId}
-            onConnected={(newId) => {
-              bindCredential(newId);
-              setOauthDialogOpen(false);
-            }}
-            onBusyChange={oauthDismiss.onBusyChange}
-          />
-        </Modal>
-      )}
-      {oauthDismiss.confirmDialog}
     </form>
   );
 }
