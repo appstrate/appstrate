@@ -23,7 +23,11 @@ import { oauthResource, organizations, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  memberContext,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
 import { seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
@@ -247,10 +251,10 @@ describe("space-pinned MCP endpoint as its own protected resource", () => {
   });
 
   describe("audience truth table with minted tokens", () => {
-    async function mint(resource: string) {
+    async function mint(resource: string, cookie = ctx.cookie) {
       const clientId = await registerClient();
       return authorizationCodeFlow(app, {
-        cookie: ctx.cookie,
+        cookie,
         clientId,
         redirectUri: REDIRECT_URI,
         scope: MCP_SCOPE,
@@ -349,6 +353,27 @@ describe("space-pinned MCP endpoint as its own protected resource", () => {
         .from(organizations)
         .where(eq(organizations.id, ctx.orgId));
       expect(org!.name).toBe("Renamed through an org token");
+    });
+
+    it("a token minted for a closed space the user is not in is refused with not_a_space_member", async () => {
+      const member = await memberContext(ctx, "member");
+      const { token } = await mint(getMcpSpaceResourceUri(ctx.orgId, s1), member.cookie);
+
+      const res = await mcpInitialize(spacePath(ctx.orgId, s1), String(token.access_token));
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("not_a_space_member");
+    });
+
+    it("a token minted for a private space the user is not in finds no space", async () => {
+      const member = await memberContext(ctx, "member");
+      const priv = (await seedSpace({ orgId: ctx.orgId, name: "P", visibility: "private" })).id;
+      const { token } = await mint(getMcpSpaceResourceUri(ctx.orgId, priv), member.cookie);
+
+      const res = await mcpInitialize(spacePath(ctx.orgId, priv), String(token.access_token));
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { detail: string }).detail).toBe(
+        `Space '${priv}' not found in this organization`,
+      );
     });
 
     it("an org-bound token reaches the org endpoint and its space endpoints", async () => {

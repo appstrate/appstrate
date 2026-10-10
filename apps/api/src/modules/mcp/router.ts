@@ -100,7 +100,6 @@ import {
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
 import {
-  describeSpace,
   listReachableSpaces,
   pinnedSpaceIds,
   requestedSpaceId,
@@ -286,7 +285,7 @@ export function buildServerInstructions(
 Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
-${orgSpaces ? orgWideSpaceContext(orgSpaces) : pinnedSpaceContext}
+${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
 ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
@@ -311,12 +310,10 @@ ${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOp
 const pinnedSpaceContext =
   "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
-function orgWideSpaceContext(spaces: OrgWideSpaces): string {
-  return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
+const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
 - Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: there is no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request; when it is ambiguous, ask.
 - Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
-- Your spaces (names are not unique; every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id): ${spaces.reachable.map(describeSpace).join("; ")}`;
-}
+- Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();

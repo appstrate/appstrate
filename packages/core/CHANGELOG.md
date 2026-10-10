@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`arguments`** on every `launchRunAndWait` refusal decided before dispatch
-  (`@appstrate/core/run-and-wait-client`): the payload is `{ error, arguments }`,
+- **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
+  before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
+  `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
+  (`missing_argument`, `unknown_argument`, `invalid_argument`) and `arguments`
   naming the faulty arguments (`input`, `manifest`, `scope`, an unknown name,
   …). A launch the route rejected stays `{ status, body }`. (#1911)
 - **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =

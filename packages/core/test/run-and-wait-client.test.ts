@@ -207,8 +207,26 @@ describe("run_and_wait client", () => {
     });
 
     await expect(collectSteps(fetchImpl, { kind: "inline" })).resolves.toEqual([
-      { error: "`manifest` is required for kind:'inline'.", arguments: ["manifest"] },
+      {
+        code: "missing_argument",
+        error: "`manifest` is required for kind:'inline'.",
+        arguments: ["manifest"],
+      },
     ]);
+  });
+
+  it("refuses an undeclared argument as unknown_argument", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+
+    const steps = await collectSteps(fetchImpl, {
+      kind: "agent",
+      scope: "@acme",
+      name: "writer",
+      contextFiles: [],
+    });
+    expect(steps).toMatchObject([{ code: "unknown_argument", arguments: ["contextFiles"] }]);
   });
 
   it("rejects an unparseable agent reference before dispatching", async () => {
@@ -222,6 +240,7 @@ describe("run_and_wait client", () => {
       collectSteps(fetchImpl, { kind: "agent", scope: "acme", name: "writer" }),
     ).resolves.toEqual([
       {
+        code: "invalid_argument",
         error: "Invalid agent reference: acme/writer (expected @scope/name).",
         arguments: ["scope", "name"],
       },

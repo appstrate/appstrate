@@ -253,9 +253,21 @@ function unknownArgumentsError(
   };
 }
 
-/** A launch refused before dispatch: the prose plus the arguments at fault. */
-function refuseArguments(error: string, args: readonly string[]): RunAndWaitFailureResult {
-  return { ok: false, step: { payload: { error, arguments: args }, isError: true } };
+/** Why a launch was refused before dispatch: an argument absent, undeclared, or malformed. */
+export type RunAndWaitArgumentCode = "missing_argument" | "unknown_argument" | "invalid_argument";
+
+/** A launch refused before dispatch: the code, the prose, and the arguments at fault. */
+function refuseArguments(
+  code: RunAndWaitArgumentCode,
+  error: string,
+  args: readonly string[],
+): RunAndWaitFailureResult {
+  return { ok: false, step: { payload: { code, error, arguments: args }, isError: true } };
+}
+
+/** `missing_argument` when the argument is absent, `invalid_argument` when present but unusable. */
+function absentOrInvalid(value: unknown): RunAndWaitArgumentCode {
+  return value === undefined || value === null ? "missing_argument" : "invalid_argument";
 }
 
 /**
@@ -562,22 +574,22 @@ export async function launchRunAndWait(
 
   const unknownArgs = unknownArgumentsError(args);
   if (unknownArgs) {
-    return refuseArguments(unknownArgs.error, unknownArgs.arguments);
+    return refuseArguments("unknown_argument", unknownArgs.error, unknownArgs.arguments);
   }
 
   const inputArg = inputArgument(args);
   if (inputArg.error) {
-    return refuseArguments(inputArg.error, ["input"]);
+    return refuseArguments("invalid_argument", inputArg.error, ["input"]);
   }
 
   const connectionOverrides = connectionOverridesArgument(args);
   if (connectionOverrides.error) {
-    return refuseArguments(connectionOverrides.error, ["connection_overrides"]);
+    return refuseArguments("invalid_argument", connectionOverrides.error, ["connection_overrides"]);
   }
 
   const contextFilesArg = contextFilesArgument(args);
   if (contextFilesArg.error) {
-    return refuseArguments(contextFilesArg.error, ["context_files"]);
+    return refuseArguments("invalid_argument", contextFilesArg.error, ["context_files"]);
   }
 
   let launchPath: string;
@@ -591,6 +603,7 @@ export async function launchRunAndWait(
     // the model believing the files were delivered.
     if (contextFiles) {
       return refuseArguments(
+        "invalid_argument",
         "`context_files` is only supported for kind:'inline'. To give a published " +
           "agent a file, pass its appfile:// URI through one of the file fields " +
           'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
@@ -601,10 +614,14 @@ export async function launchRunAndWait(
     const scope = asString(args.scope);
     const name = asString(args.name);
     if (!scope || !name) {
-      return refuseArguments("`scope` and `name` are required for kind:'agent'.", [
-        ...(scope ? [] : ["scope"]),
-        ...(name ? [] : ["name"]),
-      ]);
+      const faulty = [...(scope ? [] : ["scope"]), ...(name ? [] : ["name"])];
+      return refuseArguments(
+        faulty.every((k) => absentOrInvalid(args[k]) === "missing_argument")
+          ? "missing_argument"
+          : "invalid_argument",
+        "`scope` and `name` are required for kind:'agent'.",
+        faulty,
+      );
     }
     const qs = new URLSearchParams();
     const version = asString(args.version);
@@ -615,10 +632,11 @@ export async function launchRunAndWait(
     try {
       encodedId = encodePackageIdPath(`${scope}/${name}`);
     } catch {
-      return refuseArguments(`Invalid agent reference: ${scope}/${name} (expected @scope/name).`, [
-        "scope",
-        "name",
-      ]);
+      return refuseArguments(
+        "invalid_argument",
+        `Invalid agent reference: ${scope}/${name} (expected @scope/name).`,
+        ["scope", "name"],
+      );
     }
     launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
@@ -627,7 +645,11 @@ export async function launchRunAndWait(
   } else if (kind === "inline") {
     const manifest = asRecordOrUndefined(args.manifest);
     if (!manifest) {
-      return refuseArguments("`manifest` is required for kind:'inline'.", ["manifest"]);
+      return refuseArguments(
+        absentOrInvalid(args.manifest),
+        "`manifest` is required for kind:'inline'.",
+        ["manifest"],
+      );
     }
     // Reject a missing top-level prompt before hitting the route: the route's
     // field error alone doesn't tell the model WHERE the prompt goes, and the
@@ -637,6 +659,7 @@ export async function launchRunAndWait(
     if (!prompt) {
       const nested = typeof manifest.prompt === "string";
       return refuseArguments(
+        absentOrInvalid(args.prompt),
         nested
           ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
               "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
@@ -647,13 +670,15 @@ export async function launchRunAndWait(
     }
     const selected = manifest.runtime_tools;
     if (selected !== undefined && !Array.isArray(selected)) {
-      return refuseArguments("`manifest.runtime_tools` must be an array for kind:'inline'.", [
-        "manifest.runtime_tools",
-      ]);
+      return refuseArguments(
+        "invalid_argument",
+        "`manifest.runtime_tools` must be an array for kind:'inline'.",
+        ["manifest.runtime_tools"],
+      );
     }
     const materialized = materializeInlineManifest(manifest);
     if (!materialized.manifest) {
-      return refuseArguments(materialized.error, ["manifest"]);
+      return refuseArguments("invalid_argument", materialized.error, ["manifest"]);
     }
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
@@ -664,7 +689,9 @@ export async function launchRunAndWait(
     // only one — nothing is canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
-    return refuseArguments("`kind` must be 'agent' or 'inline'.", ["kind"]);
+    return refuseArguments(absentOrInvalid(args.kind), "`kind` must be 'agent' or 'inline'.", [
+      "kind",
+    ]);
   }
 
   // Both run bodies carry the same field, so one forward covers both kinds.

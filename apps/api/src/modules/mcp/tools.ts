@@ -1236,7 +1236,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         outcome: "rejected",
       });
       return refusalResult({
-        code: "invalid_argument",
+        code:
+          args.kind === undefined || args.kind === null ? "missing_argument" : "invalid_argument",
         error: "`kind` must be 'agent' or 'inline'.",
         arguments: ["kind"],
         accepted: inline ? ["agent", "inline"] : ["agent"],
@@ -1277,7 +1278,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // A launch HTTP failure (payload carries a numeric `status`) reached the
       // route and it rejected the request (bad input, unconnected integration,
       // no published version, …) — reported as an `invoked` POST. A pre-dispatch
-      // validation failure (payload carries an `error`) never touched the route.
+      // validation failure (payload carries its `code`, `error` and `arguments`)
+      // never touched the route.
       const launchStatus = launched.step.payload.status;
       if (typeof launchStatus === "number") {
         emit(ctx, {
@@ -1294,12 +1296,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      return jsonResult(
-        typeof launchStatus === "number"
-          ? { ...launched.step.payload, ...space }
-          : { ...launched.step.payload, code: "invalid_argument", ...space },
-        true,
-      );
+      return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
     // Any caller of this handler (an agent run included) may persist what it returns; the
@@ -1812,7 +1809,7 @@ function refuseUndeclaredArguments(
           accepted: [...declared],
           ...(pinnedSpace
             ? {
-                hint: "This connection is pinned to one space by its URL; drop space_id.",
+                hint: "This connection is pinned to one space (by its URL or its credential); drop space_id.",
               }
             : {}),
         });

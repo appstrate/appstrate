@@ -876,20 +876,34 @@ describe("run_and_wait", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("validates required arguments", async () => {
+  it("validates required arguments, telling an absent one from a malformed one", async () => {
     const { tool } = makeRunAndWait({});
     const noScope = await tool.handler({ kind: "agent", name: "b" }, noExtra);
     expect(noScope.isError).toBe(true);
     expect(parseResult(noScope)).toMatchObject({
-      code: "invalid_argument",
+      code: "missing_argument",
       arguments: ["scope"],
     });
+    const badScope = await tool.handler({ kind: "agent", scope: 7, name: "b" }, noExtra);
+    expect(parseResult(badScope)).toMatchObject({ code: "invalid_argument", arguments: ["scope"] });
     const noManifest = await tool.handler({ kind: "inline" }, noExtra);
     expect(noManifest.isError).toBe(true);
     expect(parseResult(noManifest)).toMatchObject({
+      code: "missing_argument",
+      arguments: ["manifest"],
+    });
+    const badManifest = await tool.handler({ kind: "inline", manifest: "{}" }, noExtra);
+    expect(parseResult(badManifest)).toMatchObject({
       code: "invalid_argument",
       arguments: ["manifest"],
     });
+    const noPrompt = await tool.handler({ kind: "inline", manifest: { name: "tmp" } }, noExtra);
+    expect(parseResult(noPrompt)).toMatchObject({
+      code: "missing_argument",
+      arguments: ["prompt"],
+    });
+    const noKind = await tool.handler({}, noExtra);
+    expect(parseResult(noKind)).toMatchObject({ code: "missing_argument", arguments: ["kind"] });
     const badInput = await tool.handler(
       { kind: "agent", scope: "@a", name: "b", input: "{}" },
       noExtra,

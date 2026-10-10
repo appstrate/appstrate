@@ -34,7 +34,7 @@ import { SPACE_ID_RE } from "@appstrate/db/ids";
 export const MCP_RESOURCE_PREFIX = "/api/mcp/o";
 
 /** What an MCP resource URI binds a token to. */
-export interface McpResourceBinding {
+interface McpResourceBinding {
   orgId: string;
   spaceId?: string;
 }

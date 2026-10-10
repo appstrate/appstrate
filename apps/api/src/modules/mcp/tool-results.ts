@@ -24,7 +24,7 @@ export function asString(value: unknown): string | undefined {
 export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
 /** Why a tool call was refused. Stable machine codes. */
-export type RefusalCode =
+type RefusalCode =
   | "missing_argument"
   | "unknown_argument"
   | "invalid_argument"

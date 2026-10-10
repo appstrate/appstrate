@@ -89,7 +89,9 @@ describe("mcp org-wide connection", () => {
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
     expect(instructions).toContain(`createAgent [${gestion.id}]`);
-    expect(instructions).toContain(`Gestion (\`${gestion.id}\``);
+    // The spaces are listed by the `space_id` schema, not repeated here.
+    expect(instructions).toContain("Space names are not unique");
+    expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {
