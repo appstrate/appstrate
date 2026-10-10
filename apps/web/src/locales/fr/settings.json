@@ -465,7 +465,7 @@
   "connections.reusedByCount_one": "{{count}} agent l'utilise dans ses espaces",
   "connections.reusedByCount_other": "{{count}} agents l'utilisent dans ses espaces",
   "connections.reusedByNone": "Aucun agent ne l'utilise actuellement",
-  "modelCredentials.description": "Vos clés API et abonnements paient les appels aux modèles de l'organisation. Ils ne servent qu'à vous et ne sont jamais partagés.",
+  "modelCredentials.description": "Vos clés API et abonnements paient les modèles que l'organisation laisse à chaque membre (« Chaque membre utilise son propre identifiant »). Ils ne servent qu'à vous et ne sont jamais partagés. Les autres modèles restent payés par l'organisation.",
   "modelCredentials.empty": "Aucun identifiant personnel",
   "modelCredentials.emptyHint": "Ajoutez une clé API ou connectez un abonnement pour payer vos appels aux modèles de l'organisation.",
   "modelCredentials.billedTitle": "Modèles de l'organisation payés par vos identifiants",

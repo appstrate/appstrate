@@ -442,7 +442,7 @@ export function createAgentsRouter() {
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
       const current = await getSpacePackageSettings(scope, agent.id);
-      const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId, null);
+      const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
       let generation = data.generation;

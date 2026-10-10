@@ -928,9 +928,7 @@ export function createSpacesRouter() {
     if (placement && (data.modelId !== undefined || generationConfig !== undefined)) {
       const effectiveModelId = data.modelId !== undefined ? data.modelId : placement.modelId;
       const explicitModel =
-        data.modelId !== undefined
-          ? await assertExplicitModelExists(orgId, data.modelId, null)
-          : null;
+        data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
         explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, null));
 

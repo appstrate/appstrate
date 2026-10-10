@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who pays for a model. A member's own credential serves a model it applies to,
- * first; then the org binding; an unbound model (`credential_id` NULL) with no
- * credential for the caller resolves unbound and cannot be spent. Pins the chain
- * in `loadModel`, the LLM proxy's subscription-free chain, the run's pinned
+ * Who pays for a model. A model bound to an organization credential is served by
+ * it whoever calls, and a built-in model by the platform key. A member's own
+ * credential serves only an unbound model (`credential_id` NULL); with none for
+ * the caller it resolves unbound and cannot be spent. Pins the chain in `loadModel`, the LLM proxy's subscription-free chain, the run's pinned
  * credential in `loadPinnedModel`, the write-side invariants, and the `billed_to`
  * listing.
  */
@@ -75,7 +75,7 @@ describe("applicableCredentialIds", () => {
   });
 });
 
-describe("model resolution — a member's own credential first", () => {
+describe("model resolution — a member's own credential serves an unbound model", () => {
   let ctx: TestContext;
   let bob: TestContext;
 
@@ -96,16 +96,6 @@ describe("model resolution — a member's own credential first", () => {
     });
   }
 
-  async function orgOpenAiKey() {
-    return seedOrgModelProviderKey({
-      orgId: ctx.orgId,
-      label: "Org OpenAI",
-      providerId: "openai",
-      apiShape: "openai-responses",
-      apiKey: "sk-org",
-    });
-  }
-
   async function personalKey(userId: string, providerId: string, apiKey: string) {
     const row = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
@@ -122,7 +112,10 @@ describe("model resolution — a member's own credential first", () => {
   const personalAnthropicKey = (userId: string, apiKey: string) =>
     personalKey(userId, "anthropic", apiKey);
 
-  it("serves an org anthropic model with the owner's personal key, and the org key to anyone else", async () => {
+  const unboundModel = (providerId = "anthropic", modelId = ANTHROPIC_A) =>
+    createOrgModel(ctx.orgId, "Unbound", modelId, ctx.user.id, { credentialId: null, providerId });
+
+  it("serves a bound org model with its org key to every caller, a holder of a personal key included", async () => {
     const org = await orgAnthropicKey();
     const model = await seedOrgModel({
       orgId: ctx.orgId,
@@ -131,12 +124,12 @@ describe("model resolution — a member's own credential first", () => {
       modelId: ANTHROPIC_A,
       label: "Claude",
     });
-    const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
+    await personalAnthropicKey(ctx.user.id, "sk-alice");
 
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialSource: "org",
-      credentialId: mine.id,
-      apiKey: "sk-alice",
+      credentialId: org.id,
+      apiKey: "sk-org",
     });
     expect(await loadModel(ctx.orgId, model.id, bob.user.id)).toMatchObject({
       credentialSource: "org",
@@ -207,36 +200,22 @@ describe("model resolution — a member's own credential first", () => {
     expect(requireBoundModel(withKey!, bob.user.id).credentialSource).toBe("org");
   });
 
-  it("ignores personal credentials while the organization has switched them off", async () => {
-    const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
+  it("ignores personal credentials on an unbound model while the organization has switched them off", async () => {
+    const unbound = await unboundModel();
     await personalAnthropicKey(ctx.user.id, "sk-alice");
     await db
       .update(organizations)
       .set({ orgSettings: { personal_model_credentials: false } })
       .where(eq(organizations.id, ctx.orgId));
 
-    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
-      credentialId: org.id,
-      apiKey: "sk-org",
+    expect(await loadModel(ctx.orgId, unbound, ctx.user.id)).toMatchObject({
+      credentialSource: null,
+      apiKey: "",
     });
   });
 
-  it("gives each of two members their own credential when they resolve the same model concurrently", async () => {
-    const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
+  it("gives each of two members their own credential when they resolve the same unbound model concurrently", async () => {
+    const model = { id: await unboundModel() };
     await personalAnthropicKey(ctx.user.id, "sk-alice");
     await personalAnthropicKey(bob.user.id, "sk-bob");
 
@@ -259,27 +238,21 @@ describe("model resolution — a member's own credential first", () => {
     }
   });
 
-  it("resolves the org default through the payer's chain", async () => {
-    const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
-    await setDefaultModel(ctx.orgId, model.id);
+  it("resolves an unbound org default through the payer's own credential", async () => {
+    await setDefaultModel(ctx.orgId, await unboundModel());
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
     expect(await resolveModel(ctx.orgId, "@acme/agent", null, ctx.user.id)).toMatchObject({
+      credentialSource: "org",
       apiKey: "sk-alice",
     });
     expect(await resolveModel(ctx.orgId, "@acme/agent", null, bob.user.id)).toMatchObject({
-      apiKey: "sk-org",
+      credentialSource: null,
+      apiKey: "",
     });
   });
 
-  it("serves a system model with the owner's personal key of its family, the platform key to others", async () => {
+  it("serves a system model with the platform key, even to a holder of a personal key of its family", async () => {
     initSystemModelProviderKeys([
       {
         id: "sys-anthropic",
@@ -291,8 +264,8 @@ describe("model resolution — a member's own credential first", () => {
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
     expect(await loadModel(ctx.orgId, "sys-claude", ctx.user.id)).toMatchObject({
-      credentialSource: "org",
-      apiKey: "sk-alice",
+      credentialSource: "system",
+      apiKey: "sk-system",
     });
     expect(await loadModel(ctx.orgId, "sys-claude", bob.user.id)).toMatchObject({
       credentialSource: "system",
@@ -353,7 +326,7 @@ describe("model resolution — a member's own credential first", () => {
     });
   });
 
-  it("names the payer side per member in billed_to", async () => {
+  it("names the payer side per member in billed_to: the org for a bound model, the member's own key for an unbound one", async () => {
     const org = await orgAnthropicKey();
     const bound = await seedOrgModel({
       orgId: ctx.orgId,
@@ -369,8 +342,8 @@ describe("model resolution — a member's own credential first", () => {
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
     const forAlice = await listOrgModels(ctx.orgId, ctx.user.id);
-    // A personal credential that applies is the payer, even over the org binding.
-    expect(billedTo(forAlice, bound.id)).toBe("user");
+    // The org binding pays, even for a member holding a personal key of its family.
+    expect(billedTo(forAlice, bound.id)).toBe("org");
     expect(billedTo(forAlice, unbound)).toBe("user");
 
     const forBob = await listOrgModels(ctx.orgId, bob.user.id);
@@ -380,15 +353,9 @@ describe("model resolution — a member's own credential first", () => {
     expect(billedTo(await listOrgModels(ctx.orgId, null), bound.id)).toBe("org");
   });
 
-  it("the LLM proxy's chain skips a personal subscription and serves the org key", async () => {
-    const org = await orgOpenAiKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "openai",
-      modelId: TEST_OAUTH_MODEL_ID,
-      label: "GPT",
-    });
+  it("the LLM proxy's chain skips a personal subscription and serves the member's own API key on an unbound model", async () => {
+    const model = { id: await unboundModel("openai", TEST_OAUTH_MODEL_ID) };
+    const mine = await personalKey(ctx.user.id, "openai", "sk-alice");
     const subscription = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
       providerId: TEST_OAUTH_PROVIDER_ID,
@@ -402,20 +369,13 @@ describe("model resolution — a member's own credential first", () => {
     });
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id, { viaProxy: true })).toMatchObject({
       credentialSource: "org",
-      credentialId: org.id,
-      apiKey: "sk-org",
+      credentialId: mine.id,
+      apiKey: "sk-alice",
     });
   });
 
   it("a pinned personal credential keeps serving its run after the payer adds a subscription", async () => {
-    const org = await orgOpenAiKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "openai",
-      modelId: TEST_OAUTH_MODEL_ID,
-      label: "GPT",
-    });
+    const model = { id: await unboundModel("openai", TEST_OAUTH_MODEL_ID) };
     const mine = await personalKey(ctx.user.id, "openai", "sk-alice");
     const subscription = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
@@ -439,14 +399,7 @@ describe("model resolution — a member's own credential first", () => {
   });
 
   it("a pinned personal credential stops serving its run once the organization switches personal credentials off", async () => {
-    const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
+    const model = { id: await unboundModel() };
     const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
     const pin = { credentialId: mine.id, source: "org" as const };
 
@@ -461,13 +414,7 @@ describe("model resolution — a member's own credential first", () => {
 
   it("a run whose pinned credential is gone is never served by another credential", async () => {
     const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
+    const model = { id: await unboundModel() };
     const alias = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: org.id,
@@ -484,7 +431,8 @@ describe("model resolution — a member's own credential first", () => {
         models: [{ id: "sys-claude", modelId: ANTHROPIC_A }],
       },
     ]);
-    // The run launched on the member's personal key, which was then deleted: its pin is null.
+    // The run launched on the member's personal key, which was then deleted: its pin is
+    // null. Another key of theirs still serves the unbound model.
     await personalAnthropicKey(ctx.user.id, "sk-alice");
     clearResolvedModelCache();
 
@@ -502,15 +450,8 @@ describe("model resolution — a member's own credential first", () => {
     ).toMatchObject({ aliased: true });
   });
 
-  it("a personal credential whose key is not in the keyring is skipped for the org key", async () => {
-    const org = await orgAnthropicKey();
-    const model = await seedOrgModel({
-      orgId: ctx.orgId,
-      credentialId: org.id,
-      providerId: "anthropic",
-      modelId: ANTHROPIC_A,
-      label: "Claude",
-    });
+  it("a personal credential whose key is not in the keyring is skipped for the member's next one", async () => {
+    const model = { id: await unboundModel() };
     const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
     // Sealed under a key id this process does not hold.
     const [version, , payload] = mine.credentialsEncrypted.split(":");
@@ -518,13 +459,13 @@ describe("model resolution — a member's own credential first", () => {
       .update(modelProviderCredentials)
       .set({ credentialsEncrypted: `${version}:unknown-kid:${payload}` })
       .where(eq(modelProviderCredentials.id, mine.id));
-    clearResolvedModelCache();
+    const next = await personalAnthropicKey(ctx.user.id, "sk-alice-next");
 
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialSource: "org",
-      credentialId: org.id,
-      apiKey: "sk-org",
+      credentialId: next.id,
+      apiKey: "sk-alice-next",
     });
-    expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("org");
+    expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("user");
   });
 });

@@ -56,7 +56,6 @@ import type {
 } from "@appstrate/core/module";
 
 const SYSTEM_PRESET = "sys-chat-model";
-const OPENAI_PRESET = "sys-chat-openai";
 
 /** The error `fn` throws, or `undefined` when it returns. */
 function thrownBy(fn: () => unknown): unknown {
@@ -74,6 +73,19 @@ let USER_ID = "";
 /** An org-owned model bound to the org's own API key (not a system preset). */
 let orgPresetId = "";
 let orgKeyId = "";
+
+/** An unbound openai org model: each member's own key of the family serves it. */
+async function seedUnboundOpenAiPreset(): Promise<string> {
+  const model = await seedOrgModel({
+    orgId: ORG_ID,
+    providerId: "openai",
+    credentialId: null,
+    label: "Shared GPT",
+    modelId: "gpt-5.5",
+    enabled: true,
+  });
+  return model.id;
+}
 
 function fakeInitCtx(): ModuleInitContext {
   return {
@@ -530,16 +542,9 @@ describe("checkUsageAllowed", () => {
   });
 
   it("pins an admitted chat turn to the credential that admitted it, for its turn id, preset and user", async () => {
-    // A system preset of a provider whose catalog serves its model, so a personal key of
-    // that family can serve it: the member's own key is the credential the turn is admitted on.
-    initSystemModelProviderKeys([
-      {
-        id: "sys-key-openai",
-        providerId: "openai",
-        apiKey: "sk-system-openai",
-        models: [{ id: OPENAI_PRESET, modelId: "gpt-5.5" }],
-      },
-    ]);
+    // An unbound org model: the member's own key of its family is the credential the
+    // turn is admitted on.
+    const OPENAI_PRESET = await seedUnboundOpenAiPreset();
     const personal = await seedOrgModelProviderKey({
       orgId: ORG_ID,
       createdBy: USER_ID,
@@ -603,19 +608,14 @@ describe("checkUsageAllowed", () => {
   });
 
   it("keeps the pins of two concurrent turns of one user apart, each keyed by its turn id", async () => {
-    initSystemModelProviderKeys([
-      {
-        id: "sys-key-openai",
-        providerId: "openai",
-        apiKey: "sk-system-openai",
-        models: [{ id: OPENAI_PRESET, modelId: "gpt-5.5" }],
-      },
-    ]);
-    const orgKey = await seedOrgModelProviderKey({
+    const OPENAI_PRESET = await seedUnboundOpenAiPreset();
+    const first = await seedOrgModelProviderKey({
       orgId: ORG_ID,
-      label: "Org shared key",
+      createdBy: USER_ID,
+      ownerUserId: USER_ID,
+      label: "Mine",
       providerId: "openai",
-      apiKey: "sk-org-shared",
+      apiKey: "sk-mine",
     });
     const personal = await seedOrgModelProviderKey({
       orgId: ORG_ID,
@@ -628,9 +628,9 @@ describe("checkUsageAllowed", () => {
     const turnA = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_A" };
     const turnB = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_B" };
 
-    // Turn A is admitted on the org key; turn B, same user, session and preset,
-    // is admitted afterwards on the member's personal key.
-    recordChatTurnAdmission(turnA, OPENAI_PRESET, { credentialId: orgKey.id, source: "org" });
+    // Turn A is admitted on the member's first key; turn B, same user, session and
+    // preset, is admitted afterwards on a key they added later.
+    recordChatTurnAdmission(turnA, OPENAI_PRESET, { credentialId: first.id, source: "org" });
     recordChatTurnAdmission(turnB, OPENAI_PRESET, {
       credentialId: personal.id,
       source: "org",
@@ -638,7 +638,7 @@ describe("checkUsageAllowed", () => {
 
     // Each turn still spends the credential it was admitted on.
     expect(admittedChatTurnPin(turnA, OPENAI_PRESET)).toEqual({
-      credentialId: orgKey.id,
+      credentialId: first.id,
       source: "org",
     });
     expect(admittedChatTurnPin(turnB, OPENAI_PRESET)).toEqual({

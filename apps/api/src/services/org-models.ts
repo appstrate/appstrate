@@ -46,7 +46,6 @@ import {
   isSubscription,
   listPersonalCredentials,
   servesModel,
-  type PersonalCredential,
 } from "./model-providers/credential-chain.ts";
 import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
@@ -327,52 +326,19 @@ async function loadPersonalInference(orgId: string, credentialId: string) {
   }
 }
 
-/** The payer's own credentials that may serve `target`, best first; none for an alias. */
+/** The payer's own credentials that may serve the unbound model `target`, best first. */
 async function payerCredentialIds(
   orgId: string,
   payerUserId: string | null,
-  target: { providerId: string; modelId: string; aliased?: boolean },
+  target: { providerId: string; modelId: string },
   options?: { excludeSubscriptions?: boolean },
 ): Promise<string[]> {
-  if (!payerUserId || target.aliased) return [];
+  if (!payerUserId) return [];
   return applicableCredentialIds(
     await listPersonalCredentials(orgId, payerUserId),
     target,
     options,
   );
-}
-
-/** The first of the payer's credentials (best first) that serves, with what it serves. */
-async function firstServing<T>(
-  credentialIds: readonly string[],
-  serve: (credentialId: string) => Promise<T | null>,
-): Promise<{ credentialId: string; served: T } | null> {
-  for (const credentialId of credentialIds) {
-    const served = await serve(credentialId);
-    if (served) return { credentialId, served };
-  }
-  return null;
-}
-
-/** Whether one of the payer's credentials is dead but listed: the caller has one to reconnect. */
-async function anyNeedsReconnection(
-  credentialIds: readonly string[],
-  isDead: (credentialId: string) => Promise<boolean>,
-): Promise<boolean> {
-  for (const credentialId of credentialIds) if (await isDead(credentialId)) return true;
-  return false;
-}
-
-/** Whose credential serves a model for the caller: its own when one applies (as resolution picks it), else the org's binding. */
-async function billedTo(
-  isServing: (credentialId: string) => Promise<boolean>,
-  personal: readonly PersonalCredential[],
-  target: { providerId: string; modelId: string; aliased: boolean },
-  orgUsable: boolean,
-): Promise<"user" | "org" | null> {
-  const ids = target.aliased ? [] : applicableCredentialIds(personal, target);
-  if (await firstServing(ids, async (id) => ((await isServing(id)) ? true : null))) return "user";
-  return orgUsable ? "org" : null;
 }
 
 export async function listOrgModels(
@@ -401,7 +367,13 @@ export async function listOrgModels(
   // only a row with no resolvable provider is dropped.
   const renderableRows = rows.filter((r) => bindings.has(r.id));
 
-  const personal = payerUserId ? await listPersonalCredentials(orgId, payerUserId) : [];
+  // Who pays, for the caller: the organization for a bound or built-in model; the
+  // caller's own credential for an unbound one, or nobody when none of theirs serves it.
+  const unboundRows = renderableRows.filter((r) => r.credentialId === null);
+  const personal =
+    payerUserId && unboundRows.length ? await listPersonalCredentials(orgId, payerUserId) : [];
+  const paidByCaller = new Set<string>();
+  const reconnect = new Set<string>();
   // A personal credential is read once per call, however many models it applies to.
   const servingNow = new Map<string, Promise<boolean>>();
   const isServing = (credentialId: string): Promise<boolean> => {
@@ -412,47 +384,32 @@ export async function listOrgModels(
     }
     return served;
   };
-  const billing = new Map<string, "user" | "org" | null>();
-  await Promise.all([
-    ...Array.from(system, async ([id, def]) => {
-      billing.set(
-        id,
-        await billedTo(
-          isServing,
-          personal,
-          { providerId: def.providerId, modelId: def.modelId, aliased: def.aliased === true },
-          true,
-        ),
-      );
-    }),
-    ...renderableRows.map(async (r) => {
-      const binding = bindings.get(r.id)!;
-      billing.set(
-        r.id,
-        await billedTo(
-          isServing,
-          personal,
-          { providerId: binding.providerId, modelId: r.modelId, aliased: r.aliased },
-          binding.usable,
-        ),
-      );
-    }),
-  ]);
-  // An unbound row nothing serves for the caller asks for a reconnect when one of
-  // their own credentials for it is dead, exactly as `modelNeedsReconnection` does.
-  const reconnect = new Set<string>();
   await Promise.all(
-    renderableRows.map(async (r) => {
-      if (r.credentialId !== null || r.aliased || billing.get(r.id) !== null) return;
-      const ids = applicableCredentialIds(personal, {
-        providerId: r.providerId,
-        modelId: r.modelId,
-      });
-      if (await anyNeedsReconnection(ids, (id) => credentialIsDeadButListed(orgId, id))) {
-        reconnect.add(r.id);
+    unboundRows.map(async (r) => {
+      const ids = applicableCredentialIds(personal, r);
+      for (const id of ids) {
+        if (await isServing(id)) {
+          paidByCaller.add(r.id);
+          return;
+        }
+      }
+      // Nothing of theirs serves it: a dead one asks for a reconnect, as `modelNeedsReconnection` does.
+      for (const id of ids) {
+        if (await credentialIsDeadButListed(orgId, id)) {
+          reconnect.add(r.id);
+          return;
+        }
       }
     }),
   );
+  const billedTo = (r: (typeof renderableRows)[number]): "user" | "org" | null =>
+    r.credentialId === null
+      ? paidByCaller.has(r.id)
+        ? "user"
+        : null
+      : bindings.get(r.id)!.usable
+        ? "org"
+        : null;
 
   return mergeSystemAndDb<ModelDefinition, (typeof renderableRows)[number], OrgModelInfo>({
     system,
@@ -486,7 +443,7 @@ export async function listOrgModels(
         source: "built-in",
         credentialId: def.credentialId,
         credential_label: null,
-        billed_to: billing.get(id) ?? null,
+        billed_to: "org",
         created_by: null,
         createdAt: now,
         updatedAt: now,
@@ -514,10 +471,8 @@ export async function listOrgModels(
         modelId: row.modelId,
         enabled: row.enabled,
         is_default: pointer !== null && row.id === pointer,
-        // For the caller, like `billed_to`: a dead organization credential does not
-        // make the model unusable to a member whose own credential serves it.
-        needs_reconnection:
-          (binding.needsReconnection && billing.get(row.id) !== "user") || reconnect.has(row.id),
+        // An unbound model reads the caller's own credentials, like `billed_to`.
+        needs_reconnection: binding.needsReconnection || reconnect.has(row.id),
         aliased: row.aliased,
         // DB custom models declare no icon — the client resolves it from the
         // (visible) apiShape/baseUrl. Aliases live in env, never this table.
@@ -525,7 +480,7 @@ export async function listOrgModels(
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         credential_label: row.credentialLabel,
-        billed_to: billing.get(row.id) ?? null,
+        billed_to: billedTo(row),
         created_by: row.createdBy,
         createdAt: toISORequired(row.createdAt),
         updatedAt: toISORequired(row.updatedAt),
@@ -1331,7 +1286,7 @@ export async function resolveModelCascade(
     if (resolved) return { model: resolved, fromExplicit: false };
   }
 
-  // 3. System default — through loadModel, so a member's own credential applies to it too.
+  // 3. System default.
   for (const [id, def] of getSystemModels()) {
     if (def.isDefault && def.enabled !== false) {
       const model = await loadModel(orgId, id, payerUserId);
@@ -1370,28 +1325,27 @@ export function requireBoundModel(model: ResolvedModel, payerUserId: string | nu
   return { ...model, credentialSource: model.credentialSource };
 }
 
-/**
- * The model as the payer's own credential serves it, when one applies: personal
- * credentials come first. An aliased model never takes one.
- */
+/** An unbound model as the payer's own credential serves it, when one of theirs applies. */
 async function resolvePersonalModel(
   orgId: string,
   head: ModelHead & { providerId: string },
   payerUserId: string | null,
   excludeSubscriptions: boolean,
 ): Promise<ResolvedModel | null> {
-  const ids = await payerCredentialIds(orgId, payerUserId, head, { excludeSubscriptions });
-  const first = await firstServing(ids, (id) => loadPersonalInference(orgId, id));
-  return first
-    ? buildResolvedModel(head, { ...first.served, credentialId: first.credentialId })
-    : null;
+  for (const credentialId of await payerCredentialIds(orgId, payerUserId, head, {
+    excludeSubscriptions,
+  })) {
+    const creds = await loadPersonalInference(orgId, credentialId);
+    if (creds) return buildResolvedModel(head, { ...creds, credentialId });
+  }
+  return null;
 }
 
 /**
- * Resolve a model for `payerUserId` (the user whose personal credentials may serve
- * it, or `null`: no personal credential applies). `viaProxy` is the LLM proxy's
- * chain: subscriptions are skipped, so the org binding serves it. `null` when the
- * model is missing or disabled.
+ * Resolve a model for `payerUserId`, whose personal credentials serve an unbound
+ * model (`null`: none applies). A bound or built-in model is the organization's or
+ * the platform's whoever calls. `viaProxy` skips subscriptions, which the LLM proxy
+ * never serves. `null` when the model is missing or disabled.
  */
 export async function loadModel(
   orgId: string,
@@ -1399,19 +1353,15 @@ export async function loadModel(
   payerUserId: string | null,
   options?: { viaProxy?: boolean },
 ): Promise<ResolvedModel | null> {
-  const excludeSubscriptions = options?.viaProxy === true;
-  const slot = `${payerUserId ?? ""}${excludeSubscriptions ? ":proxy" : ""}`;
   const systemDef = getSystemModels().get(modelDbId);
   if (systemDef) {
-    return resolveModelCached(
-      orgId,
-      modelDbId,
-      slot,
-      async () =>
-        (await resolvePersonalModel(orgId, systemDef, payerUserId, excludeSubscriptions)) ??
-        buildSystemResolvedModel(systemDef),
+    // A built-in model is the platform's: no payer changes how it is served.
+    return resolveModelCached(orgId, modelDbId, "", async () =>
+      buildSystemResolvedModel(systemDef),
     );
   }
+  const excludeSubscriptions = options?.viaProxy === true;
+  const slot = `${payerUserId ?? ""}${excludeSubscriptions ? ":proxy" : ""}`;
   return resolveModelCached(orgId, modelDbId, slot, () =>
     resolveDbModel(orgId, modelDbId, payerUserId, excludeSubscriptions),
   );
@@ -1469,21 +1419,21 @@ async function resolvePinnedModel(
   modelDbId: string,
   credentialId: string,
 ): Promise<ResolvedModel | null> {
-  const systemDef = getSystemModels().get(modelDbId);
-  const row = systemDef ?? (await loadOrgModelHead(orgId, modelDbId));
-  if (!row || row.enabled === false) return null;
-  const binding = await loadCredentialBinding(orgId, credentialId);
-  if (!binding) return null;
-
-  if (binding.ownerUserId === null) {
+  // A pinned credential is a custom model's: a built-in one launches unpinned.
+  const row = await loadOrgModelHead(orgId, modelDbId);
+  if (!row || !row.enabled) return null;
+  if (row.credentialId !== null) {
     // An organization credential serves only the model bound to it.
-    if (systemDef || row.credentialId !== credentialId) return null;
+    if (row.credentialId !== credentialId) return null;
     const creds = await loadInferenceCredentials(orgId, credentialId);
     return creds ? buildResolvedModel(row, { ...creds, credentialId }) : null;
   }
-  // A personal credential serves a non-aliased model it applies to, while the
-  // organization allows personal credentials: switching them off ends its runs too.
-  if (row.aliased || !servesModel(binding.providerId, row)) return null;
+  // An unbound model: a personal credential that applies to it, while the
+  // organization allows personal credentials (switching them off ends its runs too).
+  const binding = await loadCredentialBinding(orgId, credentialId);
+  if (!binding || binding.ownerUserId === null || !servesModel(binding.providerId, row)) {
+    return null;
+  }
   if (!(await personalModelCredentialsAllowed(orgId))) return null;
   const creds = await loadPersonalInference(orgId, credentialId);
   return creds ? buildResolvedModel(row, { ...creds, credentialId }) : null;
@@ -1518,7 +1468,7 @@ async function loadOrgModelHead(orgId: string, modelDbId: string): Promise<DbOrg
   }
 }
 
-/** One custom model as `payerUserId` is served it: its personal credential first, then its org binding (or none). */
+/** One custom model: its organization binding, or, unbound, the payer's own credential (or none). */
 async function resolveDbModel(
   orgId: string,
   modelDbId: string,
@@ -1540,11 +1490,10 @@ async function resolveDbModel(
     );
   }
 
-  const personal = await resolvePersonalModel(orgId, row, payerUserId, excludeSubscriptions);
-  if (personal) return personal;
-
   const { credentialId } = row;
   if (credentialId === null) {
+    const personal = await resolvePersonalModel(orgId, row, payerUserId, excludeSubscriptions);
+    if (personal) return personal;
     return buildResolvedModel(row, {
       providerId: row.providerId,
       apiShape: def.apiShape,
@@ -1594,9 +1543,10 @@ export async function modelNeedsReconnection(
   const row = await loadModelBinding(orgId, modelDbId);
   if (!row || !row.enabled) return false;
   if (row.credentialId !== null) return credentialIsDeadButListed(orgId, row.credentialId);
-  return anyNeedsReconnection(await payerCredentialIds(orgId, payerUserId, row), (id) =>
-    credentialIsDeadButListed(orgId, id),
-  );
+  for (const id of await payerCredentialIds(orgId, payerUserId, row)) {
+    if (await credentialIsDeadButListed(orgId, id)) return true;
+  }
+  return false;
 }
 
 /** A custom row's credential and switch — undefined for a system id, an unknown row or a non-UUID. */
@@ -1656,12 +1606,10 @@ async function credentialIsDeadButListed(orgId: string, credentialId: string): P
 export async function assertExplicitModelExists(
   orgId: string,
   modelId: string | null | undefined,
-  payerUserId: string | null,
 ): Promise<ResolvedModel | null> {
   if (!modelId) return null;
-  // Resolved for the payer: a model their own credential serves exists for them
-  // even when its organization credential is dead.
-  const model = await loadModel(orgId, modelId, payerUserId);
+  // Whether a model exists does not depend on who pays for it.
+  const model = await loadModel(orgId, modelId, null);
   if (!model) {
     throw notFound(`Model '${modelId}' not found — expected a model UUID or a system model key`);
   }

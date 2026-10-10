@@ -4,10 +4,11 @@
  * Whose credential a run spends (#1875).
  *
  * The payer is the run's user when the run was not triggered by an API key:
- * their personal credential serves an org model of the same provider family,
- * otherwise the model's own org binding does. An API-key run has no payer and
- * never spends a personal credential. A model with no usable credential for
- * its payer is refused at kickoff (`model_credential_required`).
+ * their personal credential serves an UNBOUND org model of the same provider
+ * family. A model bound to an organization credential is served by it whoever
+ * launches, and a built-in model by the platform key. An API-key run has no
+ * payer and never spends a personal credential. A model with no usable
+ * credential for its payer is refused at kickoff (`model_credential_required`).
  *
  * The sidecar OAuth door serves a personal credential only to runs of its
  * holder: the same pin that gates the run, plus the payer check.
@@ -144,12 +145,12 @@ describe("run payer — personal model credentials", () => {
     return ((await detail.json()) as { modelCredentialId: string | null }).modelCredentialId;
   }
 
-  it("a member's manual run spends their own key on an org model", async () => {
-    await seedBoundDefault();
+  it("a member's manual run on a bound org model spends the org credential, even with a personal key", async () => {
+    const orgCredentialId = await seedBoundDefault();
     const member = await memberContext(ctx, "member", "builder");
-    const personalId = await seedPersonalKey(member.user.id, "member-key");
+    await seedPersonalKey(member.user.id, "member-key");
 
-    expect(await launchedCredentialId(authHeaders(member))).toBe(personalId);
+    expect(await launchedCredentialId(authHeaders(member))).toBe(orgCredentialId);
   });
 
   it("the org owner without a personal key still runs on the org credential", async () => {
@@ -259,8 +260,9 @@ describe("run payer — personal model credentials", () => {
 
   // ── the other doors ───────────────────────────────────────
 
-  it("lists a model as billed to the caller's own key, and to the org for an API key", async () => {
-    await seedBoundDefault();
+  it("lists an unbound model as billed to the caller's own key and to nobody for an API key, a bound one to the org", async () => {
+    const orgCredentialId = await seedBoundDefault();
+    await seedUnboundDefault();
     const member = await memberContext(ctx, "member", "builder");
     await seedPersonalKey(member.user.id, "member-key");
     const key = await seedApiKey({
@@ -269,21 +271,27 @@ describe("run payer — personal model credentials", () => {
       createdBy: member.user.id,
       scopes: ["models:read"],
     });
-    const [model] = await db
-      .select({ id: orgModels.id })
+    const rows = await db
+      .select({ id: orgModels.id, credentialId: orgModels.credentialId })
       .from(orgModels)
       .where(eq(orgModels.orgId, ctx.orgId));
-    const orgModelId = model!.id;
+    const boundId = rows.find((r) => r.credentialId === orgCredentialId)!.id;
+    const unboundId = rows.find((r) => r.credentialId === null)!.id;
 
     const billedTo = async (headers: Record<string, string>) => {
       const res = await app.request("/api/models", { headers });
       expect(res.status).toBe(200);
       const { data } = (await res.json()) as { data: { id: string; billed_to: string | null }[] };
-      return data.find((m) => m.id === orgModelId)?.billed_to;
+      const of = (id: string) => data.find((m) => m.id === id)?.billed_to;
+      return { bound: of(boundId), unbound: of(unboundId) };
     };
 
-    expect(await billedTo(authHeaders(member))).toBe("user");
-    expect(await billedTo({ Authorization: `Bearer ${key.rawKey}` })).toBe("org");
+    expect(await billedTo(authHeaders(member))).toEqual({ bound: "org", unbound: "user" });
+    expect(await billedTo(authHeaders(ctx))).toEqual({ bound: "org", unbound: null });
+    expect(await billedTo({ Authorization: `Bearer ${key.rawKey}` })).toEqual({
+      bound: "org",
+      unbound: null,
+    });
   });
 
   it("refuses to discover another member's personal credential as absent", async () => {
@@ -335,11 +343,7 @@ describe("run admission — the credential a run spends is the one admitted", ()
     };
   }
 
-  /**
-   * The member's own openai key serves `modelId` (the system model by default): the
-   * run is admitted on it.
-   */
-  async function launchAsMember(modelId: string = SYSTEM_MODEL) {
+  async function launchAsMember(modelId: string) {
     return app.request("/api/runs/inline", {
       method: "POST",
       headers: { ...authHeaders(member), "Content-Type": "application/json" },
@@ -351,24 +355,29 @@ describe("run admission — the credential a run spends is the one admitted", ()
     });
   }
 
-  /**
-   * An org model bound to the organization's own key. The member's personal key of
-   * the same family serves it before the org key does, so the gate admits the run on
-   * the personal key (source "org"), and the org key is the next credential in line.
-   */
-  async function seedOrgBoundModel(): Promise<string> {
-    const orgCredentialId = await createApiKeyCredential({
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      ownerUserId: null,
-      label: "Org key",
-      providerId: "openai",
-      apiKey: "sk-org-admission",
-    });
-    return createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, {
-      credentialId: orgCredentialId,
-    });
+  /** An unbound org model: the member's personal key of the same family serves it (source "org"). */
+  async function seedUnboundModel(): Promise<string> {
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Shared GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+    return row!.id;
   }
+
+  const stampedCredentials = () =>
+    db
+      .select({ modelCredentialId: runs.modelCredentialId })
+      .from(runs)
+      .where(eq(runs.orgId, ctx.orgId));
 
   beforeAll(() => {
     _setOrchestratorForTesting(createFakeOrchestrator());
@@ -410,20 +419,14 @@ describe("run admission — the credential a run spends is the one admitted", ()
   });
 
   it("spends the credential resolved once and admitted, even when the gate changes what a second resolution would pick", async () => {
-    // The org model is bound to the org key; the member's personal key serves it first.
-    const orgModelId = await seedOrgBoundModel();
-    const [orgModel] = await db
-      .select({ credentialId: orgModels.credentialId })
-      .from(orgModels)
-      .where(eq(orgModels.id, orgModelId));
-    const orgCredentialId = orgModel?.credentialId;
-    if (!orgCredentialId) throw new Error("the org model is not bound to a credential");
+    // The unbound org model is served by the member's personal key.
+    const orgModelId = await seedUnboundModel();
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances(
       [
         gateModule(async () => {
           // Personal credentials are switched off org-wide while the gate runs. A
-          // second resolution after this point would skip the personal key and pick the org key.
+          // second resolution after this point would find no credential to spend.
           await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
         }, calls),
       ],
@@ -435,20 +438,16 @@ describe("run admission — the credential a run spends is the one admitted", ()
     expect(res.status).toBe(201);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ credentialSource: "org" });
-    // The run spends the personal key admitted at the gate, not the org key.
-    const stamped = await db
-      .select({ modelCredentialId: runs.modelCredentialId })
-      .from(runs)
-      .where(eq(runs.orgId, ctx.orgId));
-    expect(stamped).toEqual([{ modelCredentialId: personalId }]);
-    // Discrimination: a fresh resolution after the gate does pick the org key.
+    // The run spends the personal key admitted at the gate.
+    expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
+    // Discrimination: a fresh resolution after the gate finds no credential at all.
     clearResolvedModelCache();
     const resolvedAfterGate = await loadModel(ctx.orgId, orgModelId, member.user.id);
-    expect(resolvedAfterGate?.credentialId).toBe(orgCredentialId);
+    expect(resolvedAfterGate?.credentialSource).toBeNull();
   });
 
-  it("admits the org-model run on the member's personal key when the gate removes nothing (control)", async () => {
-    const orgModelId = await seedOrgBoundModel();
+  it("admits the unbound-model run on the member's personal key when the gate removes nothing (control)", async () => {
+    const orgModelId = await seedUnboundModel();
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(async () => {}, calls)], fakeInitCtx());
 
@@ -457,24 +456,32 @@ describe("run admission — the credential a run spends is the one admitted", ()
     expect(res.status).toBe(201);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ credentialSource: "org" });
-    const stamped = await db
-      .select({ modelCredentialId: runs.modelCredentialId })
-      .from(runs)
-      .where(eq(runs.orgId, ctx.orgId));
-    expect(stamped).toEqual([{ modelCredentialId: personalId }]);
+    expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
   });
 
-  it("admits the same run when the gate removes nothing (control)", async () => {
+  it("admits a bound model on the org credential and a built-in one on the platform key, though the member holds a personal key", async () => {
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Org key",
+      providerId: "openai",
+      apiKey: "sk-org-admission",
+    });
+    const boundModelId = await createOrgModel(ctx.orgId, "Team GPT", "gpt-5.5", ctx.user.id, {
+      credentialId: orgCredentialId,
+    });
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(async () => {}, calls)], fakeInitCtx());
 
-    const res = await launchAsMember();
+    expect((await launchAsMember(boundModelId)).status).toBe(201);
+    expect((await launchAsMember(SYSTEM_MODEL)).status).toBe(201);
 
-    expect(res.status).toBe(201);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ credentialSource: "org" });
-    expect(
-      await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId)),
-    ).toHaveLength(1);
+    expect(calls[1]).toMatchObject({ credentialSource: "system" });
+    const stamped = (await stampedCredentials()).map((r) => r.modelCredentialId);
+    expect(stamped.sort()).toEqual([orgCredentialId, null].sort());
+    expect(stamped).not.toContain(personalId);
   });
 });

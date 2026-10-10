@@ -465,7 +465,7 @@
   "connections.reusedByCount_one": "{{count}} agent uses it in its spaces",
   "connections.reusedByCount_other": "{{count}} agents use it in its spaces",
   "connections.reusedByNone": "No agent currently uses it",
-  "modelCredentials.description": "Your API keys and subscriptions pay for calls to the organization's models. They serve only you and are never shared.",
+  "modelCredentials.description": "Your API keys and subscriptions pay for the models the organization leaves to each member (\"Each member uses their own credential\"). They serve only you and are never shared. Other models stay paid by the organization.",
   "modelCredentials.empty": "No personal credential",
   "modelCredentials.emptyHint": "Add an API key or connect a subscription to pay for your calls to the organization's models.",
   "modelCredentials.billedTitle": "Organization models paid by your credentials",

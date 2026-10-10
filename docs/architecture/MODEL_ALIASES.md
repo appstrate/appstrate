@@ -201,97 +201,65 @@ The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
 billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 `PlatformServices.usage.list`) never projects `real_model`/`api`.
 
-## Who pays: the credential chain
+## Who pays
 
-The model is resolved first, by the cascade, which is actor-free. Then the
-payer decides which credential serves the call (`loadModel`,
-`services/org-models.ts`; the chain in `services/model-providers/credential-chain.ts`).
-The payer is the user whose personal credentials may serve the call, or nobody.
-Only a user principal pays: `requestPayerUserId(c)` (`services/model-providers/credential-chain.ts`)
-returns the caller's id when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), and
-`null` otherwise. Each door computes it once per request and passes it on: the run pipeline takes
-`payerUserId` as a required parameter and never derives it.
+The model is resolved first, by the cascade, which is actor-free. Who pays then
+follows from the model alone (`loadModel`, `services/org-models.ts`):
+
+1. a built-in model: the platform key;
+2. a model bound to an organization credential: that credential, whoever calls;
+3. a model with no organization credential (`credential_id` NULL, "each member
+   uses their own credential"): the payer's own credential. The applicable ones
+   are of the model's catalog family with the model in their provider's offer,
+   subscriptions first, then the oldest (`services/model-providers/credential-chain.ts`);
+   none applies while the organization has personal model credentials off. With
+   none, the call is refused with `409 model_credential_required`.
+
+The payer is the user whose personal credentials may serve step 3, or nobody.
+Only a user principal pays: `requestPayerUserId(c)` returns the caller's id when
+`isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null` otherwise.
+Each door computes it once per request and passes it down.
 
 - a session, CLI, MCP instance token or chat loopback: that user;
 - an API key, a third-party OAuth token, an end user or an OIDC end-user token: nobody;
-- a schedule: nobody, whoever wrote it and whoever is named as its actor. A schedule spends
-  organization credentials only;
-- a run: the payer its launch door computed, by the same rule.
+- a schedule: nobody, whoever wrote it or is its actor. A member-paid model
+  cannot be a schedule's `model_id_override` (`409 model_credential_required`),
+  and a model a schedule overrides with cannot be unbound
+  (`PATCH /api/models/{id}`, `409 model_scheduled`);
+- a run: the payer its launch door computed.
 
-A schedule's `model_id_override` may not name a model that only each member's
-own credential serves (`credential_id` NULL): it is refused with
-`409 model_credential_required`. For a door with no payer (a schedule, an API
-key, an end user) that message says the launch spends organization credentials
-only.
+An alias is always bound (a model alias needs an organization credential), so it
+never takes a personal credential. `GET /api/models` reads step 3 for the caller:
+`billed_to` is `org` for a built-in or usable bound model, `user` for an unbound
+model one of the caller's credentials serves, `null` otherwise; `needs_reconnection`
+on an unbound model is true when nothing of the caller's serves it and one of
+their credentials for it is dead.
 
-For a payer, the call is served by, in order:
+The public LLM proxy (`/api/llm-proxy`) never serves a subscription (`viaProxy`
+skips oauth2 credentials), so `billed_to` describes runs and chat. A run's proxy
+calls serve the credential frozen at launch (`runs.model_credential_id`), never
+re-resolved: one removed mid-run, or personal credentials switched off, refuses
+the run's next call rather than switching payer. The sidecar's token door
+(`/internal/oauth-token/{credentialId}`) gives a subscription's token only to a
+platform run pinned to it and launched by its owner with no API key; a token the
+sidecar already holds lasts up to its 30-second cache, as for a revocation.
 
-1. the payer's personal credentials that serve the model: the same catalog
-   family as the model's provider, and the model in that provider's catalog
-   offer. Subscriptions come first, then the oldest. A credential that cannot
-   serve the call is skipped. Nothing applies while the organization has
-   personal model credentials turned off.
-2. otherwise the model's own binding: the platform key of a built-in model, or
-   the organization credential of a custom one.
-3. a model with no binding (`credential_id` NULL) has no step 2. The call is
-   refused with `409 model_credential_required` before dispatch.
-
-Aliased models never take a personal credential: their binding is always the
-alias's own. `GET /api/models` and an explicit model choice at run launch are
-read for the caller's payer: `billed_to` says who pays (`user`, `org`, or `null`
-when neither applies), and `needs_reconnection` is true when nothing serves the
-model for the caller because a credential must be reconnected (the
-organization's, or one of the caller's own for an unbound model). An unbound
-model is listed with `credentialId: null`. Settings shared by every member (an
-agent's or a space's model) are validated with no payer.
-
-The public LLM proxy (`/api/llm-proxy`) never serves a subscription: its chain
-runs with `viaProxy`, which skips oauth2 credentials, so a call falls to the
-caller's other personal credential or to the organization binding, and is
-refused when that binding is itself a subscription. For a member whose only
-applicable credential is a subscription, a proxy call therefore falls to the
-organization binding or is refused (`billed_to` describes runs and chat, not the
-proxy). A run's
-inference through the LLM proxy serves the credential frozen at launch
-(`runs.model_credential_id`) and is not re-resolved during the run: a credential
-the payer adds mid-run changes nothing, and one removed mid-run stops serving
-that run's calls: the run's next call is refused, never served by whatever
-serves the model now (only a system model or an alias launches without a
-credential id). The sidecar's token door (`/internal/oauth-token/{credentialId}`)
-gives a subscription's token only to a platform run pinned to that credential,
-launched by its owner with no API key (`runs.api_key_id` NULL); any other run is
-refused. Switching personal credentials off stops them at once: a pinned run's
-next call and the token door are refused. A subscription token a run's sidecar
-already holds keeps serving until its cache entry expires (30 seconds), the same
-bound as for a deleted or revoked credential.
-
-The admission gate (`beforeUsage`) quotes the credential a run or chat turn
-resolves to when it is admitted, and that exact credential is what gets spent.
-A run resolves its model once, before the gate, and its context reuses that
-resolution. A chat turn on the proxy is admitted on the credential its gate
-resolved, recorded for its turn id (`recordChatTurnAdmission`, the id the chat
-signs into its inference bearer): its proxy calls are served on that one, and a
-call no admission covers is refused with `409 model_credential_changed`. A
-subscription turn never reaches the proxy: `resolveChatModel` records the
-subscription it hands the engine under the turn id (`recordSubscriptionTurn`, a
-separate map the proxy never reads), and admission takes that record once and
-re-validates it through the pinned-model loader. If it no longer serves
-(deleted, or personal credentials switched off), the turn is refused with
-`409 model_credential_changed`. A turn answered with a reconnect carries no
-token and is admitted with nothing recorded.
+What is admitted is what is spent. A run resolves its model once, before the
+`beforeUsage` gate, and its context reuses that resolution. A chat turn on the
+proxy is served on the credential admitted for its turn id
+(`recordChatTurnAdmission`, the id signed into its inference bearer); a call no
+admission covers is refused with `409 model_credential_changed`. A subscription
+turn never reaches the proxy: `resolveChatModel` records the subscription it
+hands the engine under the turn id (`recordSubscriptionTurn`), and admission
+re-validates that record through the pinned-model loader, refusing the turn the
+same way when it no longer serves. A reconnect answer carries no token and
+records nothing.
 
 `llm_usage.credential_id` (uuid, no foreign key) records the credential that
-served the call, as a run pins it: NULL for a platform key or an alias. A row
-already written keeps it after the credential is deleted. A run's rows read the
-run's pin (`runs.model_credential_id`, `ON DELETE SET NULL`), so the rows a run
-writes after its credential is deleted mid-run carry NULL (that run's next proxy
-call is refused anyway).
-
-A model a schedule names in `model_id_override` cannot be unbound
-(`PATCH /api/models/{id}` with `credentialId: null`): `409 model_scheduled`.
-
-`credential_source` has two values: `system` (a platform credential) and `org`
-(one the customer supplies, an organization's or a member's own).
+served a call as a run pins it (NULL for a platform key or an alias); a written
+row keeps it after the credential is deleted. `credential_source` keeps two
+values: `system` (the platform's) and `org` (the customer's: the organization's
+or a member's own).
 
 ## Error surfaces: synthesize, never scrub
 

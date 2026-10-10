@@ -170,82 +170,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING (API): a model is paid by its payer's own credential first**
-  (#1875). A call is served by the payer's personal credential when one
-  applies (a subscription, or an API key on a fixed endpoint), else by the
-  model's organization credential. Only a user principal pays (session, CLI,
-  MCP instance token, chat loopback): an API key, a third-party OAuth token,
-  an end user and a schedule spend organization credentials only. The LLM
-  proxy never serves a subscription, and a run's proxy calls serve the
-  credential frozen at launch. The chain is in
-  `docs/architecture/MODEL_ALIASES.md`, "Who pays".
-  - The model DTO's `credentialId` is nullable (`null`: each member brings
-    their own credential). It adds `credential_label` (the organization
-    credential's label, `null` when unbound) and `billed_to` (`user` | `org`
-    | `null`, for the caller). `POST /api/models` takes `providerId`, which a
-    `null` `credentialId` requires; a personal credential there is refused
-    with `400 personal_credential_not_bindable`.
-  - The credential DTO adds `owner_type` (`org` | `user`), `owner_id` and
-    `owner_name`. `POST /api/model-provider-credentials` takes `owner_type`
-    (default `org`); `user` needs `model-provider-credentials:connect` and
-    refuses a custom endpoint (`400 personal_credential_custom_endpoint`).
-  - `model-provider-credentials` gains the `connect` action, granted to member
-    and guest, never to API keys or end-user tokens. `read` now lists every
-    organization credential; without it a caller lists its own personal ones
-    only (`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.7).
-  - A model with no organization credential is served only by each member's
-    own credential, and a payer without one gets
-    `409 model_credential_required`. An aliased model never takes a personal
-    credential.
-  - The sidecar's token door serves a subscription only to a platform run
-    launched by its owner with no API key; any other run is refused (403).
-    A schedule never spends a personal credential, so a model served only by
-    each member's own credential cannot be scheduled (refused with 409
-    `model_credential_required` when the schedule fires).
-  - `credential_source` keeps its two values: `system` is a platform
-    credential, `org` one the customer supplies, an organization's or a
-    member's own.
-  - A run or a chat turn spends the exact credential it was admitted on. A run
-    resolves its model once, before the admission gate. A chat turn is admitted
-    on the subscription credential `resolveChatModel` hands its engine, recorded
-    under the turn id and re-validated at admission; if it no longer serves
-    (deleted, or personal credentials switched off), the turn is refused with
-    `409 model_credential_changed`. A proxy call no admission covers is refused
-    the same way.
-  - `llm_usage.credential_id` is restored (uuid, no foreign key): proxy, run
-    and subscription-chat usage rows record the credential that served the call
-    (NULL for a platform key or an alias), and a written row keeps it after the
-    credential is deleted.
-  - A model a schedule names in `model_id_override` cannot be unbound:
-    `PATCH /api/models/{id}` with `credentialId: null` answers
-    `409 model_scheduled`.
-  - A schedule's `model_id_override` may not name a model served only by each
-    member's own credential: `409 model_credential_required` (a schedule spends
-    organization credentials only). For a door with no payer (a schedule, an
-    API key, an end user) that message says the launch spends organization
-    credentials only.
-  - Reconnecting a subscription through a pairing is allowed only for its
-    holder (`owner_user_id` is the redeeming member), judged at redeem time
-    under the member's membership lock with the organization policy checked;
-    minting a pairing also refuses a credential the caller does not own.
-  - Probes (`POST /api/model-provider-credentials/:id/test`, and inline `/test`
-    and `/discover` naming a stored credential) refuse a personal credential
-    with `403 personal_model_credentials_disabled` when the organization policy
-    is off.
-  - Credential labels are deduplicated within the owner's scope only
-    (organization credentials among themselves, a member's among their own).
-    PATCH and DELETE editability is enforced in the credentials service. An
-    admin sees `oauth_email: null` on another member's personal subscription.
-  - `GET /api/models` `billed_to` describes runs and chat. The public LLM proxy
-    never serves a subscription, so for a member whose only applicable
-    credential is a subscription, proxy calls fall to the organization binding
-    or are refused.
-  - In `GET /api/models`, `needs_reconnection` and `billed_to` are read for
-    the caller: a model whose organization credential is dead stays usable to
-    a member whose own credential serves it, and an unbound model whose only
-    serving credential of the caller is dead asks for a reconnect.
-  - Deleting an organization credential, and the break-glass deletion of a
-    member's, take `model-provider-credentials:delete`.
+- **BREAKING (API): members bring their own model credentials for the models
+  the organization leaves to them** (#1875). A model bound to an organization
+  credential is paid by the organization, and a built-in model by the platform,
+  whoever calls. A model with no organization credential (`credentialId: null`,
+  "each member uses their own credential") is served only by the payer's own
+  applicable credential (a subscription first, then the oldest API key on a
+  fixed endpoint), else refused with `409 model_credential_required`. Only a
+  user principal pays (session, CLI, MCP instance token, chat loopback): an API
+  key, a third-party OAuth token, an end user and a schedule never spend a
+  personal credential. The rules: `docs/architecture/MODEL_ALIASES.md`,
+  "Who pays".
+  - Model DTO: `credentialId` is nullable; `credential_label` (the organization
+    credential's label) and `billed_to` (`user` | `org` | `null`, for the caller)
+    are added. `POST /api/models` takes `providerId`, which a `null`
+    `credentialId` requires; binding a personal credential is refused with
+    `400 personal_credential_not_bindable`. One unbound model per provider and
+    model id.
+  - Credential DTO: `owner_type` (`org` | `user`), `owner_id`, `owner_name`.
+    `POST /api/model-provider-credentials` takes `owner_type` (default `org`);
+    `user` needs the new `model-provider-credentials:connect` action (granted to
+    member and guest) and refuses a custom endpoint
+    (`400 personal_credential_custom_endpoint`). `read` lists every organization
+    credential; without it a caller lists only its own. Deleting an
+    organization credential, or a member's (break-glass), takes `delete`. An
+    administrator sees no `oauth_email` on a member's subscription, and labels
+    are deduplicated within their owner's scope.
+  - Org setting `personal_model_credentials` (default on). Off, personal
+    credentials can be neither created, reconnected, probed nor spent, and a run
+    pinned to one is refused at its next call.
+  - A run's proxy calls serve the credential frozen at launch; a chat turn spends
+    the credential it was admitted on (a subscription turn: the one handed to its
+    engine, re-validated at admission). Otherwise `409 model_credential_changed`.
+    The public LLM proxy never serves a subscription. The sidecar's token door
+    serves a subscription only to a run its owner launched without an API key.
+  - Schedules spend organization credentials only: a member-paid model cannot be
+    a schedule's `model_id_override` (`409 model_credential_required`), a model
+    a schedule overrides with cannot be unbound (`409 model_scheduled`), and a
+    schedule firing one through an agent's or the organization's default fails.
+  - A subscription is reconnected only by its holder, judged at redeem time.
+  - `llm_usage.credential_id` (uuid, no foreign key) records the credential that
+    served a call (NULL for a platform key or an alias). `credential_source`
+    keeps two values: `system` and `org` (an organization's or a member's own).
+  - `needs_reconnection` is read for the caller on an unbound model: true when
+    nothing of theirs serves it and one of their own credentials for it is dead.
 - **BREAKING (modules): the chat platform services take the session user**
   (#1875). `resolveChatModel(orgId, presetId, userId, turnId)` and
   `checkUsageAllowed({ ..., turnId, userId })`, where `turnId` identifies the

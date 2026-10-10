@@ -6137,7 +6137,7 @@ export interface components {
             reasoning?: boolean | null;
             enabled: boolean;
             is_default: boolean;
-            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. Read for the caller, like `billed_to`: false when the caller's own personal credential serves the model, even if its organization credential is dead (the credentials list still flags that credential); true for an unbound model when nothing of the caller's serves it and one of their own credentials for it must be reconnected. */
+            /** @description True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. On an unbound model (`credentialId: null`) it is read for the caller, like `billed_to`: true when nothing of the caller's serves it and one of their own credentials for it must be reconnected. */
             needs_reconnection: boolean;
             /** @description Managed-model flag. When true, the binding (`modelId`, `apiShape`, `base_url`, `credentialId`, capabilities/cost) is not exposed in this projection — these fields are `null`; render a managed badge. */
             aliased: boolean;
@@ -6150,7 +6150,7 @@ export interface components {
             /** @description Label of the bound credential. `null` whenever `credentialId` is `null` (unbound model, or managed model). */
             credential_label: string | null;
             /**
-             * @description Who pays for a call to this model, for the caller. `user` — the caller's own personal credential serves it. `org` — an organization or platform credential serves it. `null` — the caller has no usable credential for it: the spend is refused with `409 model_credential_required` until they add one. A personal credential never serves a managed (`aliased`) model. Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription is billed there as if they had none (the organization binding, or a 409).
+             * @description Who pays for a call to this model, for the caller. `org` — a built-in model, or a model bound to a usable organization credential: the organization (or the platform) pays whoever calls. `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — nothing serves it for the caller: a spend is refused (`409 model_credential_required` on an unbound model). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.
              * @enum {string|null}
              */
             billed_to: "user" | "org" | null;

@@ -297,15 +297,15 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 });
 
-describe("org-models — a member's own credential serves a model whose organization credential is dead", () => {
+describe("org-models — a member's own credential never serves a bound model", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
     await truncateAll();
-    ctx = await createTestContext({ orgSlug: "deadbutservedorg" });
+    ctx = await createTestContext({ orgSlug: "deadorgcred" });
   });
 
-  it("lists the model as usable to the member whose own key serves it, and flagged to a member with none", async () => {
+  it("flags a model whose organization credential is dead to everyone, own key or not", async () => {
     const alice = await memberContext(ctx, "member");
     const bob = await memberContext(ctx, "member");
     // The organization's key is listed but its blob no longer decrypts: a dead binding.
@@ -325,8 +325,8 @@ describe("org-models — a member's own credential serves a model whose organiza
       modelId: "gpt-5.5",
       enabled: true,
     });
-    // Alice's own key of the same family serves the model for her.
-    const aliceKey = await seedOrgModelProviderKey({
+    // Alice holds her own key of the same family.
+    await seedOrgModelProviderKey({
       orgId: ctx.orgId,
       createdBy: alice.user.id,
       ownerUserId: alice.user.id,
@@ -336,17 +336,12 @@ describe("org-models — a member's own credential serves a model whose organiza
     });
     clearResolvedModelCache();
 
-    const forAlice = (await listOrgModels(ctx.orgId, alice.user.id)).find((m) => m.id === model.id);
-    expect(forAlice).toMatchObject({ needs_reconnection: false, billed_to: "user" });
-    const forBob = (await listOrgModels(ctx.orgId, bob.user.id)).find((m) => m.id === model.id);
-    expect(forBob).toMatchObject({ needs_reconnection: true });
-
-    // The explicit choice is resolved for its payer: Alice's key serves it, nobody else's does.
-    expect(await assertExplicitModelExists(ctx.orgId, model.id, alice.user.id)).toMatchObject({
-      credentialId: aliceKey.id,
-      credentialSource: "org",
-    });
-    const refused = await assertExplicitModelExists(ctx.orgId, model.id, null).catch(
+    // The organization pays for a bound model: Alice's own key does not stand in for it.
+    for (const payer of [alice.user.id, bob.user.id]) {
+      const listed = (await listOrgModels(ctx.orgId, payer)).find((m) => m.id === model.id);
+      expect(listed).toMatchObject({ needs_reconnection: true, billed_to: null });
+    }
+    const refused = await assertExplicitModelExists(ctx.orgId, model.id).catch(
       (err: unknown) => err,
     );
     expect(refused).toBeInstanceOf(ApiError);
