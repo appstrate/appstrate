@@ -131,6 +131,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`@appstrate/twilio` 1.1.0 reaches Twilio's product API hosts** (#1904):
+  `messaging`, `conversations`, `studio`, `serverless`, `numbers`, `voice`
+  and every other host in Twilio's OpenAPI specs: 38 hosts, the former
+  `api`, `lookups` and `verify` among them. Calls to Messaging Services,
+  Conversations, Studio or Serverless were refused before. The list names
+  each host, not a `*.twilio.com` wildcard: some `twilio.com` subdomains are
+  run by third parties (`status`, `support`, `community`) and must never
+  receive the credential. The connect form is in French. An agent with a
+  version range resolves to 1.1.0 and gets the wider allowlist; one pinned
+  to 1.0.3 keeps the old one.
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).
   - `shared_with_org` is gone from the connection DTOs (connection list,
@@ -551,6 +561,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the payload Pi builds.
 
 ### Fixed
+
+- **The connect form lists credential fields in the schema's `required`
+  order, required fields first** (#1904). jsonb storage reorders a schema's
+  `properties` keys, so the form followed that order, not the author's. This
+  puts Twilio's Account SID before its Auth Token, and reorders the
+  `@appstrate/zendesk` and `@appstrate/activecampaign` forms.
 
 - **The OAuth consent and device-activation pages introduce the scope list
   with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover
