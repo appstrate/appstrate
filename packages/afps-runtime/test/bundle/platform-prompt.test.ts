@@ -763,4 +763,74 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("### Full JSON Schema");
     });
   });
+
+  describe("User Input value rendering (#1896)", () => {
+    const cases: Array<[string, unknown, string]> = [
+      ["object", { a: 1 }, '{"a":1}'],
+      ["array of primitives", ["x,y", 2], '["x,y",2]'],
+      ["array of objects", [{ id: 1 }, { id: 2 }], '[{"id":1},{"id":2}]'],
+      ["nested value", { a: { b: [1, { c: null }] } }, '{"a":{"b":[1,{"c":null}]}}'],
+      ["null", null, "null"],
+    ];
+
+    for (const [label, value, text] of cases) {
+      it(`renders ${label} as JSON without a schema`, () => {
+        const out = renderPlatformPrompt({ template: "T", context: ctx({ input: { v: value } }) });
+        expect(out).toContain(`- **v**: ${text}\n`);
+      });
+
+      it(`renders ${label} as JSON in a code span with a schema`, () => {
+        const out = renderPlatformPrompt({
+          template: "T",
+          context: ctx({ input: { v: value } }),
+          inputSchema: { properties: { v: { type: "object", description: "D" } } },
+        });
+        expect(out).toContain(`- **v** (object, optional): D — \`${text}\`\n`);
+      });
+    }
+
+    it("renders an object for a schema property declared without `properties`", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: { k: "x" } } }),
+        inputSchema: { properties: { v: { type: "object" } } },
+      });
+      expect(out).toContain('- **v** (object, optional):  — `{"k":"x"}`\n');
+    });
+
+    it("renders a string unchanged without a schema, even with backticks", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "run `ls`" } }),
+      });
+      expect(out).toContain("- **v**: run `ls`\n");
+    });
+
+    it("builds a valid code span around a string containing a backtick", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "run `ls`" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — `` run `ls` ``\n");
+    });
+
+    it("does not pad when the text neither starts nor ends with a backtick", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "a `b` c" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — ``a `b` c``\n");
+    });
+
+    it("uses a longer fence than the longest backtick run", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "a ``b`` c" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — ```a ``b`` c```\n");
+    });
+  });
 });
