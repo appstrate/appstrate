@@ -141,8 +141,6 @@ export interface ApiCallBaseDeps {
   config: SidecarConfig;
   /** Run-wide sticky-cookie store, read and written through `cookieScope`. */
   cookieJar: CookieJar;
-  /** `EGRESS_ALLOW_INTERNAL_HOSTS` as parsed at boot. */
-  egressAllowInternalHosts: ReadonlySet<string>;
   /** Transport override (tests); disables the address pin of `api_call` upstreams. */
   fetchFn?: typeof fetch;
   /**
@@ -403,7 +401,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       credentialHeaders,
       // The sidecar's network is not the manifest author's to declare: a literal `authorized_uris`
       // host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
-      internalHost: (host) => isOperatorTrustedEgressHost(deps.egressAllowInternalHosts, host),
+      internalHost: isOperatorTrustedEgressHost,
       cookies,
       integrationId,
       ...(fetchFn ? { fetchFn } : {}),

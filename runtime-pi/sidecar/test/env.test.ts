@@ -29,7 +29,6 @@ describe("parseSidecarEnv", () => {
       forwardProxyPort: 8081,
       listenHost: "0.0.0.0",
       runtimeToolNames: [],
-      egressAllowInternalHosts: new Set(),
     });
   });
 
@@ -120,16 +119,9 @@ describe("parseSidecarEnv", () => {
   it("refuses a malformed EGRESS_ALLOW_INTERNAL_HOSTS entry at boot, naming the entry", () => {
     expect(issuesOf({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "a.internal,b.internal:80" })).toEqual(
       [
-        'EGRESS_ALLOW_INTERNAL_HOSTS: "b.internal:80" contains ":" — a port is not part of an entry, and IPv6 literals are not supported (give the host a DNS name)',
+        'EGRESS_ALLOW_INTERNAL_HOSTS: "b.internal:80" is not a bare hostname or dotted IPv4 address (e.g. "keycloak.internal", "10.0.0.5"; no scheme, port, path, wildcard, IPv6 literal or trailing dot; IDN hosts in punycode)',
       ],
     );
-  });
-
-  it("parses a valid EGRESS_ALLOW_INTERNAL_HOSTS list into lower-cased hosts", () => {
-    expect(
-      parseSidecarEnv({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "Keycloak.internal, llm_svc" })
-        .egressAllowInternalHosts,
-    ).toEqual(new Set(["keycloak.internal", "llm_svc"]));
   });
 
   it("renders a single-line message (connect mode relays it on one stdout sentinel)", () => {

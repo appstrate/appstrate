@@ -24,7 +24,6 @@ import {
 import type { Peer } from "../helpers.ts";
 import { runnerKeyOf, type PeerAttribution } from "../runner-peers.ts";
 import { isOperatorTrustedEgressHost } from "../ssrf.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const ADAPTER_ID = `egress-wiring-${Math.random().toString(36).slice(2, 8)}`;
 const INTEGRATION_ID = "@tractr/egress";
@@ -130,7 +129,6 @@ async function boot(s: IntegrationSpawnSpec, resolved: string[]) {
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
-        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
         fetchFn,
         resolveHostFn: async (host: string) => {
           resolved.push(host);
@@ -270,9 +268,7 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
 
   it("hands the adapter a policy whose SSRF exemption reads the DECLARED list (#1819)", async () => {
     // `intranet.corp` is on the test operator list (test/setup/preload.ts).
-    expect(isOperatorTrustedEgressHost(TEST_EGRESS_ALLOW_INTERNAL_HOSTS, "intranet.corp")).toBe(
-      true,
-    );
+    expect(isOperatorTrustedEgressHost("intranet.corp")).toBe(true);
     const rendered = ["https://intranet.corp/**"];
     const declaredAs = async (declaredUris: string[]) => {
       const egress = { ...EGRESS, authorizedUris: rendered, declaredUris };

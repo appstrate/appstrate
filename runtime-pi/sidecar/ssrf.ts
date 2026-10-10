@@ -5,6 +5,7 @@
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import {
   compileEgressPolicy,
   parseAuthorizedUriPattern,
@@ -13,17 +14,20 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { isSelfHost, ownAddresses, type RunnerEgressPolicy } from "./helpers.ts";
 
 /**
- * Whether `host` is in `trusted`, the `EGRESS_ALLOW_INTERNAL_HOSTS` set `parseSidecarEnv` parsed at
- * boot (empty exempts nothing). Who may skip the floor on these hosts:
- * docs/architecture/SIDECAR.md.
+ * `EGRESS_ALLOW_INTERNAL_HOSTS`; empty exempts nothing, and `parseSidecarEnv` refuses a malformed
+ * entry at boot. Who may skip the floor on these hosts: docs/architecture/SIDECAR.md.
  */
-export function isOperatorTrustedEgressHost(trusted: ReadonlySet<string>, host: string): boolean {
-  return trusted.has(host.toLowerCase());
+const trustedEgressHosts = parseEgressAllowInternalHosts(
+  process.env.EGRESS_ALLOW_INTERNAL_HOSTS,
+).hosts;
+
+export function isOperatorTrustedEgressHost(host: string): boolean {
+  return trustedEgressHosts.has(host.toLowerCase());
 }
 
 /** Literal check of an operator-configured URL (LLM baseUrl); trusted hosts skip the blocklist. */
-export function isBlockedEgressUrl(url: string, trusted: ReadonlySet<string>): boolean {
-  return isBlockedUrl(url, (host) => isOperatorTrustedEgressHost(trusted, host));
+export function isBlockedEgressUrl(url: string): boolean {
+  return isBlockedUrl(url, isOperatorTrustedEgressHost);
 }
 
 /**
@@ -32,7 +36,7 @@ export function isBlockedEgressUrl(url: string, trusted: ReadonlySet<string>): b
  */
 export function compileRunnerEgressPolicy(
   egress: NonNullable<IntegrationSpawnSpec["egress"]>,
-  internalHost: (host: string) => boolean,
+  internalHost: (host: string) => boolean = isOperatorTrustedEgressHost,
   addresses: () => ReadonlySet<string> = ownAddresses,
 ): RunnerEgressPolicy {
   const isSelf = (host: string) => isSelfHost(host, addresses);

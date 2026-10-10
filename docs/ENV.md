@@ -172,19 +172,7 @@ Opt-in, comma-separated hostnames the operator explicitly trusts on private/inte
 
 Redirect chains are checked per hop: a trusted host redirecting to a second internal host requires that host to be listed too, and a cross-host redirect still strips credentials and the request body (on an `api_call`, unless the integration's `authorized_uris` names that origin). Unset ⇒ every internal host stays blocked (the secure default).
 
-**Entry grammar.** Entries are trimmed and lowercased; empty entries (`a,,b`, a trailing comma) are ignored. Boot refuses any other entry that contains whitespace, `://`, `/`, `*`, `@`, `:`, `[` or `]`, that ends with `.`, or that is not already the hostname a URL would normalise it to. The error names the entry.
-
-| Entry                    | Result                                        |
-| ------------------------ | --------------------------------------------- |
-| `KeyCloak.Internal`      | accepted as `keycloak.internal`               |
-| `keycloak.internal:8443` | refused: a port is not part of an entry       |
-| `https://kc.internal`    | refused: list the bare hostname               |
-| `*.internal`             | refused: wildcards are not supported          |
-| `keycloak.internal.`     | refused: drop the trailing dot                |
-| `::1`, `[::1]`           | refused: IPv6 literals are not supported      |
-| `bücher.example`         | refused: write it as `xn--bcher-kva.example`  |
-| `127.1`                  | refused: write it as `127.0.0.1`              |
-| `999.1.1.1`              | refused: not a valid hostname or IPv4 address |
+**Entry grammar.** Entries are trimmed and lowercased; empty entries (`a,,b`, a trailing comma) are ignored. Boot accepts an entry only when it is a bare hostname or dotted IPv4 address: spelled with `a-z`, `0-9`, `.`, `_` and `-`, and already the hostname a URL normalises it to. Anything else — a port, scheme, path, `*`, `@`, whitespace, a trailing dot, an IPv6 literal, a non-ASCII name (write its punycode), `127.1` or `999.1.1.1` — refuses boot with one error naming the entry. `KeyCloak.Internal` is accepted as `keycloak.internal`.
 
 **Matching** is exact: the lowercased hostname of the target URL must equal a listed entry, and the port is never part of the match. With `keycloak.internal` listed, `https://KEYCLOAK.internal:8443/x` is exempt; `https://sub.keycloak.internal/` and `https://keycloak.internal./` are not.
 

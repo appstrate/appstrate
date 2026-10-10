@@ -13,7 +13,6 @@ import { cookieScope, type ApiCallFailureCode } from "@appstrate/afps-runtime/re
 import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 /** The credential scope of `integrationId` on the `conn-1` connection these tests bind. */
 const scopeOf = (integrationId: string): string => credentialScope(integrationId, "conn-1");
@@ -22,7 +21,6 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
   return {
     config: { runToken: "rt", platformApiUrl: "http://platform" },
     cookieJar: new Map(),
-    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn: mock(
       async () =>
         new Response('{"ok":true}', {
@@ -2720,7 +2718,6 @@ describe("executeApiCall — two connections of one integration", () => {
   function sharedRunDeps(fetchFn: typeof fetch) {
     const shared = {
       cookieJar: new Map(),
-      egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
       reportedAuthFailures: new Set<string>(),
     };
     const refreshA = mock(async () => null);

@@ -18,13 +18,11 @@ import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 import { McpHost } from "../mcp-host.ts";
 import { createInProcessPair, createMcpHttpClient, wrapClient } from "@appstrate/mcp-transport";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
     config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
-    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     // Bun's `Mock` lacks the `preconnect` member that `typeof fetch`
     // declares; the cast bridges that cross-lib friction.
     fetchFn: mock(

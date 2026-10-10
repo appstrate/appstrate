@@ -159,11 +159,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   continuously and tool calls run one at a time. A caller that asks for progress
   gets a notification every 15 s. A cancelled `ssh_exec` (client timeout or
   abort) stops the command on the target, as a timed-out one is, and so do the
-  client leaving (stdin closed) and SIGTERM, SIGINT or SIGHUP. A cancelled
-  `ssh_write_file` or `ssh_edit_file` writes nothing unless its upload had started.
+  client leaving (stdin closed) and SIGTERM, SIGINT or SIGHUP. The stop sends
+  SIGTERM and returns; SIGKILL follows 5 s later from a detached process on the
+  target, so `remote_process` is now `stopping`, `already_exited` or `unknown`
+  (no more `terminated` or `still_running`). A cancelled `ssh_write_file` or
+  `ssh_edit_file` writes nothing unless its upload had started.
 - **Progress-reporting MCP calls are capped at 1 h** (`MCP_PROGRESS_CALL_MAX_TOTAL_MS`,
-  `packages/mcp-transport`), in addition to the run deadline. `MAX_WAIT_SECONDS` is
-  derived from the MCP SDK request timeout minus a 5 s margin, which is still 55.
+  `packages/mcp-transport`), in addition to the run deadline. `MAX_WAIT_SECONDS`
+  stays 55, below the MCP SDK's 60 s request timeout (a unit test holds it there).
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization

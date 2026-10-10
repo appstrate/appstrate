@@ -26,11 +26,10 @@
  * reported on the first tool call, not as "server closed the connection".
  *
  * Hand-rolled rather than @modelcontextprotocol/sdk: the runner image has no
- * node_modules, and the surface is small — `initialize`, `ping`, `tools/list`,
- * `tools/call`, `notifications/cancelled` — over line-delimited JSON-RPC. stdin
- * is read continuously. Tool calls run one at a time (`withProxyLog`,
- * `ensureSession` and `ensureMaster` rely on it). Queries and cancellations are
- * handled while a call runs.
+ * node_modules, and the surface is `initialize`, `ping`, `tools/list`,
+ * `tools/call` and `notifications/cancelled` over line-delimited JSON-RPC. Tool
+ * calls run one at a time (`withProxyLog`, `ensureSession` and `ensureMaster`
+ * rely on it); everything else is answered while a call runs.
  */
 
 import { existsSync, rmSync } from "node:fs";
@@ -299,8 +298,7 @@ const EDIT_SNIPPET_BYTES = 8 * 1024;
 /**
  * Largest prefix length ≤ `budget` ending on a character boundary; reads
  * `bytes[budget]`. `Buffer.toString("utf8")` would decode a cut sequence to
- * U+FFFD (pinned by the `OutputCapture` tests in scripts/test/ssh-mcp.test.ts,
- * which run on the repo's bun), so the cut moves back by hand.
+ * U+FFFD (measured on Bun 1.3), so the cut moves back by hand.
  */
 function utf8Cut(bytes: Uint8Array, budget: number): number {
   if (bytes.length <= budget) return bytes.length;
@@ -396,27 +394,13 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** On abort, the process is kept until its stdout holds `text`, at most `ms`. */
   abortAfterStdout?: { text: string; ms: number };
-  /** Left running by an early exit: a remote stop already under way finishes on its own. */
-  outlivesExit?: boolean;
 }
 
 /** Injectable so tests exercise the tool logic without an sshd. */
 export type Runner = (argv: string[], opts: RunOptions) => Promise<RunResult>;
 
-/** Children `runProcess` has not settled yet, killed by `killLiveChildren` before an early exit. */
+/** Killed by an exit that cannot wait: `ssh -O exit` ends the master's channels, not a client off it. */
 const liveChildren = new Set<{ kill(): void }>();
-
-/** Kills every child still running, so an exit that cannot wait for its calls leaks no ssh client. */
-function killLiveChildren(): void {
-  for (const child of liveChildren) {
-    try {
-      child.kill();
-    } catch {
-      // already gone
-    }
-  }
-  liveChildren.clear();
-}
 
 export const runProcess: Runner = (argv, opts) => {
   // `Bun.spawn({ env })` REPLACES the environment. The proxy variables the
@@ -428,7 +412,7 @@ export const runProcess: Runner = (argv, opts) => {
     stdout: "pipe",
     stderr: "pipe",
   });
-  if (!opts.outlivesExit) liveChildren.add(proc);
+  liveChildren.add(proc);
   const budget = opts.outputBytes ?? EXEC_OUTPUT_BYTES;
   const out = new OutputCapture(budget);
   const err = new OutputCapture(budget);
@@ -893,9 +877,6 @@ export async function execTool(
   // must reach the agent as data. Only ssh's own failures (255) are thrown —
   // which a command exiting 255 is indistinguishable from.
   if (res.code === 255 && !timedOut && !cancelled) throw sshFailure("ssh", res);
-  const after = cancelled
-    ? `the call was cancelled after ${Math.round((performance.now() - started) / 1000)} s`
-    : `the call returned after ${timeoutS} s`;
   return {
     // Echoed for the run journal; on the wire it follows the pid `echo` above.
     command_sent: command,
@@ -906,7 +887,13 @@ export async function execTool(
     stderr: res.stderr,
     truncated: res.stdoutTruncated === true || res.stderrTruncated === true,
     ...(cancelled ? { cancelled: true } : {}),
-    ...((timedOut || cancelled) && (await stopRemote(s, pid, after))),
+    ...((timedOut || cancelled) &&
+      (await stopRemote(
+        s,
+        pid,
+        cancelled ? "cancelled" : "timeout",
+        cancelled ? Math.round((performance.now() - started) / 1000) : timeoutS,
+      ))),
   };
 }
 
@@ -935,19 +922,18 @@ export function markedCommand(marker: string, command: string): string {
 }
 
 const TERM_GRACE_S = 5;
-const STOP_CEILING_MS = (TERM_GRACE_S + 2 + CONNECT_TIMEOUT_S) * 1000;
+const STOP_CEILING_MS = (2 + CONNECT_TIMEOUT_S) * 1000;
 
 /**
- * SIGTERM, then SIGKILL; exits 0 (gone), 3 (gone already), 4 (survived). The group `pid` leads,
- * else `pid` alone (a wrapper's child leads none). `kill -SIG -PGID`: dash refuses `--`.
+ * SIGTERM now, SIGKILL `TERM_GRACE_S` later from a detached `nohup` that outlives the channel, so
+ * the call returns at once; exits 0 (signalled) or 3 (gone already). The group `pid` leads, else
+ * `pid` alone (a wrapper's child leads none). `kill -SIG -PGID`: dash refuses `--`.
  */
 export function stopScript(pid: number): string {
   // `sh -c`, whatever the login shell; the script holds no single quote.
   return (
     `sh -c 'if kill -TERM -${pid}; then t=-${pid}; elif kill -TERM ${pid}; then t=${pid}; else exit 3; fi; ` +
-    `n=0; while kill -0 $t; do ` +
-    `[ "$n" -lt ${TERM_GRACE_S} ] || { kill -KILL $t; sleep 1; kill -0 $t && exit 4; exit 0; }; ` +
-    `sleep 1; n=$((n + 1)); done'`
+    `nohup sh -c "sleep ${TERM_GRACE_S}; kill -KILL $t" </dev/null >/dev/null 2>&1 &'`
   );
 }
 
@@ -955,9 +941,10 @@ export function stopScript(pid: number): string {
 async function stopRemote(
   s: Session,
   pid: number | null,
-  after: string,
+  reason: "cancelled" | "timeout",
+  afterS: number,
 ): Promise<Record<string, unknown>> {
-  const reason = after.startsWith("the call was cancelled") ? "cancelled" : "timeout";
+  const after = `the call ${reason === "cancelled" ? "was cancelled" : "returned"} after ${afterS} s`;
   if (pid === null) {
     logLine({ op: "exec-stop", pid: null, outcome: "unknown", reason });
     return {
@@ -970,15 +957,12 @@ async function stopRemote(
   }
   const res = await s.run(["ssh", ...buildSshArgs(s.cfg, s.paths, stopScript(pid))], {
     ceilingMs: STOP_CEILING_MS,
-    outlivesExit: true,
   });
-  const outcome =
-    { 0: "terminated", 3: "already_exited", 4: "still_running" }[res.code ?? -1] ?? "unknown";
+  const outcome = { 0: "stopping", 3: "already_exited" }[res.code ?? -1] ?? "unknown";
   logLine({ op: "exec-stop", pid, outcome, reason });
   const notes: Record<string, string> = {
-    terminated: `${after} and the command was terminated on the target`,
+    stopping: `${after}; the command was sent SIGTERM on the target, and SIGKILL follows in ${TERM_GRACE_S} s if it is still running`,
     already_exited: `${after}; the command had already ended on the target`,
-    still_running: `${after}; the command survived SIGKILL on the target`,
     unknown:
       `${after}, but stopping the command failed (${res.code === null ? "timed out" : `exit ${res.code}`}); ` +
       `it may still be running as pid ${pid}`,
@@ -1313,7 +1297,7 @@ export const TOOLS = [
   },
   {
     name: "ssh_exec",
-    description: `Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After \`timeout_seconds\` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most ${STOP_CEILING_MS / 1000} s past \`timeout_seconds\` with \`timed_out: true\`, \`exit_code: null\`, \`remote_pid\`, and \`remote_process\` saying whether it ended. A call cancelled before then stops the command the same way. While a call runs or waits its turn, a caller that requests progress gets a notification every ${PROGRESS_INTERVAL_MS / 1000} s. A process that leaves the group (\`setsid\`, a daemon) is not reached. Longer work can be started detached — \`nohup cmd > log 2>&1 < /dev/null &\`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.`,
+    description: `Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After \`timeout_seconds\` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later if it is still running; the call returns once SIGTERM is sent, at most ${STOP_CEILING_MS / 1000} s past \`timeout_seconds\`, with \`timed_out: true\`, \`exit_code: null\`, \`remote_pid\`, and \`remote_process\`: \`stopping\` (signalled), \`already_exited\` or \`unknown\`. A call cancelled before then stops the command the same way. While a call runs or waits its turn, a caller that requests progress gets a notification every ${PROGRESS_INTERVAL_MS / 1000} s. A process that leaves the group (\`setsid\`, a daemon) is not reached. Longer work can be started detached — \`nohup cmd > log 2>&1 < /dev/null &\`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1523,10 +1507,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 
 const isRequestId = (v: unknown): v is RequestId => typeof v === "string" || typeof v === "number";
 
-/**
- * Reads JSON-RPC lines without ever waiting on a tool: `tools/call` requests
- * run one at a time behind `serially`, everything else is answered at once.
- */
+/** Reads JSON-RPC lines without waiting on a tool: calls queue behind `serially`, the rest is answered at once. */
 export function createDispatcher(opts: DispatcherOptions): Dispatcher {
   const intervalMs = opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
   const inflight = new Map<RequestId, { controller: AbortController; stopProgress: () => void }>();
@@ -1563,6 +1544,8 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
 
   const invalid = (id: RequestId | null, message = "Invalid Request") =>
     write({ jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message } });
+  const internalError = (id: RequestId, err: unknown) =>
+    write({ jsonrpc: "2.0", id, error: { code: -32603, message: errorText(err) } });
 
   /** Ticks from acceptance, so time spent queued is reported too. */
   function startProgress(token: RequestId, name: string, signal: AbortSignal): () => void {
@@ -1610,8 +1593,7 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
         },
         (err: unknown) => {
           settle();
-          if (err instanceof CallCancelled || signal.aborted) return;
-          write({ jsonrpc: "2.0", id, error: { code: -32603, message: errorText(err) } });
+          if (!(err instanceof CallCancelled || signal.aborted)) internalError(id, err);
         },
       )
       .finally(() => pending.delete(done));
@@ -1664,9 +1646,10 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
       acceptCall(id, req);
       return;
     }
-    void handleRequest(req, opts.deps).then((res) => {
-      if (res) write(res);
-    });
+    void handleRequest(req, opts.deps).then(
+      (res) => res && write(res),
+      (err: unknown) => internalError(id, err),
+    );
   }
 
   async function idle(): Promise<void> {
@@ -1685,10 +1668,7 @@ export function createDispatcher(opts: DispatcherOptions): Dispatcher {
   return { acceptLine, idle, stopAll, send: write };
 }
 
-/**
- * Cancels every call, so a running ssh_exec is stopped on the target; false when the ceiling hit
- * first, after killing the children still running so the exit leaks no ssh client.
- */
+/** Cancels every call, so a running ssh_exec is stopped on the target; false when the ceiling hit first. */
 async function stopCalls(dispatcher: Dispatcher, reason: string): Promise<boolean> {
   dispatcher.stopAll(reason);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1697,7 +1677,9 @@ async function stopCalls(dispatcher: Dispatcher, reason: string): Promise<boolea
   });
   const done = await Promise.race([dispatcher.idle().then(() => true as const), ceiling]);
   clearTimeout(timer);
-  if (!done) killLiveChildren();
+  if (!done) {
+    for (const child of liveChildren) child.kill();
+  }
   return done;
 }
 

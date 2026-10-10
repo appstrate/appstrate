@@ -27,7 +27,6 @@ import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { runConnectOnce } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const INTEGRATION_ID = "@scope/connect-it";
 const SERVER_ID = "@scope/connect-srv";
@@ -135,7 +134,6 @@ async function connectRun(
     await runConnectOnce(spec, {
       platformApiUrl: "http://platform.local",
       runToken: "connect-token",
-      egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
       fetchFn,
     });
     return { error: "", bundleUrls, internalCalls };

@@ -33,6 +33,8 @@ describe("parseEgressAllowInternalHosts", () => {
     const { hosts, invalid } = parseEgressAllowInternalHosts(raw);
     return { hosts: [...hosts], invalid };
   };
+  const refusal = (entry: string) =>
+    `"${entry}" is not a bare hostname or dotted IPv4 address (e.g. "keycloak.internal", "10.0.0.5"; no scheme, port, path, wildcard, IPv6 literal or trailing dot; IDN hosts in punycode)`;
 
   it("reads undefined and whitespace-only input as an empty allowlist", () => {
     expect(parsed(undefined)).toEqual({ hosts: [], invalid: [] });
@@ -55,89 +57,33 @@ describe("parseEgressAllowInternalHosts", () => {
     expect(parsed("a,,b,")).toEqual({ hosts: ["a", "b"], invalid: [] });
   });
 
-  it("refuses an entry carrying a port", () => {
-    expect(parsed("keycloak.internal:8443").invalid).toEqual([
-      '"keycloak.internal:8443" contains ":" — a port is not part of an entry, and IPv6 literals are not supported (give the host a DNS name)',
-    ]);
-  });
-
-  it("refuses IPv6 literals, bracketed or not", () => {
-    const reason = (e: string) =>
-      `"${e}" contains ":" — a port is not part of an entry, and IPv6 literals are not supported (give the host a DNS name)`;
-    expect(parsed("::1").invalid).toEqual([reason("::1")]);
-    expect(parsed("[::1]").invalid).toEqual([reason("[::1]")]);
-    expect(parsed("fd00::1").invalid).toEqual([reason("fd00::1")]);
-  });
-
-  it("refuses a URL", () => {
-    expect(parsed("https://kc.internal").invalid).toEqual([
-      '"https://kc.internal" is a URL — list the bare hostname',
-    ]);
-  });
-
-  it("refuses a path", () => {
-    expect(parsed("kc.internal/").invalid).toEqual([
-      '"kc.internal/" contains "/" — list the bare hostname, without a path',
-    ]);
-  });
-
-  it("refuses a wildcard", () => {
-    expect(parsed("*.internal").invalid).toEqual([
-      '"*.internal" contains "*" — wildcards are not supported; list each host',
-    ]);
-  });
-
-  it("refuses userinfo", () => {
-    expect(parsed("u@h").invalid).toEqual(['"u@h" contains "@" — list the bare hostname']);
-  });
-
-  it("refuses an entry with internal whitespace", () => {
-    expect(parsed("key cloak").invalid).toEqual([
-      '"key cloak" contains whitespace — separate entries with commas',
-    ]);
-  });
-
-  it("refuses a trailing dot", () => {
-    expect(parsed("kc.internal.").invalid).toEqual([
-      '"kc.internal." ends with "." — drop the trailing dot',
-    ]);
-  });
-
-  it("refuses a non-ASCII name and names its punycode form", () => {
-    expect(parsed("bücher.example").invalid).toEqual([
-      '"bücher.example" is not in canonical form — write it as "xn--bcher-kva.example"',
-    ]);
-  });
-
-  it("refuses a shortened IPv4 and names its dotted form", () => {
-    expect(parsed("127.1").invalid).toEqual([
-      '"127.1" is not in canonical form — write it as "127.0.0.1"',
-    ]);
-  });
-
-  it("refuses a hex IPv4 and names its dotted form", () => {
-    expect(parsed("0x7f.0.0.1").invalid).toEqual([
-      '"0x7f.0.0.1" is not in canonical form — write it as "127.0.0.1"',
-    ]);
-  });
-
-  it("refuses an out-of-range IPv4", () => {
-    expect(parsed("999.1.1.1").invalid).toEqual([
-      '"999.1.1.1" is not a valid hostname or IPv4 address',
-    ]);
-  });
-
-  it("refuses a character a hostname cannot hold, without suggesting a host", () => {
-    expect(parsed("a?b").invalid).toEqual(['"a?b" contains characters a hostname cannot hold']);
+  it("refuses every entry that is not a bare hostname or dotted IPv4, naming it", () => {
+    const refused = [
+      "keycloak.internal:8443",
+      "::1",
+      "[::1]",
+      "fd00::1",
+      "https://kc.internal",
+      "kc.internal/",
+      "*.internal",
+      "u@h",
+      "key cloak",
+      "kc.internal.",
+      "bücher.example",
+      "127.1",
+      "0x7f.0.0.1",
+      "999.1.1.1",
+      "a?b",
+    ];
+    for (const entry of refused) {
+      expect(parsed(entry)).toEqual({ hosts: [], invalid: [refusal(entry)] });
+    }
   });
 
   it("keeps the valid entries of a mixed list and reports every refused one in input order", () => {
     expect(parsed("keycloak.internal, https://kc.internal, a?b, llm_svc,")).toEqual({
       hosts: ["keycloak.internal", "llm_svc"],
-      invalid: [
-        '"https://kc.internal" is a URL — list the bare hostname',
-        '"a?b" contains characters a hostname cannot hold',
-      ],
+      invalid: [refusal("https://kc.internal"), refusal("a?b")],
     });
   });
 

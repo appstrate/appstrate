@@ -11,7 +11,6 @@ import { Hono } from "hono";
 import { mountMcp } from "../mcp.ts";
 import { logger } from "../logger.ts";
 import { TokenBudget } from "../token-budget.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const EXCEEDED =
   "integration boot wait exceeded; tools/list will respond without late integrations";
@@ -21,7 +20,6 @@ function mount(integrationBootPromise: Promise<void>): void {
     proxyDeps: {
       config: { platformApiUrl: "http://mock:3000", runToken: "tok", proxyUrl: "" },
       cookieJar: new Map(),
-      egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
       fetchFn: fetch,
       reportedAuthFailures: new Set<string>(),
     },

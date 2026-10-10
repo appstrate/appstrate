@@ -16,7 +16,6 @@ import {
   makeContext,
   makeTestBundle,
 } from "../../packages/runner-pi/test/helpers.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "../sidecar/test/helpers/egress-hosts.ts";
 
 interface ObservedRequest {
   method: string;
@@ -88,7 +87,6 @@ describe("runtime-pi sidecar transport wiring", () => {
         },
         cookieJar: new Map(),
         fetchFn,
-        egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
         oauthTokenCache: {
           getToken: async () => ({ accessToken: "oat-real", expiresAt: null }),
           invalidate: () => {},

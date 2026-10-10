@@ -163,8 +163,6 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
 interface BundleFetchOptions {
   platformApiUrl: string;
   runToken: string;
-  /** `EGRESS_ALLOW_INTERNAL_HOSTS` as parsed at boot: hosts that skip the SSRF blocklist. */
-  egressAllowInternalHosts: ReadonlySet<string>;
   /** Override for tests. Defaults to `globalThis.fetch`. */
   fetchFn?: typeof fetch;
   /**
@@ -350,8 +348,6 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * AGENTS.md "Mocking Policy".
  */
 export interface ConnectRemoteHttpDeps {
-  /** `EGRESS_ALLOW_INTERNAL_HOSTS` as parsed at boot: hosts that skip the SSRF blocklist. */
-  egressAllowInternalHosts: ReadonlySet<string>;
   createClient?: typeof createMcpHttpClient;
   /**
    * Optional override for the SSE transport path (AFPS §7.1
@@ -418,7 +414,7 @@ async function defaultCreateSseClient(
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   source: IntegrationCredentialsSource,
-  deps: ConnectRemoteHttpDeps,
+  deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string }> {
   const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
@@ -543,7 +539,7 @@ export async function connectRemoteHttpIntegration(
           target,
           { ...init, headers },
           {
-            allowHost: (h) => isOperatorTrustedEgressHost(deps.egressAllowInternalHosts, h),
+            allowHost: isOperatorTrustedEgressHost,
             // The injected credential header is arbitrarily NAMED by the
             // manifest's delivery plan (e.g. `X-Api-Key`), so guardedFetch's
             // builtin authorization/cookie strip set cannot know about it —
@@ -854,7 +850,6 @@ async function spawnAndConnectLocalIntegration(params: {
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileRunnerEgressPolicy(
     spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
-    (h) => isOperatorTrustedEgressHost(bundleFetchOpts.egressAllowInternalHosts, h),
   );
   const attribute = adapter.peerAttribution();
   const isPeerAllowed: PeerCheck = async (peer) => (await attribute(peer)) === runnerKeyOf(spec);
@@ -1574,9 +1569,7 @@ export async function bootIntegrations(
             `remote integration ${spec.integrationId} has no hoisted credentials source`,
           );
         }
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, source, {
-          egressAllowInternalHosts: bundleFetchOpts.egressAllowInternalHosts,
-        });
+        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
         // Register on the caller-owned teardown collector BEFORE host.register
         // so a register failure (namespace collision / suffix exhaustion,
         // which throw before McpHost adds the client to its own set) still

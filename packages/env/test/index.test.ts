@@ -713,7 +713,7 @@ describe("EGRESS_ALLOW_INTERNAL_HOSTS", () => {
   it("fails boot naming every refused entry", () => {
     process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "kc.internal:8443,https://x";
     expect(() => getEnv()).toThrow(/EGRESS_ALLOW_INTERNAL_HOSTS/);
-    expect(() => getEnv()).toThrow(/"kc\.internal:8443" contains ":"/);
-    expect(() => getEnv()).toThrow(/"https:\/\/x" is a URL/);
+    expect(() => getEnv()).toThrow(/"kc\.internal:8443" is not a bare hostname/);
+    expect(() => getEnv()).toThrow(/"https:\/\/x" is not a bare hostname/);
   });
 });

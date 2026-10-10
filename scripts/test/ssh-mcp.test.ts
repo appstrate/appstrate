@@ -479,6 +479,11 @@ describe("dispatcher: queue, cancellation, progress", () => {
   const responseIndex = (out: Msg[], id: number) =>
     out.findIndex((m) => m.id === id && m.method === undefined);
   const payloadOf = (res: Msg) => JSON.parse(res.result.content[0].text);
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
 
   it("reports progress every 15 s and says so in ssh_exec's description", () => {
     expect(PROGRESS_INTERVAL_MS).toBe(15_000);
@@ -493,8 +498,9 @@ describe("dispatcher: queue, cancellation, progress", () => {
   // is what keeps a 90 s ssh_exec alive past a 60 s one.
   it("keeps a long call alive past a client's idle timeout by reporting progress", async () => {
     restoreEnv = withEnv(ENV);
+    const fiveTicks = deferred();
     const { run } = recordingRunner(async (argv) => {
-      await Bun.sleep(300);
+      await fiveTicks.promise;
       return { stdout: `${markerOf(argv)}77\nok`, code: 0 };
     });
     let expired = false;
@@ -507,6 +513,7 @@ describe("dispatcher: queue, cancellation, progress", () => {
     const { out, d, send } = harness(run, (m) => {
       if (m.method === "notifications/progress" && m.params.progressToken === "p1") {
         armIdleTimeout();
+        if (m.params.progress === 5) fiveTicks.resolve();
       }
       if (m.id === 1 && m.method === undefined) clearTimeout(idleTimer);
     });
@@ -528,8 +535,10 @@ describe("dispatcher: queue, cancellation, progress", () => {
 
   it("stops the remote command of a cancelled call and sends no response", async () => {
     restoreEnv = withEnv(ENV);
+    const started = deferred();
     const { run, calls } = recordingRunner(async (argv, opts, n) => {
       if (n > 0) return { code: 0 };
+      started.resolve();
       await new Promise<void>((resolve) => {
         if (opts.signal?.aborted) resolve();
         opts.signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -538,7 +547,7 @@ describe("dispatcher: queue, cancellation, progress", () => {
     });
     const { out, d, send } = harness(run);
     send(execCall(1, "sleep 600", { progressToken: "p1" }));
-    await Bun.sleep(50);
+    await started.promise;
     send(cancel(1));
     const ticksAtCancel = progressFor(out, "p1").length;
     await d.idle();
@@ -552,15 +561,16 @@ describe("dispatcher: queue, cancellation, progress", () => {
 
   it("never runs a call cancelled while it waits its turn, and never answers it", async () => {
     restoreEnv = withEnv(ENV);
+    const release = deferred();
     const { run, calls } = recordingRunner(async () => {
-      await Bun.sleep(200);
+      await release.promise;
       return { code: 0 };
     });
     const { out, d, send } = harness(run);
     send(execCall(1, "first"));
     send(execCall(2, "second"));
-    await Bun.sleep(20);
     send(cancel(2));
+    release.resolve();
     await d.idle();
 
     expect(calls).toHaveLength(1);
@@ -571,11 +581,14 @@ describe("dispatcher: queue, cancellation, progress", () => {
 
   it("answers queries while a call runs", async () => {
     restoreEnv = withEnv(ENV);
+    const answered = deferred();
     const { run } = recordingRunner(async () => {
-      await Bun.sleep(200);
+      await answered.promise;
       return { code: 0 };
     });
-    const { out, d, send } = harness(run);
+    const { out, d, send } = harness(run, () => {
+      if (responseIndex(out, 9) >= 0 && responseIndex(out, 10) >= 0) answered.resolve();
+    });
     send(execCall(1, "slow"));
     send({ jsonrpc: "2.0", id: 9, method: "tools/list" });
     send({ jsonrpc: "2.0", id: 10, method: "ping" });
@@ -610,10 +623,7 @@ describe("dispatcher: queue, cancellation, progress", () => {
 
   it("refuses a second call reusing an id still in flight", async () => {
     restoreEnv = withEnv(ENV);
-    const { run, calls } = recordingRunner(async () => {
-      await Bun.sleep(100);
-      return { code: 0 };
-    });
+    const { run, calls } = recordingRunner(async () => ({ code: 0 }));
     const { out, d, send } = harness(run);
     send(execCall(1, "a"));
     send(execCall(1, "b"));
@@ -628,6 +638,7 @@ describe("dispatcher: queue, cancellation, progress", () => {
   it("stops a command cancelled before the target reported its pid, once it does", async () => {
     restoreEnv = withEnv(ENV);
     const stops: string[] = [];
+    const started = deferred();
     const run: Run = async (argv, opts) => {
       if (isMasterCheck(argv)) return { code: 0 };
       const marker = markerOf(argv);
@@ -635,6 +646,7 @@ describe("dispatcher: queue, cancellation, progress", () => {
         stops.push(argv.at(-1)!);
         return { code: 0 };
       }
+      started.resolve();
       return runProcess(
         [
           "bun",
@@ -646,31 +658,27 @@ describe("dispatcher: queue, cancellation, progress", () => {
       );
     };
     const { out, d, send } = harness(run);
-    const started = performance.now();
+    const t0 = performance.now();
     send(execCall(1, "sleep 600"));
-    await Bun.sleep(50);
+    await started.promise;
     send(cancel(1));
     await d.idle();
 
-    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(performance.now() - t0).toBeLessThan(5_000);
     expect(stops).toEqual([stopScript(4242)]);
     expect(out.filter((m) => m.id === 1)).toEqual([]);
   });
 
   it("holds an abort until stdout shows the awaited text, at most the grace", async () => {
-    const shown = new AbortController();
-    setTimeout(() => shown.abort(), 50);
     const res = await runProcess(["sh", "-c", "sleep 0.3; echo ready; sleep 5"], {
-      signal: shown.signal,
+      signal: AbortSignal.abort(),
       abortAfterStdout: { text: "ready", ms: 4_000 },
     });
     expect(res).toMatchObject({ code: null, cancelled: true, stdout: "ready\n" });
 
-    const never = new AbortController();
-    setTimeout(() => never.abort(), 50);
     const started = performance.now();
     const silent = await runProcess(["sh", "-c", "sleep 5"], {
-      signal: never.signal,
+      signal: AbortSignal.abort(),
       abortAfterStdout: { text: "ready", ms: 200 },
     });
     expect(performance.now() - started).toBeLessThan(2_000);
@@ -691,14 +699,14 @@ describe("dispatcher: queue, cancellation, progress", () => {
     d.acceptLine("not json");
     d.acceptLine(JSON.stringify(execCall(1, "a", { progressToken: "p" })));
     await d.idle();
-    await Bun.sleep(50);
   });
 
   it("kills a process whose signal aborts, keeping it from settling as a timeout", async () => {
     const controller = new AbortController();
     const started = performance.now();
-    setTimeout(() => controller.abort(), 50);
-    const res = await runProcess(["sh", "-c", "sleep 5"], { signal: controller.signal });
+    const running = runProcess(["sh", "-c", "sleep 5"], { signal: controller.signal });
+    controller.abort();
+    const res = await running;
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(res).toMatchObject({ code: null, cancelled: true, timedOut: false });
 
@@ -1013,9 +1021,8 @@ describe("ssh_exec via injected runner", () => {
   // Killing the local client only closes its channel: the command runs on.
   // Its process group is killed from a second channel on the same master.
   it.each([
-    [0, "terminated", "was terminated"],
+    [0, "stopping", "SIGKILL follows in 5 s"],
     [3, "already_exited", "had already ended"],
-    [4, "still_running", "survived SIGKILL"],
     [255, "unknown", "stopping the command failed (exit 255)"],
     [null, "unknown", "stopping the command failed (timed out)"],
   ])(
@@ -1116,6 +1123,12 @@ describe("ssh_exec against a real shell", () => {
       return false;
     }
   };
+  const diesWithin = async (pid: number, ms: number) => {
+    for (const end = performance.now() + ms; alive(pid) && performance.now() < end;) {
+      await Bun.sleep(50);
+    }
+    return !alive(pid);
+  };
 
   it("keeps the command's exit status and output, without the pid line", async () => {
     restoreEnv = withEnv(ENV);
@@ -1135,21 +1148,23 @@ describe("ssh_exec against a real shell", () => {
       viaShell(),
     );
     const pid = res.payload.remote_pid as number;
-    expect(res.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+    expect(res.payload).toMatchObject({ timed_out: true, remote_process: "stopping" });
     expect(pid).toBeGreaterThan(1);
-    expect(alive(pid)).toBe(false);
-    expect(alive(-pid)).toBe(false); // no member of the group is left
+    expect(await diesWithin(-pid, 2_000)).toBe(true); // no member of the group is left
   });
 
-  it("sends SIGKILL when SIGTERM is ignored", async () => {
+  // The stop returns once SIGTERM is sent; the SIGKILL comes from a process that outlives it.
+  it("sends SIGKILL when SIGTERM is ignored, after the call returned", async () => {
     restoreEnv = withEnv(ENV);
     const res = await callTool(
       "ssh_exec",
       { command: "trap '' TERM; sleep 30; echo done", timeout_seconds: 1 },
       viaShell(),
     );
-    expect(res.payload.remote_process).toBe("terminated");
-    expect(alive(-(res.payload.remote_pid as number))).toBe(false);
+    const group = -(res.payload.remote_pid as number);
+    expect(res.payload.remote_process).toBe("stopping");
+    expect(alive(group)).toBe(true);
+    expect(await diesWithin(group, 10_000)).toBe(true);
   }, 15_000);
 
   // A forced command that runs `sh -c "$SSH_ORIGINAL_COMMAND"` leads the group
@@ -1168,8 +1183,8 @@ describe("ssh_exec against a real shell", () => {
         sessionDir: scratch,
       },
     );
-    expect(res.payload.remote_process).toBe("terminated");
-    expect(alive(res.payload.remote_pid as number)).toBe(false);
+    expect(res.payload.remote_process).toBe("stopping");
+    expect(await diesWithin(res.payload.remote_pid as number, 2_000)).toBe(true);
   });
 
   it("reports a group that ended before the stop as already exited", async () => {
@@ -2073,15 +2088,12 @@ describe("session directory", () => {
 // each invocation and, like a master, leaves a file at the ControlPath.
 describe("server shutdown", () => {
   // A command ending in a `block` line reports pid 4242 and runs on until killed; one ending in
-  // `hang` records its own pid and runs on without reporting any. With FAKE_SSH_STOP_HANG, the stop
-  // of pid 4242 records its own pid and runs on.
+  // `hang` records its own pid and runs on without reporting any.
   const FAKE_SSH = `#!/bin/sh
 printf '%s\\n' "$@" ::end:: >> "$FAKE_SSH_LOG"
 for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; last="$a"; done
 [ -n "$cp" ] && [ -z "$ctl" ] && : > "$cp"
-case "$last" in *"kill -TERM -4242"*)
-  [ -n "$FAKE_SSH_STOP_HANG" ] && { echo $$ > "$FAKE_SSH_LOG.stop.pid"; exec sleep 30; } ;;
-*"
+case "$last" in *"
 block")
   printf '%s4242\\n' "$(printf '%s\\n' "$last" | sed -n "1s/^sh -c 'echo \\(appstrate-ssh-pid-[0-9a-f]*=\\).*/\\1/p")"
   exec sleep 30 ;;
@@ -2202,30 +2214,6 @@ exit 0
     expect(alive()).toBe(false);
   });
 
-  // A stop already under way when the ceiling hits is left to finish: killing its client would
-  // leave the command running on the target.
-  it("leaves a remote stop running when the shutdown ceiling hits", async () => {
-    const { child, invocations } = await spawnServer({ FAKE_SSH_STOP_HANG: "1" });
-    const call = { name: "ssh_exec", arguments: { command: "block" } };
-    child.stdin.write(
-      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: call })}\n`,
-    );
-    child.stdin.flush();
-    for (let i = 0; i < 250 && !invocations().some((r) => r.at(-1) === "block"); i++) {
-      await Bun.sleep(20);
-    }
-    child.kill("SIGTERM");
-    expect(await child.exited).toBe(143);
-    const pidFile = join(scratch, "ssh.log.stop.pid");
-    expect(existsSync(pidFile)).toBe(true);
-    const pid = Number(readFileSync(pidFile, "utf8").trim());
-    try {
-      expect(() => process.kill(pid, 0)).not.toThrow();
-    } finally {
-      process.kill(pid, "SIGKILL");
-    }
-  });
-
   // The master binds `<ControlPath>.<16 characters>`, and the bind fails past
   // sockaddr_un's 104 bytes (macOS): a HOME that deep is passed over.
   it("keeps the control socket path short enough to bind", async () => {
@@ -2257,10 +2245,12 @@ describe("the stdio entry point", () => {
     const reader = child.stdout.getReader();
     const decoder = new TextDecoder();
     let text = "";
-    while (text.split("\n").length <= 3) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      text += decoder.decode(value, { stream: true });
+    const deadline = performance.now() + 10_000;
+    while (text.split("\n").length <= 3 && performance.now() < deadline) {
+      const timeout = Bun.sleep(deadline - performance.now()).then(() => ({ done: true }) as const);
+      const next = await Promise.race([reader.read(), timeout]);
+      if (next.done) break;
+      text += decoder.decode(next.value, { stream: true });
     }
     child.stdin.end();
     expect(await child.exited).toBe(0);
@@ -2395,7 +2385,15 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
         { command: "sleep 30; echo done", timeout_seconds: 1 },
         deps,
       );
-      expect(slow.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+      expect(slow.payload).toMatchObject({ timed_out: true, remote_process: "stopping" });
+      for (let i = 0; i < 40 && slow.payload.remote_pid; i++) {
+        try {
+          process.kill(slow.payload.remote_pid as number, 0);
+        } catch {
+          break;
+        }
+        await Bun.sleep(50);
+      }
       expect(() => process.kill(slow.payload.remote_pid as number, 0)).toThrow();
 
       const log = readFileSync(join(dir, "sshd.log"), "utf8");

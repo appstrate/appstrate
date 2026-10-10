@@ -97,8 +97,6 @@ export const SIDECAR_IDLE_TIMEOUT_SECONDS = 255;
 export interface AppDeps {
   config: SidecarConfig;
   cookieJar: CookieJar;
-  /** `EGRESS_ALLOW_INTERNAL_HOSTS` as parsed at boot: hosts that skip the SSRF blocklist. */
-  egressAllowInternalHosts: ReadonlySet<string>;
   /** Tests only. Absent: api_call uses its pinned transport, `/llm/*` global fetch. */
   fetchFn?: typeof fetch;
   isReady?: () => boolean; // default: () => true — controls /health
@@ -635,7 +633,6 @@ export function buildSidecarRuntimeDeps(deps: AppDeps): SidecarRuntimeDeps {
   const proxyDeps: ApiCallBaseDeps = {
     config: deps.config,
     cookieJar: deps.cookieJar,
-    egressAllowInternalHosts: deps.egressAllowInternalHosts,
     ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}),
     reportedAuthFailures: new Set<string>(),
   };
@@ -737,7 +734,7 @@ export function createApp(deps: AppDeps): Hono {
   app.all("/llm/*", async (c) => {
     const llm = config.llm;
     if (llm?.authMode === "oauth") {
-      if (isBlockedEgressUrl(llm.baseUrl, deps.egressAllowInternalHosts)) {
+      if (isBlockedEgressUrl(llm.baseUrl)) {
         return llmProxyError(
           403,
           "permission_error",
@@ -895,7 +892,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const baseUrl = llmConfig.baseUrl;
-    if (isBlockedEgressUrl(baseUrl, deps.egressAllowInternalHosts)) {
+    if (isBlockedEgressUrl(baseUrl)) {
       return llmProxyError(
         403,
         "permission_error",

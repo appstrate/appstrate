@@ -11,7 +11,6 @@ import { describe, it, expect, mock } from "bun:test";
 import { type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { parseModelSwapEnv } from "../model-swap.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 // What an aliased run actually ships: the container speaks `pi-messages`, the
 // backing speaks the vendor's protocol, and the catalog to rebuild the backing's
@@ -38,7 +37,6 @@ function makeDeps(fetchFn: typeof fetch): AppDeps {
       },
     },
     cookieJar: new Map(),
-    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
     fetchFn,
     isReady: () => true,
   };

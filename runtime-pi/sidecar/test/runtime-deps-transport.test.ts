@@ -8,7 +8,6 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { buildSidecarRuntimeDeps } from "../app.ts";
 import { executeApiCall } from "../credential-proxy.ts";
-import { TEST_EGRESS_ALLOW_INTERNAL_HOSTS } from "./helpers/egress-hosts.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -20,7 +19,6 @@ const productionDeps = () =>
   buildSidecarRuntimeDeps({
     config: { platformApiUrl: "http://platform:3000", runToken: "tok", proxyUrl: "" },
     cookieJar: new Map(),
-    egressAllowInternalHosts: TEST_EGRESS_ALLOW_INTERNAL_HOSTS,
   });
 
 describe("sidecar runtime deps — api_call transport", () => {
