@@ -6,6 +6,7 @@ import {
   findRuntimeImageTagMismatch,
   type RuntimeImageTagMismatch,
 } from "@appstrate/core/image-ref";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -732,7 +733,17 @@ export const envSchema = z
     // upstreams, org proxies, model tests, credential-proxy targets, remote MCP
     // servers, and the sidecar's own gates) skips ONLY the host blocklist for
     // these hosts so self-hosted deployments can reach internal upstreams.
-    EGRESS_ALLOW_INTERNAL_HOSTS: z.string().optional(),
+    // Entries are bare hostnames or IPv4 addresses (grammar in
+    // `parseEgressAllowInternalHosts`). A refused entry fails boot with one
+    // issue per entry, so the parsed value is a Set of exact hostnames.
+    EGRESS_ALLOW_INTERNAL_HOSTS: z
+      .string()
+      .optional()
+      .transform((raw, ctx) => {
+        const { hosts, invalid } = parseEgressAllowInternalHosts(raw);
+        for (const message of invalid) ctx.addIssue({ code: "custom", message });
+        return hosts;
+      }),
 
     // Run token signing (required). Dedicated HMAC secret for run bearer
     // tokens — without a key, `Bun.CryptoHasher("sha256", undefined)`
@@ -1047,3 +1058,4 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
+export { INFRA_ENV_KEYS, FOREIGN_ENV_SEGMENTS, findUnreadEnvKeys } from "./env-key-inventory.ts";

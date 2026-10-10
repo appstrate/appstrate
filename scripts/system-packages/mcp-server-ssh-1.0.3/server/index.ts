@@ -26,8 +26,11 @@
  * reported on the first tool call, not as "server closed the connection".
  *
  * Hand-rolled rather than @modelcontextprotocol/sdk: the runner image has no
- * node_modules, and the surface is `initialize` + `tools/list` + `tools/call`
- * over line-delimited JSON-RPC.
+ * node_modules, and the surface is small — `initialize`, `ping`, `tools/list`,
+ * `tools/call`, `notifications/cancelled` — over line-delimited JSON-RPC. stdin
+ * is read continuously. Tool calls run one at a time (`withProxyLog`,
+ * `ensureSession` and `ensureMaster` rely on it). Queries and cancellations are
+ * handled while a call runs.
  */
 
 import { existsSync, rmSync } from "node:fs";
@@ -296,7 +299,8 @@ const EDIT_SNIPPET_BYTES = 8 * 1024;
 /**
  * Largest prefix length ≤ `budget` ending on a character boundary; reads
  * `bytes[budget]`. `Buffer.toString("utf8")` would decode a cut sequence to
- * U+FFFD (measured on Bun 1.3), so the cut moves back by hand.
+ * U+FFFD (pinned by the `OutputCapture` tests in scripts/test/ssh-mcp.test.ts,
+ * which run on the repo's bun), so the cut moves back by hand.
  */
 function utf8Cut(bytes: Uint8Array, budget: number): number {
   if (bytes.length <= budget) return bytes.length;
@@ -373,6 +377,8 @@ export interface RunResult {
   /** `null` when the ceiling fired: the process was killed before it reported one. */
   code: number | null;
   timedOut?: boolean;
+  /** The caller's signal aborted: the process was killed, what it wrote so far is kept. */
+  cancelled?: boolean;
   /** The stream outgrew `outputBytes` and is rendered as a head+tail excerpt. */
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
@@ -386,6 +392,10 @@ export interface RunOptions {
   ceilingMs?: number;
   /** Per-stream memory budget (default 64 KiB), see `OutputCapture`. */
   outputBytes?: number;
+  /** Abort kills the process and settles as `cancelled`. */
+  signal?: AbortSignal;
+  /** On abort, the process is kept until its stdout holds `text`, at most `ms`. */
+  abortAfterStdout?: { text: string; ms: number };
 }
 
 /** Injectable so tests exercise the tool logic without an sshd. */
@@ -406,16 +416,24 @@ export const runProcess: Runner = (argv, opts) => {
   const err = new OutputCapture(budget);
   const decoder = new TextDecoder();
   let early = ""; // stderr decoded for `untilStderr`, first `budget` characters only
+  const awaited = opts.abortAfterStdout;
+  const outDecoder = new TextDecoder();
+  let earlyOut = ""; // stdout decoded for `abortAfterStdout`, first `budget` characters only
+  let outSeen = awaited === undefined;
 
   return new Promise<RunResult>((resolve) => {
     let settled = false;
+    let aborted = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Settle once — on the marker, on exit, or on the ceiling — and make sure
-    // the child is dead afterwards.
-    const settle = (code: number | null, timedOut: boolean) => {
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    // Settle once — on the marker, on exit, on the ceiling or on abort — and
+    // make sure the child is dead afterwards.
+    const settle = (code: number | null, timedOut: boolean, cancelled = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(graceTimer);
+      opts.signal?.removeEventListener("abort", onAbort);
       try {
         proc.kill();
       } catch {
@@ -426,14 +444,26 @@ export const runProcess: Runner = (argv, opts) => {
         stderr: err.render() + (timedOut ? `\n(killed after ${opts.ceilingMs} ms)` : ""),
         code,
         timedOut,
+        ...(cancelled ? { cancelled: true } : {}),
         stdoutTruncated: out.truncated,
         stderrTruncated: err.truncated,
       });
     };
+    const onAbort = () => {
+      aborted = true;
+      if (outSeen) settle(null, false, true);
+      else graceTimer = setTimeout(() => settle(null, false, true), awaited!.ms);
+    };
     const drain = async (stream: ReadableStream<Uint8Array>, onChunk: (c: Uint8Array) => void) => {
       for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) onChunk(chunk);
     };
-    const stdoutDone = drain(proc.stdout, (c) => out.push(c)).catch(() => {});
+    const stdoutDone = drain(proc.stdout, (c) => {
+      out.push(c);
+      if (outSeen || earlyOut.length > budget) return;
+      earlyOut += outDecoder.decode(c, { stream: true });
+      outSeen = earlyOut.includes(awaited!.text);
+      if (outSeen && aborted) settle(null, false, true);
+    }).catch(() => {});
     const stderrDone = drain(proc.stderr, (c) => {
       err.push(c);
       if (!opts.untilStderr || early.length > budget) return;
@@ -442,6 +472,8 @@ export const runProcess: Runner = (argv, opts) => {
     }).catch(() => {});
     void Promise.all([proc.exited, stdoutDone, stderrDone]).then(([code]) => settle(code, false));
     if (opts.ceilingMs) timer = setTimeout(() => settle(null, true), opts.ceilingMs);
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener("abort", onAbort, { once: true });
   });
 };
 
@@ -590,7 +622,7 @@ function intArg(value: unknown, name: string, fallback: number, min: number, max
   return value;
 }
 
-function logLine(fields: Record<string, string | number | boolean>): void {
+function logLine(fields: Record<string, string | number | boolean | null>): void {
   const parts: string[] = ["[ssh-mcp]"];
   for (const [k, v] of Object.entries(fields)) {
     const val = typeof v === "string" ? v : String(v);
@@ -637,15 +669,8 @@ async function ensureSession(cfg: SshConfig): Promise<string> {
   await chmod(dir, 0o700);
   sessionDir = dir;
   if (!exitHookInstalled) {
-    // The server ends when stdin does, or on a signal; both reach `exit`.
+    // The server ends when stdin does, or on a signal (`main`); both reach `exit`.
     process.on("exit", endSession);
-    for (const [signal, code] of [
-      ["SIGTERM", 143],
-      ["SIGINT", 130],
-      ["SIGHUP", 129],
-    ] as const) {
-      process.on(signal, () => process.exit(code));
-    }
     exitHookInstalled = true;
   }
   await writeFile(sessionPaths(dir).knownHosts, renderKnownHosts(cfg.host, cfg.port, cfg.hostKey), {
@@ -683,6 +708,8 @@ export interface Deps {
   run?: Runner;
   /** Test hook — an existing directory used as the session directory, known_hosts left unwritten. */
   sessionDir?: string;
+  /** Aborted when the client cancels the call (`notifications/cancelled`). */
+  signal?: AbortSignal;
 }
 
 interface Session {
@@ -714,6 +741,11 @@ async function session(deps: Deps): Promise<Session> {
 /** Staging path for one sftp `get`/`put`, inside the 0700 session dir. */
 function scratchPath(s: Session, prefix: string): string {
   return join(s.dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+}
+
+/** Checked before each remote step: a cancelled call starts nothing, a step under way completes. */
+function throwIfCancelled(deps: Deps): void {
+  if (deps.signal?.aborted) throw new CallCancelled();
 }
 
 /** The target refused the credential itself (only a reconnect fixes it), unlike a network failure. */
@@ -821,20 +853,30 @@ export async function execTool(
     EXEC_TIMEOUT_MAX_S,
   );
   const s = await session(deps);
+  throwIfCancelled(deps);
   logLine({ op: "exec", timeout_s: timeoutS });
   const marker = `appstrate-ssh-pid-${crypto.randomUUID().replaceAll("-", "")}=`;
+  const started = performance.now();
   const res = await s.run(
     ["ssh", ...buildSshArgs(s.cfg, s.paths, markedCommand(marker, command))],
     {
       ceilingMs: timeoutS * 1000,
+      // A cancel before the pid is reported would leave the command running untraced.
+      ...(deps.signal
+        ? { signal: deps.signal, abortAfterStdout: { text: marker, ms: STOP_CEILING_MS } }
+        : {}),
     },
   );
   const { stdout, pid } = takePidMarker(res.stdout, marker);
   const timedOut = res.timedOut === true;
+  const cancelled = res.cancelled === true;
   // A non-zero exit from the COMMAND is a result, not a transport failure, and
   // must reach the agent as data. Only ssh's own failures (255) are thrown —
   // which a command exiting 255 is indistinguishable from.
-  if (res.code === 255 && !timedOut) throw sshFailure("ssh", res);
+  if (res.code === 255 && !timedOut && !cancelled) throw sshFailure("ssh", res);
+  const after = cancelled
+    ? `the call was cancelled after ${Math.round((performance.now() - started) / 1000)} s`
+    : `the call returned after ${timeoutS} s`;
   return {
     // Echoed for the run journal; on the wire it follows the pid `echo` above.
     command_sent: command,
@@ -844,7 +886,8 @@ export async function execTool(
     stdout,
     stderr: res.stderr,
     truncated: res.stdoutTruncated === true || res.stderrTruncated === true,
-    ...(timedOut && (await stopRemote(s, pid, timeoutS))),
+    ...(cancelled ? { cancelled: true } : {}),
+    ...((timedOut || cancelled) && (await stopRemote(s, pid, after))),
   };
 }
 
@@ -893,10 +936,11 @@ export function stopScript(pid: number): string {
 async function stopRemote(
   s: Session,
   pid: number | null,
-  timeoutS: number,
+  after: string,
 ): Promise<Record<string, unknown>> {
-  const after = `the call returned after ${timeoutS} s`;
+  const reason = after.startsWith("the call was cancelled") ? "cancelled" : "timeout";
   if (pid === null) {
+    logLine({ op: "exec-stop", pid: null, outcome: "unknown", reason });
     return {
       remote_pid: null,
       remote_process: "unknown",
@@ -910,7 +954,7 @@ async function stopRemote(
   });
   const outcome =
     { 0: "terminated", 3: "already_exited", 4: "still_running" }[res.code ?? -1] ?? "unknown";
-  logLine({ op: "exec-stop", pid, outcome });
+  logLine({ op: "exec-stop", pid, outcome, reason });
   const notes: Record<string, string> = {
     terminated: `${after} and the command was terminated on the target`,
     already_exited: `${after}; the command had already ended on the target`,
@@ -1048,6 +1092,7 @@ export async function readTool(
   const offset = intArg(args.offset, "offset", 1, 1, Number.MAX_SAFE_INTEGER);
   const limit = intArg(args.limit, "limit", READ_LIMIT_DEFAULT, 1, READ_LIMIT_MAX);
   const s = await session(deps);
+  throwIfCancelled(deps);
   const { target, incomplete } = await statPath(s, path, quoted);
   if (target.kind === "directory") {
     if (args.offset !== undefined || args.limit !== undefined) {
@@ -1056,6 +1101,7 @@ export async function readTool(
     return directoryListing(path, target.entries, incomplete);
   }
 
+  throwIfCancelled(deps);
   const lines = splitLines((await fetchText(s, path, target.size)).text);
   const file = { path, type: "file", bytes: target.size, total_lines: lines.length };
   if (lines.length === 0) return { ...file, content: "[empty file]", next_offset: null };
@@ -1087,6 +1133,7 @@ export async function writeFileTool(
     );
   }
   const s = await session(deps);
+  throwIfCancelled(deps);
   // `put` onto a directory drops the file INSIDE it under the scratch name, so
   // the target is stat'ed first; only "not found" means a new file.
   const existing = await statPath(s, path, quoted).then(
@@ -1097,6 +1144,7 @@ export async function writeFileTool(
     },
   );
   if (existing?.kind === "directory") throw new ProtocolError(`${path} is a directory`);
+  throwIfCancelled(deps);
   try {
     await putFile(s, path, content);
   } catch (err) {
@@ -1125,8 +1173,10 @@ export async function editFileTool(
     throw new ProtocolError("`replace_all` must be a boolean");
   }
   const s = await session(deps);
+  throwIfCancelled(deps);
   const { target } = await statPath(s, path, quoted);
   if (target.kind === "directory") throw new ProtocolError(`${path} is a directory`);
+  throwIfCancelled(deps);
   const original = await fetchText(s, path, target.size);
   const before = original.text;
 
@@ -1159,6 +1209,7 @@ export async function editFileTool(
   // Nothing locks the file between the `get` above and this `put`: a write
   // landing in between is lost. A failed `put` may have truncated the file,
   // so the original bytes go back once before the failure is reported.
+  throwIfCancelled(deps);
   try {
     await putFile(s, path, after);
   } catch (err) {
@@ -1191,6 +1242,22 @@ export async function editFileTool(
 }
 
 // ─────────────────────── MCP stdio JSON-RPC loop ─────────────────────
+
+export const SERVER_VERSION = "1.0.3";
+/** Newest first; [0] is answered to a client asking for anything else. */
+export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
+/** A quarter of the MCP SDK's 60 s default request timeout. */
+export const PROGRESS_INTERVAL_MS = 15_000;
+/** Above the sidecar's 16 MiB envelope cap. */
+export const STDIN_LINE_MAX_CHARS = 32 * 1024 * 1024;
+/** Calls stopping at shutdown get this long: under the MCP SDK's 2 s between SIGTERM and SIGKILL. */
+export const SHUTDOWN_CEILING_MS = 1_500;
+
+export function negotiateProtocolVersion(requested: unknown): string {
+  return (SUPPORTED_PROTOCOL_VERSIONS as readonly unknown[]).includes(requested)
+    ? (requested as string)
+    : SUPPORTED_PROTOCOL_VERSIONS[0];
+}
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -1226,7 +1293,7 @@ export const TOOLS = [
   },
   {
     name: "ssh_exec",
-    description: `Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After \`timeout_seconds\` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most ${STOP_CEILING_MS / 1000} s past \`timeout_seconds\` with \`timed_out: true\`, \`exit_code: null\`, \`remote_pid\`, and \`remote_process\` saying whether it ended. A process that leaves the group (\`setsid\`, a daemon) is not reached. Longer work can be started detached — \`nohup cmd > log 2>&1 < /dev/null &\`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.`,
+    description: `Run a command on the remote host, as the connection's Unix account. WRITES — this tool can do anything that account can do; withhold it from an agent that must not change the target. The string is handed to the account's login shell, so shell syntax works and quoting is yours to get right. After \`timeout_seconds\` (default 120, max 600) the command's process group on the target — background jobs it started included — gets SIGTERM, then SIGKILL 5 s later, and the call returns at most ${STOP_CEILING_MS / 1000} s past \`timeout_seconds\` with \`timed_out: true\`, \`exit_code: null\`, \`remote_pid\`, and \`remote_process\` saying whether it ended. A call cancelled before then stops the command the same way. While a call runs or waits its turn, a caller that requests progress gets a notification every ${PROGRESS_INTERVAL_MS / 1000} s. A process that leaves the group (\`setsid\`, a daemon) is not reached. Longer work can be started detached — \`nohup cmd > log 2>&1 < /dev/null &\`; without the redirections the call waits for it — and followed with ssh_read on the log. The server handles one call at a time: a running ssh_exec holds up every other ssh tool until it returns. Exit status 255 is reserved by ssh itself: a command exiting 255 is reported as an ssh failure. stdout and stderr over 64 KiB each keep their head and tail around an omission marker.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1272,7 +1339,7 @@ export const TOOLS = [
   {
     name: "ssh_write_file",
     description:
-      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. WRITES — withhold it from an agent that must not change the target.",
+      "Write a remote file over SFTP, creating or overwriting it (8 MiB at most; a directory is refused). An existing file keeps its mode; a new file is created 0600 — chmod it with ssh_exec if needed. A symlink is followed: its target is written. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. A call cancelled before the upload starts writes nothing; an upload already under way completes. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
@@ -1283,7 +1350,7 @@ export const TOOLS = [
   {
     name: "ssh_edit_file",
     description:
-      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. WRITES — withhold it from an agent that must not change the target.",
+      "Replace an exact string in a remote UTF-8 text file over SFTP, rewriting it in place so its mode, owner and links are kept; a symlink is followed and its target edited. `old_str` must occur exactly once unless `replace_all` is set; copy it from ssh_read output without the line-number prefix, whitespace included. Relative paths, `~` and `~/…` start at the account's home directory; `~user` is refused. A call cancelled before the upload starts changes nothing; an upload already under way completes. WRITES — withhold it from an agent that must not change the target.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1303,6 +1370,9 @@ export const TOOLS = [
 ];
 
 class ProtocolError extends Error {}
+
+/** The client cancelled the call before it ran or while it ran; it gets no response. */
+class CallCancelled extends Error {}
 
 function okResult(id: number | string | null | undefined, payload: unknown): JsonRpcResponse {
   return {
@@ -1331,11 +1401,14 @@ export async function handleRequest(
       jsonrpc: "2.0",
       id: req.id ?? null,
       result: {
-        protocolVersion: "2024-11-05",
+        protocolVersion: negotiateProtocolVersion(req.params?.protocolVersion),
         capabilities: { tools: {} },
-        serverInfo: { name: "appstrate-ssh-mcp", version: "1.0.2" },
+        serverInfo: { name: "appstrate-ssh-mcp", version: SERVER_VERSION },
       },
     };
+  }
+  if (req.method === "ping") {
+    return { jsonrpc: "2.0", id: req.id ?? null, result: {} };
   }
   if (req.method === "tools/list") {
     return { jsonrpc: "2.0", id: req.id ?? null, result: { tools: TOOLS } };
@@ -1355,6 +1428,8 @@ export async function handleRequest(
     try {
       return okResult(req.id, await handler(params.arguments ?? {}, deps));
     } catch (err) {
+      // The dispatcher logged the cancel and answers nothing.
+      if (err instanceof CallCancelled || deps.signal?.aborted) throw err;
       const message = errorText(err);
       const ms = Math.round(performance.now() - started);
       // Refusals and misconfiguration are tool RESULTS the agent can act on,
@@ -1386,26 +1461,275 @@ export async function handleRequest(
   };
 }
 
-async function main(): Promise<void> {
-  let buf = "";
-  for await (const chunk of process.stdin as AsyncIterable<Buffer>) {
-    buf += chunk.toString("utf8");
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let req: JsonRpcRequest;
+type RequestId = string | number;
+
+const INVALID_REQUEST = -32600;
+
+export interface DispatcherOptions {
+  /** One JSON-RPC message; `main` serialises it as one stdout line. May throw once the client is gone. */
+  write: (message: object) => void;
+  deps?: Deps;
+  /** Default `PROGRESS_INTERVAL_MS`. */
+  progressIntervalMs?: number;
+}
+
+export interface Dispatcher {
+  /** Synchronous: a tool call is queued, never awaited. */
+  acceptLine(line: string): void;
+  /** `write`, a failure logged once instead of thrown. */
+  send(message: object): void;
+  /** Resolves when no call is queued or running. */
+  idle(): Promise<void>;
+  /** Cancels every queued and running call, as a client's cancel would, and reads no more lines. */
+  stopAll(reason: string): void;
+}
+
+/** `prior`, or a `CallCancelled` rejection as soon as `signal` aborts. */
+function untilOrAborted(prior: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return prior;
+  if (signal.aborted) return Promise.reject(new CallCancelled());
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new CallCancelled());
+    signal.addEventListener("abort", onAbort, { once: true });
+    void prior.then(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+  });
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const isRequestId = (v: unknown): v is RequestId => typeof v === "string" || typeof v === "number";
+
+/**
+ * Reads JSON-RPC lines without ever waiting on a tool: `tools/call` requests
+ * run one at a time behind `serially`, everything else is answered at once.
+ */
+export function createDispatcher(opts: DispatcherOptions): Dispatcher {
+  const intervalMs = opts.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
+  const inflight = new Map<RequestId, { controller: AbortController; stopProgress: () => void }>();
+  const pending = new Set<Promise<void>>();
+  let queue: Promise<void> = Promise.resolve();
+  let stopped = false;
+  let writeFailed = false;
+
+  const write = (message: object) => {
+    try {
+      opts.write(message);
+    } catch (err) {
+      if (writeFailed) return;
+      writeFailed = true;
+      logLine({ op: "write-failed", message: errorText(err) });
+    }
+  };
+
+  // A call cancelled while queued still waits for its predecessor before
+  // releasing the lock, so calls never overtake one another.
+  function serially<T>(signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+    const prior = queue;
+    let release!: () => void;
+    queue = new Promise<void>((r) => (release = r));
+    return (async () => {
       try {
-        req = JSON.parse(line) as JsonRpcRequest;
-      } catch {
-        process.stderr.write(`[ssh-mcp] dropping malformed line: ${line.slice(0, 120)}\n`);
-        continue;
+        await untilOrAborted(prior, signal);
+        return await fn();
+      } finally {
+        void prior.then(release);
       }
-      const res = await handleRequest(req);
-      if (res) process.stdout.write(JSON.stringify(res) + "\n");
+    })();
+  }
+
+  const invalid = (id: RequestId | null, message = "Invalid Request") =>
+    write({ jsonrpc: "2.0", id, error: { code: INVALID_REQUEST, message } });
+
+  /** Ticks from acceptance, so time spent queued is reported too. */
+  function startProgress(token: RequestId, name: string, signal: AbortSignal): () => void {
+    const started = performance.now();
+    let n = 0;
+    const timer = setInterval(() => {
+      const s = Math.round((performance.now() - started) / 1000);
+      write({
+        jsonrpc: "2.0",
+        method: "notifications/progress",
+        params: { progressToken: token, progress: ++n, message: `${name}: ${s} s elapsed` },
+      });
+    }, intervalMs);
+    const stop = () => {
+      clearInterval(timer);
+      signal.removeEventListener("abort", stop);
+    };
+    signal.addEventListener("abort", stop, { once: true });
+    return stop;
+  }
+
+  function acceptCall(id: RequestId, req: JsonRpcRequest): void {
+    if (inflight.has(id)) {
+      invalid(id, "Invalid Request: id already in use");
+      return;
+    }
+    const controller = new AbortController();
+    const { signal } = controller;
+    const params = req.params ?? {};
+    const token = isPlainObject(params._meta) ? params._meta.progressToken : undefined;
+    const name = typeof params.name === "string" ? params.name : "tools/call";
+    const stopProgress = isRequestId(token) ? startProgress(token, name, signal) : () => {};
+    inflight.set(id, { controller, stopProgress });
+
+    const settle = () => {
+      stopProgress();
+      inflight.delete(id);
+    };
+    const done: Promise<void> = serially(signal, () => handleRequest(req, { ...opts.deps, signal }))
+      .then(
+        (res) => {
+          settle();
+          // A cancelled request gets no response.
+          if (res && !signal.aborted) write(res);
+        },
+        (err: unknown) => {
+          settle();
+          if (err instanceof CallCancelled || signal.aborted) return;
+          write({ jsonrpc: "2.0", id, error: { code: -32603, message: errorText(err) } });
+        },
+      )
+      .finally(() => pending.delete(done));
+    pending.add(done);
+  }
+
+  function acceptLine(raw: string): void {
+    if (stopped) return;
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (line.trim() === "") return;
+    let msg: unknown;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+      logLine({ op: "parse-error" });
+      return;
+    }
+    if (!isPlainObject(msg)) {
+      invalid(null);
+      return;
+    }
+    const hasId = "id" in msg;
+    // The server sends no requests, so a response object is nobody's to read.
+    if (hasId && ("result" in msg || "error" in msg) && !("method" in msg)) return;
+    if (
+      msg.jsonrpc !== "2.0" ||
+      typeof msg.method !== "string" ||
+      (hasId && !isRequestId(msg.id)) ||
+      ("params" in msg && !isPlainObject(msg.params))
+    ) {
+      invalid(isRequestId(msg.id) ? msg.id : null);
+      return;
+    }
+    const req = msg as unknown as JsonRpcRequest;
+
+    if (!hasId) {
+      if (req.method === "notifications/cancelled") {
+        const requestId = req.params?.requestId;
+        const entry = isRequestId(requestId) ? inflight.get(requestId) : undefined;
+        if (entry) {
+          entry.controller.abort(req.params?.reason ?? "cancelled");
+          logLine({ op: "cancel", id: requestId as RequestId });
+        }
+      }
+      return;
+    }
+    const id = msg.id as RequestId;
+    if (req.method === "tools/call") {
+      acceptCall(id, req);
+      return;
+    }
+    void handleRequest(req, opts.deps).then((res) => {
+      if (res) write(res);
+    });
+  }
+
+  async function idle(): Promise<void> {
+    while (pending.size > 0) await Promise.allSettled([...pending]);
+    await queue;
+  }
+
+  function stopAll(reason: string): void {
+    stopped = true;
+    for (const [id, { controller }] of inflight) {
+      controller.abort(reason);
+      logLine({ op: "cancel", id, reason });
     }
   }
+
+  return { acceptLine, idle, stopAll, send: write };
+}
+
+/** Cancels every call, so a running ssh_exec is stopped on the target; false when the ceiling hit first. */
+async function stopCalls(dispatcher: Dispatcher, reason: string): Promise<boolean> {
+  dispatcher.stopAll(reason);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ceiling = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), SHUTDOWN_CEILING_MS);
+  });
+  const done = await Promise.race([dispatcher.idle().then(() => true as const), ceiling]);
+  clearTimeout(timer);
+  return done;
+}
+
+async function main(): Promise<void> {
+  let stdoutFailed = false;
+  process.stdout.on("error", (err) => {
+    if (stdoutFailed) return;
+    stdoutFailed = true;
+    logLine({ op: "write-failed", message: errorText(err) });
+  });
+  const send = (m: object) => process.stdout.write(JSON.stringify(m) + "\n");
+  const dispatcher = createDispatcher({ write: send });
+  let shuttingDown = false;
+  for (const [signal, code] of [
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+    ["SIGHUP", 129],
+  ] as const) {
+    process.on(signal, () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      void stopCalls(dispatcher, signal).finally(() => process.exit(code));
+    });
+  }
+  const decoder = new TextDecoder();
+  let buf = "";
+  // Set once a line outgrows `STDIN_LINE_MAX_CHARS`: the rest of it is dropped.
+  let skipping = false;
+  for await (const chunk of process.stdin as AsyncIterable<Uint8Array>) {
+    buf += decoder.decode(chunk, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (skipping) skipping = false;
+      else dispatcher.acceptLine(line);
+    }
+    if (skipping) {
+      buf = "";
+    } else if (buf.length > STDIN_LINE_MAX_CHARS) {
+      dispatcher.send({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: INVALID_REQUEST, message: "Invalid Request: line too large" },
+      });
+      logLine({ op: "line-too-large" });
+      skipping = true;
+      buf = "";
+    }
+  }
+  buf += decoder.decode();
+  if (!skipping && buf.trim()) dispatcher.acceptLine(buf);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // The client is gone: nobody reads an answer, and a running command must not outlive it.
+  if (!(await stopCalls(dispatcher, "stdin closed"))) process.exit(0);
 }
 
 if ((import.meta as unknown as { main?: boolean }).main === true) {

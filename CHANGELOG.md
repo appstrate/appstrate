@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Before the deploy, check `EGRESS_ALLOW_INTERNAL_HOSTS`.** A malformed entry
+  fails boot and names itself: a port (`host:8443`), a scheme, a path, a wildcard,
+  an IPv6 literal or a non-canonical spelling. List bare hostnames, and review the
+  value before upgrading (#1912). The release adds a boot warning that names each
+  set environment variable the platform does not read when its namespace is one it
+  reads (`docs/ENV.md` § Unread keys). The SSH MCP server is ssh-mcp 1.0.3 (see
+  Changed).
+
 - **Before the deploy, mark `required: true` on every agent integration a run
   cannot do without** (#1830). After it, a declared integration blocks a run
   only when the agent marks it `required` (below): an agent whose user has no
@@ -141,6 +149,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   enables a subscription module, so its report should show none.
 
 ### Changed
+
+- **BREAKING (operators): `EGRESS_ALLOW_INTERNAL_HOSTS` takes bare hostnames
+  only** (#1912). An IPv6 literal, a port, a scheme, a path, a wildcard or a
+  non-canonical spelling now refuses boot; see Operators.
+- **ssh-mcp 1.0.3: hand-rolled JSON-RPC server.** Protocol versions `2025-11-25`,
+  `2025-06-18` and `2024-11-05` (no JSON-RPC batches, so not `2025-03-26`);
+  malformed input answers `-32700`, an invalid request `-32600`. stdin is read
+  continuously and tool calls run one at a time. A caller that asks for progress
+  gets a notification every 15 s. A cancelled `ssh_exec` (client timeout or
+  abort) stops the command on the target, as a timed-out one is, and so do the
+  client leaving (stdin closed) and SIGTERM, SIGINT or SIGHUP. A cancelled
+  `ssh_write_file` or `ssh_edit_file` writes nothing unless its upload had started.
+- **Progress-reporting MCP calls are capped at 1 h** (`MCP_PROGRESS_CALL_MAX_TOTAL_MS`,
+  `packages/mcp-transport`), in addition to the run deadline. `MAX_WAIT_SECONDS` is
+  derived from the MCP SDK request timeout minus a 5 s margin, which is still 55.
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
@@ -507,6 +530,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Boot warning for environment keys this version does not read.** One `warn`
+  line lists each set key whose namespace is one the platform reads and that no
+  current setting consumes, so a renamed, retired or misspelled variable is
+  visible. Namespace rule and limits: `docs/ENV.md` § Unread keys.
+
 - **Personal model credentials** (#1875). A member brings their own model
   credential (an API key for a fixed-endpoint provider, or a subscription where
   a subscription module is enabled) from Préférences → Identifiants de modèle,
@@ -625,6 +653,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the payload Pi builds.
 
 ### Fixed
+
+- **A session is refused for a user with no user row.** The session hook throws
+  instead of creating a session without a realm.
+- **The Pi resource loader guard throws when Pi no longer exposes
+  `packageManager.resolve` or `resolveExtensionSources`.** Without the host-isolation
+  shim Pi would scan the host's skill and extension directories.
 
 - **The connect form lists credential fields in the schema's `required`
   order, required fields first** (#1904). jsonb storage reorders a schema's

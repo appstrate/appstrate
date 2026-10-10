@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { BASE_ERROR_CODES, betterAuth } from "better-auth";
+import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -218,8 +218,23 @@ const realmResolver = hookSlot<RealmResolver>();
 
 export const setRealmResolver = realmResolver.set;
 
-/** `user.realm` of `userId`, or `undefined` when no such row exists. */
-async function readUserRealm(userId: string): Promise<string | undefined> {
+/**
+ * `user.realm` of `userId`, or `undefined` when no such row exists. Inside a Better Auth
+ * hook it reads through the adapter BA is writing with, so it sees the hook's own transaction.
+ */
+async function readUserRealm(
+  userId: string,
+  context: GenericEndpointContext | null,
+): Promise<string | undefined> {
+  if (context) {
+    const adapter = await getCurrentAdapter(context.context.adapter);
+    const found = await adapter.findOne<{ realm: string }>({
+      model: "user",
+      where: [{ field: "id", value: userId }],
+      select: ["realm"],
+    });
+    return found?.realm;
+  }
   const [row] = await db
     .select({ realm: user.realm })
     .from(user)
@@ -1267,7 +1282,7 @@ function buildAuth(options: CreateAuthOptions) {
       account: {
         delete: {
           before: async (account, context) => {
-            await assertMagicLinkAudience(() => readUserRealm(account.userId), context);
+            await assertMagicLinkAudience(() => readUserRealm(account.userId, context), context);
           },
         },
       },
@@ -1280,14 +1295,14 @@ function buildAuth(options: CreateAuthOptions) {
           // return a patch to merge the realm before the write.
           before: async (sess, context) => {
             // One read serves both the magic-link audience check and the patch.
-            const realm = await readUserRealm(sess.userId);
+            const realm = await readUserRealm(sess.userId, context);
+            if (realm === undefined) {
+              throw new Error(
+                `auth: no user row for session user ${sess.userId} — refusing to create a session without its realm`,
+              );
+            }
             await assertMagicLinkAudience(async () => realm, context);
-            // If the user row vanished before our SELECT (shouldn't happen —
-            // BA inserts the user before the session in the same flow), fall
-            // back to "platform". The request-time guard then treats the
-            // session as platform-scoped, which is safer than leaking an
-            // end-user session.
-            return { data: { realm: realm ?? "platform" } };
+            return { data: { realm } };
           },
         },
       },

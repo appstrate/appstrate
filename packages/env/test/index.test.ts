@@ -685,3 +685,35 @@ describe("agent-container knobs and signature policy defaults", () => {
     expect(() => getEnv()).toThrow(/TOOL_RESULT_BYTE_LIMIT/);
   });
 });
+
+describe("EGRESS_ALLOW_INTERNAL_HOSTS", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("parses to a lowercased Set of hosts, skipping empty items", () => {
+    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "Keycloak.internal, 10.0.0.5,";
+    expect([...getEnv().EGRESS_ALLOW_INTERNAL_HOSTS]).toEqual(["keycloak.internal", "10.0.0.5"]);
+  });
+
+  it("is an empty Set when unset", () => {
+    delete process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
+    expect(getEnv().EGRESS_ALLOW_INTERNAL_HOSTS.size).toBe(0);
+  });
+
+  it("fails boot naming every refused entry", () => {
+    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "kc.internal:8443,https://x";
+    expect(() => getEnv()).toThrow(/EGRESS_ALLOW_INTERNAL_HOSTS/);
+    expect(() => getEnv()).toThrow(/"kc\.internal:8443" contains ":"/);
+    expect(() => getEnv()).toThrow(/"https:\/\/x" is a URL/);
+  });
+});

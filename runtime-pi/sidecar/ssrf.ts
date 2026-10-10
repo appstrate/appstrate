@@ -9,22 +9,30 @@ import {
   compileEgressPolicy,
   parseAuthorizedUriPattern,
 } from "@appstrate/afps-shared/authorized-uris";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { isSelfHost, ownAddresses, type RunnerEgressPolicy } from "./helpers.ts";
 
 /**
  * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated); empty exempts nothing. Who may skip the floor
- * on these hosts: docs/architecture/SIDECAR.md.
+ * on these hosts: docs/architecture/SIDECAR.md. Validated at boot by parseSidecarEnv; same parser
+ * as the platform.
  */
-const trustedEgressHosts: ReadonlySet<string> = new Set(
-  (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
-    .split(",")
-    .map((h) => h.trim().toLowerCase())
-    .filter((h) => h.length > 0),
-);
+let trustedEgressHosts: ReadonlySet<string> | undefined;
+
+function trustedEgressHostSet(): ReadonlySet<string> {
+  if (trustedEgressHosts === undefined) {
+    const { hosts, invalid } = parseEgressAllowInternalHosts(
+      process.env.EGRESS_ALLOW_INTERNAL_HOSTS,
+    );
+    if (invalid.length > 0) throw new Error(`EGRESS_ALLOW_INTERNAL_HOSTS: ${invalid.join("; ")}`);
+    trustedEgressHosts = hosts;
+  }
+  return trustedEgressHosts;
+}
 
 export function isOperatorTrustedEgressHost(host: string): boolean {
-  return trustedEgressHosts.has(host.toLowerCase());
+  return trustedEgressHostSet().has(host.toLowerCase());
 }
 
 /** Literal check of an operator-configured URL (LLM baseUrl); trusted hosts skip the blocklist. */

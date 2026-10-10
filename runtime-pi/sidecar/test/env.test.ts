@@ -116,6 +116,20 @@ describe("parseSidecarEnv", () => {
     ]);
   });
 
+  it("refuses a malformed EGRESS_ALLOW_INTERNAL_HOSTS entry at boot, naming the entry", () => {
+    expect(issuesOf({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "a.internal,b.internal:80" })).toEqual(
+      [
+        'EGRESS_ALLOW_INTERNAL_HOSTS: "b.internal:80" contains ":" — a port is not part of an entry, and IPv6 literals are not supported (give the host a DNS name)',
+      ],
+    );
+  });
+
+  it("accepts a valid EGRESS_ALLOW_INTERNAL_HOSTS list without adding a field", () => {
+    expect(
+      parseSidecarEnv({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "keycloak.internal, llm_svc" }),
+    ).toEqual(parseSidecarEnv(VALID));
+  });
+
   it("renders a single-line message (connect mode relays it on one stdout sentinel)", () => {
     expect.assertions(1);
     try {

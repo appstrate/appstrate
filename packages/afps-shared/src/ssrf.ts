@@ -173,3 +173,60 @@ export function isBlockedUrl(url: string, allowHost?: (host: string) => boolean)
   if (allowHost?.(parsed.hostname)) return false;
   return isBlockedHost(parsed.hostname);
 }
+
+/** The parsed `EGRESS_ALLOW_INTERNAL_HOSTS` list: the accepted hosts and one reason per refused entry. */
+export interface EgressAllowlistParse {
+  /** Lowercased bare hostnames / dotted IPv4, matched exactly against a URL's `hostname`. */
+  hosts: ReadonlySet<string>;
+  /** One `"<entry>" <reason>` per refused entry, in input order; empty when valid. */
+  invalid: readonly string[];
+}
+
+/**
+ * Parse the comma-separated `EGRESS_ALLOW_INTERNAL_HOSTS` list. Empty items are skipped; every other
+ * entry is either kept as a host or refused with a reason. IPv6 literals are refused: the per-run
+ * bridge is IPv4-only, and sidecar CONNECT hosts arrive unbracketed while `URL.hostname` keeps brackets.
+ */
+export function parseEgressAllowInternalHosts(raw: string | undefined): EgressAllowlistParse {
+  const hosts = new Set<string>();
+  const invalid: string[] = [];
+  for (const item of (raw ?? "").split(",")) {
+    const entry = item.trim().toLowerCase();
+    if (entry === "") continue;
+    const reason = egressEntryRefusal(entry);
+    if (reason === null) hosts.add(entry);
+    else invalid.push(`"${entry}" ${reason}`);
+  }
+  return { hosts, invalid };
+}
+
+/** The reason a non-empty, trimmed, lowercased entry is refused, or null when it is a valid host. */
+function egressEntryRefusal(entry: string): string | null {
+  if (/\s/.test(entry)) return "contains whitespace — separate entries with commas";
+  if (entry.includes("://")) return "is a URL — list the bare hostname";
+  if (entry.includes("/")) return `contains "/" — list the bare hostname, without a path`;
+  if (entry.includes("*")) return `contains "*" — wildcards are not supported; list each host`;
+  if (entry.includes("@")) return `contains "@" — list the bare hostname`;
+  if (/[:[\]]/.test(entry)) {
+    return `contains ":" — a port is not part of an entry, and IPv6 literals are not supported (give the host a DNS name)`;
+  }
+  if (entry.endsWith(".")) return `ends with "." — drop the trailing dot`;
+
+  let parsed: URL | null;
+  try {
+    parsed = new URL(`http://${entry}/`);
+  } catch {
+    parsed = null;
+  }
+  if (!/^[a-z0-9._-]+$/.test(entry)) {
+    // Only a host that the URL parser keeps whole (nothing spills into a query or path) has a canonical form.
+    const canonical = parsed && parsed.href === `http://${parsed.hostname}/` ? parsed.hostname : "";
+    return /^[a-z0-9._-]+$/.test(canonical)
+      ? `is not in canonical form — write it as "${canonical}"`
+      : "contains characters a hostname cannot hold";
+  }
+  if (!parsed) return "is not a valid hostname or IPv4 address";
+  if (parsed.hostname !== entry)
+    return `is not in canonical form — write it as "${parsed.hostname}"`;
+  return null;
+}

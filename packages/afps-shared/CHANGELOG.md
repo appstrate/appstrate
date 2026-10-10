@@ -32,6 +32,14 @@ consumer's publish rather than the first user's `npm install`.
   replaces the host blocklist on both the literal and the resolved-address
   layer of every hop, keeping resolution and the address pin (`allowHost`
   skips both). (#1819)
+- **`parseEgressAllowInternalHosts`** (`./ssrf`): the one parser of
+  `EGRESS_ALLOW_INTERNAL_HOSTS`, returning `{ hosts, invalid }`. Entries are
+  comma-separated, trimmed and lowercased; empty items are skipped. A bare
+  hostname or dotted IPv4 is kept, and any other entry (a URL, path, port,
+  wildcard, userinfo, whitespace, trailing dot, non-canonical form, or an
+  IPv6 literal, which is refused because the per-run bridge is IPv4-only) is
+  reported in `invalid` with its reason and the canonical form where one
+  exists. Hosts match `URL.hostname` exactly. (#1912)
 
 ### Changed
 
