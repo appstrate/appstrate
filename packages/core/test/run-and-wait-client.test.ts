@@ -236,7 +236,13 @@ describe("run_and_wait client", () => {
       name: "writer",
       contextFiles: [],
     });
-    expect(steps).toMatchObject([{ code: "unknown_argument", arguments: ["contextFiles"] }]);
+    expect(steps).toMatchObject([
+      {
+        code: "unknown_argument",
+        arguments: ["contextFiles"],
+        accepted: expect.arrayContaining(["context_files"]),
+      },
+    ]);
   });
 
   it("rejects an unparseable agent reference before dispatching", async () => {

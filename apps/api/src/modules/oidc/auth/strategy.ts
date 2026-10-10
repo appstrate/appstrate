@@ -158,11 +158,7 @@ export const oidcAuthStrategy: AuthStrategy = {
         });
         return null;
       }
-      resolution = {
-        ...resolution,
-        spaceId: boundSpaceId,
-        permissions: spaceKeyCeiling(resolution),
-      };
+      resolution = { ...capToSpaceKeyScopes(resolution), spaceId: boundSpaceId };
     }
 
     // Surface the token's RFC 8707 audiences so a resource server (e.g. an MCP
@@ -178,16 +174,18 @@ export const oidcAuthStrategy: AuthStrategy = {
 };
 
 /**
- * The ceiling of a space-bound token: the API-key scope allowlist, narrowed by
- * the token's own list when it carries one. An empty deferred list is the
- * uncapped instance token, so it takes the whole allowlist. An end-user
- * token's list is already its fixed allowlist.
+ * Caps a space-bound token at the API-key scope allowlist: the deferred
+ * instance token (uncapped otherwise) gets it as its `scopeCeiling`, a token
+ * carrying its own list has that list narrowed. An end-user token's list is
+ * already its fixed allowlist.
  */
-function spaceKeyCeiling(resolution: AuthResolution): readonly string[] {
-  if (resolution.principalKind === "end_user") return resolution.permissions;
+function capToSpaceKeyScopes(resolution: AuthResolution): AuthResolution {
+  if (resolution.principalKind === "end_user") return resolution;
   const keyScopes = getApiKeyAllowedScopes();
-  if (resolution.deferOrgResolution && resolution.permissions.length === 0) return [...keyScopes];
-  return resolution.permissions.filter((permission) => keyScopes.has(permission));
+  if (resolution.deferOrgResolution && resolution.orgRole === undefined) {
+    return { ...resolution, scopeCeiling: [...keyScopes] };
+  }
+  return { ...resolution, permissions: resolution.permissions.filter((p) => keyScopes.has(p)) };
 }
 
 async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResolution | null> {
@@ -218,12 +216,10 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
   // tokens, the dashboard SPA / CLI) leaves `orgId` undefined, preserving the
   // "defer entirely to X-Org-Id" behavior.
   //
-  // `permissions: []` with NO `orgRole` is the session-equivalent shape, not a
-  // scope claim: this token IS the user (the CLI's device-flow login), so it
-  // gets the user's full authority in whichever org they select, and the
-  // pipeline deliberately writes no `scopeCeiling` for it
-  // (`lib/auth-pipeline.ts`, the strategy branch). A token bound to a space
-  // resource is capped in `authenticate` above, like a space API key.
+  // No `orgRole` and no `scopeCeiling` is the session-equivalent shape: this
+  // token IS the user (the CLI's device-flow login), so it gets the user's full
+  // authority in whichever org they select. A token bound to a space resource
+  // is capped in `authenticate` above, like a space API key.
   const binding = mcpBindingFromAudiences(claims.audiences ?? []);
   return {
     user: {

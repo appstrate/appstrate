@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
+  ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
+  over the org role resolved later. Absent, the caller is uncapped. (#1911)
 - **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
   before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
   `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
   (`missing_argument`, `unknown_argument`, `invalid_argument`) and `arguments`
   naming the faulty arguments (`input`, `manifest`, `scope`, an unknown name,
-  …). A launch the route rejected stays `{ status, body }`. (#1911)
+  …). An `unknown_argument` refusal also carries `accepted`, the declared
+  argument names. A launch the route rejected stays `{ status, body }`. (#1911)
 - **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =
   allowed) and the **`model-provider-credentials:connect`** permission action
   (`@appstrate/core/permissions`): a member brings their own model credential.

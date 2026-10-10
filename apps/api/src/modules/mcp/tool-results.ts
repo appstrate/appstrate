@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { RunAndWaitArgumentCode } from "@appstrate/core/run-and-wait-client";
 
 /**
  * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
@@ -25,9 +26,7 @@ export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
 /** Why a tool call was refused. Stable machine codes. */
 type RefusalCode =
-  | "missing_argument"
-  | "unknown_argument"
-  | "invalid_argument"
+  | RunAndWaitArgumentCode
   | "unknown_operation"
   | "unknown_space"
   | "space_mismatch"
@@ -56,9 +55,6 @@ export interface Refusal {
   ceiling_permissions?: readonly string[];
   /** Next step (`not_granted`: NO_FALLBACK_HINT / report it). */
   hint?: string;
-  /** invoke_operation 403 only: the route's own HTTP status and body. */
-  status?: number;
-  body?: unknown;
 }
 
 export function refusalResult(refusal: Refusal): CallToolResult {
@@ -66,8 +62,8 @@ export function refusalResult(refusal: Refusal): CallToolResult {
 }
 
 /**
- * Thrown only by nested helpers (`readPackageFileBytes`, `readPackageStream`);
- * the handler that called them catches it and returns `refusalResult`.
+ * Thrown by nested helpers (the package and file readers); the tool handler or
+ * resource provider that called them maps it to its own answer.
  */
 export class ToolRefusal extends Error {
   constructor(readonly refusal: Refusal) {

@@ -18,7 +18,6 @@ import {
   type CatalogOperation,
 } from "../../../../src/modules/mcp/catalog.ts";
 import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
-import { connectionIdSetJsonSchema } from "../../../../src/openapi/paths/integrations.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
@@ -203,15 +202,6 @@ describe("buildMcpTools declarations", () => {
       kinds: null,
     },
   ];
-
-  it("declares run_and_wait's connection_overrides values as the connection id set", () => {
-    const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:run", "runs:read-all"]);
-    const overrides = byName.get("run_and_wait")!.descriptor.inputSchema.properties!
-      .connection_overrides as { additionalProperties: unknown };
-    expect(overrides.additionalProperties).toBe(connectionIdSetJsonSchema);
-    expect(connectionIdSetJsonSchema.items).toMatchObject({ format: "uuid" });
-    expect(connectionIdSetJsonSchema.uniqueItems).toBe(true);
-  });
 
   for (const { who, permissions, extra, kinds } of cases) {
     it(`declares exactly what the routes grant ${who}`, () => {

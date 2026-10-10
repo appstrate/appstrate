@@ -81,6 +81,7 @@ import {
   RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
+  ToolRefusal,
   type Refusal,
 } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
@@ -1228,19 +1229,18 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const start = performance.now();
     const signal = extra.signal;
     throwIfAborted(signal);
-    const kind = asString(args.kind);
-    if (kind !== "agent" && kind !== "inline") {
+    // `launchRunAndWait` validates `kind`; only the inline grant is decided here.
+    if (args.kind === "inline" && !inline) {
       emit(ctx, {
         tool: "run_and_wait",
         durationMs: performance.now() - start,
         outcome: "rejected",
       });
       return refusalResult({
-        code:
-          args.kind === undefined || args.kind === null ? "missing_argument" : "invalid_argument",
-        error: "`kind` must be 'agent' or 'inline'.",
+        code: "invalid_argument",
+        error: "`kind` must be 'agent'.",
         arguments: ["kind"],
-        accepted: inline ? ["agent", "inline"] : ["agent"],
+        accepted: ["agent"],
       });
     }
 
@@ -1281,21 +1281,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // validation failure (payload carries its `code`, `error` and `arguments`)
       // never touched the route.
       const launchStatus = launched.step.payload.status;
-      if (typeof launchStatus === "number") {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          method: "POST",
-          status: launchStatus,
-          outcome: "invoked",
-        });
-      } else {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-      }
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        ...(typeof launchStatus === "number"
+          ? { method: "POST", status: launchStatus, outcome: "invoked" as const }
+          : { outcome: "rejected" as const }),
+      });
       return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
@@ -1307,7 +1299,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
-      operationId: kind === "agent" ? "runAgent" : "runInline",
+      operationId: args.kind === "agent" ? "runAgent" : "runInline",
       status: launched.launchStatus,
       outcome: "invoked",
     });
@@ -1326,23 +1318,15 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
 
     // A failed poll reports its HTTP status; otherwise the run's own status (the
     // wait may have ended on `pending`/`running`), not the polling GET's 200.
-    if (typeof waited.payload.status === "number") {
-      emit(ctx, {
-        tool: "run_and_wait",
-        durationMs: performance.now() - start,
-        operationId: "getRun",
-        method: "GET",
-        status: waited.payload.status,
-        outcome: "invoked",
-      });
-    } else {
-      emit(ctx, {
-        tool: "run_and_wait",
-        durationMs: performance.now() - start,
-        runStatus: String(waited.payload.status),
-        outcome: "invoked",
-      });
-    }
+    const waitedStatus = waited.payload.status;
+    emit(ctx, {
+      tool: "run_and_wait",
+      durationMs: performance.now() - start,
+      outcome: "invoked",
+      ...(typeof waitedStatus === "number"
+        ? { operationId: "getRun", method: "GET", status: waitedStatus }
+        : { runStatus: String(waitedStatus) }),
+    });
 
     const { step: final, files } = await enrichTerminalRunAndWaitStep(waited, waitOpts);
     const result = jsonResult({ ...final.payload, ...space }, final.isError);
@@ -1521,12 +1505,16 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
         arguments: ["uri"],
       });
     }
-    const result = await readFile(uri);
-    if (isRefusal(result)) return refusalResult(result);
-    return {
-      content: result.contents.map((resource) => ({ type: "resource", resource })),
-      isError: false,
-    } as CallToolResult;
+    try {
+      const result = await readFile(uri);
+      return {
+        content: result.contents.map((resource) => ({ type: "resource", resource })),
+        isError: false,
+      } as CallToolResult;
+    } catch (err) {
+      if (err instanceof ToolRefusal) return refusalResult(err.refusal);
+      throw err;
+    }
   };
   return { descriptor, handler };
 }
@@ -1534,43 +1522,18 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
 // --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The `resources/read` provider for `appfile://file_xxx` URIs — lets an MCP
- * client read a file referenced by a `resource_link` (or a known
- * `appfile://` URI) WITHOUT going through the REST API.
+ * The file read shared by `read_file` and `resources/read`, through the files
+ * service's container ACL (`getFileForActor`, as the REST route) and straight
+ * from storage (`streamFileContent`, so no presigned redirect to follow). A bad
+ * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
  *
- * Authorization + scope resolution call the files SERVICE directly with the
- * MCP session's resolved actor (`getFileForActor`), which enforces the same
- * container ACL the REST route does (a foreign/unknown id is a 404 → surfaced as
- * an MCP error) and derives the caller's {@link FileCapabilities} from the
- * one `getFileCapabilities`. The bytes are read via `streamFileContent`
- * — NOT an in-process `GET /content` — so there is no 307-presigned-redirect the
- * reader cannot follow: the read behaves identically on FS, S3-proxy, and
- * S3-presigned deployments (the bug this replaces).
- *
- * Return shape (each < ~1 MB total):
- *  - textual mime, ≤ {@link RESOURCE_TEXT_MAX_BYTES} → `text` contents.
- *  - non-textual, ≤ {@link RESOURCE_BLOB_MAX_BYTES} → base64 `blob` contents.
- *  - larger (either kind), OR not downloadable by this caller → metadata-only
- *    JSON, including the capabilities and (when downloadable) the REST content
- *    URL hint. When the caller lacks `metadata` (a non-creator upload) the JSON
- *    itself is degraded (generic name + mime, no sha256), flowing from the same
- *    {@link projectFileMetadata} the DTO uses.
- *
- * Deliberately provides NO `list()` (files are not enumerated under
- * `resources/list` per the plan/spec — they surface only via `resource_link`);
- * omitting it makes `resources/list` return empty.
- */
-/** A read the file tools answer as a refusal: the URI, or the file it names, is not readable. */
-function isRefusal(result: ReadResourceResult | Refusal): result is Refusal {
-  return "code" in result;
-}
-
-/**
- * The file read shared by `read_file` and `resources/read`. A bad or unknown URI
- * is a {@link Refusal}; each caller maps it to its own answer.
+ * Returns, each under ~1 MB: `text` for a textual file up to
+ * {@link RESOURCE_TEXT_MAX_BYTES}, base64 `blob` for another up to
+ * {@link RESOURCE_BLOB_MAX_BYTES}, else metadata-only JSON (also when the caller
+ * may not download it), degraded per the caller's {@link FileCapabilities}.
  */
 function buildFileResourceReader(ctx: McpToolContext): {
-  read: (uri: string) => Promise<ReadResourceResult | Refusal>;
+  read: (uri: string) => Promise<ReadResourceResult>;
 } {
   /** Metadata-only JSON block — degraded per the caller's capabilities. */
   const metadataOnly = (
@@ -1604,19 +1567,23 @@ function buildFileResourceReader(ctx: McpToolContext): {
   };
 
   return {
-    read: async (uri: string): Promise<ReadResourceResult | Refusal> => {
+    read: async (uri: string): Promise<ReadResourceResult> => {
       const docId = parseFileUri(uri);
       if (!docId) {
-        return {
+        throw new ToolRefusal({
           code: "invalid_argument",
           error: `Not a file resource URI: ${uri}`,
           arguments: ["uri"],
-        };
+        });
       }
 
       const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
       if (!resolved) {
-        return { code: "not_found", error: `File not found: ${uri}`, arguments: ["uri"] };
+        throw new ToolRefusal({
+          code: "not_found",
+          error: `File not found: ${uri}`,
+          arguments: ["uri"],
+        });
       }
       const { row, capabilities } = resolved;
       // Canonicalise the URI to the resolved id (the caller may have passed any
@@ -1669,22 +1636,22 @@ const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 /**
  * `resources/read` for `appfile://` URIs: a refusal is a JSON-RPC error here, as
  * the resource protocol has no tool-result channel. A file that does not
- * resolve is `-32002`; a malformed URI is `-32602`.
+ * resolve is `-32002`; a malformed URI is `-32602`. No `list()`: files surface
+ * only via `resource_link`, so `resources/list` is empty.
  */
 export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
   const reader = buildFileResourceReader(ctx);
   return {
-    read: async (uri: string): Promise<ReadResourceResult> => {
-      const result = await reader.read(uri);
-      if (isRefusal(result)) {
+    read: (uri: string) =>
+      reader.read(uri).catch((err: unknown) => {
+        if (!(err instanceof ToolRefusal)) throw err;
+        const { code, error } = err.refusal;
         throw new McpError(
-          result.code === "not_found" ? RESOURCE_NOT_FOUND_ERROR_CODE : ErrorCode.InvalidParams,
-          result.error,
+          code === "not_found" ? RESOURCE_NOT_FOUND_ERROR_CODE : ErrorCode.InvalidParams,
+          error,
           { uri },
         );
-      }
-      return result;
-    },
+      }),
   };
 }
 

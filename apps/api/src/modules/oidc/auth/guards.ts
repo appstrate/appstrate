@@ -213,6 +213,13 @@ async function enforceRateLimit(
   }
 }
 
+/** The `resource` parameter, single or repeated (RFC 8707 §2), as its non-empty strings. */
+function resourceList(raw: unknown): string[] {
+  return (Array.isArray(raw) ? raw : [raw]).filter(
+    (r): r is string => typeof r === "string" && r.length > 0,
+  );
+}
+
 interface TokenRequestBody {
   grant_type?: string;
   resource?: string | string[];
@@ -716,11 +723,7 @@ export function oidcGuardsPlugin() {
               // is kept because the self-service rule below counts it. Each
               // value's existence is checked by the oauth-provider itself —
               // an unknown or disabled identifier gets `invalid_target` there.
-              const resources = Array.isArray(body.resource)
-                ? body.resource
-                : body.resource
-                  ? [body.resource]
-                  : [];
+              const resources = resourceList(body.resource);
               if (resources.length === 0) {
                 throw new APIError("BAD_REQUEST", {
                   error: "invalid_request",
@@ -777,13 +780,12 @@ export function oidcGuardsPlugin() {
           // resource minted on demand must be made mintable here as well.
           matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/authorize",
           handler: createAuthMiddleware(async (ctx) => {
-            const raw =
-              (ctx.query as { resource?: unknown } | undefined)?.resource ??
-              (ctx.body as { resource?: unknown } | undefined)?.resource;
-            const resources = (Array.isArray(raw) ? raw : [raw]).filter(
-              (r): r is string => typeof r === "string" && r.length > 0,
+            await ensureProtectedResourcesMintable(
+              resourceList(
+                (ctx.query as { resource?: unknown } | undefined)?.resource ??
+                  (ctx.body as { resource?: unknown } | undefined)?.resource,
+              ),
             );
-            await ensureProtectedResourcesMintable(resources);
           }),
         },
         {

@@ -17,11 +17,9 @@ import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_CONNECT_OFFERS_HEADER,
 } from "@appstrate/core/run-and-wait-client";
-import {
-  CONNECTION_RESOLUTION_WARNING_CODES,
-  MAX_CONNECTIONS_PER_INTEGRATION,
-} from "@appstrate/core/integration";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { connectionIdSetJsonSchema } from "../../../../src/openapi/paths/integrations.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
 
@@ -344,6 +342,17 @@ describe("run_and_wait", () => {
       }
       const shared = ["kind", "scope", "name", "version", "input", "connection_overrides"];
       expect(declared).toEqual(expect.arrayContaining(shared));
+    });
+
+    it('refuses `kind:"inline"` before any launch', async () => {
+      const { tool, calls } = makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] });
+      const res = await tool.handler({ kind: "inline" }, noExtra);
+      expect(parseResult(res)).toMatchObject({
+        code: "invalid_argument",
+        arguments: ["kind"],
+        accepted: ["agent"],
+      });
+      expect(calls).toHaveLength(0);
     });
 
     it("mentions inline runs nowhere in the descriptor", () => {
@@ -696,15 +705,8 @@ describe("run_and_wait", () => {
       ).connection_overrides;
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      // 0..MAX connection ids per integration (`[]` = none), always an array — the route's shape.
-      expect(property!.additionalProperties).toEqual({
-        type: "array",
-        items: { type: "string", format: "uuid" },
-        minItems: 0,
-        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-        uniqueItems: true,
-        description: expect.any(String),
-      });
+      // The route's own connection id set, not a restatement of it.
+      expect(property!.additionalProperties).toBe(connectionIdSetJsonSchema);
       // Not required: the argument only exists for the retry after the 409, so
       // demanding it would break every ordinary launch. Pinned as an exact set
       // rather than a `not.toContain` — `kind` is the ONE required argument,

@@ -256,13 +256,18 @@ function unknownArgumentsError(
 /** Why a launch was refused before dispatch: an argument absent, undeclared, or malformed. */
 export type RunAndWaitArgumentCode = "missing_argument" | "unknown_argument" | "invalid_argument";
 
-/** A launch refused before dispatch: the code, the prose, and the arguments at fault. */
+/**
+ * A launch refused before dispatch: the code, the prose, the arguments at fault
+ * and, when given, what they accept.
+ */
 function refuseArguments(
   code: RunAndWaitArgumentCode,
   error: string,
   args: readonly string[],
+  accepted?: readonly string[],
 ): RunAndWaitFailureResult {
-  return { ok: false, step: { payload: { code, error, arguments: args }, isError: true } };
+  const payload = { code, error, arguments: args, ...(accepted ? { accepted } : {}) };
+  return { ok: false, step: { payload, isError: true } };
 }
 
 /** `missing_argument` when the argument is absent, `invalid_argument` when present but unusable. */
@@ -574,7 +579,9 @@ export async function launchRunAndWait(
 
   const unknownArgs = unknownArgumentsError(args);
   if (unknownArgs) {
-    return refuseArguments("unknown_argument", unknownArgs.error, unknownArgs.arguments);
+    return refuseArguments("unknown_argument", unknownArgs.error, unknownArgs.arguments, [
+      ...RUN_AND_WAIT_ARGUMENT_NAMES,
+    ]);
   }
 
   const inputArg = inputArgument(args);

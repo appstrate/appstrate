@@ -55,8 +55,9 @@ PRM at `/.well-known/oauth-protected-resource/api/mcp/o/:org/s/:space` whose
 mints it on first request (`ensureMcpResourceMintable`), and it accepts a token
 bound to the space or the organization's token. A token bound to the space is
 accepted on that URL only, and it pins the space on the REST API as a space API
-key does (`requireSpaceContext`, `pinnedSpaceScopeGuard`). Its dispatches keep
-the subject's organization-level reach, as a space-pinned API key does.
+key does (`requireSpaceContext`, `pinnedSpaceScopeGuard`). It is also capped
+like a space API key: no organization-level permission is in its reach,
+whatever the subject's organization role.
 
 ### 2. Discovering the spaces
 
