@@ -112,7 +112,11 @@ import { createScheduleSchema, updateScheduleSchema } from "../routes/schedules.
 import { createUploadSchema } from "../routes/uploads.ts";
 
 // --- Member integration-pin schema (routes/me.ts) ---
-import { upsertMemberPinSchema } from "../routes/me.ts";
+import {
+  createUserMemorySchema,
+  updateUserMemorySchema,
+  upsertMemberPinSchema,
+} from "../routes/me.ts";
 
 // --- Model-provider OAuth pairing schemas (routes/model-providers-oauth.ts) ---
 import { createPairingBody, importBody } from "../routes/model-providers-oauth.ts";
@@ -662,6 +666,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
     jsonSchema: toJsonSchema(upsertMemberPinSchema),
     description: "Upsert the caller's integration connection pin",
+  },
+  {
+    method: "POST",
+    path: "/api/me/memories",
+    jsonSchema: toJsonSchema(createUserMemorySchema),
+    description: "Add a memory to the assistant's memory of the caller",
+  },
+  {
+    method: "PATCH",
+    path: "/api/me/memories/{id}",
+    jsonSchema: toJsonSchema(updateUserMemorySchema),
+    description: "Edit one of the caller's memories",
   },
 
   // ─── Unattended install bootstrap ───────────────────────────────────────

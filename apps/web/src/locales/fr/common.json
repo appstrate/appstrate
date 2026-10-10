@@ -417,5 +417,8 @@
   "viewAs.stopped.view_as_unsupported": "Prévisualisation indisponible : cette session ne peut pas prévisualiser de rôle.",
   "viewAs.stopped.view_as_forbidden": "Prévisualisation indisponible : vous n'avez pas le droit de prévisualiser ce rôle.",
   "viewAs.stopped.view_as_not_found": "Prévisualisation indisponible : l'espace ou le rôle à prévisualiser n'existe pas.",
-  "viewAs.stopped.generic": "Prévisualisation indisponible."
+  "viewAs.stopped.generic": "Prévisualisation indisponible.",
+  "apiError.memory_full": "La mémoire est pleine pour cette partie ({{message}}) : condensez ou supprimez des souvenirs avant d'en ajouter.",
+  "apiError.memory_off": "La mémoire de l'assistant est désactivée ici.",
+  "apiError.memory_outside_organization": "Cette connexion n'agit que dans une organisation : elle ne peut pas toucher ce qui a été appris dans une autre."
 }

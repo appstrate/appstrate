@@ -105,6 +105,11 @@ const PACKAGE_HOME_PROPERTIES = {
 } as const;
 
 export const ORG_SETTINGS_PROPERTIES = {
+  assistant_memory: {
+    type: "boolean",
+    description:
+      "The assistant's memory of each member (`/api/me/memories`). `false`: in this organization the chat neither reads nor writes it; memories already learned here stay with their owners unless purged with `DELETE /api/orgs/{orgId}/memories`. Default true.",
+  },
   restrict_package_copy: {
     type: "boolean",
     description:
@@ -627,11 +632,16 @@ export const schemas = {
     type: "object",
     description:
       "The dashboard user's profile — single serializer shared by GET and PATCH /api/profile.",
-    required: ["id", "language", "email", "name", "can_create_org"],
+    required: ["id", "language", "assistant_memory", "email", "name", "can_create_org"],
     properties: {
       id: { type: "string" },
       displayName: { type: ["string", "null"] },
       language: { type: "string", enum: ["fr", "en"] },
+      assistant_memory: {
+        type: "boolean",
+        description:
+          "The person's switch for the assistant's memory of them (`/api/me/memories`). Off: no chat reads or writes it, in any organization. Default true.",
+      },
       email: { type: "string", format: "email" },
       name: { type: "string" },
       can_create_org: {

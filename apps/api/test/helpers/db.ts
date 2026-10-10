@@ -69,6 +69,8 @@ const CORE_TABLES = [
   "run_logs",
   // Chat tables (core schema, consumed by @appstrate/module-chat).
   // Children first: chat_messages → chat_sessions → (organizations, user).
+  // `user_memories` points at all three (session SET NULL, org/user CASCADE).
+  "user_memories",
   "chat_messages",
   "chat_sessions",
   "package_persistence",

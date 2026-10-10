@@ -106,6 +106,12 @@ export interface CoreResources {
   // Unified `package_persistence` (checkpoints + memories) with first-class
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
+  // The assistant's memory of a person (`user_memories`). No role grant gates
+  // it: every org role holds both, and a memory is reached by its owner alone
+  // (`isUserPrincipal`). It exists to CAP a credential that carries a scope
+  // ceiling (`requireCeiling`): the chat's inference bearer names neither, so it
+  // never reads a memory. Absent from the API-key and OAuth vocabularies.
+  memory: "read" | "write";
   models: "read" | "write" | "delete";
   "model-provider-credentials": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
@@ -276,6 +282,7 @@ export const CORE_RESOURCE_ACTIONS = {
   files: ["read", "delete"],
   schedules: ["read", "write", "delete"],
   persistence: ["read", "delete"],
+  memory: ["read", "write"],
   models: ["read", "write", "delete"],
   "model-provider-credentials": ["read", "write", "delete"],
   proxies: ["read", "write", "delete"],
@@ -333,6 +340,8 @@ export const CORE_RESOURCE_LEVELS = {
   files: "space",
   schedules: "space",
   persistence: "space",
+  // Org-level only so every org role can carry it; the memory itself spans orgs.
+  memory: "org",
   "end-users": "space",
   // Keys are space-bound (`api_keys.space_id NOT NULL`).
   "api-keys": "space",
@@ -517,6 +526,9 @@ export const orgSettingsSchema = z.object({
   // would protect the link and not the content. SKILLS are exempt: the CLI's
   // `code sync` is a local copy by design and its audience is already the space.
   restrict_package_copy: z.boolean().optional(),
+  // The assistant's memory of each member (`user_memories`). `false` = in this
+  // organization the chat neither reads nor writes it. Absent = on.
+  assistant_memory: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

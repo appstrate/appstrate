@@ -36,6 +36,12 @@
  *   - PUT    /integration-pins/:agentPackageId/integrations/:integrationPackageId — upsert a member-self pin
  *   - DELETE /integration-pins/:agentPackageId/integrations/:integrationPackageId — clear it
  *   - GET    /context                   — the caller's working context (get_me)
+ *   - GET    /memories                  — the assistant's memory of the caller
+ *   - GET    /memories/core             — what the chat loads: about them + one org
+ *   - POST   /memories                  — add a memory
+ *   - PATCH  /memories/:id              — edit one
+ *   - DELETE /memories/:id              — forget one
+ *   - DELETE /memories?origin=          — forget in bulk (all, about me, one org)
  */
 
 import { Hono } from "hono";
@@ -86,9 +92,27 @@ import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { forbidden, notFound, unauthorized } from "../lib/errors.ts";
+import { forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
+import {
+  USER_MEMORY_CONTENT_MAX_CHARS,
+  USER_MEMORY_SUBJECT_MAX_CHARS,
+  USER_MEMORY_TYPES,
+} from "@appstrate/core/user-memory";
+import {
+  addUserMemory,
+  deleteUserMemories,
+  deleteUserMemory,
+  getUserMemoryCore,
+  isUserMemoryEnabled,
+  listUserMemories,
+  assertMemoryOpen,
+  type MemoryCaller,
+  updateUserMemory,
+  type UserMemoryListItem,
+} from "../services/user-memories.ts";
+import { getOrgMember } from "../services/organizations.ts";
 
 const router = new Hono<AppEnv>();
 
@@ -579,6 +603,153 @@ router.get("/context", requireSpaceContext(), async (c) => {
     skills_truncated: activeSkills.truncated,
     skills_total: activeSkills.total,
   });
+});
+
+/**
+ * `/api/me/memories`: the assistant's memory of the caller
+ * (`services/user-memories.ts`). The person's own identity only: a delegate (an
+ * API key, a third-party OAuth client) carries their authority, not their
+ * identity, and is refused like on `/api/profile`. A credential carrying a scope
+ * ceiling is capped by `memory:read` / `memory:write`.
+ *
+ * One rule with the `memory` MCP tool (`MemoryCaller`): a credential bound to an
+ * organization (the chat's token, an MCP client's token audience-bound to one
+ * organization's endpoint) is an assistant acting there and reaches what is about
+ * the person and that organization only; the person's unbound session or CLI
+ * reaches every memory. These routes skip org context, so `orgId` is set here
+ * only by the credential itself, never by an `X-Org-Id` header.
+ */
+async function memoryCaller(c: Context<AppEnv>): Promise<MemoryCaller> {
+  if (!isUserPrincipal(c)) {
+    throw forbidden("Only the user's own credential can reach the assistant's memory of them");
+  }
+  const user = c.get("user");
+  if (!user) throw unauthorized("Authentication required");
+  const caller = { userId: user.id, boundOrgId: c.get("orgId") ?? null };
+  await assertMemoryOpen(caller);
+  return caller;
+}
+
+function userMemoryWire(m: UserMemoryListItem) {
+  return {
+    id: m.id,
+    type: m.type,
+    subject: m.subject,
+    content: m.content,
+    orgId: m.orgId,
+    org_name: m.orgName,
+    org_member: m.orgMember,
+    created_by: m.createdBy,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+  };
+}
+
+const memoryContentSchema = z.string().trim().min(1).max(USER_MEMORY_CONTENT_MAX_CHARS);
+const memorySubjectSchema = z.string().trim().min(1).max(USER_MEMORY_SUBJECT_MAX_CHARS);
+
+export const createUserMemorySchema = z
+  .object({
+    type: z.enum(USER_MEMORY_TYPES),
+    content: memoryContentSchema,
+    subject: memorySubjectSchema.nullable().optional(),
+    /** Origin: an organization the caller belongs to, or null (about them). */
+    orgId: z.uuid().nullable().optional(),
+  })
+  .strict();
+
+export const updateUserMemorySchema = z
+  .object({
+    type: z.enum(USER_MEMORY_TYPES).optional(),
+    content: memoryContentSchema.optional(),
+    subject: memorySubjectSchema.nullable().optional(),
+  })
+  .strict();
+
+/** Read one memory back in the list's shape, after a write. */
+async function memoryItem(caller: MemoryCaller, id: string) {
+  const [item] = await listUserMemories(caller, id);
+  return userMemoryWire(item!);
+}
+
+router.get("/memories", requireCeiling("memory", "read"), async (c) => {
+  const caller = await memoryCaller(c);
+  return c.json(listResponse((await listUserMemories(caller)).map(userMemoryWire)));
+});
+
+/**
+ * The CORE the chat loads into its prompt: what is about the person, plus what
+ * was learned in `orgId` (omitted: the first half only). `enabled: false` when
+ * the person's switch or that org's is off: the chat then shows no memory and
+ * offers no tool. Its own read, beside `/api/me/context` rather than inside it,
+ * so a failed context read never drops the memory and the memory never waits
+ * on the space-scoped listings.
+ */
+router.get("/memories/core", requireCeiling("memory", "read"), async (c) => {
+  const { userId, boundOrgId } = await memoryCaller(c);
+  const parsed = z.uuid().optional().safeParse(c.req.query("orgId"));
+  if (!parsed.success) throw invalidRequest("orgId must be an organization id", "orgId");
+  // A bound caller's core is its own organization's, whatever it names.
+  if (boundOrgId && parsed.data && parsed.data !== boundOrgId) {
+    throw forbidden("This credential acts in one organization and reads only its core");
+  }
+  const orgId = boundOrgId ?? parsed.data ?? null;
+  if (orgId && !(await getOrgMember(orgId, userId))) {
+    throw invalidRequest("orgId must be an organization you belong to", "orgId");
+  }
+  if (!(await isUserMemoryEnabled(userId, orgId))) {
+    return c.json({ enabled: false, memories: [] });
+  }
+  const memories = (await getUserMemoryCore(userId, orgId)).map((m) => ({
+    id: m.id,
+    type: m.type,
+    subject: m.subject,
+    content: m.content,
+    orgId: m.orgId,
+  }));
+  return c.json({ enabled: true, memories });
+});
+
+router.post("/memories", requireCeiling("memory", "write"), async (c) => {
+  const caller = await memoryCaller(c);
+  const input = await readJsonBody(c, createUserMemorySchema);
+  const memory = await addUserMemory(caller, {
+    type: input.type,
+    content: input.content,
+    subject: input.subject ?? null,
+    orgId: input.orgId ?? null,
+  });
+  return c.json(await memoryItem(caller, memory.id), 201);
+});
+
+router.patch("/memories/:id", requireCeiling("memory", "write"), async (c) => {
+  const caller = await memoryCaller(c);
+  const patch = await readJsonBody(c, updateUserMemorySchema);
+  const memory = await updateUserMemory(caller, c.req.param("id")!, patch);
+  return c.json(await memoryItem(caller, memory.id));
+});
+
+router.delete("/memories/:id", requireCeiling("memory", "write"), async (c) => {
+  const caller = await memoryCaller(c);
+  await deleteUserMemory(caller, c.req.param("id")!);
+  return c.body(null, 204);
+});
+
+/** `origin`: `all`, `me` (about the person), or an organization id. Required: no implicit wipe. */
+const forgetOriginSchema = z.union([z.literal("all"), z.literal("me"), z.uuid()]);
+
+router.delete("/memories", requireCeiling("memory", "write"), async (c) => {
+  const caller = await memoryCaller(c);
+  const parsed = forgetOriginSchema.safeParse(c.req.query("origin"));
+  if (!parsed.success) {
+    throw invalidRequest("origin must be 'all', 'me' or an organization id", "origin");
+  }
+  const origin = parsed.data;
+  const deleted = await deleteUserMemories(
+    caller,
+    origin === "all" ? {} : { orgId: origin === "me" ? null : origin },
+  );
+  return c.json({ deleted });
 });
 
 export default router;

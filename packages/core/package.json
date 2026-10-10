@@ -95,6 +95,7 @@
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
+    "./user-memory": "./src/user-memory.ts",
     "./file-uri": "./src/file-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./model-error": "./src/model-error.ts",

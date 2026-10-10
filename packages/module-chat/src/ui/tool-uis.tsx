@@ -22,6 +22,7 @@ import * as React from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import {
   BookOpenIcon,
+  BrainIcon,
   Loader2Icon,
   PencilIcon,
   PlayIcon,
@@ -445,5 +446,31 @@ export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unk
         />
       ))}
     </>
+  ),
+});
+
+/** `memory`: the assistant keeping its memory of the user, one label per action. */
+const MEMORY_ACTION_LABELS: Record<string, string> = {
+  add: "tool.memory.add",
+  replace: "tool.memory.replace",
+  remove: "tool.memory.remove",
+  view: "tool.memory.read",
+  search: "tool.memory.read",
+};
+
+export const MemoryToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "memory",
+  render: (props: AnyToolProps) => (
+    <ToolCallCard
+      phase={deriveToolPhase(props)}
+      Icon={BrainIcon}
+      labelKey={MEMORY_ACTION_LABELS[stringArg(props.args, "action") ?? ""] ?? "tool.memory.read"}
+      idText={stringArg(props.args, "content") ?? stringArg(props.args, "query")}
+      args={props.args}
+      result={props.result}
+      isError={props.isError}
+      toolCallId={props.toolCallId}
+      timing={props.timing}
+    />
   ),
 });

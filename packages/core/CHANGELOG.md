@@ -134,6 +134,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
+- **`@appstrate/core/user-memory`**: the vocabulary and bounds of the
+  assistant's memory of a person: `USER_MEMORY_TYPES`, `UserMemoryType`,
+  `USER_MEMORY_CONTENT_MAX_CHARS`, `USER_MEMORY_SUBJECT_MAX_CHARS`,
+  `USER_MEMORY_PERSONAL_BUDGET_CHARS`, `USER_MEMORY_ORG_BUDGET_CHARS`.
+- **`memory`** core resource (`read`, `write`, org-level) and the
+  `assistant_memory` key of `orgSettingsSchema`
+  (`@appstrate/core/permissions`).
 
 ## [15.0.0] — 2026-10-08
 

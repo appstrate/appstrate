@@ -35,6 +35,7 @@ import {
   unsupportedApiVersion,
 } from "../lib/api-versions.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { deleteOrgUserMemories } from "../services/user-memories.ts";
 import { listResponse } from "../lib/list-response.ts";
 import {
   createInvitation,
@@ -670,10 +671,27 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
       apiVersion: data.api_version,
       dashboardSsoEnabled: data.dashboard_sso_enabled,
       restrictPackageCopy: data.restrict_package_copy,
+      assistantMemory: data.assistant_memory,
     },
     orgIdOverride: orgId,
   });
   return c.json(settings);
+});
+
+// DELETE /api/orgs/:orgId/memories: erase what every member's assistant learned
+// in this organization (owner/admin). The members' memories about themselves,
+// and what they learned elsewhere, are untouched: those are theirs.
+router.delete("/:orgId/memories", requirePermission("org", "settings"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  const deleted = await deleteOrgUserMemories(orgId);
+  await recordAuditFromContext(c, {
+    action: "org.assistant_memories_erased",
+    resourceType: "org",
+    resourceId: orgId,
+    after: { deleted },
+    orgIdOverride: orgId,
+  });
+  return c.json({ deleted });
 });
 
 export default router;

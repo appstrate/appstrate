@@ -21,6 +21,7 @@ export const profilePaths = {
                 id: "usr_abc123",
                 displayName: "Alice Martin",
                 language: "fr",
+                assistant_memory: true,
                 email: "alice@example.com",
                 name: "Alice Martin",
                 can_create_org: true,
@@ -37,7 +38,7 @@ export const profilePaths = {
       operationId: "updateProfile",
       tags: ["Profile"],
       summary: "Update user profile",
-      description: "Update the current user's profile (displayName, language).",
+      description: "Update the current user's profile (displayName, language, assistant_memory).",
       requestBody: {
         required: true,
         content: {
@@ -47,6 +48,7 @@ export const profilePaths = {
               properties: {
                 displayName: { type: "string", minLength: 1, maxLength: 100 },
                 language: { type: "string", enum: ["fr", "en"] },
+                assistant_memory: { type: "boolean" },
               },
               additionalProperties: false,
             },
@@ -64,6 +66,7 @@ export const profilePaths = {
                 id: "usr_abc123",
                 displayName: "Alice Martin",
                 language: "en",
+                assistant_memory: true,
                 email: "alice@example.com",
                 name: "Alice Martin",
                 can_create_org: true,

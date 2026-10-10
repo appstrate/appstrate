@@ -536,4 +536,31 @@ export const organizationsPaths = {
       },
     },
   },
+  "/api/orgs/{orgId}/memories": {
+    delete: {
+      operationId: "eraseOrgAssistantMemories",
+      tags: ["Organizations"],
+      summary: "Erase what members' assistants learned in this organization",
+      description:
+        "Deletes every member's assistant memories whose origin is this organization (`user_memories.org_id`). What members told the assistant about themselves, and what they taught it in other organizations, is theirs and untouched. Pair it with `assistant_memory: false` in the settings to stop new ones. Owner/admin (`org:settings`).",
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      responses: {
+        "200": {
+          description: "Number of memories erased",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["deleted"],
+                properties: { deleted: { type: "integer" } },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
 } as const;

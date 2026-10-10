@@ -112,6 +112,9 @@ const MEMBER_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevel
   "proxies:read",
   // Completions with the org's models (first-party chat, remote CLI); metered per call in `llm_usage`.
   "llm-proxy:call",
+  // The assistant's memory of the member themselves: a cap on scoped credentials, not a grant.
+  "memory:read",
+  "memory:write",
 ]);
 
 /**
@@ -125,6 +128,8 @@ const GUEST_ORG_PERMISSIONS: ReadonlySet<OrgLevelPermission> = new Set<OrgLevelP
   "proxies:read",
   // The proxy is org-metered, not space-scoped, so a guest's grant lives here.
   "llm-proxy:call",
+  "memory:read",
+  "memory:write",
 ]);
 
 /** Org role → org-level permissions. Module org grants are layered on at resolve time. */

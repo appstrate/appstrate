@@ -22,6 +22,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
 import { McpClientConnect } from "../../components/org-settings/mcp-client-connect";
+import { AssistantMemoryCard } from "../../components/org-settings/assistant-memory-card";
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
@@ -242,6 +243,8 @@ export function OrgSettingsGeneralPage() {
           </div>
         </div>
       )}
+
+      {can("org:settings") && features.chat && <AssistantMemoryCard orgId={currentOrg.id} />}
 
       {can("org:settings") && features.oidc && (
         <>
