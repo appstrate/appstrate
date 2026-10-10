@@ -5,7 +5,7 @@
   "schema_version": "0.3",
   "display_name": "Playwright MCP",
   "icon": "logos:playwright",
-  "description": "Microsoft's Playwright MCP server on your own infrastructure (its URL is a connection variable): a real Chromium per connection, driven step by step through accessibility snapshots. Navigate, click, type, fill forms, select options, hover, drag, handle dialogs, manage tabs, wait, read console and network traffic, evaluate JavaScript and take screenshots; started with --caps vision it adds coordinate mouse tools. Started with --cdp-endpoint it drives an existing Chromium instead. Playwright MCP has no authentication of its own: put a reverse proxy that checks the token in front of it. Running arbitrary code in the server process and uploading files from the server's disk are hidden.",
+  "description": "Microsoft's Playwright MCP server on your own infrastructure (its URL is a connection variable): each run gets a fresh browser context, driven step by step through accessibility snapshots. Navigate, click, type, fill forms, select options, hover, drag, handle dialogs, manage tabs, wait, read console and network traffic, evaluate JavaScript and take screenshots; started with --caps vision it adds coordinate mouse tools. Started with --cdp-endpoint it drives an existing Chromium instead. Playwright MCP has no authentication of its own: put a reverse proxy that checks the token in front of it. Running arbitrary code in the server process and the two tools that read files from the server's disk are hidden.",
   "keywords": ["browser-automation", "web-scraping", "testing"],
   "license": "Apache-2.0",
   "source": {
@@ -24,7 +24,7 @@
           "format": "uri",
           "pattern": "^https?://",
           "title": "URL du serveur Playwright MCP",
-          "description": "Adresse de votre serveur Playwright MCP (image mcr.microsoft.com/playwright/mcp lancée avec --port et --host 0.0.0.0), sans /mcp. Son option --allowed-hosts doit lister cet hôte. Il n'a aucune authentification propre : ne l'exposez que derrière un proxy inverse qui vérifie le jeton ci-dessous."
+          "description": "Adresse de votre serveur Playwright MCP (image mcr.microsoft.com/playwright/mcp), sans /mcp. Lancez-le avec --isolated, obligatoire même avec --cdp-endpoint : sans lui, toutes les exécutions partagent un même profil (cookies et sessions d'un utilisateur à l'autre). --allowed-hosts doit lister l'en-tête Host exact reçu par le serveur, port compris (derrière un proxy inverse, celui que le proxy transmet). Le navigateur atteint tout ce que joint son conteneur : placez-le sur un réseau à sortie restreinte (par exemple --proxy-server vers un proxy de sortie), jamais à côté de services internes. Il n'a aucune authentification propre : ne l'exposez que derrière un proxy inverse qui vérifie le jeton d'accès de la connexion."
         }
       },
       "required": ["base_url"]
@@ -41,7 +41,7 @@
             "api_key": {
               "type": "string",
               "title": "Jeton d'accès",
-              "description": "Jeton que votre proxy inverse attend dans l'en-tête Authorization: Bearer. Playwright MCP lui-même l'ignore : sur un réseau privé sans proxy, n'importe quelle valeur convient."
+              "description": "Jeton que votre proxy inverse attend dans l'en-tête Authorization: Bearer. Le formulaire l'exige ; seul votre proxy le vérifie, Playwright MCP l'ignore. Pour une adresse privée, l'opérateur doit lister l'hôte dans EGRESS_ALLOW_INTERNAL_HOSTS, sinon Appstrate la refuse."
             }
           },
           "required": ["api_key"]
@@ -62,7 +62,7 @@
       }
     }
   },
-  "hidden_tools": ["browser_file_upload", "browser_run_code_unsafe"],
+  "hidden_tools": ["browser_drop", "browser_file_upload", "browser_run_code_unsafe"],
   "tools_policy": {
     "browser_click": {},
     "browser_close": {},
