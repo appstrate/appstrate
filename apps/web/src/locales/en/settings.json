@@ -467,7 +467,7 @@
   "connections.reusedByNone": "No agent currently uses it",
   "modelCredentials.description": "Your API keys and subscriptions pay for the models the organization leaves to each member (\"Each member uses their own credential\"). They serve only you and are never shared. Other models stay paid by the organization.",
   "modelCredentials.empty": "No personal credential",
-  "modelCredentials.emptyHint": "Add an API key or connect a subscription to pay for your calls to the organization's models.",
+  "modelCredentials.emptyHint": "Add an API key or connect a subscription to pay for the models the organization leaves to each member.",
   "modelCredentials.billedTitle": "Organization models paid by your credentials",
   "modelCredentials.billedNone": "No organization model is paid by your credentials.",
   "modelCredentials.policyDisabled": "Your organization has disabled personal model credentials. Your existing credentials no longer serve any call, and adding one is unavailable. You can still delete them.",

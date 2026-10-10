@@ -467,7 +467,7 @@
   "connections.reusedByNone": "Aucun agent ne l'utilise actuellement",
   "modelCredentials.description": "Vos clés API et abonnements paient les modèles que l'organisation laisse à chaque membre (« Chaque membre utilise son propre identifiant »). Ils ne servent qu'à vous et ne sont jamais partagés. Les autres modèles restent payés par l'organisation.",
   "modelCredentials.empty": "Aucun identifiant personnel",
-  "modelCredentials.emptyHint": "Ajoutez une clé API ou connectez un abonnement pour payer vos appels aux modèles de l'organisation.",
+  "modelCredentials.emptyHint": "Ajoutez une clé API ou connectez un abonnement pour payer les modèles que l'organisation laisse à chaque membre.",
   "modelCredentials.billedTitle": "Modèles de l'organisation payés par vos identifiants",
   "modelCredentials.billedNone": "Aucun modèle de l'organisation n'est payé par vos identifiants.",
   "modelCredentials.policyDisabled": "Votre organisation a désactivé les identifiants de modèle personnels. Vos identifiants existants ne servent plus aucun appel, et l'ajout n'est pas disponible. Vous pouvez encore les supprimer.",
