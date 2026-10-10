@@ -22,7 +22,6 @@ import {
   deriveModelLabel,
   projectAliasedModel,
   resolveCatalogDefaults,
-  loadCredentialBinding,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
@@ -33,7 +32,11 @@ import {
   restrictsToOffer,
 } from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
-import { loadInferenceCredentials } from "../services/model-providers/credentials.ts";
+import {
+  canSeeCredential,
+  loadInferenceCredentials,
+  requestModelCredentialCaller,
+} from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
@@ -476,11 +479,13 @@ export function createModelsRouter() {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
     const creds = await loadInferenceCredentials(orgId, data.credentialId);
-    // A member's own credential is probed by its owner only (and never by an API key).
-    const owner = creds
-      ? ((await loadCredentialBinding(orgId, data.credentialId))?.ownerUserId ?? null)
-      : null;
-    if (!creds || (owner !== null && owner !== requestPayerUserId(c))) {
+    // A member's own credential is probed by its owner only (never by an API key);
+    // `models:write` stands in for the org-wide read here.
+    const visible = await canSeeCredential(
+      { ...requestModelCredentialCaller(c), readsOrg: true },
+      data.credentialId,
+    );
+    if (!creds || !visible) {
       throw notFound("Credential not found");
     }
     const apiKey = data.api_key || creds.apiKey;

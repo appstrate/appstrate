@@ -321,13 +321,15 @@ export async function handleChatStream(
   // proxy binding gets a *minter* and re-mints a fresh bearer immediately before
   // every provider request. The static header below is for the one-shot calls
   // (listModels) that fire immediately on this same line.
+  // Identifies this turn to the platform: admitted once, its proxy calls then
+  // spend the credential admitted for it, whatever another turn admits meanwhile.
+  const turnId = crypto.randomUUID();
   const mintInferenceAuth = () =>
     mintLoopbackToken(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
-      // The session id rides the SIGNED loopback claims (not a header) so the
-      // llm-proxy can attribute a proxy-routed turn's usage to the chat session
-      // without trusting anything spoofable.
-      { chatSessionId: meteringSessionId },
+      // Both ride the SIGNED loopback claims (not a header), so the llm-proxy
+      // attributes and serves the turn without trusting anything spoofable.
+      { chatSessionId: meteringSessionId, turnId },
     );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
@@ -476,8 +478,6 @@ export async function handleChatStream(
   // binding, never a choice of loop.
   const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id);
   const isSubscription = subscription.subscription;
-  // The personal credential the turn spends, attributed on the usage ledger.
-  const credentialId = "model" in subscription ? subscription.model.credentialId : null;
 
   // Admission gate — EVERY turn. The platform
   // resolves system-provided vs. org-owned server-side and dispatches
@@ -501,6 +501,7 @@ export async function handleChatStream(
     presetId: chosen.id,
     sessionId: meteringSessionId,
     subscription: isSubscription,
+    turnId,
     userId: user.id,
   });
   if (rejection) {
@@ -707,7 +708,7 @@ export async function handleChatStream(
         onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
-          void deps.recordChatUsage({ ...record, credentialId }).catch((err) => {
+          void deps.recordChatUsage(record).catch((err) => {
             logger.warn("chat usage metering failed", { err: String(err) });
           });
         },

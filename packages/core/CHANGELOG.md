@@ -81,14 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: the chat platform services take the session user.**
   `PlatformServices.resolveChatModel(orgId, presetId, userId)` and
-  `checkUsageAllowed({ …, userId })` (`@appstrate/core/module`): a subscription
-  turn spends the user's own personal credential, and a turn on a model the user
-  holds no credential for is refused with `model_credential_required`.
-  `SubscriptionChatModel` (`@appstrate/core/chat-contract`) gains
-  `credentialId: string`, and `ChatUsageRecord` gains
-  `credentialId: string | null`, written to `llm_usage.credential_id`. Out-of-tree
-  modules that call either seam must pass the session user, and forward the
-  credential id when they record usage.
+  `checkUsageAllowed({ …, turnId, userId })` (`@appstrate/core/module`): a
+  subscription turn spends the user's own personal credential, and a turn on a
+  model the user holds no credential for is refused with
+  `model_credential_required`. `turnId` identifies the turn: its proxy calls are
+  served on the credential admitted for that id, which the caller carries to
+  them. Out-of-tree modules that call either seam must pass the session user and
+  the turn id.
 - **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
   (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
   manifest declares them, which the sidecar's runner egress listeners read to

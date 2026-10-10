@@ -164,9 +164,14 @@ For any credential whose provider has `authMode: "oauth2"` (a subscription):
   (`model_provider_credentials.owner_user_id`), never an organization credential;
 - it is **never bound to an organization model**: an `org_models` row can only
   reference an organization credential;
-- it serves **only its owner's** runs, schedules and chat. For any other run the
+- it serves **only its owner's** runs and chat (a schedule never spends a
+  personal credential). For any other run the
   sidecar token door refuses to hand it out (`assertOAuthModelCredential`,
   `apps/api/src/routes/internal.ts`), as defence in depth behind the resolution step.
+
+Subscriptions connected before this rule are made personal by
+`scripts/migration/0042-personal-model-subscriptions.ts`; until it is applied
+they stay organization credentials and keep serving every member.
 
 Holder-only use removes the aggravation of several people
 sharing one subscription. It does **not** make the `claude-code` path compliant

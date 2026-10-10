@@ -1991,7 +1991,7 @@ export const schemas = {
       needs_reconnection: {
         type: "boolean",
         description:
-          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. Read for the caller, like `billed_to`: false when the caller's own personal credential serves the model, even if its organization credential is dead (the credentials list still flags that credential).",
+          "True when the model's stored credential can no longer be used for inference — an OAuth credential flagged as needing reconnection, or (either auth mode) a stored secret that no longer decrypts. The model is listed so it can be inspected, detached or deleted, but it is not usable for inference and cannot be made the organization default. Always false for built-in models, which read their key from the environment. Read for the caller, like `billed_to`: false when the caller's own personal credential serves the model, even if its organization credential is dead (the credentials list still flags that credential); true for an unbound model when nothing of the caller's serves it and one of their own credentials for it must be reconnected.",
       },
       aliased: {
         type: "boolean",

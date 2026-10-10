@@ -133,11 +133,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it** (#1875). Migration `0087` runs at boot: it adds
   `model_provider_credentials.owner_user_id`, `org_models.provider_id`
   (backfilled from each bound credential), makes `org_models.credential_id`
-  nullable and adds `llm_usage.credential_id`. Rolling back past it means
-  restoring that dump. Then, app up:
+  nullable. An older build cannot insert a model afterwards: rolling back past
+  it means restoring that dump. Then, app up:
   1. dry run (writes nothing):
      `set -a && . ./.env && set +a && bun scripts/migration/0042-personal-model-subscriptions.ts`;
-  2. read its report per organization, then run it with `--apply`.
+  2. read its report per organization, then run it with `--apply`. It refuses
+     an organization with an aliased model or an active run on one of its
+     subscriptions, and fails at the end while an org-owned credential does
+     not decrypt (`scripts/migration/README.md`).
 
   Apply while no run is active: a run pinned to a subscription its launcher
   did not create is refused by the sidecar token door (403) once that
@@ -148,8 +151,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   recognised by its decrypted blob, never by the provider registry) personal
   to its creator when that creator is still a member of the organization.
   It deletes the orphans (no creator, or a creator who has left the
-  organization) with their pairings, and unbinds the organization models
-  bound to a subscription, so each member brings their own credential for
+  organization) with their pairings, and unbinds the non-aliased organization
+  models bound to a subscription, so each member brings their own credential for
   them. It lists the members who ran on a subscription they did not own. One
   transaction per organization; a second run changes nothing. Production
   never enables a subscription module, so the report should show zero
@@ -189,22 +192,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     A schedule never spends a personal credential, so a model served only by
     each member's own credential cannot be scheduled (refused with 409
     `model_credential_required` when the schedule fires).
-  - `llm_usage.credential_id` records the credential that served each call
-    (proxy, runner and chat rows). `credential_source` keeps its two values:
-    `system` is a platform credential, `org` one the customer supplies, an
-    organization's or a member's own; `credential_id` tells which.
-  - A run or a chat turn spends the exact credential it was admitted on: if a
-    member's key is deleted or personal credentials are switched off between
-    admission and use, it is refused with `409 model_credential_changed`, never
-    moved to another credential or payer. A chat turn's proxy calls are served
-    on its admitted credential, with or without a saved conversation.
-  - In `GET /api/models`, `needs_reconnection` is read for the caller: a model
-    whose organization credential is dead stays usable to a member whose own
-    credential serves it.
+  - `credential_source` keeps its two values: `system` is a platform
+    credential, `org` one the customer supplies, an organization's or a
+    member's own.
+  - A run or a chat turn spends the exact credential it was admitted on. A run
+    resolves its model once, before the admission gate. A chat turn's proxy
+    calls are served on the credential admitted for that turn, with or without
+    a saved conversation; a call no admission covers is refused with
+    `409 model_credential_changed`.
+  - In `GET /api/models`, `needs_reconnection` and `billed_to` are read for
+    the caller: a model whose organization credential is dead stays usable to
+    a member whose own credential serves it, and an unbound model whose only
+    serving credential of the caller is dead asks for a reconnect.
+  - Deleting an organization credential, and the break-glass deletion of a
+    member's, take `model-provider-credentials:delete`.
 - **BREAKING (modules): the chat platform services take the session user**
   (#1875). `resolveChatModel(orgId, presetId, userId)` and
-  `checkUsageAllowed({ ..., userId })`; `SubscriptionChatModel` and
-  `ChatUsageRecord` gain `credentialId`. See `packages/core/CHANGELOG.md`.
+  `checkUsageAllowed({ ..., turnId, userId })`, where `turnId` identifies the
+  turn whose proxy calls then spend the credential admitted for it. See
+  `packages/core/CHANGELOG.md`.
 
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).

@@ -18,6 +18,7 @@
  *     service is concerned only with org-owned credentials.
  */
 
+import type { Context } from "hono";
 import { eq, gt, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, user } from "@appstrate/db/schema";
@@ -41,32 +42,36 @@ import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 import { getOrgSettings } from "../organizations.ts";
 import { lockOrgMember } from "../space-members.ts";
+import type { AppEnv } from "../../types/index.ts";
+import { requestPayerUserId } from "./credential-chain.ts";
 
 /**
  * Who is asking about model provider credentials, and what the org grants them.
  * A personal credential (`owner_user_id` set) is visible and editable to its
- * owner only; `readsOrg` / `writesOrg` widen that to the whole org.
+ * owner only, as a user principal; `readsOrg` / `writesOrg` / `deletesOrg` widen
+ * that to the whole org.
  */
 export interface ModelCredentialCaller {
   orgId: string;
-  userId: string;
+  /** The payer (`requestPayerUserId`): `null` for a delegate, which owns nothing. */
+  userId: string | null;
   /** Holds `model-provider-credentials:read` (org-wide view). */
   readsOrg: boolean;
   /** Holds `model-provider-credentials:write` (manage org credentials). */
   writesOrg: boolean;
+  /** Holds `model-provider-credentials:delete` (remove org credentials, break-glass on personal ones). */
+  deletesOrg: boolean;
 }
 
-/** The caller of a request, from its org, user and effective permissions. */
-export function modelCredentialCaller(
-  orgId: string,
-  userId: string,
-  permissions: ReadonlySet<string>,
-): ModelCredentialCaller {
+/** The model credential caller of a request: its org, its payer and its effective permissions. */
+export function requestModelCredentialCaller(c: Context<AppEnv>): ModelCredentialCaller {
+  const permissions = c.get("permissions") ?? new Set<string>();
   return {
-    orgId,
-    userId,
+    orgId: c.get("orgId"),
+    userId: requestPayerUserId(c),
     readsOrg: permissions.has("model-provider-credentials:read"),
     writesOrg: permissions.has("model-provider-credentials:write"),
+    deletesOrg: permissions.has("model-provider-credentials:delete"),
   };
 }
 
@@ -275,7 +280,7 @@ export async function personalModelCredentialsAllowed(orgId: string): Promise<bo
   return (await getOrgSettings(orgId)).personal_model_credentials !== false;
 }
 
-function personalModelCredentialsDisabled(): ApiError {
+export function personalModelCredentialsDisabled(): ApiError {
   return new ApiError({
     status: 403,
     code: "personal_model_credentials_disabled",
@@ -284,13 +289,17 @@ function personalModelCredentialsDisabled(): ApiError {
   });
 }
 
-function personalCredentialCustomEndpoint(providerId: string): ApiError {
+/** `param` names the field the custom endpoint came through. */
+export function personalCredentialCustomEndpoint(
+  providerId: string,
+  param = "base_url_override",
+): ApiError {
   return new ApiError({
     status: 400,
     code: "personal_credential_custom_endpoint",
     title: "Invalid Request",
     detail: `Provider ${providerId} with a custom endpoint is an organization credential only`,
-    param: "base_url_override",
+    param,
   });
 }
 
@@ -552,18 +561,21 @@ export async function updateModelProviderCredential(
   clearResolvedModelCache();
 }
 
-/** The owner of a credential of the caller's org; `null` when the row is absent. */
-async function loadCredentialOwner(
-  caller: ModelCredentialCaller,
-  id: string,
-): Promise<{ ownerUserId: string | null } | null> {
+/** A credential of the org: the provider it serves and its owner (`null` for an org credential). */
+export async function loadCredentialBinding(
+  orgId: string,
+  credentialId: string,
+): Promise<{ providerId: string; ownerUserId: string | null } | null> {
   const [row] = await db
-    .select({ ownerUserId: modelProviderCredentials.ownerUserId })
+    .select({
+      providerId: modelProviderCredentials.providerId,
+      ownerUserId: modelProviderCredentials.ownerUserId,
+    })
     .from(modelProviderCredentials)
     .where(
       scopedWhere(modelProviderCredentials, {
-        orgId: caller.orgId,
-        extra: [eq(modelProviderCredentials.id, id)],
+        orgId,
+        extra: [eq(modelProviderCredentials.id, credentialId)],
       }),
     )
     .limit(1);
@@ -578,28 +590,29 @@ export async function canSeeCredential(
   caller: ModelCredentialCaller,
   id: string,
 ): Promise<boolean> {
-  const row = await loadCredentialOwner(caller, id);
+  const row = await loadCredentialBinding(caller.orgId, id);
   if (!row) return false;
   return row.ownerUserId === null ? caller.readsOrg : row.ownerUserId === caller.userId;
 }
 
 /**
  * The editability rule, shared by PATCH, DELETE and pairing reconnect: an
- * organization credential needs `writesOrg`; a personal one must be the caller's
- * own, except that a `writesOrg` holder may delete any personal credential
- * (break-glass). Anything else is a 404: to the caller, it does not exist.
+ * organization credential needs `writesOrg` (`deletesOrg` to delete it); a
+ * personal one must be the caller's own, except that a `deletesOrg` holder may
+ * delete any personal credential (break-glass). Anything else is a 404: to the caller, it does not exist.
  */
 export async function assertCredentialEditable(
   caller: ModelCredentialCaller,
   id: string,
   action: "edit" | "delete",
 ): Promise<void> {
-  const row = await loadCredentialOwner(caller, id);
+  const row = await loadCredentialBinding(caller.orgId, id);
+  const managesOrg = action === "delete" ? caller.deletesOrg : caller.writesOrg;
   const editable =
     !!row &&
     (row.ownerUserId === null
-      ? caller.writesOrg
-      : row.ownerUserId === caller.userId || (action === "delete" && caller.writesOrg));
+      ? managesOrg
+      : row.ownerUserId === caller.userId || (action === "delete" && caller.deletesOrg));
   if (!editable) throw notFound("Model provider credential not found");
 }
 
@@ -922,7 +935,9 @@ export async function listOrgModelProviderCredentials(
       scopedWhere(modelProviderCredentials, {
         orgId: caller.orgId,
         extra: [
-          caller.readsOrg ? undefined : eq(modelProviderCredentials.ownerUserId, caller.userId),
+          caller.readsOrg
+            ? undefined
+            : eq(modelProviderCredentials.ownerUserId, caller.userId ?? sql`NULL`),
         ],
       }),
     );

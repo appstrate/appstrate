@@ -1551,6 +1551,12 @@ export interface PlatformServices {
     presetId: string;
     sessionId: string | null;
     subscription: boolean;
+    /**
+     * Identifies the turn: the turn's proxy calls are served on the credential
+     * admitted for it, so the caller carries it to them (the chat module signs it
+     * into its inference bearer).
+     */
+    turnId: string;
     /** The session user: the payer whose personal credentials the turn may spend. */
     userId: string;
   }): Promise<UsageRejection | null>;

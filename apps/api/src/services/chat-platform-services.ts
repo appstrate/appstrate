@@ -127,7 +127,6 @@ export async function resolveChatModel(
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
       accessToken: token.accessToken,
-      credentialId,
     },
   };
 }
@@ -140,9 +139,8 @@ export async function resolveChatModel(
  *
  * The subscription chat path spends the user's OWN provider subscription
  * (oauth2 claude-code/codex), so the row is always stamped
- * `credentialSource="org"` and attributed to that credential (`credentialId`).
- * Cost is derived here from the token counts + the model's catalog rates with
- * Pi's `calculateCost`, like the proxy/runner rows.
+ * `credentialSource="org"`. Cost is derived here from the token counts + the
+ * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
  * Its tier bands (`record.tiers`) price each model call at its tier.
  *
  * KNOWN LABELLING GAP — `source: "proxy"` is inaccurate for this producer. The
@@ -215,7 +213,6 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
-        credentialId: record.credentialId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -277,6 +274,7 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
   subscription: boolean;
+  turnId: string;
   userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
@@ -304,12 +302,8 @@ export async function checkUsageAllowed(args: {
   const admit = () => {
     if (resolved && !args.subscription) {
       recordChatTurnAdmission(
-        {
-          orgId: args.orgId,
-          userId: args.userId,
-          sessionId: args.sessionId,
-          presetId: args.presetId,
-        },
+        { orgId: args.orgId, userId: args.userId, turnId: args.turnId },
+        args.presetId,
         credentialPin(resolved),
       );
     }

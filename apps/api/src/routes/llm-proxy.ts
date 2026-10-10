@@ -178,6 +178,7 @@ async function handleProxy(
   const authExtra = c.get("authExtra");
   const chatSessionId =
     authExtra && typeof authExtra.chatSessionId === "string" ? authExtra.chatSessionId : null;
+  const turnId = authExtra && typeof authExtra.turnId === "string" ? authExtra.turnId : null;
 
   const runIdHeader = c.req.header("X-Run-Id");
   const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
@@ -218,7 +219,7 @@ async function handleProxy(
   return proxyAndLog(c, apiShape, limits, {
     principal,
     payerUserId: requestPayerUserId(c),
-    chatTurn: c.get("firstPartyLoopback") ? { userId, sessionId: chatSessionId } : undefined,
+    chatTurn: c.get("firstPartyLoopback") ? { userId, turnId } : undefined,
     runId,
     chatSessionId,
     beforeUpstream: (resolved) => enforceSystemProxyAdmission({ orgId, resolved, usageContext }),

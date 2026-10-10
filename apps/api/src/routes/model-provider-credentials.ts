@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
@@ -28,7 +28,8 @@ import {
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
-  modelCredentialCaller,
+  personalCredentialCustomEndpoint,
+  requestModelCredentialCaller,
   updateModelProviderCredential,
   type ModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
@@ -69,14 +70,6 @@ const REMOVE_CREDENTIALS = [
   "model-provider-credentials:delete",
   "model-provider-credentials:connect",
 ];
-
-function callerOf(c: Context<AppEnv>): ModelCredentialCaller {
-  return modelCredentialCaller(
-    c.get("orgId"),
-    c.get("user").id,
-    c.get("permissions") ?? new Set<string>(),
-  );
-}
 
 export const createSchema = z
   .object({
@@ -261,10 +254,7 @@ async function resolveTestTarget(
   // Same line as creation: a custom endpoint is an organization credential, so only
   // its managers may point a probe at a host of their choosing.
   if (cfg.baseUrlOverridable && !caller.writesOrg) {
-    throw invalidRequest(
-      `Provider ${cfg.providerId} with a custom endpoint is an organization credential only`,
-      "providerId",
-    );
+    throw personalCredentialCustomEndpoint(cfg.providerId, "providerId");
   }
   if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
     throw invalidRequest(
@@ -296,10 +286,9 @@ export function createModelProviderCredentialsRouter() {
 
   // GET /api/model-provider-credentials/registry — surfaces the in-code
   // MODEL_PROVIDERS registry so the UI can render a provider picker without
-  // hard-coding the catalog client-side. Read-only; admin-only because it
-  // sits behind the same `model-provider-credentials:read` permission as
-  // the rest of this resource (the catalog itself is non-sensitive metadata
-  // — the gate is for surface uniformity, not the data).
+  // hard-coding the catalog client-side. Read-only, behind the same `read` or
+  // `connect` permission as the listing (the catalog itself is non-sensitive
+  // metadata — the gate is for surface uniformity, not the data).
   // Allowlisted projection keys for the `fields` selector. `models` is the
   // heavy field — the full per-provider catalog offer (hundreds of models
   // across the registry). A caller asking only "which providers exist" can request
@@ -349,13 +338,13 @@ export function createModelProviderCredentialsRouter() {
 
   // GET /api/model-provider-credentials
   router.get("/", requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
-    const keys = await listOrgModelProviderCredentials(callerOf(c));
+    const keys = await listOrgModelProviderCredentials(requestModelCredentialCaller(c));
     return c.json(listResponse(keys));
   });
 
   // POST /api/model-provider-credentials
   router.post("/", rateLimit(10), requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
-    const caller = callerOf(c);
+    const caller = requestModelCredentialCaller(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);
     const { providerId, api_key: apiKey, base_url_override: baseUrlOverride } = data;
@@ -422,7 +411,10 @@ export function createModelProviderCredentialsRouter() {
 
   // POST /api/model-provider-credentials/test — inline test (before saving)
   router.post("/test", rateLimit(5), requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
-    const target = await resolveTestTarget(callerOf(c), await readJsonBody(c, testInlineSchema));
+    const target = await resolveTestTarget(
+      requestModelCredentialCaller(c),
+      await readJsonBody(c, testInlineSchema),
+    );
     try {
       const result = await testModelConfig({ ...target, modelId: "_test" });
       return c.json(result);
@@ -445,7 +437,7 @@ export function createModelProviderCredentialsRouter() {
     rateLimit(6),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
-      const caller = callerOf(c);
+      const caller = requestModelCredentialCaller(c);
       const body = await readJsonBody(c, discoverSchema);
       const target = await resolveDiscoverTarget(caller, body);
       const listing = await listServedModels(target);
@@ -500,7 +492,7 @@ export function createModelProviderCredentialsRouter() {
 
   // POST /api/model-provider-credentials/:id/test
   router.post("/:id/test", rateLimit(5), requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
-    const caller = callerOf(c);
+    const caller = requestModelCredentialCaller(c);
     const id = c.req.param("id")!;
     try {
       // A built-in key spends the platform's money: only an org reader may probe it.
@@ -531,7 +523,7 @@ export function createModelProviderCredentialsRouter() {
 
   // PATCH /api/model-provider-credentials/:id
   router.patch("/:id", requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
-    const caller = callerOf(c);
+    const caller = requestModelCredentialCaller(c);
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
@@ -565,7 +557,7 @@ export function createModelProviderCredentialsRouter() {
 
   // DELETE /api/model-provider-credentials/:id
   router.delete("/:id", requireAnyPermission(REMOVE_CREDENTIALS), async (c) => {
-    const caller = callerOf(c);
+    const caller = requestModelCredentialCaller(c);
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id, "delete");

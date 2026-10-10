@@ -231,14 +231,18 @@ For a payer, the call is served by, in order:
    refused with `409 model_credential_required` before dispatch.
 
 Aliased models never take a personal credential: their binding is always the
-alias's own. Metadata reads take no payer, so an unbound model still exists
-in the listing and in `assertExplicitModelExists`. `billed_to` on
-`GET /api/models` tells the caller who pays: `user`, `org`, or `null` when
-neither applies.
+alias's own. `GET /api/models` and an explicit model choice at run launch are
+read for the caller's payer: `billed_to` says who pays (`user`, `org`, or `null`
+when neither applies), and `needs_reconnection` is true when nothing serves the
+model for the caller because a credential must be reconnected (the
+organization's, or one of the caller's own for an unbound model). An unbound
+model is listed with `credentialId: null`. Settings shared by every member (an
+agent's or a space's model) are validated with no payer.
 
 The public LLM proxy (`/api/llm-proxy`) never serves a subscription: its chain
 runs with `viaProxy`, which skips oauth2 credentials, so a call falls to the
-caller's other personal credential or to the organization binding. A run's
+caller's other personal credential or to the organization binding, and is
+refused when that binding is itself a subscription. A run's
 inference through the LLM proxy serves the credential frozen at launch
 (`runs.model_credential_id`) and is not re-resolved during the run: a credential
 the payer adds mid-run changes nothing, and one removed mid-run stops serving
@@ -254,15 +258,14 @@ bound as for a deleted or revoked credential.
 
 The admission gate (`beforeUsage`) quotes the credential a run or chat turn
 resolves to when it is admitted, and that exact credential is what gets spent.
-A run whose context resolves another credential is refused with
-`409 model_credential_changed`. A chat turn's proxy calls are served on the
-credential the turn was admitted on (`recordChatTurnAdmission`, keyed by user,
-session and preset, so an unsaved conversation is covered too), and a call that
-no admission covers is refused.
+A run resolves its model once, before the gate, and its context reuses that
+resolution. A chat turn's proxy calls are served on the credential the turn was
+admitted on (`recordChatTurnAdmission`, keyed by the turn id the chat signs into
+its inference bearer); a call no admission covers is refused with
+`409 model_credential_changed`.
 
 `credential_source` has two values: `system` (a platform credential) and `org`
 (one the customer supplies, an organization's or a member's own).
-`llm_usage.credential_id` records which credential served each call.
 
 ## Error surfaces: synthesize, never scrub
 

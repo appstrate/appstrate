@@ -24,7 +24,7 @@ import {
   assertCredentialEditable,
   assertPersonalModelCredentialsAllowed,
   getOrgModelProviderCredential,
-  modelCredentialCaller,
+  requestModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
 
 /**
@@ -221,7 +221,7 @@ export function createModelProvidersOAuthRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const user = c.get("user");
-      const caller = modelCredentialCaller(orgId, user.id, c.get("permissions") ?? new Set());
+      const caller = requestModelCredentialCaller(c);
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
       // A subscription is always personal: minting a pairing creates one, so the org policy applies.

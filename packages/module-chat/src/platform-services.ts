@@ -102,6 +102,8 @@ export interface ChatPlatformDeps {
     presetId: string;
     sessionId: string | null;
     subscription: boolean;
+    /** This turn's id, signed into its inference bearer (`turnId` claim). */
+    turnId: string;
     /** The session user, whose payer credentials the turn resolves against. */
     userId: string;
   }): Promise<UsageRejection | null>;

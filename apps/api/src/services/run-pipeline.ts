@@ -20,7 +20,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
-import { credentialPin, resolveModel, samePin } from "./org-models.ts";
+import { credentialPin, resolveModelCascade } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -42,7 +42,7 @@ import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
-import { ApiError, conflict, type ResolutionFieldError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -386,23 +386,24 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
-  // --- Step 0: Resolve the credential source reported to the admission gate ---
+  // --- Step 0: Resolve the model, once ---
   //
-  // The `beforeUsage` gate fires for EVERY run; this resolution does not decide
-  // whether it fires, it supplies the fact the module quotes the MODEL
-  // component against (platform-supplied credential vs. the org's own BYOK /
-  // OAuth credential). Resolve the same model `buildRunContext` will (Step 3) —
-  // cheap: system models are in-memory and DB rows are short-TTL cached, so the
-  // later resolution is a cache hit. `modelId` is the effective preset (per-run
-  // override folded in by the route/scheduler/inline callers), matching the
-  // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
-  // with no resolvable model reports `null` and then fails downstream with
-  // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
-  // model component costs nothing. An unbound model (`credentialSource` null)
-  // is refused downstream by `requireBoundModel`.
-  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null, payerUserId);
-  const credentialSourceForGate = gateModel?.credentialSource ?? null;
-  const gatePin = credentialPin({ ...gateModel, credentialSource: credentialSourceForGate });
+  // The `beforeUsage` gate fires for EVERY run; this resolution supplies the
+  // fact the module quotes the MODEL component against (platform-supplied
+  // credential vs. one the customer supplies), and the run context reuses it, so
+  // the run spends the very credential the gate admitted. `modelId` is the
+  // effective preset (per-run override and space setting folded in by the
+  // route/scheduler/inline callers). A run with no resolvable model reports
+  // `null` and then fails with `ModelNotConfiguredError` — it never reaches
+  // inference. An unbound model (`credentialSource` null) is refused by
+  // `requireBoundModel` when the context is built.
+  const modelCascade = await resolveModelCascade(
+    orgId,
+    params.agent.id,
+    modelId ?? null,
+    payerUserId,
+  );
+  const credentialSourceForGate = modelCascade?.model.credentialSource ?? null;
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
@@ -534,7 +535,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         orgId,
         spaceId,
         actor,
-        payerUserId,
+        modelCascade,
         input: input ?? undefined,
         files,
         modelId,
@@ -584,17 +585,6 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     const mapped = toBundleApiError(err);
     if (mapped) throw mapped;
     throw err;
-  }
-
-  // The gate admitted the credential resolved at Step 0. A credential removed
-  // since (a member's own key deleted, personal credentials switched off) would
-  // hand the run another credential, and another payer, than the one admitted.
-  const runPin = credentialPin({ ...plan.llmConfig, credentialSource: modelSource });
-  if (!samePin(gatePin, runPin)) {
-    throw conflict(
-      "model_credential_changed",
-      "The model's credential changed while the run was being admitted. Launch the run again.",
-    );
   }
 
   // --- Step 4: Mint sink credentials ---
@@ -661,7 +651,8 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         // credentials → its provider and endpoint — straight to the backing.
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
-        modelCredentialId: runPin.credentialId,
+        modelCredentialId: credentialPin({ ...plan.llmConfig, credentialSource: modelSource })
+          .credentialId,
         consumedFileIds: params.consumedFileIds,
       },
     ),

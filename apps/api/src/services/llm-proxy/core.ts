@@ -68,7 +68,7 @@ interface ProxyCallInputs {
    */
   pinned?: PinnedModelCredential;
   /** A first-party chat turn: its preset is served by the credential the turn was admitted on. */
-  chatTurn?: { userId: string; sessionId: string | null };
+  chatTurn?: { userId: string; turnId: string | null };
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -425,7 +425,7 @@ async function resolvePresetForOrg(
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   const pin =
     inputs.pinned ??
-    (inputs.chatTurn ? admittedChatTurnPin({ orgId, presetId, ...inputs.chatTurn }) : undefined);
+    (inputs.chatTurn ? admittedChatTurnPin({ orgId, ...inputs.chatTurn }, presetId) : undefined);
   try {
     loaded = pin
       ? await loadPinnedModel(orgId, presetId, pin)

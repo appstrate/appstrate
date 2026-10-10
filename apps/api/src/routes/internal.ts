@@ -58,6 +58,7 @@ import {
 } from "../services/model-providers/token-resolver.ts";
 import {
   personalModelCredentialsAllowed,
+  personalModelCredentialsDisabled,
   serializeOAuthTokenResponse,
 } from "../services/model-providers/credentials.ts";
 import {
@@ -915,6 +916,6 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
     throw forbidden(`Credential ${credentialId} is another member's`);
   }
   if (row.ownerUserId !== null && !(await personalModelCredentialsAllowed(run.orgId))) {
-    throw forbidden("Personal model credentials are turned off for this organization");
+    throw personalModelCredentialsDisabled();
   }
 }

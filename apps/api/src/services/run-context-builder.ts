@@ -16,7 +16,7 @@ import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
-import { clampToBackingLevel, requireBoundModel, resolveModelCascade } from "./org-models.ts";
+import { clampToBackingLevel, requireBoundModel, type ModelCascade } from "./org-models.ts";
 import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
@@ -89,11 +89,11 @@ export async function buildRunContext(params: {
   orgId: string;
   spaceId: string;
   actor: Actor | null;
-  /** Whose personal model credentials may serve the run — see `requestPayerUserId`. */
-  payerUserId: string | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
   modelId?: string | null;
+  /** The model resolved for `modelId` and the payer, admitted by the caller's gate. */
+  modelCascade: ModelCascade;
   /** Persisted agent defaults; undefined asks this service to load them. */
   generationConfig?: ModelGenerationSettings | null;
   /** Invocation layer; null/omitted fields inherit the agent defaults. */
@@ -149,7 +149,7 @@ export async function buildRunContext(params: {
   /** The model pin this run fell back from — see {@link recordModelFallback}. */
   unavailablePinnedModelId: string | null;
 }> {
-  const { runId, agent, orgId, spaceId, actor, input, files, payerUserId } = params;
+  const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
   // Skip getSpacePackageSettings when all values are already provided by the caller (from preflight)
   const skipSettingsFetch =
@@ -211,10 +211,10 @@ export async function buildRunContext(params: {
   const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
   const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
-  const [proxyResult, modelCascade] = await Promise.all([
-    resolveProxy(orgId, agent.id, effectiveProxyId),
-    resolveModelCascade(orgId, agent.id, effectiveModelId, payerUserId),
-  ]);
+  const proxyResult = await resolveProxy(orgId, agent.id, effectiveProxyId);
+  // Resolved once, by the caller, before the admission gate: the run spends the
+  // credential the gate admitted.
+  const { modelCascade } = params;
 
   if (!modelCascade) {
     throw new ModelNotConfiguredError();

@@ -163,45 +163,52 @@ export async function enforceSystemProxyAdmission(args: {
 
 /**
  * The credential each chat turn was admitted on, served to the turn's proxy calls
- * instead of a fresh chain resolution. The chat engine reaches the proxy through
- * this process's own loopback, so a process-local entry sees every call of the
- * turn; it lives as long as the engine's loopback bearer. Keyed by the preset as
- * well, so a turn needs no session: two concurrent turns of one user on one
- * preset are admitted on the same credential.
+ * instead of a fresh chain resolution. Keyed by the turn id the chat signs into
+ * its inference bearer, so concurrent turns never share an entry. The chat engine
+ * reaches the proxy through this process's own loopback, so a process-local entry
+ * sees every call of the turn; it lives as long as the engine's loopback bearer.
  */
-const admittedChatTurns = createCache<PinnedModelCredential>({
+const admittedChatTurns = createCache<{ presetId: string; pin: PinnedModelCredential }>({
   name: "chat-turn-admission",
   ttlMs: 30 * 60_000,
   max: 10_000,
 });
 
-interface ChatTurnKey {
+interface ChatTurn {
   orgId: string;
   userId: string;
-  sessionId: string | null;
-  presetId: string;
+  turnId: string;
 }
 
-const chatTurnKey = (turn: ChatTurnKey) =>
-  `${turn.orgId}:${turn.userId}:${turn.sessionId ?? ""}:${turn.presetId}`;
+const chatTurnKey = (turn: ChatTurn) => `${turn.orgId}:${turn.userId}:${turn.turnId}`;
 
-/** Remember the credential a chat turn was admitted on. */
-export function recordChatTurnAdmission(turn: ChatTurnKey, pin: PinnedModelCredential): void {
-  admittedChatTurns.set(chatTurnKey(turn), pin);
+/** Remember the credential a chat turn was admitted on, for its preset. */
+export function recordChatTurnAdmission(
+  turn: ChatTurn,
+  presetId: string,
+  pin: PinnedModelCredential,
+): void {
+  admittedChatTurns.set(chatTurnKey(turn), { presetId, pin });
 }
 
 /**
  * The credential a chat turn's proxy call must spend. A call no admission covers
- * is refused: it would otherwise resolve a credential, and a payer, nobody admitted.
+ * (no turn id, an unknown turn, another preset) is refused: it would otherwise
+ * resolve a credential, and a payer, nobody admitted.
  */
-export function admittedChatTurnPin(turn: ChatTurnKey): PinnedModelCredential {
-  const pin = admittedChatTurns.peek(chatTurnKey(turn));
-  if (!pin) {
+export function admittedChatTurnPin(
+  turn: Omit<ChatTurn, "turnId"> & { turnId: string | null },
+  presetId: string,
+): PinnedModelCredential {
+  const admitted = turn.turnId
+    ? admittedChatTurns.peek(chatTurnKey({ ...turn, turnId: turn.turnId }))
+    : undefined;
+  if (!admitted || admitted.presetId !== presetId) {
     // The chat classifies a proxied failure by its wording: no "credential" here.
     throw conflict(
       "model_credential_changed",
       "This chat turn was not admitted on this model. Send the message again.",
     );
   }
-  return pin;
+  return admitted.pin;
 }
