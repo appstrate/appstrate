@@ -236,7 +236,8 @@ integration_connections WHERE shared_with_org;` tells whether the step
     The DTOs add `scope` (`"org"` | `"space"`), `spaceId`, `shared_here`
     (the connection is shared into the current space), `allowed_actions` and
     `origin_space_id` (owner only). The owner also gets `shared_space_ids`
-    (the full target set) and `shareable_space_ids`.
+    (the full target set) and `shareable_spaces` (`{id, name}`, the shape
+    `/me` uses); a delegated owner sees both filtered to its bound space.
   - A share is changed with `PUT` (`204`, idempotent) and `DELETE` (`204`) on
     `/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}`
     and `/api/me/connections/{connectionId}/shares/{spaceId}`. `PATCH` on the
@@ -249,7 +250,8 @@ integration_connections WHERE shared_with_org;` tells whether the step
     API key or a third-party token, and `409 connection_pinned` on a removal
     an admin pin or an org default still names.
   - `PATCH /api/me/connections/{connectionId}` (owner,
-    `integrations:connect` ceiling): label.
+    `integrations:connect` ceiling): label; answers the connection resource.
+    A malformed share `spaceId` answers `400 invalid_request`.
   - `GET /api/me/connections`: `space` is `null` for an org-scoped
     connection; new `scope`, `origin_space`, `shared_spaces`,
     `shareable_spaces` and `allowed_actions`.
