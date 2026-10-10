@@ -111,6 +111,7 @@
   "model.billedToUser": "Votre identifiant",
   "model.credentialRequired": "Identifiant requis",
   "turn.error.modelCredentialRequired": "Ce modèle est payé par votre propre identifiant fournisseur, qui n'est pas configuré. Ajoutez-le pour pouvoir l'utiliser.",
+  "turn.error.modelCredentialRequiredPolicy": "Ce modèle nécessite un identifiant de l'organisation : les identifiants personnels sont désactivés. Demandez à un administrateur d'en configurer un.",
   "turn.error.managePersonalModels": "Ajouter mon identifiant",
   "model.answeredBy": "Répondu par {{model}}",
   "model.failedWith": "Échec avec {{model}}",

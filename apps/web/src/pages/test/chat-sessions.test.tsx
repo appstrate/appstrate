@@ -42,6 +42,7 @@ function renderChatPage(qc: QueryClient, can: (permission: string) => boolean): 
         uploadFile={async () => "upload://unused"}
         t={(key) => key}
         can={can}
+        personalModelCredentials
         formatBytes={String}
       />,
       { queryClient: qc },
@@ -59,6 +60,7 @@ function hostWith(granted: string[]): ChatHost {
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),
+    personalModelCredentials: true,
     formatBytes: String,
   };
 }

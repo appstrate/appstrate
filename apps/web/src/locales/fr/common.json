@@ -240,7 +240,7 @@
   "apiError.model_already_added": "Ce modèle est déjà ajouté pour cet identifiant fournisseur.",
   "apiError.model_not_offered": "Ce modèle n'est pas proposé par ce fournisseur : {{message}}",
   "apiError.credential_in_use": "Cet identifiant est utilisé par des modèles : supprimez-les d'abord.",
-  "apiError.model_credential_changed": "Cet appel n'est couvert par aucune admission du modèle. Renvoyez le message.",
+  "apiError.model_credential_changed": "L'accès à ce modèle a changé pendant l'envoi du message. Renvoyez-le.",
   "apiError.model_credential_required": "Ce modèle nécessite votre propre identifiant fournisseur, ou un identifiant de l'organisation : {{message}}",
   "apiError.personal_model_credentials_disabled": "L'organisation n'autorise pas les identifiants personnels de modèle : demandez à un administrateur de l'activer.",
   "apiError.personal_credential_custom_endpoint": "Un identifiant personnel ne peut pas servir un endpoint personnalisé : utilisez un identifiant de l'organisation.",

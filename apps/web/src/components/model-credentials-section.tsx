@@ -207,16 +207,19 @@ export function CredentialsSection({
                         {isOauth && (
                           <>
                             {canEditCredential(pk) && editButton}
-                            {pk.needs_reconnection && pk.providerId && isOwnCredential(pk) && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => onConnectOAuth(pk)}
-                              >
-                                {t("credentials.oauth.reconnect")}
-                              </Button>
-                            )}
+                            {pk.needs_reconnection &&
+                              pk.providerId &&
+                              isOwnCredential(pk) &&
+                              canWrite && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => onConnectOAuth(pk)}
+                                >
+                                  {t("credentials.oauth.reconnect")}
+                                </Button>
+                              )}
                             {canDelete && (
                               <Button
                                 variant="ghost"

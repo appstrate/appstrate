@@ -271,6 +271,12 @@ export function OrgSettingsGeneralPage() {
                   },
                   {
                     onSuccess: (data) => {
+                      // The flag changes which models each member pays for and which
+                      // credentials serve a call: refresh both lists.
+                      void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+                      void queryClient.invalidateQueries({
+                        queryKey: ["get", "/api/model-provider-credentials"],
+                      });
                       toast.success(
                         data.personal_model_credentials === false
                           ? t("orgSettings.personalModelCredentialsDisabled")

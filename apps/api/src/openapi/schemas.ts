@@ -2018,7 +2018,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: ["user", "org", null],
         description:
-          "Who pays for a call to this model, for the caller. `user` — the caller's own personal credential serves it. `org` — an organization or platform credential serves it. `null` — the caller has no usable credential for it: the spend is refused with `409 model_credential_required` until they add one. A personal credential never serves a managed (`aliased`) model.",
+          "Who pays for a call to this model, for the caller. `user` — the caller's own personal credential serves it. `org` — an organization or platform credential serves it. `null` — the caller has no usable credential for it: the spend is refused with `409 model_credential_required` until they add one. A personal credential never serves a managed (`aliased`) model. Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription is billed there as if they had none (the organization binding, or a 409).",
       },
       cost: {
         type: ["object", "null"],

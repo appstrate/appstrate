@@ -470,6 +470,7 @@
   "modelCredentials.emptyHint": "Ajoutez une clé API ou connectez un abonnement pour payer vos appels aux modèles de l'organisation.",
   "modelCredentials.billedTitle": "Modèles de l'organisation payés par vos identifiants",
   "modelCredentials.billedNone": "Aucun modèle de l'organisation n'est payé par vos identifiants.",
+  "modelCredentials.policyDisabled": "Votre organisation a désactivé les identifiants de modèle personnels. Vos identifiants existants ne servent plus aucun appel, et l'ajout n'est pas disponible. Vous pouvez encore les supprimer.",
   "modelCredentials.deleteConfirm": "Supprimer l'identifiant « {{label}} » ?",
   "modelCredentials.deleteImpact": "Les modèles de l'organisation qu'il payait redeviennent « Identifiant requis » tant que vous n'en ajoutez pas un autre.",
   "models.billing.userCredential": "Votre identifiant",

@@ -111,6 +111,7 @@
   "model.billedToUser": "Your credential",
   "model.credentialRequired": "Credential required",
   "turn.error.modelCredentialRequired": "This model is paid by your own provider credential, which is not set up. Add it to use this model.",
+  "turn.error.modelCredentialRequiredPolicy": "This model needs an organization credential: personal credentials are disabled. Ask an administrator to set one up.",
   "turn.error.managePersonalModels": "Add my credential",
   "model.answeredBy": "Answered by {{model}}",
   "model.failedWith": "Failed with {{model}}",

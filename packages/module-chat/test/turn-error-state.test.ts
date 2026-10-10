@@ -147,6 +147,17 @@ describe("turnErrorState", () => {
     }
   });
 
+  it("offers no link to add a personal credential while the organization refuses them", () => {
+    // The link leads to a form the server answers 403 to: the sentence stays, the link goes.
+    const refusal = failed(problem({ status: 409, code: "model_credential_required" }));
+    expect(turnErrorState(refusal, t, manager)).toEqual(
+      refused("turn.error.modelCredentialRequired", PERSONAL_MODELS),
+    );
+    expect(turnErrorState(refusal, t, manager, false)).toEqual(
+      refused("turn.error.modelCredentialRequiredPolicy"),
+    );
+  });
+
   it("shows the request id of a live failure, from the marker or the refused request", () => {
     expect(
       turnErrorState(

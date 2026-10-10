@@ -470,6 +470,7 @@
   "modelCredentials.emptyHint": "Add an API key or connect a subscription to pay for your calls to the organization's models.",
   "modelCredentials.billedTitle": "Organization models paid by your credentials",
   "modelCredentials.billedNone": "No organization model is paid by your credentials.",
+  "modelCredentials.policyDisabled": "Your organization has disabled personal model credentials. Your existing credentials no longer serve any call, and adding one is unavailable. You can still delete them.",
   "modelCredentials.deleteConfirm": "Delete the credential \"{{label}}\"?",
   "modelCredentials.deleteImpact": "Organization models it paid for become \"Credential required\" until you add another one.",
   "models.billing.userCredential": "Your credential",

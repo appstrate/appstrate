@@ -27,6 +27,7 @@ import {
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatAccessChip } from "./chat-access-chip";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useOrgSettings } from "../../hooks/use-org-settings";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
@@ -71,6 +72,9 @@ export function ChatModulePage() {
   // those answers speaks the same language too — labels and aria-labels alike.
   const { t, i18n } = useTranslation("chat");
   const { can } = usePermissions();
+  // Absent means allowed (the setting is opt-out): the chat only drops its
+  // "add my credential" link once the organization has turned them off.
+  const { data: orgSettings } = useOrgSettings();
   // Persona and space are threaded through so this callback's identity moves
   // with either: the module's streams read their URL once, and would otherwise
   // keep tailing under the replaced authority or miss a space resolved late.
@@ -138,6 +142,7 @@ export function ChatModulePage() {
           uploadFile={uploadFile}
           t={translate}
           can={can}
+          personalModelCredentials={orgSettings?.personal_model_credentials !== false}
           formatBytes={formatBytes}
         />
       </div>

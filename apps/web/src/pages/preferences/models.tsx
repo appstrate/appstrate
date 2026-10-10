@@ -9,6 +9,8 @@ import { CredentialFormModal } from "../../components/credential-form-modal";
 import { CredentialsSection } from "../../components/model-credentials-section";
 import { ErrorState, LoadingState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { AlertTriangle } from "lucide-react";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
@@ -18,6 +20,7 @@ import {
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useModels } from "../../hooks/use-models";
+import { useOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
 import { errorMessage } from "../../lib/mutation-error";
 import {
@@ -35,6 +38,10 @@ export function PreferencesModelsPage() {
   const queryClient = useQueryClient();
 
   const canConnect = can("model-provider-credentials:connect");
+  const { data: orgSettings } = useOrgSettings();
+  // Absent means allowed (the setting is opt-out). Only an explicit `false` withdraws adding:
+  // a key or a subscription pairing is then refused, and existing credentials can still be deleted.
+  const personalModelCredentialsDisabled = orgSettings?.personal_model_credentials === false;
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
   const createCredential = useCreateModelProviderCredential();
@@ -98,6 +105,13 @@ export function PreferencesModelsPage() {
 
   return (
     <>
+      {personalModelCredentialsDisabled && (
+        <Alert variant="warning" className="mb-4">
+          <AlertTriangle size={16} />
+          <AlertDescription>{t("modelCredentials.policyDisabled")}</AlertDescription>
+        </Alert>
+      )}
+
       <p className="text-muted-foreground mb-4 text-sm">{t("modelCredentials.description")}</p>
 
       <CredentialsSection
@@ -108,7 +122,7 @@ export function PreferencesModelsPage() {
         onEdit={openEdit}
         onDelete={(credential) => setConfirmDelete(credential)}
         onConnectOAuth={openEdit}
-        canWrite={canConnect}
+        canWrite={canConnect && !personalModelCredentialsDisabled}
         canDelete={canConnect}
         userId={userId}
         showOwner={false}
