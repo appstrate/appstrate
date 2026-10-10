@@ -391,9 +391,8 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     const viaKey = (await listAs({ Authorization: `Bearer ${key.rawKey}` })).find(
       (c) => c.id === mine,
     )!;
-    // A delegated credential sees the row projected onto its space: no owner-only fields.
-    expect(viaKey).toMatchObject({ shared_here: true });
-    expect(viaKey).not.toHaveProperty("shared_space_ids");
+    // A delegated credential sees the row projected onto its space: its shares there, no origin.
+    expect(viaKey).toMatchObject({ shared_here: true, shared_space_ids: [ctx.defaultSpaceId] });
     expect(viaKey).not.toHaveProperty("origin_space_id");
     expect(viaKey.identity_claims).not.toBeNull();
     const viaSession = (await listAs(authHeaders(ctx))).find((c) => c.id === mine)!;

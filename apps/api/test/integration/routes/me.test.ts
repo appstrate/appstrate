@@ -623,6 +623,47 @@ describe("Me API (/api/me)", () => {
       ]);
     });
 
+    it("gives a key bound to a space the same shares on the space's connection list", async () => {
+      const ctx = await createTestContext({ orgSlug: "orgrow-bound-list" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const integrationId = "@conn/bound-list";
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: spaceB.id,
+        integrationId,
+        userId: ctx.user.id,
+      });
+      await seedShares(id, [spaceB.id, ctx.defaultSpaceId]);
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+      const list = async (headers: Record<string, string>) => {
+        const res = await app.request(`/api/integrations/${integrationId}/connections`, {
+          headers,
+        });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+      };
+
+      const asKey = await list({ Authorization: `Bearer ${key.rawKey}` });
+      expect(asKey).toEqual([
+        expect.objectContaining({ id, shared_here: true, shared_space_ids: [ctx.defaultSpaceId] }),
+      ]);
+      expect(asKey[0]).not.toHaveProperty("origin_space_id");
+      const asOwner = await list(authHeaders(ctx));
+      expect(asOwner).toEqual([
+        expect.objectContaining({
+          id,
+          shared_space_ids: [spaceB.id, ctx.defaultSpaceId].toSorted(),
+          origin_space_id: spaceB.id,
+        }),
+      ]);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/connections");
       expect(res.status).toBe(401);
@@ -800,6 +841,8 @@ describe("Me API (/api/me)", () => {
 
       // The key shares into its own space only: B's share is neither read nor touched.
       expect((await share("PUT", id, bearer, spaceB.id)).status).toBe(403);
+      expect((await share("DELETE", id, bearer, spaceB.id)).status).toBe(403);
+      expect(await sharesOf(id)).toEqual([spaceB.id]);
       expect((await share("PUT", id, bearer, ctx.defaultSpaceId)).status).toBe(204);
       expect(await sharesOf(id)).toEqual([spaceB.id, ctx.defaultSpaceId].toSorted());
       expect((await share("DELETE", id, bearer, ctx.defaultSpaceId)).status).toBe(204);

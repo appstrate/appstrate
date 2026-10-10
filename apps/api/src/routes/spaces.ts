@@ -613,13 +613,14 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;
     assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "sweep");
-    const counts = await emptyAndDeletePersonalSpace(orgId, spaceId);
+    const { counts, removedShares } = await emptyAndDeletePersonalSpace(orgId, spaceId);
     await recordAuditFromContext(c, {
       action: "space.swept",
       resourceType: "space",
       resourceId: spaceId,
       after: counts,
     });
+    await recordSharesRemoved(c, orgId, removedShares, "space_deleted");
     return c.json(toSweepWire(spaceId, counts));
   });
 

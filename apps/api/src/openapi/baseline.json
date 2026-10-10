@@ -5934,7 +5934,7 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
@@ -7007,7 +7007,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
@@ -7648,7 +7648,7 @@
                           "items": {
                             "type": "string"
                           },
-                          "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                          "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                         },
                         "origin_space_id": {
                           "type": ["string", "null"],
@@ -7916,7 +7916,7 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                            "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                           },
                           "origin_space_id": {
                             "type": ["string", "null"],
@@ -8131,7 +8131,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
@@ -8588,7 +8588,7 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
@@ -32515,7 +32515,7 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read."
+                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],

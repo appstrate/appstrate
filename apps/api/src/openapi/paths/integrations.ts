@@ -206,12 +206,12 @@ export const sharedHereSchema = {
     "Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses).",
 } as const;
 
-/** Owner's own session only (absent otherwise): every space the connection is shared into. */
+/** The owner only (absent otherwise): the spaces the connection is shared into. */
 export const sharedSpaceIdsSchema = {
   type: "array",
   items: { type: "string" },
   description:
-    "Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read.",
+    "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read.",
 } as const;
 
 /** Owner's own session only (absent otherwise). */

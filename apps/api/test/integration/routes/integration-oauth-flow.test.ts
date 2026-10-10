@@ -42,7 +42,7 @@ import {
   integrationConnections,
   integrationOauthClients,
 } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
@@ -458,6 +458,33 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       originSpaceId: null,
       userId: ctx.user.id,
     });
+
+    // The owner's session reconnecting that row through the same client widens it to the org.
+    const scoped = (await storedConnection())!;
+    await consentAndCallback(await beginConnect(ctx, { connection_id: scoped.id }));
+    expect(await storedConnection()).toMatchObject({
+      id: scoped.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    const widened = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.resourceId, scoped.id),
+          eq(auditEvents.action, "integration.connection.scope_widened"),
+        ),
+      );
+    expect(widened).toEqual([
+      expect.objectContaining({
+        spaceId: ctx.defaultSpaceId,
+        actorType: "user",
+        actorId: ctx.user.id,
+        before: { spaceId: ctx.defaultSpaceId, label: scoped.label },
+        after: { originSpaceId: ctx.defaultSpaceId, label: scoped.label },
+      }),
+    ]);
 
     // Control: the owner's session, through the same client, connects for the whole org.
     await db.delete(integrationConnections);

@@ -5908,7 +5908,7 @@ export interface components {
                 spaceId: string | null;
                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                 shared_here: boolean;
-                /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                 shared_space_ids?: string[];
                 /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                 origin_space_id?: string | null;
@@ -12860,7 +12860,7 @@ export interface operations {
                             spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
-                            /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                             shared_space_ids?: string[];
                             /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                             origin_space_id?: string | null;
@@ -13027,7 +13027,7 @@ export interface operations {
                                 spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
-                                /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                                 shared_space_ids?: string[];
                                 /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                                 origin_space_id?: string | null;
@@ -13222,7 +13222,7 @@ export interface operations {
                         spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
-                        /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                         shared_space_ids?: string[];
                         /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                         origin_space_id?: string | null;
@@ -13610,7 +13610,7 @@ export interface operations {
                             spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
-                            /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                             shared_space_ids?: string[];
                             /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                             origin_space_id?: string | null;
@@ -13704,7 +13704,7 @@ export interface operations {
                         spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
-                        /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                         shared_space_ids?: string[];
                         /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                         origin_space_id?: string | null;
@@ -14389,7 +14389,7 @@ export interface operations {
                                 spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
-                                /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
+                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
                                 shared_space_ids?: string[];
                                 /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
                                 origin_space_id?: string | null;

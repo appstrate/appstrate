@@ -116,7 +116,7 @@ import {
   type ConnectionReader,
   type ShareTargets,
 } from "./connection-reach.ts";
-import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { sharesSeenBy, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
   getPackageDisplayName,
@@ -3404,9 +3404,13 @@ export async function listIntegrationConnections(
     .filter((p) => p.owner && p.row.userId !== null && p.actions.includes("share"))
     .map((p) => p.row.id);
   const shareable = await shareableSpaces(shareableIds, reader.shareTargets);
+  // The owner sees where its row is shared; a credential it delegated, within its binding.
   return projected.map(({ row, owner, actions, summary }) => ({
     ...summary,
     allowed_actions: actions,
+    ...(owner
+      ? { shared_space_ids: sharesSeenBy(reader.principal, shares.get(row.id) ?? []) }
+      : {}),
     ...(owner && row.userId !== null ? { shareable_space_ids: shareable.get(row.id) ?? [] } : {}),
   }));
 }

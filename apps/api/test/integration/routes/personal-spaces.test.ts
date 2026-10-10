@@ -25,6 +25,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
   auditEvents,
+  integrationConnections,
   organizationMembers,
   packages,
   runs,
@@ -35,6 +36,7 @@ import {
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
 import {
@@ -1029,6 +1031,48 @@ describe("personal spaces — offboarding", () => {
     expect((await listSpaces(owner)).map((space) => space.id)).toContain(personalId);
     await ageOrphan(personalId);
     expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+  });
+
+  it("records each share the sweep drops as share_removed, reason space_deleted, by the system", async () => {
+    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
+    await seedPackage({
+      id: "@leaving/conn",
+      orgId: owner.orgId,
+      type: "integration",
+      source: "local",
+    });
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@leaving/conn",
+        authKey: "primary",
+        accountId: "acct-sweep",
+        label: "Sweep",
+        orgId: owner.orgId,
+        spaceId: null,
+        userId: owner.user.id,
+        credentialsEncrypted: "x",
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    await seedShares(conn!.id, [personalId]);
+    await ageOrphan(personalId);
+
+    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
+    const removed = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.connection.share_removed"));
+    expect(removed).toEqual([
+      expect.objectContaining({
+        orgId: owner.orgId,
+        spaceId: personalId,
+        actorType: "system",
+        actorId: null,
+        resourceId: conn!.id,
+        after: { spaceId: personalId, reason: "space_deleted" },
+      }),
+    ]);
   });
 
   describeRequiresPostgres("a membership removal racing lazy repair", () => {

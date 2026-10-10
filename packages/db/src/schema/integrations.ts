@@ -170,7 +170,7 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // Serves `shared_space_ids @> ARRAY[$space]` (drizzle `arrayContains`), not `= ANY`.
+    // Unread; dropped with the column.
     index("idx_integration_conn_shared").using("gin", table.sharedSpaceIds),
     // Referenced target of the shares' composite FK, which keeps a share in its connection's org.
     uniqueIndex("uq_integration_conn_id_org_id").on(table.id, table.orgId),

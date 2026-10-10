@@ -15,8 +15,9 @@
  * merged registration, `repointConnectionsToClient`), then it is deleted. A space-tier winner is
  * then promoted by the service a space admin's promotion runs (`moveClientToOrgTier`), once the
  * org-tier client it beat is gone (one auto client per key and tier). The user-owned rows of the
- * whole key are widened to org scope (`widenConnectionsToOrgScope`); end users' rows stay in their
- * space.
+ * whole key are widened to org scope (`widenConnectionsToOrgScope`), each recorded as a `system`
+ * `integration.connection.scope_widened` audit row in the space it left; end users' rows stay in
+ * their space.
  *
  * Run after the deploy, app up, `pg_dump` first, after `0044` and `0041`. Refuses an empty
  * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization; dry run
@@ -27,11 +28,13 @@
 import { parseArgs } from "node:util";
 import { and, asc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import {
+  auditEvents,
   integrationConnections as c,
   integrationOauthClients as ioc,
   spaces,
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { WidenedConnection } from "../../apps/api/src/services/integration-connections.ts";
 
 class DryRunRollback extends Error {}
 
@@ -93,6 +96,7 @@ export async function runPromoteAutoClientsToOrg(options: {
       await db.transaction(async (tx) => {
         await tx.execute("SET LOCAL lock_timeout = '5s'");
         await tx.execute("SET LOCAL statement_timeout = '300s'");
+        const widened: WidenedConnection[] = [];
         for (const group of groups.filter((g) => g.orgId === orgId)) {
           const ofKey = and(
             eq(ioc.orgId, orgId),
@@ -155,12 +159,24 @@ export async function runPromoteAutoClientsToOrg(options: {
               winner.id,
               true,
             );
-            report.widened += promoted.widened.length;
+            widened.push(...promoted.widened);
             report.promoted++;
           }
 
-          const widened = await widenConnectionsToOrgScope(tx, eq(c.clientRef, winner.id));
-          report.widened += widened.length;
+          widened.push(...(await widenConnectionsToOrgScope(tx, eq(c.clientRef, winner.id))));
+        }
+        report.widened = widened.length;
+        for (const w of widened) {
+          await tx.insert(auditEvents).values({
+            orgId,
+            spaceId: w.previousSpaceId,
+            actorType: "system",
+            action: "integration.connection.scope_widened",
+            resourceType: "integration_connection",
+            resourceId: w.id,
+            before: { spaceId: w.previousSpaceId, label: w.previousLabel },
+            after: { originSpaceId: w.previousSpaceId, label: w.label },
+          });
         }
         out(
           `org ${orgId}: promoted ${report.promoted}, merged ${report.merged}, re-pointed ${report.repointed}, widened ${report.widened}`,

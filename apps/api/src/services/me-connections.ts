@@ -30,7 +30,11 @@ import {
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
 import { displayAccountId } from "../lib/connection-identity.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import {
+  boundSpaceOf,
+  sharesSeenBy,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -246,14 +250,12 @@ async function listActorIntegrationConnections(
     }
   }
 
-  // A credential pinned to a space sees only that space's share of a row.
-  const boundSpace = boundSpaceOf(principal);
   const shares = await loadConnectionShares(
     db,
     rows.map((r) => r.connectionId),
   );
   const sharesOf = (connectionId: string) =>
-    (shares.get(connectionId) ?? []).filter((id) => boundSpace === null || id === boundSpace);
+    sharesSeenBy(principal, shares.get(connectionId) ?? []);
   const reaches = new Map(
     rows.map((r) => [
       r.connectionId,

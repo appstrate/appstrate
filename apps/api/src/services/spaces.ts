@@ -770,7 +770,10 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
 export async function emptyAndDeletePersonalSpace(
   orgId: string,
   spaceId: string,
-): Promise<{ rehomedPackages: number; deletedPackages: number }> {
+): Promise<{
+  counts: { rehomedPackages: number; deletedPackages: number };
+  removedShares: ConnectionShare[];
+}> {
   return db.transaction(async (tx) => {
     const [org] = await tx
       .select({ id: organizations.id })
@@ -888,7 +891,7 @@ export async function emptyAndDeletePersonalSpace(
 
     // Inside the same transaction, so the space and the packages it homed
     // commit or roll back together.
-    await deleteSpace(orgId, spaceId, "sweeper", tx);
-    return { rehomedPackages, deletedPackages };
+    const { removedShares } = await deleteSpace(orgId, spaceId, "sweeper", tx);
+    return { counts: { rehomedPackages, deletedPackages }, removedShares };
   });
 }

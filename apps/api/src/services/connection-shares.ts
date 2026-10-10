@@ -36,7 +36,7 @@ import { assertConnectionsUnpinned } from "./integration-connections.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { isUserConnectionCreationBlocked } from "./integration-connection-resolver.ts";
 import { listSpacesForPrincipal } from "./spaces.ts";
-import { recordAuditFromContext } from "./audit.ts";
+import { recordAudit, recordAuditFromContext } from "./audit.ts";
 
 export interface ConnectionViewer {
   principal: ConnectionPrincipal;
@@ -237,21 +237,31 @@ export async function shareTargetSpaces(input: {
   return { spaceIds, configures };
 }
 
-/** One `integration.connection.share_removed` per withdrawn share, recorded in its space. */
+/**
+ * One `integration.connection.share_removed` per withdrawn share, recorded in its space; with no
+ * request (`ctx` null, the background sweeper) the actor is `system`.
+ */
 export async function recordSharesRemoved(
-  ctx: Context<AppEnv>,
+  ctx: Context<AppEnv> | null,
   orgId: string,
   removed: readonly ConnectionShare[],
-  reason?: "access_lost" | "space_deleted",
+  reason: "access_lost" | "space_deleted",
 ): Promise<void> {
   for (const share of removed) {
-    await recordAuditFromContext(ctx, {
+    const event = {
       action: "integration.connection.share_removed",
       resourceType: "integration_connection",
       resourceId: share.connectionId,
-      after: { spaceId: share.spaceId, ...(reason ? { reason } : {}) },
-      orgIdOverride: orgId,
-      spaceIdOverride: share.spaceId,
-    });
+      after: { spaceId: share.spaceId, reason },
+    };
+    if (ctx) {
+      await recordAuditFromContext(ctx, {
+        ...event,
+        orgIdOverride: orgId,
+        spaceIdOverride: share.spaceId,
+      });
+    } else {
+      await recordAudit({ ...event, orgId, spaceId: share.spaceId, actorType: "system" });
+    }
   }
 }

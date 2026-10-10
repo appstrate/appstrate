@@ -9,9 +9,9 @@
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { auditEvents, integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { runPromoteAutoClientsToOrg } from "../migration/0043-promote-auto-clients-to-org.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
@@ -80,6 +80,13 @@ async function clientsOf(integrationId: string) {
     .from(integrationOauthClients)
     .where(inArray(integrationOauthClients.integrationId, [integrationId]));
   return new Map(rows.map((row) => [row.id, row]));
+}
+
+function scopeWidenedAudits() {
+  return db
+    .select()
+    .from(auditEvents)
+    .where(eq(auditEvents.action, "integration.connection.scope_widened"));
 }
 
 async function connectionsOf(ids: string[]) {
@@ -168,6 +175,7 @@ describe("0043 — space-tier auto clients moved to the org tier", () => {
       before,
     );
     expect(await connectionsOf(all)).toEqual(rowsBefore);
+    expect(await scopeWidenedAudits()).toEqual([]);
   });
 
   it("(a) promotes the space client with the most connections and merges the other into it", async () => {
@@ -222,6 +230,25 @@ describe("0043 — space-tier auto clients moved to the org tier", () => {
       expect(rows.get(id)!.spaceId).toBeNull();
       expect(rows.get(id)!.originSpaceId).toBe(s1);
     }
+  });
+
+  it("(f) records one system scope_widened per widened connection, in the space it left", async () => {
+    const audits = await scopeWidenedAudits();
+    const rows = await connectionsOf([...winnerRows, loserRow, ...mergedRows, ...spaceWinnerRows]);
+    expect(audits.map((a) => a.resourceId).sort()).toEqual([...rows.keys()].sort());
+    for (const audit of audits) {
+      const row = rows.get(audit.resourceId!)!;
+      expect(audit).toMatchObject({
+        orgId: ctx.orgId,
+        spaceId: row.originSpaceId,
+        actorType: "system",
+        actorId: null,
+        resourceType: "integration_connection",
+        after: { originSpaceId: row.originSpaceId, label: row.label },
+      });
+      expect(audit.before).toMatchObject({ spaceId: row.originSpaceId });
+    }
+    expect(audits.find((a) => a.resourceId === endUserRow)).toBeUndefined();
   });
 
   it("(d) a second --apply finds nothing to promote", async () => {
