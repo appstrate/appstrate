@@ -530,20 +530,6 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec(pat, "https://evil.com/x.acme.com/y")).toBe(false);
   });
 
-  it("a subdomain wildcard reaches only hosts under the domain, never lookalikes", () => {
-    // `https://*.twilio.com/**` is a shipped system-integration pattern (#1904).
-    const pat = "https://*.twilio.com/**";
-    for (const host of ["api", "messaging", "conversations", "studio", "serverless"]) {
-      expect(matchesAuthorizedUriSpec(pat, `https://${host}.twilio.com/v1/Services`)).toBe(true);
-    }
-    expect(matchesAuthorizedUriSpec(pat, "https://evil-twilio.com/x")).toBe(false);
-    expect(matchesAuthorizedUriSpec(pat, "https://eviltwilio.com/x")).toBe(false);
-    expect(matchesAuthorizedUriSpec(pat, "https://twilio.com.evil.test/x")).toBe(false);
-    expect(matchesAuthorizedUriSpec(pat, "https://api.twilio.com.evil.test/x")).toBe(false);
-    // The bare apex is not a subdomain.
-    expect(matchesAuthorizedUriSpec(pat, "https://twilio.com/x")).toBe(false);
-  });
-
   it("host `**` does not cross the authority boundary into the path", () => {
     const pat = "https://**.example.com/**";
     // Legitimate host matches.

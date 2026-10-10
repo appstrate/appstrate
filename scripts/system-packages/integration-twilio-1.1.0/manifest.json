@@ -15,20 +15,59 @@
   "auths": {
     "primary": {
       "type": "api_key",
-      "authorized_uris": ["https://*.twilio.com/**"],
+      "authorized_uris": [
+        "https://accounts.twilio.com/**",
+        "https://api.twilio.com/**",
+        "https://bulkexports.twilio.com/**",
+        "https://chat.twilio.com/**",
+        "https://content.twilio.com/**",
+        "https://conversations.twilio.com/**",
+        "https://events.twilio.com/**",
+        "https://flex-api.twilio.com/**",
+        "https://frontline-api.twilio.com/**",
+        "https://iam.twilio.com/**",
+        "https://insights.twilio.com/**",
+        "https://intelligence.twilio.com/**",
+        "https://ip-messaging.twilio.com/**",
+        "https://knowledge.twilio.com/**",
+        "https://lookups.twilio.com/**",
+        "https://marketplace.twilio.com/**",
+        "https://memory.twilio.com/**",
+        "https://messaging.twilio.com/**",
+        "https://monitor.twilio.com/**",
+        "https://notify.twilio.com/**",
+        "https://numbers.twilio.com/**",
+        "https://oauth.twilio.com/**",
+        "https://preview-iam.twilio.com/**",
+        "https://preview.twilio.com/**",
+        "https://pricing.twilio.com/**",
+        "https://proxy.twilio.com/**",
+        "https://routes.twilio.com/**",
+        "https://serverless.twilio.com/**",
+        "https://studio.twilio.com/**",
+        "https://supersim.twilio.com/**",
+        "https://sync.twilio.com/**",
+        "https://taskrouter.twilio.com/**",
+        "https://trunking.twilio.com/**",
+        "https://trusthub.twilio.com/**",
+        "https://verify.twilio.com/**",
+        "https://video.twilio.com/**",
+        "https://voice.twilio.com/**",
+        "https://wireless.twilio.com/**"
+      ],
       "credentials": {
         "schema": {
           "type": "object",
           "properties": {
             "account_sid": {
               "type": "string",
-              "title": "Account SID ou SID de clé d'API",
-              "description": "Account SID (AC…, page d'accueil de la console, Account Info) ou, recommandé, SID d'une clé d'API (SK…, Console → Account → API keys & tokens → Create API key, type Standard), révocable seule sans toucher à l'Auth Token."
+              "title": "Account SID",
+              "description": "Identifiant du compte Twilio (commence par AC), sur la page d'accueil de la console, encadré Account Info."
             },
             "auth_token": {
               "type": "string",
-              "title": "Auth Token ou secret de clé d'API",
-              "description": "Secret associé : l'Auth Token du compte (accès complet, le renouveler coupe tous ses clients) ou le secret de la clé d'API, affiché une seule fois à sa création."
+              "title": "Auth Token",
+              "description": "Auth Token du compte, sur la même page (Account Info). Il donne un accès complet au compte."
             }
           },
           "required": ["account_sid", "auth_token"]
