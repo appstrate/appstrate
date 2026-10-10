@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, Controller } from "react-hook-form";
 import { Modal } from "./modal";
+import { useModalParam } from "../hooks/use-modal-param";
 import { RevealedSecret } from "./revealed-secret";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -22,9 +23,10 @@ import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
 import { permissionResourceLabel } from "../lib/permission-labels";
 
+/** The URL parameter that opens the modal. The created key has no URL of its own. */
+export const NEW_API_KEY_PARAM = "newApiKey";
+
 interface Props {
-  open: boolean;
-  onClose: () => void;
   onKeyCreated?: (rawKey: string) => void;
 }
 
@@ -65,9 +67,10 @@ function buildResourceSummary(
     }));
 }
 
-export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
+export function ApiKeyCreateModal({ onKeyCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateApiKey();
+  const param = useModalParam(NEW_API_KEY_PARAM);
   const { data: availableScopes } = useAvailableScopes();
 
   const [createdKey, setCreatedKey] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
     setCreatedScopes([]);
     setSelectedScopes(null);
     createMutation.reset();
-    onClose();
+    param.close();
   };
 
   const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
@@ -110,7 +113,9 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
       },
       {
         onSuccess: (result) => {
+          // The key is shown once and has no address: the creation's one goes away.
           setCreatedKey(result.key ?? null);
+          param.close();
           setCreatedScopes(result.scopes ?? []);
           if (result.key) onKeyCreated?.(result.key);
         },
@@ -132,7 +137,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
     const isFullAccess = availableScopes ? createdScopes.length === availableScopes.length : true;
 
     return (
-      <Modal open={open} onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
+      <Modal open onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
         <RevealedSecret secret={createdKey} warning={t("apiKeys.createdWarning")} />
 
         {/* Scopes granted */}
@@ -168,7 +173,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
   // ── Creation form ──
   return (
     <Modal
-      open={open}
+      open={param.value !== null}
       onClose={handleClose}
       title={t("apiKeys.createTitle")}
       className="sm:max-w-lg"

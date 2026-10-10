@@ -76,12 +76,14 @@ function isSchemaKind(kind: MapEditKind): kind is "input" | "output" {
 const PROMPT_FILE = PACKAGE_CONTENT_ENTRY.agent!.path;
 
 interface MapEditDialogProps {
-  kind: MapEditKind | null;
+  /** The `?mapEdit=` value as it came: one that names no editor opens nothing. */
+  kind: string | null;
   packageId: string;
   onClose: () => void;
 }
 
-export function MapEditDialog({ kind, packageId, onClose }: MapEditDialogProps) {
+export function MapEditDialog({ kind: requested, packageId, onClose }: MapEditDialogProps) {
+  const kind = requested !== null && requested in TITLE_KEY ? (requested as MapEditKind) : null;
   const { t } = useTranslation(["agents", "agent-map"]);
   const qc = useQueryClient();
   // Only fetched while open, and re-read on open so the draft starts from the

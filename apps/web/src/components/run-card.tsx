@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { FileInput, FileOutput, Shield } from "lucide-react";
@@ -13,6 +12,7 @@ import { formatDateField } from "../lib/format-date";
 import { runErrorText } from "../lib/run-error";
 import { useFiles } from "../hooks/use-files";
 import { FilePreview } from "./file-preview";
+import { useModalParam } from "../hooks/use-modal-param";
 import { MimeIcon } from "./file-tile";
 
 /**
@@ -21,7 +21,8 @@ import { MimeIcon } from "./file-tile";
  * already has), which is also when the run page features it.
  */
 function ProducedFile({ runId }: { runId: string }) {
-  const [open, setOpen] = useState(false);
+  // The same `?preview=<file>` address the file lists use.
+  const preview = useModalParam("preview");
   const { data } = useFiles({ runId, purpose: "agent_output", limit: 1 });
   const file = data?.data[0];
   if (!file) return null;
@@ -29,14 +30,14 @@ function ProducedFile({ runId }: { runId: string }) {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => preview.open(file.id)}
         disabled={!file.capabilities.preview}
         className="bg-background hover:bg-accent relative z-10 mt-3 flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs"
       >
         <MimeIcon mime={file.mime} className="text-muted-foreground size-4 shrink-0" />
         <span className="text-foreground truncate">{file.name}</span>
       </button>
-      {open && <FilePreview file={file} onClose={() => setOpen(false)} />}
+      {preview.value === file.id && <FilePreview file={file} onClose={preview.close} />}
     </>
   );
 }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
@@ -11,14 +10,15 @@ import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { PageActionsMenu } from "@/components/page-actions-menu";
 import { useWebhookColumns } from "../components/webhook-columns";
-import { WebhookCreateModal } from "../components/webhook-create-modal";
+import { useModalParam } from "@/hooks/use-modal-param";
+import { NEW_WEBHOOK_PARAM, WebhookCreateModal } from "../components/webhook-create-modal";
 import { usePermissions } from "@/hooks/use-permissions";
 import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
   const location = useLocation();
   const { t } = useTranslation(["settings", "common"]);
-  const [createOpen, setCreateOpen] = useState(false);
+  const newWebhook = useModalParam(NEW_WEBHOOK_PARAM);
   const { can } = usePermissions();
 
   const { data: webhooks, isLoading, error } = useWebhooks();
@@ -36,7 +36,7 @@ export function WebhooksPage() {
       {canCreate && (
         <SettingsPageActions>
           <PageActionsMenu>
-            <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+            <DropdownMenuItem data-page-action="create" onSelect={() => newWebhook.open()}>
               <Plus />
               {t("settings:webhooks.createTitle")}
             </DropdownMenuItem>
@@ -61,11 +61,7 @@ export function WebhooksPage() {
         }
       />
 
-      <WebhookCreateModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        levels={createLevels}
-      />
+      {canCreate && <WebhookCreateModal levels={createLevels} />}
     </div>
   );
 }

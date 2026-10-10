@@ -54,6 +54,7 @@ import { formatDateField } from "../lib/format-date";
 import { historyRuns, recalledMemories } from "../lib/runtime-tool-results";
 import { ListToolbar, type FilterSpec } from "./list-toolbar";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { useModalParam } from "../hooks/use-modal-param";
 
 const levelIconConfig: Record<string, { icon: typeof Info; className: string; label: string }> = {
   debug: { icon: Bug, className: "text-muted-foreground", label: "DEBUG" },
@@ -326,7 +327,8 @@ export function LogViewer({
   const [query, setQuery] = useState("");
   const [levelFilters, setLevelFilters] = useState<JournalLevelFilter[]>([]);
   const [typeFilters, setTypeFilters] = useState<JournalTypeFilter[]>([]);
-  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const toolParam = useModalParam("tool");
+  const selectedToolId = toolParam.value;
   const displayFilters = [
     ...(showTimestamps ? ["timestamps"] : []),
     ...(!showTools ? ["hide_tools"] : []),
@@ -620,13 +622,13 @@ export function LogViewer({
                           )}
                           onClick={() => {
                             if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
-                            else if (hasToolDetails) setSelectedToolId(entry.id);
+                            else if (hasToolDetails) toolParam.open(entry.id);
                           }}
                           onKeyDown={(event) => {
                             if (isInteractive && (event.key === "Enter" || event.key === " ")) {
                               event.preventDefault();
                               if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
-                              else if (hasToolDetails) setSelectedToolId(entry.id);
+                              else if (hasToolDetails) toolParam.open(entry.id);
                             }
                           }}
                           tabIndex={isInteractive ? 0 : undefined}
@@ -680,10 +682,7 @@ export function LogViewer({
             </div>
           </div>
         </div>
-        <ToolDetailsModal
-          entry={onSelectEntry ? null : selectedTool}
-          onClose={() => setSelectedToolId(null)}
-        />
+        <ToolDetailsModal entry={onSelectEntry ? null : selectedTool} onClose={toolParam.close} />
       </div>
     );
   }
@@ -928,13 +927,13 @@ export function LogViewer({
                     )}
                     onClick={() => {
                       if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
-                      else if (hasToolDetails) setSelectedToolId(entry.id);
+                      else if (hasToolDetails) toolParam.open(entry.id);
                     }}
                     onKeyDown={(event) => {
                       if (isInteractive && (event.key === "Enter" || event.key === " ")) {
                         event.preventDefault();
                         if (onSelectEntry) onSelectEntry(isSelected ? null : entry);
-                        else if (hasToolDetails) setSelectedToolId(entry.id);
+                        else if (hasToolDetails) toolParam.open(entry.id);
                       }
                     }}
                     role={isInteractive ? "button" : undefined}
@@ -989,10 +988,7 @@ export function LogViewer({
           </div>
         )}
       </div>
-      <ToolDetailsModal
-        entry={onSelectEntry ? null : selectedTool}
-        onClose={() => setSelectedToolId(null)}
-      />
+      <ToolDetailsModal entry={onSelectEntry ? null : selectedTool} onClose={toolParam.close} />
     </div>
   );
 }

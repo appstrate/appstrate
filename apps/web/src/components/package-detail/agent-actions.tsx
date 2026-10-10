@@ -65,7 +65,7 @@ export function AgentActions({
     type: "deleteAgent" | "clearRuns" | "clearMemories" | "deactivateAgent";
     label: string;
   } | null>(null);
-  const [runOptionsOpen, setRunOptionsOpen] = useState(false);
+  const runOptions = useModalParam("runOptions");
 
   if (!detail) return null;
 
@@ -169,18 +169,16 @@ export function AgentActions({
             label: t("detail.clearMemoriesConfirm"),
           })
         }
-        onRunWithOptions={() => setRunOptionsOpen(true)}
+        onRunWithOptions={() => runOptions.open()}
         labelledTrigger
         {...(runBlockedReason ? { runBlockedReason } : {})}
       />
       <RunWithOptionsModal
-        open={runOptionsOpen}
-        onClose={() => setRunOptionsOpen(false)}
+        open={runOptions.value !== null}
+        onClose={runOptions.close}
         agent={detail}
         isPending={launcher.isPending}
-        onSubmit={(submit) =>
-          launcher.launch(launchFromOptions(submit), () => setRunOptionsOpen(false))
-        }
+        onSubmit={(submit) => launcher.launch(launchFromOptions(submit), runOptions.close)}
       />
       <RunLaunchRecovery
         launcher={launcher}

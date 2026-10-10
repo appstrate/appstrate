@@ -17,7 +17,8 @@ import { ErrorState, EmptyState } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../components/page-actions-menu";
-import { ApiKeyCreateModal } from "../components/api-key-create-modal";
+import { useModalParam } from "../hooks/use-modal-param";
+import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../components/api-key-create-modal";
 import { useApiKeyColumns } from "./api-key-columns";
 
 export function ApiKeysPage() {
@@ -27,7 +28,7 @@ export function ApiKeysPage() {
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
-  const [createOpen, setCreateOpen] = useState(false);
+  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   const handleRevoke = (key: ApiKeyInfo) => {
@@ -47,7 +48,7 @@ export function ApiKeysPage() {
       <SettingsPageActions>
         <PageActionsMenu>
           {can("api-keys:create") && (
-            <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+            <DropdownMenuItem data-page-action="create" onSelect={() => newApiKey.open()}>
               <Plus />
               {t("settings:apiKeys.createBtn")}
             </DropdownMenuItem>
@@ -84,7 +85,7 @@ export function ApiKeysPage() {
         }
       />
 
-      <ApiKeyCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <ApiKeyCreateModal />
 
       <ConfirmModal
         open={!!confirmState}

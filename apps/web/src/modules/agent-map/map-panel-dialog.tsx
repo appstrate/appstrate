@@ -130,14 +130,16 @@ function ConfigPanel({ packageId }: { packageId: string }) {
 }
 
 export function MapPanelDialog({
-  kind,
+  kind: requested,
   packageId,
   onClose,
 }: {
-  kind: MapPanelKind | null;
+  /** The `?mapPanel=` value as it came: one that names no panel opens nothing. */
+  kind: string | null;
   packageId: string;
   onClose: () => void;
 }) {
+  const kind = requested !== null && requested in TITLE_KEY ? (requested as MapPanelKind) : null;
   const { t } = useTranslation(["agents", "agent-map"]);
   const qc = useQueryClient();
   // Only the connections panel needs the detail DTO; fetching it for every kind

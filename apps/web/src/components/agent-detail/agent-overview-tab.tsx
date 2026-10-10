@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { Link, useLocation, type To } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -43,6 +42,7 @@ import { formatDateField } from "../../lib/format-date";
 import { AgentMapView } from "../../modules/agent-map/agent-map-view";
 import { PackageFilesView } from "../package-files/package-files-view";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { AgentDiagnosticsDialog, AgentDiagnosticsIssueBadge } from "./agent-diagnostics-dialog";
 import {
   agentDiagnosticCorrectionTarget,
@@ -66,7 +66,7 @@ function AgentHealthSection({
   const { features } = useAppConfig();
   const diagnostics = useAgentDiagnostics(packageId, version);
   const result = diagnostics.data;
-  const [issuesOpen, setIssuesOpen] = useState(false);
+  const issues = useModalParam("agentIssues");
 
   if (diagnostics.isLoading) {
     return (
@@ -111,7 +111,7 @@ function AgentHealthSection({
         cardHeaders={cardHeaders}
         badge={
           result ? (
-            <button type="button" onClick={() => setIssuesOpen(true)}>
+            <button type="button" onClick={() => issues.open()}>
               <AgentDiagnosticsIssueBadge result={result} />
             </button>
           ) : (
@@ -175,7 +175,7 @@ function AgentHealthSection({
             <div className="mt-3">
               <button
                 type="button"
-                onClick={() => setIssuesOpen(true)}
+                onClick={() => issues.open()}
                 className="text-primary text-xs font-medium hover:underline"
               >
                 {t("detail.diagnostics.seeAll")}
@@ -184,16 +184,12 @@ function AgentHealthSection({
           )}
         </div>
         {result && result.diagnostics.length > 3 && cardHeaders && (
-          <OverviewCardAction onClick={() => setIssuesOpen(true)}>
+          <OverviewCardAction onClick={() => issues.open()}>
             {t("detail.diagnostics.seeAll")}
           </OverviewCardAction>
         )}
       </HealthCard>
-      <AgentDiagnosticsDialog
-        result={result}
-        open={issuesOpen}
-        onClose={() => setIssuesOpen(false)}
-      />
+      <AgentDiagnosticsDialog result={result} open={issues.value !== null} onClose={issues.close} />
     </>
   );
 }

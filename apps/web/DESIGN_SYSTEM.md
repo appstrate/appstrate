@@ -247,9 +247,42 @@ A `Select` never holds hundreds of entries.
 - Always `<Modal>` (`components/modal.tsx`), never `Dialog` directly; the
   two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
-- **A modal has a URL** (`useModalParam`, `hooks/use-modal-param.ts`): it can be
-  linked, reloads onto itself, Back closes it, the hash and the router state ride
-  along. Pick a short param name and export it (`NEW_SCHEDULE_PARAM`).
+- **Every modal that is a place has a URL** (`useModalParam`,
+  `hooks/use-modal-param.ts`): a creation, an edition, a detail, a setting, a
+  choice of an element, a form. It can be linked, reloads onto the same modal on
+  the same object, Back closes it, the hash and the router state ride along.
+  Opening pushes, closing replaces. Never `useState` for it.
+  - **Naming**: the param is named by the act and the object, in camelCase.
+    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows. A
+    value is `1` when there is no object, the object's id otherwise (a composite
+    value when a page holds several of them: `?editOauthClient=<authKey>:<ref>`).
+    A param read by several components of one page must differ per component.
+    Export the name when several entry points open the same modal
+    (`NEW_SCHEDULE_PARAM`, `NEW_API_KEY_PARAM`, `SHARE_PARAM`).
+  - **An object that may not exist**: `useModalTarget(name, items)` resolves the
+    id against the loaded list and drops the param for an unknown id, so a stale
+    link never leaves a modal on nothing. Create and edit are two params
+    (`newProxy`, `editProxy`) sharing one form component; the host closes only
+    the one that is open.
+  - **Handing over** to another modal (`share` to `moveHome`): one navigation,
+    `open(value, closing)`, never two modals stacked.
+  - **After a creation** that shows a secret once, the creation's param goes
+    away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
+    `OAuthClientFormModal`): the secret has no address and does not survive a
+    reload.
+  - **Exceptions, without a URL**: (1) the confirmation of an act
+    (`ConfirmModal`, the re-authentication that confirms one, the activation
+    closure): reopening « Supprimer X » from a link would be a trap; (2) the
+    single display of a secret (`RevealedSecret`, `SecretRevealModal`, the key
+    just created): the secret is not there after a reload. A step inside a flow
+    that is already at an address, a pairing in progress, a help text and a
+    display mode are not places either. Each one is listed.
+  - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
+    and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open` or
+    `onClose` is driven by a `useState`, unless the pair is in its `EXCEPTIONS`
+    list with one line of reason. The list also fails when an entry no longer
+    matches code. Port the modal to `useModalParam` first; add an exception only
+    when it is not a place.
 - Destructive acts: `ConfirmModal` (`components/confirm-modal.tsx`). Its title
   names the act (« Supprimer la planification ? »), its body says what changes,
   its button repeats the verb through `confirmLabel` (« Supprimer »), never

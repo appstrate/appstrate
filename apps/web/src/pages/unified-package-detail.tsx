@@ -37,6 +37,7 @@ import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
+import { useModalParam } from "../hooks/use-modal-param";
 import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
@@ -249,7 +250,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const homeDeletable = (agentDetail ?? pkgDetail)?.home_deletable;
   const homeShareable = (agentDetail ?? pkgDetail)?.home_shareable;
   const homeSpaceName = useHomeSpaceName(homeSpaceId);
-  const [forkOpen, setForkOpen] = useState(false);
+  const fork = useModalParam("fork");
   const [confirmAction, setConfirmAction] = useState<{
     type: "deletePackage" | "deactivatePackage";
     description: string;
@@ -332,7 +333,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     location,
     navigate,
   ]);
-  const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const newVersion = useModalParam("newVersion");
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) return <ResourceErrorState error={error} />;
@@ -503,8 +504,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               downloadVersion={downloadVersion}
               downloadPackage={downloadPackage}
               downloadBundle={downloadBundle}
-              onCreateVersion={() => setCreateVersionOpen(true)}
-              onFork={() => setForkOpen(true)}
+              onCreateVersion={() => newVersion.open()}
+              onFork={() => fork.open()}
             />
           ) : (
             <div className="flex items-center gap-2">
@@ -521,8 +522,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                 homeShareable={homeShareable}
                 downloadVersion={downloadVersion}
                 onDownload={downloadPackage}
-                onCreateVersion={() => setCreateVersionOpen(true)}
-                onFork={() => setForkOpen(true)}
+                onCreateVersion={() => newVersion.open()}
+                onFork={() => fork.open()}
                 // The definition is edited in Paramètres › Définition.
                 showEdit={false}
                 canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
@@ -754,8 +755,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       <CreateVersionModal
-        open={createVersionOpen}
-        onClose={() => setCreateVersionOpen(false)}
+        open={newVersion.value !== null}
+        onClose={newVersion.close}
         type={type}
         packageId={packageId}
         hasUnarchivedChanges={hasTimestampChanges}
@@ -763,8 +764,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       />
 
       <ForkPackageModal
-        open={forkOpen}
-        onClose={() => setForkOpen(false)}
+        open={fork.value !== null}
+        onClose={fork.close}
         packageId={packageId}
         defaultName={name ?? ""}
         type={type}

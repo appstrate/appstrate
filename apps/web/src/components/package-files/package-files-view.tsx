@@ -120,7 +120,7 @@ interface VirtualFile {
 
 const BUNDLE_ROOT = "Bundle AFPS/";
 
-type FileDialog = { kind: "create" } | { kind: "rename" | "delete"; path: string } | null;
+type FileDialog = { kind: "delete"; path: string } | null;
 
 /** The file gestures a bundle file offers, when its draft is being edited. */
 interface FileGestures {
@@ -199,7 +199,8 @@ export function PackageFilesView({
   const scope = useOrgScope();
   const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState(initialVersion ?? "draft");
-  const [compareVersion, setCompareVersion] = useState<string | null>(null);
+  const compareParam = useModalParam("compareFiles");
+  const compareVersion = compareParam.value;
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState<SelectedItem | null>(null);
@@ -240,7 +241,10 @@ export function PackageFilesView({
   // The tree the first edit started from. A refetch cannot rebase staged edits;
   // the original ETag (sent as If-Match) rejects the save if the package moved meanwhile.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
+  // Naming a file has an address (`?newFile=1`, `?renameFile=<path>`); deleting one is a confirmation.
   const [dialog, setDialog] = useState<FileDialog>(null);
+  const newFile = useModalParam("newFile");
+  const renameFile = useModalParam("renameFile");
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const editingFile = useModalParam("editFile");
@@ -261,6 +265,8 @@ export function PackageFilesView({
       if (base === null) setBase(bundleBase);
       setOperations(next);
       setDialog(null);
+      if (newFile.value !== null) newFile.close();
+      else if (renameFile.value !== null) renameFile.close();
       setSaveError(null);
       return true;
     } catch (error) {
@@ -559,7 +565,7 @@ export function PackageFilesView({
                           <DropdownMenuItem
                             key={version.version}
                             disabled={version.version === selectedVersion}
-                            onSelect={() => setCompareVersion(version.version)}
+                            onSelect={() => compareParam.open(version.version)}
                           >
                             v{version.version}
                           </DropdownMenuItem>
@@ -590,7 +596,7 @@ export function PackageFilesView({
                     icon={FilePlus}
                     label={t("files.newFile")}
                     disabled={busy}
-                    onClick={() => setDialog({ kind: "create" })}
+                    onClick={() => newFile.open()}
                   />
                   <IconAction
                     icon={Upload}
@@ -671,11 +677,11 @@ export function PackageFilesView({
                   actions={
                     editing
                       ? {
-                          onCreate: () => setDialog({ kind: "create" }),
+                          onCreate: () => newFile.open(),
                           onUpload: () => pickUpload(null),
                           onRename: (path) =>
                             path.startsWith(BUNDLE_ROOT) &&
-                            setDialog({ kind: "rename", path: path.slice(BUNDLE_ROOT.length) }),
+                            renameFile.open(path.slice(BUNDLE_ROOT.length)),
                           onDelete: (path) =>
                             path.startsWith(BUNDLE_ROOT) &&
                             setDialog({ kind: "delete", path: path.slice(BUNDLE_ROOT.length) }),
@@ -717,8 +723,7 @@ export function PackageFilesView({
                         onReplace: () => pickUpload(activeSelection.file.bundlePath!),
                         onRename: isPinned(activeSelection.file.bundlePath)
                           ? undefined
-                          : () =>
-                              setDialog({ kind: "rename", path: activeSelection.file.bundlePath! }),
+                          : () => renameFile.open(activeSelection.file.bundlePath),
                         onDelete: isPinned(activeSelection.file.bundlePath)
                           ? undefined
                           : () =>
@@ -795,13 +800,13 @@ export function PackageFilesView({
           if (picked.length) void upload(picked);
         }}
       />
-      {dialog?.kind === "create" && (
+      {newFile.value !== null && (
         <FilePathDialog
           title={t("files.newFile")}
           confirmLabel={t("btn.create", { ns: "common" })}
           initialPath=""
           entries={bundleEntries ?? []}
-          onClose={() => setDialog(null)}
+          onClose={newFile.close}
           onSubmit={(path) => {
             if (stage([fileTextOperation(path, "")])) {
               setSelected({
@@ -812,15 +817,15 @@ export function PackageFilesView({
           }}
         />
       )}
-      {dialog?.kind === "rename" && (
+      {renameFile.value !== null && (
         <FilePathDialog
           title={t("files.newName")}
           confirmLabel={t("files.rename")}
-          initialPath={dialog.path}
-          entries={(bundleEntries ?? []).filter((entry) => entry.path !== dialog.path)}
-          onClose={() => setDialog(null)}
+          initialPath={renameFile.value}
+          entries={(bundleEntries ?? []).filter((entry) => entry.path !== renameFile.value)}
+          onClose={renameFile.close}
           onSubmit={(to) => {
-            if (stage([{ op: "move", from: dialog.path, to }])) setSelected(null);
+            if (stage([{ op: "move", from: renameFile.value!, to }])) setSelected(null);
           }}
         />
       )}
@@ -868,7 +873,7 @@ export function PackageFilesView({
 
       <Modal
         open={compareVersion !== null}
-        onClose={() => setCompareVersion(null)}
+        onClose={compareParam.close}
         title={t("agents:detail.files.compareTitle", { version: compareVersion })}
         className="max-w-5xl"
       >

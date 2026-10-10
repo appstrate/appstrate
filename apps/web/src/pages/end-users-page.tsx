@@ -15,6 +15,7 @@ import {
 } from "../hooks/use-end-users";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
@@ -48,7 +49,7 @@ function EndUsersPageContent() {
   const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const newEndUser = useModalParam("newEndUser");
   const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
   const [deletedUserIds, setDeletedUserIds] = useState<ReadonlySet<string>>(() => new Set());
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -146,7 +147,7 @@ function EndUsersPageContent() {
     <div>
       <SettingsPageActions>
         <PageActionsMenu>
-          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+          <DropdownMenuItem data-page-action="create" onSelect={() => newEndUser.open()}>
             <Plus />
             {t("applications.newEndUser")}
           </DropdownMenuItem>
@@ -208,7 +209,7 @@ function EndUsersPageContent() {
         </Button>
       )}
 
-      <EndUserCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <EndUserCreateModal open={newEndUser.value !== null} onClose={newEndUser.close} />
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultRunVersion } from "../lib/version-selector";
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +11,7 @@ import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
 import { RunModal } from "./run-modal";
 import { RunLaunchRecovery } from "./run-launch-recovery";
 import { useRunLauncher } from "../hooks/use-mutations";
+import { useModalParam } from "../hooks/use-modal-param";
 import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
@@ -53,7 +53,9 @@ export function RunAgentButton({
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const launcher = useRunLauncher(packageId);
-  const [inputOpen, setInputOpen] = useState(false);
+  // The input form's address: `?run=<agent>`, so the agent's own button answers it.
+  const runParam = useModalParam("run");
+  const inputOpen = runParam.value === packageId;
 
   // Skip the fetch when the parent already provided the detail (detail page
   // case). Otherwise the query stays DISABLED — list pages render N of these
@@ -64,7 +66,7 @@ export function RunAgentButton({
     data: fetchedDetail,
     isFetching,
     refetch,
-  } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: false });
+  } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: inputOpen });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
   // Draft for whoever authors the package, no selector at all for everyone
@@ -87,7 +89,7 @@ export function RunAgentButton({
       launcher.launch({ version: version ?? defaultRunVersion(agentDetail.home_writable) });
       return;
     }
-    setInputOpen(true);
+    runParam.open(packageId);
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -173,7 +175,7 @@ export function RunAgentButton({
       {detail && (
         <RunModal
           open={inputOpen}
-          onClose={() => setInputOpen(false)}
+          onClose={runParam.close}
           agent={detail}
           onSubmit={(input) => launcher.launch({ input, version: runVersion })}
           isPending={launcher.isPending}

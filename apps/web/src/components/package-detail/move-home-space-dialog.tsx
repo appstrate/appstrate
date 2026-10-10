@@ -20,6 +20,9 @@ import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
 
+/** The URL parameter that opens the dialog; its value is the package. */
+export const MOVE_HOME_PARAM = "moveHome";
+
 /**
  * Move a package's home space — the counterpart of `PUT
  * /api/packages/{scope}/{name}/home`, and the only way out of the 409 a space

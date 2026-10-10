@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
+import { useModalParam } from "@/hooks/use-modal-param";
 import { Modal } from "@/components/modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
@@ -18,9 +19,10 @@ import type { WebhookInfo } from "../hooks/use-webhooks";
 
 type Level = WebhookInfo["level"];
 
+/** The URL parameter that opens the modal. The secret step has no URL of its own. */
+export const NEW_WEBHOOK_PARAM = "newWebhook";
+
 interface Props {
-  open: boolean;
-  onClose: () => void;
   /** Levels the caller may create at — never empty (the page gates the button). */
   levels: readonly Level[];
 }
@@ -29,9 +31,10 @@ type FormData = {
   url: string;
 };
 
-export function WebhookCreateModal({ open, onClose, levels }: Props) {
+export function WebhookCreateModal({ levels }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
+  const param = useModalParam(NEW_WEBHOOK_PARAM);
 
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
@@ -62,7 +65,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
     setPayloadMode("full");
     setChosenLevel("space");
     createMutation.reset();
-    onClose();
+    param.close();
   };
 
   function onFormSubmit(data: FormData) {
@@ -80,7 +83,9 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
       },
       {
         onSuccess: (result) => {
+          // The secret is shown once and has no address: the creation's one goes away.
           setCreatedSecret(result.secret);
+          param.close();
         },
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
@@ -95,7 +100,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
   if (createdSecret) {
     return (
       <SecretRevealModal
-        open={open}
+        open
         onClose={handleClose}
         title={t("settings:webhooks.created")}
         secret={createdSecret}
@@ -106,7 +111,7 @@ export function WebhookCreateModal({ open, onClose, levels }: Props) {
   // Step 1: creation form
   return (
     <Modal
-      open={open}
+      open={param.value !== null}
       onClose={handleClose}
       title={t("settings:webhooks.createTitle")}
       actions={

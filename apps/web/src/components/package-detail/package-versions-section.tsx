@@ -11,11 +11,11 @@
  * and any row can be compared to the draft from its own menu: the diff is a
  * gesture on the list, not a block that pushes it off the screen.
  */
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GitCompareArrows } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { useVersionDetail } from "../../hooks/use-packages";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
@@ -44,7 +44,9 @@ export function PackageVersionsSection({
   hasUnarchivedChanges?: boolean;
 }) {
   const { t } = useTranslation("agents");
-  const [compare, setCompare] = useState<string | null>(null);
+  // `?compare=<version>`: the comparison with the draft has an address.
+  const compareParam = useModalParam("compare");
+  const compare = compareParam.value;
   // The latest version is already loaded by the page; any other row is fetched
   // when its comparison is asked for.
   const picked = compare && compare !== latestVersion?.version ? compare : undefined;
@@ -61,7 +63,7 @@ export function PackageVersionsSection({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setCompare(latestVersion.version)}
+            onClick={() => compareParam.open(latestVersion.version)}
           >
             <GitCompareArrows />
             {t("version.compare")}
@@ -73,12 +75,12 @@ export function PackageVersionsSection({
         type={type}
         canRestore={canRestore}
         canDelete={canDelete}
-        onCompare={(version) => setCompare(version)}
+        onCompare={(version) => compareParam.open(version)}
       />
 
       <Modal
         open={compare !== null}
-        onClose={() => setCompare(null)}
+        onClose={compareParam.close}
         title={t("detail.files.compareTitle", { version: compare })}
         className="max-w-5xl"
       >

@@ -56,20 +56,49 @@ interface FormData {
   name: string;
 }
 
+type CreatedSecret = { clientId: string; clientSecret: string };
+
 export function OAuthClientFormModal({ open, onClose, client, level }: Props) {
+  const { t } = useTranslation(["settings", "common"]);
+  // The secret is shown once and has no address: the creation's one (`?oauth-client=new`)
+  // goes away as it appears, so the secret lives here, not in the form.
+  const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);
+  if (createdSecret) {
+    return (
+      <SecretRevealModal
+        open
+        onClose={() => setCreatedSecret(null)}
+        title={t("settings:oauthClients.createdTitle")}
+        secret={`Client ID: ${createdSecret.clientId}\nClient Secret: ${createdSecret.clientSecret}`}
+      />
+    );
+  }
   if (!open) return null;
   const key = client?.clientId ?? "__create__";
-  return <OAuthClientFormBody key={key} client={client} level={level} onClose={onClose} />;
+  return (
+    <OAuthClientFormBody
+      key={key}
+      client={client}
+      level={level}
+      onClose={onClose}
+      onCreated={(secret) => {
+        setCreatedSecret(secret);
+        onClose();
+      }}
+    />
+  );
 }
 
 function OAuthClientFormBody({
   client,
   level,
   onClose,
+  onCreated,
 }: {
   client: OAuthClient | null;
   level?: "org" | "space";
   onClose: () => void;
+  onCreated: (secret: CreatedSecret) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
@@ -111,10 +140,6 @@ function OAuthClientFormBody({
       role: spaceRoleValue(assignment),
     })),
   );
-  const [createdSecret, setCreatedSecret] = useState<{
-    clientId: string;
-    clientSecret: string;
-  } | null>(null);
 
   const {
     register,
@@ -254,7 +279,7 @@ function OAuthClientFormBody({
         },
         {
           onSuccess: (result) => {
-            setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
+            onCreated({ clientId: result.clientId, clientSecret: result.clientSecret });
           },
           onError: (err) => {
             setError("root", { message: errorMessage(err) });
@@ -262,18 +287,6 @@ function OAuthClientFormBody({
         },
       );
     }
-  }
-
-  // Create mode: show secret reveal after successful creation
-  if (createdSecret) {
-    return (
-      <SecretRevealModal
-        open
-        onClose={handleClose}
-        title={t("settings:oauthClients.createdTitle")}
-        secret={`Client ID: ${createdSecret.clientId}\nClient Secret: ${createdSecret.clientSecret}`}
-      />
-    );
   }
 
   const title = isEditing

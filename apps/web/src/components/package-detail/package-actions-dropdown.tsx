@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -32,8 +31,9 @@ import { packageEditPath } from "../../lib/package-paths";
 import { packagePermission } from "@appstrate/core/permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
-import { MoveHomeSpaceDialog } from "./move-home-space-dialog";
-import { SharePackageDialog } from "./share-package-dialog";
+import { MoveHomeSpaceDialog, MOVE_HOME_PARAM } from "./move-home-space-dialog";
+import { SharePackageDialog, SHARE_PARAM } from "./share-package-dialog";
+import { useModalParam } from "../../hooks/use-modal-param";
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -187,8 +187,8 @@ export function PackageActionsDropdown({
   const navigate = useNavigate();
   const { can } = usePermissions();
   const spaceGrant = useCurrentSpaceGrant();
-  const [moveHomeOpen, setMoveHomeOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  const moveHome = useModalParam(MOVE_HOME_PARAM);
+  const share = useModalParam(SHARE_PARAM);
 
   const isAgent = type === "agent";
   // The server's own verdict, not a re-derivation of it.
@@ -395,13 +395,13 @@ export function PackageActionsDropdown({
                     its own on that same space (RBAC spec §6.10). Both act on
                     WHERE the package lives, so both belong in this group. */}
                   {isMutable && (
-                    <DropdownMenuItem onSelect={() => setMoveHomeOpen(true)}>
+                    <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
                       <FolderInput size={14} />
                       {t("packages.moveHome", { ns: "settings" })}
                     </DropdownMenuItem>
                   )}
                   {canShare && (
-                    <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+                    <DropdownMenuItem onSelect={() => share.open(packageId)}>
                       <Share2 size={14} />
                       {t("packages.share", { ns: "settings" })}
                     </DropdownMenuItem>
@@ -467,13 +467,13 @@ export function PackageActionsDropdown({
                     its own on that same space (RBAC spec §6.10). Both act on
                     WHERE the package lives, so both belong in this group. */}
                   {isMutable && (
-                    <DropdownMenuItem onSelect={() => setMoveHomeOpen(true)}>
+                    <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
                       <FolderInput size={14} />
                       {t("packages.moveHome", { ns: "settings" })}
                     </DropdownMenuItem>
                   )}
                   {canShare && (
-                    <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+                    <DropdownMenuItem onSelect={() => share.open(packageId)}>
                       <Share2 size={14} />
                       {t("packages.share", { ns: "settings" })}
                     </DropdownMenuItem>
@@ -495,22 +495,21 @@ export function PackageActionsDropdown({
       </DropdownMenu>
 
       <MoveHomeSpaceDialog
-        open={moveHomeOpen}
-        onClose={() => setMoveHomeOpen(false)}
+        open={moveHome.value === packageId}
+        onClose={moveHome.close}
         packageId={packageId}
         type={type}
         homeSpaceId={homeSpaceId}
       />
       <SharePackageDialog
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
+        open={share.value === packageId}
+        onClose={share.close}
         packageId={packageId}
         type={type}
         homeSpaceId={homeSpaceId}
         canPublish={homeWritable === true}
         onMoveHome={() => {
-          setShareOpen(false);
-          setMoveHomeOpen(true);
+          moveHome.open(packageId, SHARE_PARAM);
         }}
       />
     </>

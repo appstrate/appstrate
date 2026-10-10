@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Modal } from "./modal";
+import { useModalParam } from "../hooks/use-modal-param";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -11,16 +12,15 @@ import { Spinner } from "./spinner";
 import { useCreateSpace } from "../hooks/use-spaces";
 import { errorMessage } from "../lib/mutation-error";
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-}
+/** The URL parameter that opens the modal. */
+export const NEW_SPACE_PARAM = "newSpace";
 
 type FormData = { name: string };
 
-export function SpaceCreateModal({ open, onClose }: Props) {
+export function SpaceCreateModal() {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateSpace();
+  const param = useModalParam(NEW_SPACE_PARAM);
 
   const {
     register,
@@ -34,7 +34,7 @@ export function SpaceCreateModal({ open, onClose }: Props) {
   const handleClose = () => {
     reset({ name: "" });
     createMutation.reset();
-    onClose();
+    param.close();
   };
 
   const onFormSubmit = (data: FormData) => {
@@ -49,11 +49,11 @@ export function SpaceCreateModal({ open, onClose }: Props) {
     );
   };
 
-  if (!open) return null;
+  if (param.value === null) return null;
 
   return (
     <Modal
-      open={open}
+      open
       onClose={handleClose}
       title={t("spaces.createTitle")}
       actions={

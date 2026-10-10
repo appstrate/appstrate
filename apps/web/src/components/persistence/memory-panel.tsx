@@ -18,6 +18,7 @@ import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
+import { useModalParam } from "../../hooks/use-modal-param";
 import {
   useAgentMemories,
   useAgentPinned,
@@ -190,7 +191,7 @@ function AgentMemoryCollection({
   const [query, setQuery] = useState("");
   const [scopes, setScopes] = useState<string[]>([]);
   const [types, setTypes] = useState<string[]>(initialTypes);
-  const [selected, setSelected] = useState<MemoryCollectionItem | null>(null);
+  const memoryParam = useModalParam("memory");
   const { copy } = useCopyToClipboard(1_500);
 
   const allItems = useMemo<MemoryCollectionItem[]>(
@@ -218,6 +219,9 @@ function AgentMemoryCollection({
     ],
     [memories, pinned],
   );
+
+  // The entry read in the modal: `?memory=pinned:12`. One the list no longer holds shows nothing.
+  const selected = allItems.find((item) => `${item.kind}:${item.id}` === memoryParam.value) ?? null;
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredItems = allItems.filter((item) => {
@@ -267,7 +271,7 @@ function AgentMemoryCollection({
       isLoading={tableLoading}
       isError={tableError}
       empty={t("agents:detail.memoryEmptyAll")}
-      onOpen={setSelected}
+      onOpen={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
       onCopy={(item) => void copy(memoryText(item.content))}
       onDelete={(item) => {
         if (item.kind === "pinned") onDeletePinned?.(item.id);
@@ -304,7 +308,7 @@ function AgentMemoryCollection({
       {collection}
       <Modal
         open={selected !== null}
-        onClose={() => setSelected(null)}
+        onClose={memoryParam.close}
         title={
           selected?.key ??
           (selected?.kind === "pinned"

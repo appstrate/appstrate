@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { CredentialsSection } from "../../components/model-credentials-section";
 import { ErrorState } from "../../components/page-states";
@@ -48,11 +49,13 @@ export function PreferencesModelsPage() {
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
 
-  const [formOpen, setFormOpen] = useState(false);
-  const [editCredential, setEditCredential] = useState<ModelProviderCredentialInfo | null>(null);
+  const newParam = useModalParam("newCredential");
+  const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
+  const editParam = useModalTarget("editCredential", credentialsQuery.data && credentials);
+  const editCredential = editParam.target ?? null;
+  const formOpen = newParam.value !== null || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
-  const credentials = ownPersonalCredentials(credentialsQuery.data ?? [], userId);
   const paidByCaller = (modelsQuery.data ?? []).filter((m) => m.billed_to === "user");
 
   // A credential's add, rename, delete or pairing changes which models the caller pays for.
@@ -61,19 +64,13 @@ export function PreferencesModelsPage() {
   };
 
   const closeForm = () => {
-    setFormOpen(false);
+    (editCredential ? editParam : newParam).close();
     refreshModels();
   };
 
-  const openCreate = () => {
-    setEditCredential(null);
-    setFormOpen(true);
-  };
+  const openCreate = () => newParam.open();
 
-  const openEdit = (credential: ModelProviderCredentialInfo) => {
-    setEditCredential(credential);
-    setFormOpen(true);
-  };
+  const openEdit = (credential: ModelProviderCredentialInfo) => editParam.open(credential.id);
 
   // A refusal is toasted by the mutation cache; the rejection keeps the typed label.
   const renameCredential = async (credential: ModelProviderCredentialInfo, label: string) => {

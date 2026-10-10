@@ -22,10 +22,10 @@ import {
   useDeleteModelProviderCredential,
   useProvidersRegistry,
   deduplicateLabel,
-  type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { CredentialsSection } from "../../components/model-credentials-section";
@@ -136,9 +136,12 @@ export function OrgSettingsModelsPage() {
     personal?: boolean;
   } | null>(null);
 
-  const [modelModalOpen, setModelModalOpen] = useState(false);
-  const [editModel, setEditModel] = useState<OrgModelInfo | null>(null);
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
+  const newModel = useModalParam("newModel");
+  const editModelParam = useModalTarget("editModel", models);
+  const editModel = editModelParam.target ?? null;
+  const modelModalOpen = newModel.value !== null || editModel !== null;
+  const closeModelModal = editModel ? editModelParam.close : newModel.close;
 
   // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
   // the dialog says so before asking the server.
@@ -152,12 +155,15 @@ export function OrgSettingsModelsPage() {
   const setDefaultModelMutation = useSetDefaultModel();
   const modelForm = useModelFormHandler({
     editModel,
-    onSuccess: () => setModelModalOpen(false),
+    onSuccess: closeModelModal,
   });
 
-  const [pkModalOpen, setPkModalOpen] = useState(false);
-  const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
   const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  const newPk = useModalParam("newCredential");
+  const editPkParam = useModalTarget("editCredential", credentials);
+  const editPk = editPkParam.target ?? null;
+  const pkModalOpen = newPk.value !== null || editPk !== null;
+  const closePkModal = editPk ? editPkParam.close : newPk.close;
   // The credentials tab has its own resource; `models:read` alone does not open it.
   const activeTab = canReadCredentials ? subTab : "models-list";
   const createPkMutation = useCreateModelProviderCredential();
@@ -190,14 +196,8 @@ export function OrgSettingsModelsPage() {
           credentialLabels={new Map((credentials ?? []).map((k) => [k.id, k.label]))}
           isLoading={modelsLoading}
           error={modelsError}
-          onCreate={() => {
-            setEditModel(null);
-            setModelModalOpen(true);
-          }}
-          onEdit={(m) => {
-            setEditModel(m);
-            setModelModalOpen(true);
-          }}
+          onCreate={() => newModel.open()}
+          onEdit={(m) => editModelParam.open(m.id)}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
           settingDefaultId={
             setDefaultModelMutation.isPending
@@ -220,10 +220,7 @@ export function OrgSettingsModelsPage() {
               <PageActionsMenu>
                 <DropdownMenuItem
                   data-page-action="create-credential"
-                  onSelect={() => {
-                    setEditPk(null);
-                    setPkModalOpen(true);
-                  }}
+                  onSelect={() => newPk.open()}
                 >
                   <Plus />
                   {t("credentials.add")}
@@ -235,10 +232,7 @@ export function OrgSettingsModelsPage() {
             credentials={credentials}
             isLoading={pkLoading}
             error={pkError}
-            onEdit={(pk) => {
-              setEditPk(pk);
-              setPkModalOpen(true);
-            }}
+            onEdit={(pk) => editPkParam.open(pk.id)}
             onDelete={(pk) =>
               setConfirmState({
                 type: "deleteCredential",
@@ -254,10 +248,7 @@ export function OrgSettingsModelsPage() {
                 body: { label: newLabel },
               });
             }}
-            onConnectOAuth={(credential) => {
-              setEditPk(credential);
-              setPkModalOpen(true);
-            }}
+            onConnectOAuth={(credential) => editPkParam.open(credential.id)}
             canWrite={canWriteCredentials}
             canDelete={canDeleteCredentials}
             userId={userId}
@@ -268,7 +259,7 @@ export function OrgSettingsModelsPage() {
 
       <ModelFormModal
         open={modelModalOpen}
-        onClose={() => setModelModalOpen(false)}
+        onClose={closeModelModal}
         model={editModel}
         isPending={modelForm.isPending}
         onSubmit={modelForm.onSubmit}
@@ -276,7 +267,7 @@ export function OrgSettingsModelsPage() {
 
       <CredentialFormModal
         open={pkModalOpen}
-        onClose={() => setPkModalOpen(false)}
+        onClose={closePkModal}
         credential={editPk}
         isPending={createPkMutation.isPending || updatePkMutation.isPending}
         onSubmit={(data) => {
@@ -289,7 +280,7 @@ export function OrgSettingsModelsPage() {
                 body: credentialUpdateBody(editPk, data),
               },
               {
-                onSuccess: () => setPkModalOpen(false),
+                onSuccess: closePkModal,
               },
             );
           } else {
@@ -304,7 +295,7 @@ export function OrgSettingsModelsPage() {
                 },
               },
               {
-                onSuccess: () => setPkModalOpen(false),
+                onSuccess: closePkModal,
               },
             );
           }

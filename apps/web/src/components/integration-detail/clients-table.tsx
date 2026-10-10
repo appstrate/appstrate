@@ -20,6 +20,7 @@ import { Modal } from "../modal";
 import { DataTable } from "../data-table";
 import { EmptyState, ErrorState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { useIntegrationClientColumns } from "../../pages/integration-columns";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
@@ -46,6 +47,11 @@ import {
  * cleanly between invocations. The client secret is write-only — never echoed
  * back, shown as a placeholder when one is already set.
  */
+type ModalState =
+  | { mode: "create"; tier: IntegrationClientTier }
+  | { mode: "edit"; tier: IntegrationClientTier; client: IntegrationClient }
+  | null;
+
 function OAuthClientModal({
   tier,
   packageId,
@@ -293,11 +299,13 @@ export function ClientsTable({
   const deleteSpaceClient = useDeleteIntegrationOAuthClient("space");
   const deleteOrgClient = useDeleteIntegrationOAuthClient("org");
   const promote = usePromoteIntegrationOAuthClient();
-  const [modal, setModal] = useState<
-    | { mode: "create"; tier: IntegrationClientTier }
-    | { mode: "edit"; tier: IntegrationClientTier; client: IntegrationClient }
-    | null
-  >(null);
+  // Several tables can share a page (one per auth): each answers only the parameters
+  // scoped to its own `authKey` (`?newOauthClient=<authKey>:<tier>`,
+  // `?editOauthClient=<authKey>:<client_ref>`).
+  const newClient = useModalParam("newOauthClient");
+  const editClient = useModalParam("editOauthClient");
+  const scopedValue = (value: string | null) =>
+    value?.startsWith(`${authKey}:`) ? value.slice(authKey.length + 1) : null;
   const [confirmDelete, setConfirmDelete] = useState<ClientRow | null>(null);
   const [confirmPromote, setConfirmPromote] = useState<ClientRow | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
@@ -316,6 +324,14 @@ export function ClientsTable({
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
   const tierOf = (row: ClientRow): IntegrationClientTier => (row.level === "org" ? "org" : "space");
+  const editedRow = rows.find((row) => row.client.client_ref === scopedValue(editClient.value));
+  const newTier = scopedValue(newClient.value);
+  const modal: ModalState = editedRow
+    ? { mode: "edit", tier: tierOf(editedRow), client: editedRow.client }
+    : newTier === "space" || newTier === "org"
+      ? { mode: "create", tier: newTier }
+      : null;
+  const closeModal = editedRow ? editClient.close : newClient.close;
   const pending = [
     setSpaceDefault,
     setOrgDefault,
@@ -346,7 +362,7 @@ export function ClientsTable({
         params: { path: { packageId, authKey } },
         body: { client_ref: row.client.client_ref },
       }),
-    onEdit: (row) => setModal({ mode: "edit", tier: tierOf(row), client: row.client }),
+    onEdit: (row) => editClient.open(`${authKey}:${row.client.client_ref}`),
     onPromote: (row) => setConfirmPromote(row),
     onDelete: (row) => setConfirmDelete(row),
   });
@@ -382,11 +398,11 @@ export function ClientsTable({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setModal({ mode: "create", tier: "space" })}>
+                <DropdownMenuItem onSelect={() => newClient.open(`${authKey}:space`)}>
                   {t("integration.clients.registerSpace")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={() => setModal({ mode: "create", tier: "org" })}
+                  onSelect={() => newClient.open(`${authKey}:org`)}
                   data-testid={`org-oauth-client-register-${authKey}`}
                 >
                   {t("integration.clients.registerOrg")}
@@ -399,7 +415,7 @@ export function ClientsTable({
               size="sm"
               variant="outline"
               className="h-7 text-xs"
-              onClick={() => setModal({ mode: "create", tier: "space" })}
+              onClick={() => newClient.open(`${authKey}:space`)}
               data-testid={`oauth-client-register-${authKey}`}
             >
               <Plus size={14} />
@@ -476,7 +492,7 @@ export function ClientsTable({
           mode={modal.mode}
           existing={modal.mode === "edit" ? modal.client : undefined}
           platformRedirectUri={platformRedirectUri}
-          onClose={() => setModal(null)}
+          onClose={closeModal}
         />
       )}
       <ConfirmModal

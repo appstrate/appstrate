@@ -19,6 +19,7 @@ import {
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
 import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
@@ -184,11 +185,14 @@ export function OrgSettingsProxiesPage() {
   const canWrite = can("proxies:write");
   const canDelete = can("proxies:delete");
 
-  const [proxyModalOpen, setProxyModalOpen] = useState(false);
-  const [editProxy, setEditProxy] = useState<OrgProxyInfo | null>(null);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const { data: proxies, isLoading, error } = useProxies();
+  const newProxy = useModalParam("newProxy");
+  const editParam = useModalTarget("editProxy", proxies);
+  const editProxy = editParam.target ?? null;
+  const proxyModalOpen = newProxy.value !== null || editProxy !== null;
+  const closeProxyModal = editProxy ? editParam.close : newProxy.close;
   const createMutation = useCreateProxy();
   const updateMutation = useUpdateProxy();
   const deleteMutation = useDeleteProxy();
@@ -196,14 +200,8 @@ export function OrgSettingsProxiesPage() {
   const testMutation = useTestProxy();
   const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
 
-  const onCreate = () => {
-    setEditProxy(null);
-    setProxyModalOpen(true);
-  };
-  const onEdit = (p: OrgProxyInfo) => {
-    setEditProxy(p);
-    setProxyModalOpen(true);
-  };
+  const onCreate = () => newProxy.open();
+  const onEdit = (p: OrgProxyInfo) => editParam.open(p.id);
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
   const columns = useProxyColumns({
@@ -253,7 +251,7 @@ export function OrgSettingsProxiesPage() {
 
       <ProxyFormModal
         open={proxyModalOpen}
-        onClose={() => setProxyModalOpen(false)}
+        onClose={closeProxyModal}
         proxy={editProxy}
         isPending={createMutation.isPending || updateMutation.isPending}
         onSubmit={(data) => {
@@ -268,14 +266,14 @@ export function OrgSettingsProxiesPage() {
                 body: data.url ? data : { label: data.label },
               },
               {
-                onSuccess: () => setProxyModalOpen(false),
+                onSuccess: closeProxyModal,
               },
             );
           } else {
             createMutation.mutate(
               { body: data },
               {
-                onSuccess: () => setProxyModalOpen(false),
+                onSuccess: closeProxyModal,
               },
             );
           }

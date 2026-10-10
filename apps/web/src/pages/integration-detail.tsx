@@ -61,6 +61,7 @@ import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
+import { useModalParam } from "../hooks/use-modal-param";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
@@ -546,7 +547,7 @@ export function IntegrationDetailPage() {
     else params.delete("connectionMethod");
     void navigate({ search: params.toString(), hash: "connections" });
   };
-  const [forkOpen, setForkOpen] = useState(false);
+  const fork = useModalParam("fork");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const canBrowseIntegrations = useCanReach()("/integrations");
@@ -641,7 +642,7 @@ export function IntegrationDetailPage() {
               homeShareable={homeShareable}
               downloadVersion={version}
               onDownload={downloadPackage}
-              onFork={() => setForkOpen(true)}
+              onFork={() => fork.open()}
               // The definition is edited in Paramètres › Définition.
               showEdit={false}
               canDeactivate={active}
@@ -736,8 +737,8 @@ export function IntegrationDetailPage() {
       </Tabs>
 
       <ForkPackageModal
-        open={forkOpen}
-        onClose={() => setForkOpen(false)}
+        open={fork.value !== null}
+        onClose={fork.close}
         packageId={packageId}
         defaultName={name ?? ""}
         type="integration"

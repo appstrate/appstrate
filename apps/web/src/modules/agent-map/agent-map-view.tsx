@@ -47,6 +47,7 @@ import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import { ErrorState, LoadingState } from "../../components/page-states";
 import { MapEditDialog, type MapEditKind } from "./map-edit-dialog";
 import { MapPanelDialog, type MapPanelKind } from "./map-panel-dialog";
+import { useModalParam } from "../../hooks/use-modal-param";
 import {
   AgentDiagnosticsDialog,
   AgentDiagnosticsIssueBadge,
@@ -370,12 +371,10 @@ export function AgentMapView({
   const requestedNodeId = requestedDiagnostic
     ? agentDiagnosticMapNodeId(requestedDiagnostic)
     : null;
-  const [editKind, setEditKind] = useState<MapEditKind | null>(null);
-  const [panelKind, setPanelKind] = useState<MapPanelKind | null>(null);
-  const [localIssuesOpen, setLocalIssuesOpen] = useState(false);
-  const issuesOpen =
-    localIssuesOpen ||
-    (diagnosticSearch.get("agentDiagnostics") === "all" && Boolean(diagnosticResult));
+  const editParam = useModalParam("mapEdit");
+  const panelParam = useModalParam("mapPanel");
+  const issuesParam = useModalParam("agentDiagnostics");
+  const issuesOpen = issuesParam.value === "all" && Boolean(diagnosticResult);
   const [expanded, setExpanded] = useState(false);
   const [hoveredRelation, setHoveredRelation] = useState<string | null>(null);
   const [selectedRelation, setSelectedRelation] = useState<string | null>(null);
@@ -384,7 +383,6 @@ export function AgentMapView({
   useEscape(expanded, collapse);
 
   const closeIssues = useCallback(() => {
-    setLocalIssuesOpen(false);
     const search = new URLSearchParams(location.search);
     let changed = false;
     for (const key of AGENT_DIAGNOSTIC_QUERY_KEYS) {
@@ -402,8 +400,10 @@ export function AgentMapView({
 
   // Stable identity: it rides in every node's `data`, which React Flow compares
   // to decide what to re-render.
-  const onEdit = useCallback((kind: MapEditKind) => setEditKind(kind), []);
-  const onPanel = useCallback((kind: MapPanelKind) => setPanelKind(kind), []);
+  const { open: openEdit, close: closeEdit } = editParam;
+  const { open: openPanel, close: closePanel } = panelParam;
+  const onEdit = useCallback((kind: MapEditKind) => openEdit(kind), [openEdit]);
+  const onPanel = useCallback((kind: MapPanelKind) => openPanel(kind), [openPanel]);
   const onRelationActive = useCallback((relationId: string | null) => {
     setHoveredRelation(relationId);
   }, []);
@@ -636,7 +636,7 @@ export function AgentMapView({
         <header className="border-border bg-background flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b px-4 py-2.5">
           <div>
             {diagnosticResult && diagnosticResult.status !== "healthy" && (
-              <button type="button" onClick={() => setLocalIssuesOpen(true)}>
+              <button type="button" onClick={() => issuesParam.open("all")}>
                 <AgentDiagnosticsIssueBadge result={diagnosticResult} />
               </button>
             )}
@@ -697,8 +697,8 @@ export function AgentMapView({
         </div>
       </section>
       <AgentDiagnosticsDialog result={diagnosticResult} open={issuesOpen} onClose={closeIssues} />
-      <MapEditDialog kind={editKind} packageId={packageId} onClose={() => setEditKind(null)} />
-      <MapPanelDialog kind={panelKind} packageId={packageId} onClose={() => setPanelKind(null)} />
+      <MapEditDialog kind={editParam.value} packageId={packageId} onClose={closeEdit} />
+      <MapPanelDialog kind={panelParam.value} packageId={packageId} onClose={closePanel} />
     </div>
   );
 }

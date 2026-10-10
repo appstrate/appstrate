@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
@@ -15,6 +15,7 @@ import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
@@ -114,7 +115,7 @@ export function PackageList() {
   const { data: agents, isLoading, error } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const { can } = usePermissions();
-  const [importOpen, setImportOpen] = useState(false);
+  const importParam = useModalParam("import");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -160,7 +161,7 @@ export function PackageList() {
               {/* An import may carry any package type, so any authoring grant
                   opens it; the server re-checks the type it finds. */}
               {canImport && (
-                <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                <DropdownMenuItem data-page-action="import" onSelect={() => importParam.open()}>
                   <Upload />
                   {t("nav.import", { ns: "common" })}
                 </DropdownMenuItem>
@@ -175,7 +176,7 @@ export function PackageList() {
           ) : undefined
         }
       />
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <ImportModal open={importParam.value !== null} onClose={importParam.close} />
       {creation.isOpen && (
         <CreationHandoffModal
           resource="agent"

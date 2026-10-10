@@ -36,10 +36,11 @@ import { ContentEditor } from "../package-editor/content-editor";
 import { LoadingState, ErrorState } from "../page-states";
 import { FileTree } from "./file-tree";
 import { FilePreview } from "./file-preview";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { FilePathDialog } from "./file-path-dialog";
 import { usePackageFile } from "./use-package-file";
 
-type Dialog = { kind: "create" } | { kind: "rename" | "delete"; path: string } | null;
+type Dialog = { kind: "delete"; path: string } | null;
 
 interface Props {
   packageId: string | undefined;
@@ -80,7 +81,10 @@ export function PackageFilesEditor({
   );
   if (base === null && query.isSuccess && query.isFetchedAfterMount) setBase(query.data.data);
   const [selected, setSelected] = useState<string | null>(null);
+  // Naming a file has an address (`?newFile=1`, `?renameFile=<path>`); deleting one is a confirmation.
   const [dialog, setDialog] = useState<Dialog>(null);
+  const newFile = useModalParam("newFile");
+  const renameFile = useModalParam("renameFile");
   const [generation, setGeneration] = useState(0);
   const [uploading, setUploading] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -106,6 +110,8 @@ export function PackageFilesEditor({
       onChange(next);
       if (select !== undefined) setSelected(select);
       setDialog(null);
+      if (newFile.value !== null) newFile.close();
+      else if (renameFile.value !== null) renameFile.close();
     } catch (error) {
       toast.error(t(packageFilesErrorKey(error) ?? "files.errorGeneric", { limit }));
     }
@@ -181,9 +187,9 @@ export function PackageFilesEditor({
           controlsId={id}
           className="border-border bg-card max-h-[560px] rounded-lg border"
           actions={{
-            onCreate: () => setDialog({ kind: "create" }),
+            onCreate: () => newFile.open(),
             onUpload: () => pick(null),
-            onRename: (path) => setDialog({ kind: "rename", path }),
+            onRename: (path) => renameFile.open(path),
             onDelete: (path) => setDialog({ kind: "delete", path }),
             isPinned: pinned,
             isBusy: busy,
@@ -227,24 +233,24 @@ export function PackageFilesEditor({
           if (files.length) void upload(files);
         }}
       />
-      {dialog?.kind === "create" && (
+      {newFile.value !== null && (
         <FilePathDialog
           title={t("files.newFile")}
           confirmLabel={t("btn.create", { ns: "common" })}
           initialPath=""
           entries={entries}
-          onClose={() => setDialog(null)}
+          onClose={newFile.close}
           onSubmit={(path) => stage([fileTextOperation(path, "")], path)}
         />
       )}
-      {dialog?.kind === "rename" && (
+      {renameFile.value !== null && (
         <FilePathDialog
           title={t("files.newName")}
           confirmLabel={t("files.rename")}
-          initialPath={dialog.path}
-          entries={entries.filter((entry) => entry.path !== dialog.path)}
-          onClose={() => setDialog(null)}
-          onSubmit={(to) => stage([{ op: "move", from: dialog.path, to }], to)}
+          initialPath={renameFile.value}
+          entries={entries.filter((entry) => entry.path !== renameFile.value)}
+          onClose={renameFile.close}
+          onSubmit={(to) => stage([{ op: "move", from: renameFile.value!, to }], to)}
         />
       )}
       {dialog?.kind === "delete" && (

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -32,6 +32,7 @@ import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
 import { DetailSectionCard as RunDetailCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
+import { useModalParam } from "../../hooks/use-modal-param";
 
 export function RunSnapshotInspector({
   run,
@@ -55,7 +56,7 @@ export function RunSnapshotInspector({
   contained?: boolean;
 }) {
   const { t } = useTranslation("agents");
-  const [turnsOpen, setTurnsOpen] = useState(false);
+  const turnsParam = useModalParam("turns");
   const inputDocumentsQuery = useFiles({
     runId: run.id,
     purpose: "user_upload",
@@ -312,7 +313,7 @@ export function RunSnapshotInspector({
                 </SnapshotFacts>
               </div>
               {turns.length > 0 && (
-                <OverviewCardAction onClick={() => setTurnsOpen(true)}>
+                <OverviewCardAction onClick={() => turnsParam.open()}>
                   {t("run.viewTurnDetails")}
                 </OverviewCardAction>
               )}
@@ -456,8 +457,8 @@ export function RunSnapshotInspector({
       </div>
 
       <Modal
-        open={turnsOpen}
-        onClose={() => setTurnsOpen(false)}
+        open={turnsParam.value !== null}
+        onClose={turnsParam.close}
         title={t("run.turnsTitle")}
         className="max-h-[85vh] max-w-4xl overflow-y-auto"
       >

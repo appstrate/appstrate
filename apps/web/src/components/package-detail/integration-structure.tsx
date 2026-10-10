@@ -35,6 +35,7 @@ import { packageDetailPath } from "../../lib/package-paths";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useIntegrationClients } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { authMethodLabel } from "../../lib/integration-presentation";
 
 function accessInfo(detail: IntegrationDetailWire) {
@@ -194,8 +195,11 @@ export function IntegrationMap({
 }) {
   const { t } = useTranslation("settings");
   const [expanded, setExpanded] = useState(false);
-  const [panel, setPanel] = useState<string | null>(null);
-  const open = useCallback((section: string) => setPanel(section), []);
+  // The section's settings open at `?structurePanel=<section>`; the callback rides in node data.
+  const panelParam = useModalParam("structurePanel");
+  const panel = panelParam.value;
+  const { open: openPanel, close: closePanel } = panelParam;
+  const open = useCallback((section: string) => openPanel(section), [openPanel]);
   const [hoveredRelation, setHoveredRelation] = useState<string | null>(null);
   const [selectedRelation, setSelectedRelation] = useState<string | null>(null);
   const activeRelation = hoveredRelation ?? selectedRelation;
@@ -652,12 +656,7 @@ export function IntegrationMap({
       ) : (
         <div className="h-[60vh] min-h-[420px]">{canvas}</div>
       )}
-      <Modal
-        open={panel !== null}
-        onClose={() => setPanel(null)}
-        title={panelTitle}
-        className="sm:max-w-3xl"
-      >
+      <Modal open={panel !== null} onClose={closePanel} title={panelTitle} className="sm:max-w-3xl">
         <div className="max-h-[70vh] overflow-y-auto">{panel && renderPanel(panel, open)}</div>
       </Modal>
     </>

@@ -20,7 +20,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { RunList } from "../run-list";
 import { SchedulesTable, useScheduleColumns } from "../schedules-table";
 import { AgentRunButton } from "./agent-run-button";
-import { ApiKeyCreateModal } from "../api-key-create-modal";
+import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
@@ -285,7 +285,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
   const canReach = useCanReach();
 
   const [rawKey, setRawKey] = useState<string | null>(null);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const newApiKey = useModalParam(NEW_API_KEY_PARAM);
   const { copied, copy } = useCopyToClipboard();
 
   if (!detail || !currentOrg) return null;
@@ -341,7 +341,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
           <p className="text-warning text-sm">{t("api.noKey")}</p>
           <p className="text-muted-foreground mt-1 text-xs">{t("api.noKeyHint")}</p>
           {can("api-keys:create") && (
-            <Button size="sm" className="mt-2" onClick={() => setCreateModalOpen(true)}>
+            <Button size="sm" className="mt-2" onClick={() => newApiKey.open()}>
               {t("api.createKey")}
             </Button>
           )}
@@ -450,11 +450,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
       </a>
 
       {/* Create API Key Modal */}
-      <ApiKeyCreateModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-        onKeyCreated={handleKeyCreated}
-      />
+      <ApiKeyCreateModal onKeyCreated={handleKeyCreated} />
     </div>
   );
 }

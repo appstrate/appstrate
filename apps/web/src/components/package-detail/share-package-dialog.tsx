@@ -65,6 +65,9 @@ function parseTargetValue(value: string): ShareTarget | null {
   return null;
 }
 
+/** The URL parameter that opens the dialog; its value is the package. */
+export const SHARE_PARAM = "share";
+
 /**
  * The two things "sharing" can mean, named separately (#1440).
  *

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
@@ -11,6 +10,7 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
@@ -25,11 +25,11 @@ export function OnboardingModelStep() {
   const orgId = useOnboardingGuard();
   const { nextRoute } = useOnboardingNav("model");
 
-  const [modalOpen, setModalOpen] = useState(false);
+  const newModel = useModalParam("newModel");
   const { data: models } = useModels();
   const { data: registry } = useProvidersRegistry();
   const { onSubmit, isPending } = useModelFormHandler({
-    onSuccess: () => setModalOpen(false),
+    onSuccess: newModel.close,
   });
 
   const goNext = () => nextRoute && navigate(nextRoute);
@@ -107,20 +107,15 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-center"
-          onClick={() => setModalOpen(true)}
-        >
+        <Button variant="outline" size="sm" className="self-center" onClick={() => newModel.open()}>
           <Plus className="mr-1.5 size-3.5" />
           {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
         </Button>
       </div>
 
       <ModelFormModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        open={newModel.value !== null}
+        onClose={newModel.close}
         model={null}
         isPending={isPending}
         onSubmit={onSubmit}

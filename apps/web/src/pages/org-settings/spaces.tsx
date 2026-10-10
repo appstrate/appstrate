@@ -30,12 +30,13 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { useSpaceColumns } from "./space-columns";
-import { SpaceCreateModal } from "../../components/space-create-modal";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { NEW_SPACE_PARAM, SpaceCreateModal } from "../../components/space-create-modal";
 
 export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { data: spaces, isLoading, error } = useSpaces();
-  const [createOpen, setCreateOpen] = useState(false);
+  const newSpace = useModalParam(NEW_SPACE_PARAM);
   const [pending, setPending] = useState<{ id: string; action: "convert" | "sweep" } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
@@ -93,7 +94,7 @@ export function OrgSettingsSpacesPage() {
             <DropdownMenuItem
               data-page-action="create"
               data-testid="create-space-button"
-              onSelect={() => setCreateOpen(true)}
+              onSelect={() => newSpace.open()}
             >
               <Plus />
               {t("spaces.create")}
@@ -116,7 +117,7 @@ export function OrgSettingsSpacesPage() {
         }
       />
 
-      <SpaceCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      {can("spaces:write") && <SpaceCreateModal />}
 
       <ConfirmModal
         open={pending !== null}

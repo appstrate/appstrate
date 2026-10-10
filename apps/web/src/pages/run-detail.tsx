@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
+import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ResourceErrorState } from "../components/page-states";
@@ -115,7 +116,7 @@ export function RunDetailPage() {
 
   const launcher = useRunLauncher(packageId);
   const cancelRun = useCancelRun();
-  const [inputOpen, setInputOpen] = useState(false);
+  const rerun = useModalParam("rerun");
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
@@ -292,7 +293,7 @@ export function RunDetailPage() {
               rerunPending={launcher.isPending}
               cancelPending={cancelRun.isPending}
               onRerun={() => {
-                if (canReadAgent) setInputOpen(true);
+                if (canReadAgent) rerun.open();
                 // The API conceals resolved input from runners: replay that
                 // snapshot server-side, keeping its parameters.
                 else
@@ -311,8 +312,8 @@ export function RunDetailPage() {
 
       {agent && canReadAgent && (
         <RunModal
-          open={inputOpen}
-          onClose={() => setInputOpen(false)}
+          open={rerun.value !== null}
+          onClose={rerun.close}
           agent={agent}
           onSubmit={(input) => {
             // Re-run the SAME definition the original run executed, as far as
@@ -320,7 +321,7 @@ export function RunDetailPage() {
             // and only an author replays a draft (see `replayVersion`).
             launcher.launch(
               { input, version: replayVersion(run.version_ref, agent.home_writable) },
-              () => setInputOpen(false),
+              rerun.close,
             );
           }}
           isPending={launcher.isPending}

@@ -55,8 +55,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
-import { SharePackageDialog } from "./package-detail/share-package-dialog";
+import { MOVE_HOME_PARAM, MoveHomeSpaceDialog } from "./package-detail/move-home-space-dialog";
+import { SHARE_PARAM, SharePackageDialog } from "./package-detail/share-package-dialog";
 import { ActivationClosureDialog } from "./catalogue-activation-dialog";
 import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
 import { catalogueHref } from "../lib/catalogue-link";
@@ -300,8 +300,8 @@ export function OrgCatalogueModal({
     maySetPackageActive(grantById.get(targetSpaceId), pkg.type, true) &&
     (pkg.placements.some((placement) => placement.space_id === targetSpaceId) ||
       pkg.home_shareable === true);
-  const rowOf = (item: CardItem) => ofKind.find((row) => row.id === item.id);
-  const writableOf = (item: CardItem) => rowOf(item)?.home_writable === true;
+  const rowOf = (item: Pick<CardItem, "id">) => ofKind.find((row) => row.id === item.id);
+  const writableOf = (item: Pick<CardItem, "id">) => rowOf(item)?.home_writable === true;
   const shareableOf = (item: CardItem) => rowOf(item)?.home_shareable === true;
   // Every space the package reaches through an OFFER: each one can be withdrawn,
   // and withdrawing takes the activation it backs with it.
@@ -320,8 +320,8 @@ export function OrgCatalogueModal({
     spaceId: string;
     missing: MissingDependency[];
   } | null>(null);
-  const [moveHome, setMoveHome] = useState<CardItem | null>(null);
-  const [sharing, setSharing] = useState<CardItem | null>(null);
+  const moveHome = useModalParam(MOVE_HOME_PARAM);
+  const share = useModalParam(SHARE_PARAM);
   const revoke = useRevokePackageShare();
   /**
    * Withdraw the offer that places this package in that space.
@@ -609,8 +609,8 @@ export function OrgCatalogueModal({
     shareableOf,
     sharedSpacesOf,
     onOpen: (item) => preview.open(item.id),
-    onMoveHome: setMoveHome,
-    onShare: setSharing,
+    onMoveHome: (item) => moveHome.open(item.id),
+    onShare: (item) => share.open(item.id),
     onRevoke: revokeFrom,
   });
 
@@ -839,8 +839,8 @@ export function OrgCatalogueModal({
                   icon: ExternalLink,
                   onSelect: () => navigate(packageDetailPath(active, reading.id)),
                 }}
-                onMoveHome={setMoveHome}
-                onShare={setSharing}
+                onMoveHome={(item) => moveHome.open(item.id)}
+                onShare={(item) => share.open(item.id)}
                 onRevoke={revokeFrom}
               />
             </PageActionsMenu>
@@ -978,23 +978,23 @@ export function OrgCatalogueModal({
         />
       )}
 
-      {moveHome && (
+      {moveHome.value && (
         <MoveHomeSpaceDialog
           open
-          onClose={() => setMoveHome(null)}
-          packageId={moveHome.id}
+          onClose={moveHome.close}
+          packageId={moveHome.value}
           type={active}
-          homeSpaceId={placementById.get(moveHome.id)?.homeSpaceId}
+          homeSpaceId={placementById.get(moveHome.value)?.homeSpaceId}
         />
       )}
-      {sharing && (
+      {share.value && (
         <SharePackageDialog
           open
-          onClose={() => setSharing(null)}
-          packageId={sharing.id}
+          onClose={share.close}
+          packageId={share.value}
           type={active}
-          homeSpaceId={placementById.get(sharing.id)?.homeSpaceId}
-          canPublish={writableOf(sharing)}
+          homeSpaceId={placementById.get(share.value)?.homeSpaceId}
+          canPublish={writableOf({ id: share.value })}
         />
       )}
     </PanelDialog>

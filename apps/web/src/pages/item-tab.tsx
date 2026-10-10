@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { LibraryBig, Plug, Plus, Upload, Wrench } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
@@ -54,7 +54,7 @@ export function ItemTab({
   // What works in THIS space; the rest of the org is one action away.
   const { data: rawItems, isLoading } = usePackageList(type);
   const { can } = usePermissions();
-  const [importOpen, setImportOpen] = useState(false);
+  const importParam = useModalParam("import");
   const navigate = useNavigate();
   const location = useLocation();
   // Creating is a write on the package type, as its route is.
@@ -103,7 +103,7 @@ export function ItemTab({
                 </DropdownMenuItem>
               )}
               {canImport && (
-                <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                <DropdownMenuItem data-page-action="import" onSelect={() => importParam.open()}>
                   <Upload />
                   {t("nav.import", { ns: "common" })}
                 </DropdownMenuItem>
@@ -120,15 +120,15 @@ export function ItemTab({
         title={title}
         breadcrumbs={[{ label: title }]}
       />
-      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <ImportModal open={importParam.value !== null} onClose={importParam.close} />
       {creation.isOpen && (
         <CreationHandoffModal
           resource={type}
           onClose={creation.close}
           onManual={() => {
             if (manualCreation === "import") {
-              creation.close();
-              setImportOpen(true);
+              // Handing over from the chooser: one navigation, never two modals.
+              importParam.open("1", "create");
               return;
             }
             navigate(packageNewPath(type));
