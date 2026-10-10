@@ -1073,4 +1073,20 @@ describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
       default: 5,
     });
   });
+
+  it("keeps a union items type when editing multiselect enum text", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        pick: { type: "array", items: { type: ["string", "null"], enum: ["a", "b"] } },
+      },
+    };
+    const fields = schemaToFields(schema, "input");
+    expect(fieldsToSchema(fields, "input")!.schema).toEqual(schema);
+    fields[0] = { ...fields[0]!, arrayEnumItems: "a, c" };
+    expect(fieldsToSchema(fields, "input")!.schema.properties.pick!.items).toEqual({
+      type: ["string", "null"],
+      enum: ["a", "c"],
+    });
+  });
 });

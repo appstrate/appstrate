@@ -616,7 +616,11 @@ export function fieldsToSchema(
         const type = srcItems ? itemType(src) : "string";
         const vals = parseList(f.arrayEnumItems, type);
         if (vals.length > 0) {
-          prop.items = { ...srcItems, type: type as JSONSchema7TypeName, enum: vals };
+          prop.items = {
+            ...(srcItems?.type === undefined ? { type: type as JSONSchema7TypeName } : {}),
+            ...srcItems,
+            enum: vals,
+          };
         } else if (srcItems?.enum) {
           const { enum: _removed, ...rest } = srcItems;
           assign(prop, "items", Object.keys(rest).length > 0 ? rest : undefined);
