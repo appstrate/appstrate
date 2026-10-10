@@ -60,12 +60,8 @@ export function useCatalogueSelectColumn({
       />
     ),
     width: "36px",
-    // Tier two, so the deed can hold tier one. This table SCROLLS rather than
-    // dropping columns (`columnMode="scroll"`), so the tier decides the width
-    // the narrow table must reserve before it scrolls, not what is hidden: the
-    // first thing in view should be what the row IS and whether it can be
-    // switched on, with bulk selection a scroll away rather than the reverse.
-    tier: 2,
+    // This table SCROLLS rather than dropping columns (`columnMode="scroll"`),
+    // and the tick is held at its start with the name beside it.
     control: true,
     cell: (item) =>
       selectable(item) ? (
@@ -256,10 +252,6 @@ export function useCatalogueSpaceColumns({
     // The pinned first column carries the space name AND the "ici" pill, so it
     // asks for more room than the ones that carry a name alone.
     width: index === 0 ? "minmax(140px,1fr)" : "minmax(104px,1fr)",
-    // The first space holds tier two, beside the name; the others wait for the
-    // width the way any further column does. A caller with ONE space therefore
-    // keeps the table it had, with the space named instead of implied.
-    tier: index === 0 ? 2 : 3,
     cell: (item) => {
       const placement = placementOf(item);
       if (!placement) return <span className="text-muted-foreground/50">—</span>;

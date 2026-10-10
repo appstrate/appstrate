@@ -83,14 +83,16 @@ export function displayedConnectionIds(input: {
   return input.overrideMode ? [] : input.resolvedIds;
 }
 
-/** The ticked set "Valider" writes. A tick the user cannot see is one they cannot remove. */
+/**
+ * The ticked set "Valider" writes: what is CHOSEN, never what the cascade would bind (while
+ * nothing is chosen "Hériter" is the ticked row, not the connection it resolves to).
+ */
 export function checkedConnectionIds(input: {
   draft: string[] | null;
   explicitIds: ConnectionSet;
-  resolvedIds: string[];
   candidateIds: string[];
 }): string[] {
-  const base = input.draft ?? input.explicitIds ?? input.resolvedIds;
+  const base = input.draft ?? input.explicitIds ?? [];
   return keepAvailable(base, input.candidateIds);
 }
 

@@ -342,7 +342,8 @@ export function useConnectionColumns({
       id: "shared",
       header: t("integration.connection.col.shared"),
       width: "minmax(128px,1fr)",
-      tier: 2,
+      // Share menus: the column scrolls into reach rather than waiting for room.
+      control: true,
       cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
     {

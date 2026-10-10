@@ -63,6 +63,7 @@ export function useUserSpaceColumns({
       id: "role",
       header: t("spaceMembers.colRole"),
       width: "minmax(120px,1fr)",
+      control: true,
       cell: (membership) =>
         editable(membership) ? (
           <SpaceRoleSelect

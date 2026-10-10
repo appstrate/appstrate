@@ -27,6 +27,9 @@ import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 import type { ViewAsPreset } from "../lib/view-as-preset";
 
+/** A chosen value reads as chosen: the global `button` base would grey it like a placeholder. */
+const CHOSEN_VALUE = "text-foreground data-[placeholder]:text-muted-foreground";
+
 /** "No space" option. Not the empty string — Radix refuses an empty item value. */
 const NO_SPACE = "none";
 
@@ -61,13 +64,23 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const navigate = useNavigate();
   const background = useBackgroundLocation();
 
-  // An organization role is previewed on its own: a space would ask for a second choice.
-  const initialSpaceId =
-    preset?.kind === "org" ? NO_SPACE : (spaceId ?? currentSpaceId ?? NO_SPACE);
   const [orgRole, setOrgRole] = useState<ViewAsOrgRole>(
     preset?.kind === "org" ? preset.role : "member",
   );
-  const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
+  // What the opening asks for. A space role is judged in the space the page is about. A Member
+  // reaches the open spaces unasked, with the role each gives its members: the current space,
+  // when open. A Guest reaches nothing unasked, hence no space.
+  const homeSpaceId = spaceId ?? currentSpaceId ?? NO_SPACE;
+  const homeSpace = spaces?.find((s) => s.id === homeSpaceId);
+  const presetSpace =
+    preset?.kind !== "org"
+      ? homeSpaceId
+      : preset.role === "member" && homeSpace?.visibility === "open"
+        ? homeSpace.id
+        : NO_SPACE;
+  /** `null` follows the preset; any pick, even "none", is the user's own. */
+  const [pickedSpaceId, setPickedSpaceId] = useState<string | null>(null);
+  const selectedSpaceId = pickedSpaceId ?? presetSpace;
   /** `null` follows the preset; any pick, even "none", is the user's own. */
   const [pickedRole, setPickedRole] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
@@ -98,8 +111,13 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
     refetch: refetchRoles,
   } = useSpaceRoleOptions(inSpace ? selectedSpaceId : undefined, inSpace);
   const space = spaces?.find((s) => s.id === selectedSpaceId);
-  const presetRole =
-    preset?.kind === "space" ? roles?.find((r) => r.key === preset.key) : undefined;
+  const presetRoleKey =
+    preset?.kind === "space"
+      ? preset.key
+      : preset?.kind === "org" && presetSpace !== NO_SPACE
+        ? homeSpace?.default_role
+        : undefined;
+  const presetRole = presetRoleKey ? roles?.find((r) => r.key === presetRoleKey) : undefined;
   const roleValue =
     pickedRole ??
     (presetRole
@@ -191,11 +209,11 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
             <Select
               value={selectedSpaceId}
               onValueChange={(value) => {
-                setSelectedSpaceId(value);
+                setPickedSpaceId(value);
                 setPickedRole("");
               }}
             >
-              <SelectTrigger id="view-as-space">
+              <SelectTrigger id="view-as-space" className={CHOSEN_VALUE}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -214,7 +232,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
               <Label htmlFor="view-as-space-role">{t("viewAs.spaceRoleLabel")}</Label>
               {catalogUsable ? (
                 <Select value={roleValue || undefined} onValueChange={setPickedRole}>
-                  <SelectTrigger id="view-as-space-role">
+                  <SelectTrigger id="view-as-space-role" className={CHOSEN_VALUE}>
                     <SelectValue placeholder={t("viewAs.spaceRolePlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>

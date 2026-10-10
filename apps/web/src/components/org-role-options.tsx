@@ -49,7 +49,7 @@ export function OrgRoleOptions({
               htmlFor={`${idPrefix}-role-${option}`}
               className="flex min-w-0 flex-col items-start gap-1"
             >
-              <span>{t(roleI18nKey(option))}</span>
+              <span className="text-foreground">{t(roleI18nKey(option))}</span>
               <span className="text-muted-foreground text-sm leading-relaxed font-normal">
                 {t(`orgSettings.roleHint.${option}`)}
               </span>

@@ -321,6 +321,7 @@
   "toolbar.searchEntity": "Search {{entity}}…",
   "toolbar.columns": "Columns",
   "toolbar.columnsLabel": "Toggle columns",
+  "table.resizeColumn": "Resize column {{column}}",
   "toolbar.selected": "{{count}} selected",
   "toolbar.reset": "Reset",
   "toolbar.clearFilters": "Clear this filter",

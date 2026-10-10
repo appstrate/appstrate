@@ -94,7 +94,8 @@ export function useMemberColumns({
       id: "role",
       header: t("orgSettings.roleColumn"),
       width: "minmax(140px,1fr)",
-      tier: 2,
+      // A select: it scrolls into reach rather than waiting for room.
+      control: true,
       cell: (member) => {
         const roles = assignableRoles(member);
         if (roles.length === 0) {

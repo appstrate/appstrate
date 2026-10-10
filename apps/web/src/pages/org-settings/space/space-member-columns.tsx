@@ -100,7 +100,8 @@ export function useSpaceMemberColumns({
       id: "role",
       header: t("spaceMembers.colRole"),
       width: "minmax(110px,1fr)",
-      tier: 2,
+      // A select: it scrolls into reach rather than waiting for room.
+      control: true,
       cell: (member) =>
         editable(member) ? (
           <SpaceRoleSelect

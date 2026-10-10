@@ -64,24 +64,19 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet([], [], true)).toBe(false);
     expect(canApplyConnectionSet([a], [], true)).toBe(true);
     // Untouched over a stored "none", nothing is ticked: nothing to write.
-    const untouched = checkedConnectionIds({
-      draft: null,
-      explicitIds: [],
-      resolvedIds: candidateIds,
-      candidateIds,
-    });
+    const untouched = checkedConnectionIds({ draft: null, explicitIds: [], candidateIds });
     expect(untouched).toEqual([]);
     expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
   });
 
-  it("refuses an untouched menu ticked from the cascade's resolved default", () => {
-    // Writing it would pin {a, b} and detach the member from later org-default
-    // changes. Control: the same ticks after an actual edit are writable.
-    const input = { explicitIds: null, resolvedIds: candidateIds, candidateIds };
-    const untouched = checkedConnectionIds({ ...input, draft: null });
-    expect(untouched).toEqual(candidateIds);
+  it("ticks nothing while nothing is chosen: the cascade's default is not a choice", () => {
+    // "Hériter" is the ticked row; ticking its connection too would show two choices, and
+    // writing them would pin the default and detach the member from later changes.
+    const untouched = checkedConnectionIds({ explicitIds: null, candidateIds, draft: null });
+    expect(untouched).toEqual([]);
     expect(canApplyConnectionSet(conns(untouched), null, false)).toBe(false);
-    expect(canApplyConnectionSet(conns(untouched), null, true)).toBe(true);
+    // Control: ticks after an actual edit are writable.
+    expect(canApplyConnectionSet(conns(["conn_a"]), null, true)).toBe(true);
   });
 
   it("refuses an untouched override that inherits — it would freeze the cascade", () => {
@@ -89,12 +84,7 @@ describe("canApplyConnectionSet", () => {
     expect(
       displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds: ["conn_a"] }),
     ).toEqual([]);
-    const untouched = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: ["conn_a"],
-      candidateIds,
-    });
+    const untouched = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
     expect(canApplyConnectionSet(conns(untouched), explicitIds, false)).toBe(false);
   });
 
@@ -102,12 +92,7 @@ describe("canApplyConnectionSet", () => {
     // Nothing was ticked or unticked, yet the stored set differs from what a
     // write would send: without this the ghost id could never be dropped.
     const explicitIds = ["conn_a", "conn_unshared"];
-    const cleaned = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: [],
-      candidateIds,
-    });
+    const cleaned = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
     expect(cleaned).toEqual(["conn_a"]);
     expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
     // Control: an untouched pick with no ghost has nothing to rewrite.
@@ -156,18 +141,17 @@ describe("checkedConnectionIds", () => {
       checkedConnectionIds({
         draft: null,
         explicitIds: ["conn_a", "conn_unshared"],
-        resolvedIds: [],
         candidateIds,
       }),
     ).toEqual(["conn_a"]);
   });
 
-  it("prefers the draft, then the explicit pick, then the cascade", () => {
-    const base = { explicitIds: ["conn_a"], resolvedIds: ["conn_b"], candidateIds };
+  it("prefers the draft, then the explicit pick, and ticks nothing under the cascade", () => {
+    const base = { explicitIds: ["conn_a"], candidateIds };
     expect(checkedConnectionIds({ ...base, draft: ["conn_b"] })).toEqual(["conn_b"]);
     expect(checkedConnectionIds({ ...base, draft: null })).toEqual(["conn_a"]);
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual(["conn_b"]);
-    // A stored "no connection" ticks nothing, rather than the cascade.
+    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual([]);
+    // A stored "no connection" ticks nothing too.
     expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual([]);
   });
 });
@@ -291,17 +275,10 @@ describe("unavailableConnectionIds", () => {
   it("leaves 'Valider' live on the survivors, and dead once nothing survives", () => {
     const explicitIds = ["a", "gone"];
     const candidateIds = ["a", "b"];
-    const checked = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: [],
-      candidateIds,
-    });
+    const checked = checkedConnectionIds({ draft: null, explicitIds, candidateIds });
     expect(checked).toEqual(["a"]);
     expect(canApplyConnectionSet([{ id: "a" }], explicitIds, false)).toBe(true);
-    expect(
-      checkedConnectionIds({ draft: null, explicitIds: ["gone"], resolvedIds: [], candidateIds }),
-    ).toEqual([]);
+    expect(checkedConnectionIds({ draft: null, explicitIds: ["gone"], candidateIds })).toEqual([]);
     expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
   });
 });

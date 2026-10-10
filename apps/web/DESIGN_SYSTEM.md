@@ -104,7 +104,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (`headerAction`). A problem the object carries opens the overview as a
    `HealthCard` (`components/health-card.tsx`; `tone` `blocking`, `warning` or
    neutral; rows are `HealthCardItem` with `HealthAction`s, badges
-   `HealthIssueBadge`), with a link to where it is fixed or read.
+   `HealthIssueBadge`), with a link to where it is fixed or read. A cancelled run
+   is a neutral one (« Run annulé »: who stopped it as the platform records it,
+   and when), never a fact among the Exécution facts.
 6. **Paramètres**: `AgentDetailSplit`
    (`components/agent-detail/agent-detail-split.tsx`) with a rail of `RailLink`
    (`components/settings/rail-link.tsx`, a lock when the role may not open the
@@ -155,9 +157,24 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - A linked object (a schedule's agent) is shown as its preview card (identity
   tile, name, description, arrow), never as a bare link.
 - "Inherit" is always an explicit option and names what it inherits
-  (« Hériter (Mistral Medium) »). A connection picker lists it in every mode, one
-  connection included, as a radio checked while nothing is picked (« Résolution
-  automatique » for a member's own pin); clicking the ticked row again does nothing.
+  (« Hériter (Mistral Medium) »).
+- **A connection picker** (`components/integration-connect/connection-picker-menu.tsx`,
+  the agent's and the schedule's Connexions, one component): **what is ticked is
+  what is CHOSEN**, never a second tick for what the cascade would give. Rows
+  follow the cascade: « Hériter » first (ticked while nothing is chosen), then the
+  explicit connections, then « Aucune connexion » (withheld for a required
+  integration). Each row is a label and one line of the same form: « Hériter » /
+  « Utilise 12****oken, la connexion par défaut de l'espace » (the layer in the
+  server's words, `run.connSource.*`: space default, member's choice, automatic),
+  « 12****oken » / « Clé API · connectée depuis Default », « Aucune connexion » /
+  « L'agent s'exécute sans cette intégration ». The trigger reads the current choice
+  like a select (« Hériter (12****oken) », the same form as the model and proxy « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune
+  connexion ») and never carries a « + »: that means add, and belongs to the
+  « Ajouter une connexion » entry. The model is 0..N connections per integration:
+  with several to pick from, the rows are checkboxes, « Valider » writes the ticked
+  set, and « Hériter » and « Aucune connexion » write at once and exclude the
+  others; with one, radios that write at once. The row that is the current choice is
+  never greyed (choosing it again does nothing): only an unavailable option is.
 
 ## 5. Choosing a value
 
@@ -202,15 +219,36 @@ A `Select` never holds hundreds of entries.
   workspace) is the one raw shadcn `Table`.
 - `DataTable` (`components/data-table.tsx`) under a `ListToolbar`
   (`components/list-toolbar.tsx`: search, filters behind one button, column menu,
-  view toggle; `ListFooter` for the count). Columns carry a tier: low tiers hide
-  on narrow screens (`components/test/column-tiers.test.tsx` checks the
-  arithmetic of every column set, add yours to it). Grid tracks are
+  view toggle; `ListFooter` for the count). Grid tracks are
   `minmax(<floor>px,1fr)`, never `minmax(0,…)`. A header that truncates at 1440
   px is a column too narrow, fix the width. Text a cell truncates carries its
   full value in `title` (a name, an email, a list); a column that holds a name
   has a floor that fits a usual one. `columnMode="scroll"` makes the
   reader's selected columns authoritative and scrolls them sideways instead of
   dropping tiers.
+- **Two rules for every table** (both live in `DataTable`, no caller opts in):
+  1. **A column that can be acted on never disappears.** A column declares what it
+     is in its definition: a READ column (text, badge, date) may carry a `tier`
+     and wait for room on a narrow screen (tier `2` for a 36rem table, `3` for a
+     56rem one; `column-tiers.test.tsx` checks the arithmetic of every set); a CONTROL column (`control: true`: a
+     select, a switch, a tick, a button, a link that does something) has no tier
+     and is always drawn. The type forbids a `tier` on a control, and
+     `components/test/column-tiers.test.tsx` fails on one in any real column
+     set (add your set to it, and mark every column that holds a control). When a
+     table no longer fits, it scrolls sideways and holds its name column (the
+     first read column, with the ticks before it) and its row's end (the
+     headerless « … » column) in place (`sticky`), so a row is always named and
+     its actions are always in reach. A scroll is better than a lost control, and
+     a « … » menu is not the place for a dropdown: a control that is the setting
+     (role, share, default) stays in its own column.
+  2. **Columns resize.** Every column with a head has a handle on its right edge
+     (cursor `col-resize`): drag it, double-click it to fit the column to its
+     longest content (one click to see the full names), or focus it and use the
+     arrows (Shift for a bigger step, Enter to fit). A column never goes below
+     its track's floor. The width is the person's: it is kept per table (its
+     `label`) and per account in `localStorage`
+     (`stores/column-widths-store.ts`, a phone keeps its own), and the table
+     works without it. The row's end and fixed-size ticks have no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
   pushed, the search is replaced, a reset is one update. Table or cards is a
@@ -387,6 +425,13 @@ A `Select` never holds hundreds of entries.
 - The « view as » preview (`ViewAsBanner`) is on every shell and on a refusal
   with no shell around it (the chat), and the product tabs judge the persona on its
   grants alone (its own conversations do not count).
+- « Prévisualiser » on a role's row opens the preview dialog already set to it
+  (`lib/view-as-preset.ts`): a space role, in the current space with that role; the
+  Member, in the current space when it is open, with the role that space gives its
+  members (a Member reaches open spaces unasked); the Guest with no space (it
+  reaches only what it is assigned). A chosen radio or select value reads as chosen
+  (foreground colour): the global `button` and `label` base is muted, so a `Select`
+  in a dialog sets `text-foreground` itself; only an unavailable option is greyed.
 - An action the role cannot perform is **not offered**. When it must stay
   visible to explain itself, it is disabled with its reason
   (`DisabledReasonTooltip`, `components/disabled-reason-tooltip.tsx`). Never a

@@ -101,9 +101,9 @@ export function RunSnapshotInspector({
   // What ended the run, and what it lost on the way (`RunWarnings`), is part of
   // its story, so it is told here, not in a banner over every tab: a failure or a timeout opens the overview as its
   // problem card (the agent page's Diagnostic card); a cancellation is no
-  // problem and says who stopped it among the execution facts.
+  // problem, so it opens the overview as a neutral card of its own.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
-  const stopped = run.error && run.status === "cancelled" ? runErrorText(run, t) : null;
+  const cancelled = run.status === "cancelled";
 
   return (
     <>
@@ -128,6 +128,28 @@ export function RunSnapshotInspector({
                       {t("run.overview.problemJournal")}
                     </HealthAction>
                   }
+                />
+              </ul>
+            </HealthCard>
+          </div>
+        )}
+        {cancelled && (
+          <div className="mb-6">
+            <HealthCard
+              title={t("run.overview.cancelled")}
+              tone="neutral"
+              cardHeaders={cardHeaders}
+              badge={null}
+            >
+              <ul className={cardHeaders ? "px-4" : "mt-3"}>
+                {/* The run keeps no name for who stopped it: the platform's reason and the time do. */}
+                <HealthCardItem
+                  title={run.error ? runErrorText(run, t) : t("run.cancelledByUser")}
+                  description={
+                    run.completed_at ? formatDateField(run.completed_at, "datetime") : undefined
+                  }
+                  cardHeaders={cardHeaders}
+                  actions={null}
                 />
               </ul>
             </HealthCard>
@@ -186,7 +208,6 @@ export function RunSnapshotInspector({
                 {run.proxy_label && (
                   <SnapshotFact label={t("run.infoProxy")} value={run.proxy_label} />
                 )}
-                {stopped && <SnapshotFact label={t("run.infoStopped")} value={stopped} />}
               </SnapshotFacts>
             </RunDetailCard>
 

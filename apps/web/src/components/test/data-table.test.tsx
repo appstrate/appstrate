@@ -143,9 +143,12 @@ describe("the row's link", () => {
   it("carries a name of its own and covers the whole row", () => {
     const html = table();
     expect(html).toContain('aria-label="Ligne Alpha"');
-    expect(html).toContain("after:absolute after:inset-0");
-    // One focusable node per row, not one per cell.
-    expect([...html.matchAll(/<a /g)]).toHaveLength(ROWS.length);
+    // The cover belongs to the row, not to the first cell: a held (`sticky`)
+    // cell is the containing block of anything absolute inside it, so a link
+    // stretched from there would cover that one cell.
+    expect(html).toMatch(/<td role="presentation" class="absolute inset-0[^"]*"><a tabindex="-1"/);
+    // One focusable node per row, not one per cell: the cover is out of the tab order.
+    expect([...html.matchAll(/<a (?![^>]*tabindex="-1")/g)]).toHaveLength(ROWS.length);
   });
 
   it("renders a static row when there is nowhere to go", () => {
@@ -176,5 +179,67 @@ describe("states", () => {
     expect(html).toContain('role="columnheader"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).not.toContain("<a ");
+  });
+});
+
+describe("controls and the row's end", () => {
+  const columns: DataColumn<Row>[] = [
+    { id: "name", header: "Nom", width: "minmax(120px,1fr)", cell: (r) => <span>{r.name}</span> },
+    { id: "when", header: "Date", width: "96px", tier: 2, cell: (r) => <span>{r.when}</span> },
+    {
+      id: "role",
+      header: "Rôle",
+      width: "minmax(140px,1fr)",
+      control: true,
+      cell: () => <button type="button">Choisir</button>,
+    },
+    { id: "actions", header: "", width: "80px", align: "end", cell: () => <span>…</span> },
+  ];
+  const html = table({ columns });
+
+  it("never hides a control: it has no tier class and sits in the narrowest template", () => {
+    const tier1 = /--dt-cols:\s*([^;"]+)/.exec(html)?.[1];
+    expect(tier1).toBe("minmax(120px,1fr) minmax(140px,1fr) 80px");
+    expect(html).not.toMatch(/data-data-table-column="role"[^>]*class="[^"]*hidden/);
+    expect(html).not.toMatch(/data-data-table-column="actions"[^>]*class="[^"]*hidden/);
+  });
+
+  it("scrolls instead: the narrow table keeps the floor of everything it still shows", () => {
+    // Floors 120 + 140 + 80, and four 12px gaps/paddings.
+    expect(html).toContain("--dt-floor:388px");
+    expect(html).toContain("min-w-(--dt-floor)");
+  });
+
+  it("holds the name and the row's end in place", () => {
+    const heads = html.match(/<th[^>]*>/g) ?? [];
+    expect(heads.filter((head) => head.includes("sticky"))).toHaveLength(2);
+    expect(heads.find((head) => head.includes('column="name"'))).toContain("sticky");
+    expect(heads.find((head) => head.includes('column="actions"'))).toContain("sticky");
+    expect(heads.find((head) => head.includes('column="role"'))).not.toContain("sticky");
+  });
+});
+
+describe("resizing", () => {
+  const html = table();
+
+  it("gives every head a focusable, named handle at its floor", () => {
+    expect([...html.matchAll(/role="separator"/g)]).toHaveLength(COLUMNS.length);
+    expect(html).toContain('aria-label="Redimensionner la colonne Nom"');
+    expect(html).toContain('aria-valuemin="120"');
+    expect(html).toContain("cursor-col-resize");
+  });
+
+  it("offers none on the row's end, which has no head to name", () => {
+    const withEnd = table({
+      columns: [
+        ...COLUMNS,
+        { id: "actions", header: "", width: "80px", cell: () => <span>…</span> },
+      ],
+    });
+    expect([...withEnd.matchAll(/role="separator"/g)]).toHaveLength(COLUMNS.length);
+  });
+
+  it("draws none in a table without a head band", () => {
+    expect(table({ showHeader: false })).not.toContain('role="separator"');
   });
 });

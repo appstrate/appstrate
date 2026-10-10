@@ -321,6 +321,7 @@
   "toolbar.searchEntity": "Rechercher des {{entity}}…",
   "toolbar.columns": "Colonnes",
   "toolbar.columnsLabel": "Afficher les colonnes",
+  "table.resizeColumn": "Redimensionner la colonne {{column}}",
   "toolbar.selected": "{{count}} sélectionnés",
   "toolbar.reset": "Réinitialiser",
   "toolbar.clearFilters": "Effacer ce filtre",

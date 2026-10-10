@@ -228,7 +228,6 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(
       `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`,
     );
-    expect(html).toContain(t("defaultBadge"));
     expect(html).toContain(t("defaultUnavailableWarning", { count: 1 }));
     expect(html).not.toContain(t("unavailableWarning", { count: 1 }));
   });
@@ -271,12 +270,12 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(t("chooseLabel"));
   });
 
-  it("marks a fallback-bound connection as the default", () => {
+  it("reads a fallback-bound connection as what the trigger inherits", () => {
     const html = renderPicker(
       resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] }),
       false,
     );
-    expect(html).toContain(t("defaultBadge"));
+    expect(html).toContain(t("inheritTrigger", { name: "web" }));
   });
 
   it("locks the dropdown on a stored admin pin, whatever the verdict names", () => {
@@ -663,10 +662,18 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       return propsOf(trees[0], `member-pick-none-${INTEGRATION}`);
     };
     const none = resolution({ source: null, member_pinned_connection_ids: [] });
-    expect(noneItem(none)).toMatchObject({ role: "menuitemradio", "aria-checked": true });
+    // Several connections to pick from: the choices are boxes, "no connection" among them.
+    expect(noneItem(none)).toMatchObject({ role: "menuitemcheckbox", "aria-checked": true });
     expect(noneItem(resolution({}))).toMatchObject({
-      role: "menuitemradio",
+      role: "menuitemcheckbox",
       "aria-checked": false,
+    });
+    // One connection to pick from: radios.
+    const single = (over: Partial<Resolution>) =>
+      resolution({ candidates: [candidate(WEB, "web")], ...over });
+    expect(noneItem(single({ source: null, member_pinned_connection_ids: [] }))).toMatchObject({
+      role: "menuitemradio",
+      "aria-checked": true,
     });
   });
 
@@ -732,21 +739,25 @@ describe("PickerMenu — where a candidate comes from", () => {
 
   const t = (key: string, opts?: Record<string, unknown>) =>
     i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+  // The origin reads after the connection's type: « Clé API · connectée depuis Default ».
+  const inline = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
   it("tells the owner of an org-scoped row the space it was connected from", () => {
     const own = { ...candidate(WEB, "web"), origin_space_id: ORIGIN };
-    expect(rowText(own)).toContain(t("connectedFrom", { space: "Marketing" }));
+    expect(rowText(own)).toContain(inline(t("connectedFrom", { space: "Marketing" })));
   });
 
   it("names the owner to anyone else, and on a space-scoped row", () => {
     const foreign = { ...candidate(WEB, "web"), is_own: false, owner_name: "Alice" };
-    expect(rowText(foreign)).toContain(t("connectedBy", { owner: "Alice" }));
+    expect(rowText(foreign)).toContain(inline(t("connectedBy", { owner: "Alice" })));
     const spaceScoped = { ...candidate(WEB, "web"), scope: "space" as const, spaceId: ORIGIN };
-    expect(rowText(spaceScoped)).toContain(t("connectedBy", { owner: t("byYou") }));
+    expect(rowText(spaceScoped)).toContain(inline(t("connectedBy", { owner: t("byYou") })));
   });
 
   it("falls back to the owner when the origin space is gone", () => {
-    expect(rowText(candidate(WEB, "web"))).toContain(t("connectedBy", { owner: t("byYou") }));
+    expect(rowText(candidate(WEB, "web"))).toContain(
+      inline(t("connectedBy", { owner: t("byYou") })),
+    );
   });
 });
 
@@ -1136,3 +1147,82 @@ function summaryOf(node: unknown): string | undefined {
   if (node.type === ScopeSummaryText) return render(node);
   return summaryOf(node.props.children);
 }
+
+describe("PickerMenu — one way to read the state", () => {
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+
+  function menuFor(res: Resolution, persistence?: Persistence) {
+    const qc = new QueryClient();
+    qc.setQueryData(READINESS_KEY, readiness(res));
+    const pickers: Array<ConnectionPicker | null> = [];
+    render(
+      <PickerProbe
+        persistence={persistence ?? { mode: "pin" }}
+        onPicker={(p) => pickers.push(p)}
+      />,
+      { queryClient: qc },
+    );
+    const trees: ReactNode[] = [];
+    render(<MenuProbe picker={pickers[0]!} onTree={(tree) => trees.push(tree)} />, {
+      queryClient: qc,
+    });
+    const item = (id: string) => propsOf(trees[0], id);
+    return {
+      inherit: item(`member-pick-reset-${INTEGRATION}`),
+      web: item(`member-pick-option-${WEB}`),
+      db: item(`member-pick-option-${DB}`),
+      none: item(`member-pick-none-${INTEGRATION}`),
+    };
+  }
+
+  /** The `description` prop of the choice's label, which is what the row says about it. */
+  function descriptionOf(node: unknown): string | undefined {
+    if (Array.isArray(node)) return node.map(descriptionOf).find((d) => d !== undefined);
+    if (!isValidElement<{ description?: unknown; children?: unknown }>(node)) return undefined;
+    if (typeof node.props.description === "string") return node.props.description;
+    return descriptionOf(node.props.children);
+  }
+
+  it("ticks only 'Hériter' while nothing is chosen, and says what it gives", () => {
+    const menu = menuFor(
+      resolution({
+        source: "org_default",
+        org_default_connection_ids: [WEB],
+        resolved_connection_ids: [WEB],
+      }),
+    );
+    expect(menu.inherit).toMatchObject({ "aria-checked": true });
+    expect(menu.web).toMatchObject({ "aria-checked": false });
+    expect(menu.db).toMatchObject({ "aria-checked": false });
+    expect(menu.none).toMatchObject({ "aria-checked": false });
+    expect(descriptionOf(menu.inherit?.children)).toBe(
+      t("inheritFromSpaceDefault", { name: "web", count: 1 }),
+    );
+    // No row is greyed for being the current choice.
+    expect(menu.inherit?.disabled).toBe(false);
+    expect(menu.none?.disabled).toBe(false);
+  });
+
+  it("ticks only what is chosen, never 'Hériter' beside it", () => {
+    const menu = menuFor(
+      resolution({ member_pinned_connection_ids: [WEB], resolved_connection_ids: [WEB] }),
+    );
+    expect(menu.inherit).toMatchObject({ "aria-checked": false });
+    expect(menu.web).toMatchObject({ "aria-checked": true });
+    expect(menu.db).toMatchObject({ "aria-checked": false });
+    expect(menu.none).toMatchObject({ "aria-checked": false });
+    // Under a pin the verdict is the pin: inheriting is not named after it.
+    expect(descriptionOf(menu.inherit?.children)).toBe(t("inheritGeneric"));
+  });
+
+  it("an override inherits what the cascade binds, whoever binds it", () => {
+    const menu = menuFor(resolution({ source: "member_pin", resolved_connection_ids: [DB] }), {
+      mode: "override",
+      value: null,
+      onChange: () => {},
+    });
+    expect(menu.inherit).toMatchObject({ "aria-checked": true });
+    expect(descriptionOf(menu.inherit?.children)).toBe(t("inheritFromPin", { name: "db" }));
+  });
+});

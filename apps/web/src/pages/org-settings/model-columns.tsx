@@ -153,7 +153,8 @@ export function useModelColumns({
               failedKey="models.testFailed"
             />
           ) : m.needs_reconnection ? (
-            <ModelUnavailableBadge />
+            // Clipped to its column, never over the next one; the title holds the full text.
+            <ModelUnavailableBadge className="block max-w-full truncate" />
           ) : !m.enabled ? (
             <Badge variant="secondary" className="opacity-60">
               {t("models.disabled")}

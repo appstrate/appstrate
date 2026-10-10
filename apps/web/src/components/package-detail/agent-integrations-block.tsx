@@ -150,6 +150,8 @@ export function AgentIntegrationsBlock({
       id: "account",
       header: t("detail.connectionsTable.account"),
       width: "minmax(260px,1.4fr)",
+      // The connection picker.
+      control: true,
       cell: ({ entry, state }) => (
         <IntegrationConnectionCell
           packageId={entry.id}

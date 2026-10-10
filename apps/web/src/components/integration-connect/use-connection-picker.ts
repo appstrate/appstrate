@@ -17,7 +17,7 @@ import {
 } from "../../hooks/use-member-integration-pins";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
-import { describeResolution } from "./integration-run-readiness";
+import { describeResolution, unboundLabel } from "./integration-run-readiness";
 import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
 import {
   requiredScopesForAgent,
@@ -212,12 +212,23 @@ export function useConnectionPicker(
   const storedIds = fromDefault ? softDefaultIds : (explicitIds ?? []);
   const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
   const dirty = draft !== null;
-  const checkedIds = checkedConnectionIds({
-    draft,
-    explicitIds,
-    resolvedIds: resolvedConnectionIds,
-    candidateIds,
-  });
+  const checkedIds = checkedConnectionIds({ draft, explicitIds, candidateIds });
+  // What "Hériter" would bind: the verdict itself while nothing explicit is chosen (and, in
+  // override mode, always: the verdict ignores the override). Under a member pin the verdict
+  // is the pin, so only the soft space default can be named.
+  const orgDefaultIds = resolution.org_default_connection_ids ?? [];
+  const inheritedConns =
+    overrideMode || explicitIds === null
+      ? resolvedConnectionIds.map(byId).filter((c): c is IntegrationCandidate => !!c)
+      : orgDefaultIds.map(byId).filter((c): c is IntegrationCandidate => !!c);
+  const inheritedSource =
+    overrideMode || explicitIds === null
+      ? resolution.source
+      : orgDefaultIds.length > 0
+        ? ("org_default" as const)
+        : null;
+  // Why nothing is inherited, when the verdict says (not connected, several to choose from...).
+  const inheritedUnbound = unboundLabel(resolution.warning);
   const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   const oneClick = candidates.length === 1;
 
@@ -326,6 +337,9 @@ export function useConnectionPicker(
     byDefault,
     softDefaultIds,
     emptyPickerPrompt,
+    inheritedConns,
+    inheritedSource,
+    inheritedUnbound,
     // Actor
     canConnect,
     integrationPath,

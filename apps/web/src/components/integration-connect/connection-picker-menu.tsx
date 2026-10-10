@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
@@ -14,7 +15,6 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import {
   DropdownMenu,
@@ -28,7 +28,6 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useSpaces } from "../../hooks/use-spaces";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
-import { NoConnectionLabel } from "./no-connection-label";
 import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
@@ -38,23 +37,37 @@ type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose
 function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.unavailableIds.length > 0) return "unavailable";
   if (p.pickedNone) return "none";
-  if (p.displayConns.length === 1) return "one";
-  if (p.displayConns.length > 1) return "many";
-  if (p.overrideMode) return "inherit";
+  if (p.displayConns.length === 1 && p.explicitIds !== null) return "one";
+  if (p.displayConns.length > 1 && p.explicitIds !== null) return "many";
+  // Nothing chosen: the trigger reads "Hériter", unless the picker is what asks for an act.
+  if (p.overrideMode || p.inheritedConns.length > 0) return "inherit";
   return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
 }
 
+// A "+" says "add": only the entry that connects carries it.
 const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
   unavailable: Users,
   none: Ban,
   one: Users,
   many: Users,
-  inherit: Plus,
-  choose: Plus,
+  inherit: Users,
+  choose: Users,
   connect: Plus,
 };
 
-/** The picker's dropdown: its trigger, one row per candidate, and the write/connect entries. */
+/** One choice of the menu: its label, and one line saying what it means. */
+function ChoiceLabel({ label, description }: { label: string; description: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate font-medium">{label}</span>
+      <span className="text-muted-foreground text-[0.65rem] break-words">{description}</span>
+    </div>
+  );
+}
+
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** The picker's dropdown: its trigger, the choices in cascade order, and the write/connect entries. */
 export function PickerMenu({
   integrationId,
   picker,
@@ -68,10 +81,7 @@ export function PickerMenu({
   const {
     runBlocking,
     candidates,
-    resolvedConnectionIds,
     canAddConnection,
-    byDefault,
-    softDefaultIds,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -98,6 +108,9 @@ export function PickerMenu({
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
+    inheritedConns,
+    inheritedSource,
+    inheritedUnbound,
     open,
     setOpen,
     onOpenChange,
@@ -121,6 +134,19 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.connectedFrom", { space: origin })
       : t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) });
   };
+  // « Clé API · connectée depuis Default »: what the connection is, then where it comes from.
+  const candidateDescription = (c: IntegrationCandidate): string =>
+    [
+      typeLabel(c.auth_key),
+      c.shared_here ? lowerFirst(t("detail.integrationMemberPicker.sharedBadge")) : null,
+      lowerFirst(provenance(c)),
+      c.needs_reconnection
+        ? lowerFirst(t("detail.integrationMemberPicker.needsReconnection"))
+        : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · ")
+      .replace(/^./, (first) => first.toUpperCase());
   // A fresh connect requests the agent's scopes: saying so is what makes it the safe choice
   // over upgrading a shared connection.
   const addLabel = (authKey: string): string => {
@@ -134,21 +160,42 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.addVia", { label: tl })
       : t("detail.integrationMemberPicker.addConnection");
   };
-  // "Hériter" names what is inherited when the cascade already resolves to a connection.
-  const inheritedLabels = candidates
-    .filter((c) => resolvedConnectionIds.includes(c.id))
-    .map((c) => c.label);
-  const inheritLabel =
-    inheritedLabels.length > 0
-      ? t("detail.integrationMemberPicker.inheritNamed", { name: inheritedLabels.join(" · ") })
-      : t("detail.integrationMemberPicker.inherit");
+  // "Hériter" says which connection the cascade gives and which layer gives it, in the server's
+  // words (`run.connSource.*`).
+  const inheritedNames = inheritedConns.map((c) => c.label).join(" · ");
+  const inheritDescription = (() => {
+    if (inheritedConns.length > 0) {
+      const name = inheritedNames;
+      switch (inheritedSource) {
+        case "org_default":
+        case "org_default_enforced":
+          return t("detail.integrationMemberPicker.inheritFromSpaceDefault", {
+            name,
+            count: inheritedConns.length,
+          });
+        case "fallback_auto":
+          return t("detail.integrationMemberPicker.inheritFromOwn", { name });
+        case "member_pin":
+          return t("detail.integrationMemberPicker.inheritFromPin", { name });
+        default:
+          return t("detail.integrationMemberPicker.inheritUses", { name });
+      }
+    }
+    // Under a member pin the verdict is the pin's: it says nothing of what inheriting would give.
+    return overrideMode || explicitIds === null
+      ? (inheritedUnbound ?? t("detail.integrationMemberPicker.inheritNone"))
+      : t("detail.integrationMemberPicker.inheritGeneric");
+  })();
   const trigger = triggerKind(picker);
   const triggerLabel = {
     unavailable: () => setLabel(storedIds, unavailableIds),
     none: () => t("detail.integrationMemberPicker.none"),
     one: () => displayConns[0]!.label,
     many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
-    inherit: () => t("detail.integrationMemberPicker.inherit"),
+    inherit: () =>
+      inheritedNames
+        ? t("detail.integrationMemberPicker.inheritTrigger", { name: inheritedNames })
+        : t("detail.integrationMemberPicker.inherit"),
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
@@ -163,6 +210,19 @@ export function PickerMenu({
       (pickedNone && required)
     : runBlocking;
   const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
+  // What the menu ticks is what is CHOSEN. "Hériter" and "Aucune connexion" exclude the explicit
+  // connections: ticking one of these while the other is on stands for the whole change.
+  const ticking = checkedIds.length > 0;
+  const inheritChecked = explicitIds === null && !ticking;
+  const noneChecked = pickedNone && !ticking;
+  // One connection to pick from: radios. Several: boxes, written by "Valider".
+  const choiceRole = oneClick ? "menuitemradio" : "menuitemcheckbox";
+  const indicator = (checked: boolean) =>
+    oneClick ? (
+      <Check className={`size-3.5 ${checked ? "" : "opacity-0"}`} />
+    ) : (
+      <Checkbox checked={checked} aria-hidden tabIndex={-1} className="pointer-events-none" />
+    );
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -175,11 +235,6 @@ export function PickerMenu({
         >
           <TriggerIcon className="size-3" />
           <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-          {!overrideMode && byDefault && (
-            <span className="text-muted-foreground/70">
-              {t("detail.integrationMemberPicker.defaultBadge")}
-            </span>
-          )}
           <ChevronDown className="size-3 opacity-60" />
         </Button>
       </DropdownMenuTrigger>
@@ -187,14 +242,27 @@ export function PickerMenu({
         <DropdownMenuLabel className="text-[0.7rem]">
           {t("detail.integrationMemberPicker.title")}
         </DropdownMenuLabel>
+        {/* The cascade's turn comes first: the default, then what is chosen over it, then none.
+            Ticking it again does nothing; going back is picking it. */}
+        <DropdownMenuItem
+          role={choiceRole}
+          aria-checked={inheritChecked}
+          disabled={busy}
+          onSelect={() => {
+            if (explicitIds !== null) void persist(null);
+          }}
+          data-testid={`member-pick-reset-${integrationId}`}
+        >
+          {indicator(inheritChecked)}
+          <ChoiceLabel
+            label={t("detail.integrationMemberPicker.inherit")}
+            description={inheritDescription}
+          />
+        </DropdownMenuItem>
         {candidates.map((c) => {
-          const tl = typeLabel(c.auth_key);
           const fit = scopeFitOf(c);
           const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
-          const isDefault =
-            explicitIds === null &&
-            (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
           // let the actor pin a foreign needs_reconnection row (their
@@ -205,12 +273,13 @@ export function PickerMenu({
             <DropdownMenuItem
               key={c.id}
               // The row is the checkbox a screen reader sees; the box is a glyph.
-              {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": isChecked })}
+              role={choiceRole}
+              aria-checked={isChecked}
               disabled={oneClick ? busy : atCap && !isChecked}
               // Toggling must not close the menu — "Valider" writes.
               onSelect={(e) => {
                 if (oneClick) {
-                  // Back to the cascade is the "Hériter" entry, never a second click on the row.
+                  // Ticked already: nothing to do (back to the cascade is "Hériter").
                   if (explicitIds?.length === 1 && explicitIds[0] === c.id) return;
                   void persist([c.id]);
                   return;
@@ -220,42 +289,14 @@ export function PickerMenu({
               }}
               data-testid={`member-pick-option-${c.id}`}
             >
-              {oneClick ? (
-                <Check className={`size-3.5 ${isChecked ? "" : "opacity-0"}`} />
-              ) : (
-                <Checkbox
-                  checked={isChecked}
-                  aria-hidden
-                  tabIndex={-1}
-                  className="pointer-events-none"
-                />
-              )}
+              {indicator(isChecked)}
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex items-center gap-1.5">
-                  {/* An incompatible row is muted on its name; its reason stays legible. */}
-                  <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
-                    {c.label}
-                  </span>
-                  {tl && (
-                    <Badge variant="outline" className="text-[0.6rem]">
-                      {tl}
-                    </Badge>
-                  )}
-                  {c.shared_here && (
-                    <Badge variant="secondary" className="text-[0.6rem]">
-                      {t("detail.integrationMemberPicker.sharedBadge")}
-                    </Badge>
-                  )}
-                  {isDefault && (
-                    <span className="text-muted-foreground/70 text-[0.6rem]">
-                      {t("detail.integrationMemberPicker.defaultBadge")}
-                    </span>
-                  )}
-                </div>
-                <span className="text-muted-foreground truncate text-[0.65rem]">
-                  {provenance(c)}
-                  {c.needs_reconnection &&
-                    ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
+                {/* An incompatible row is muted on its name; its reason stays legible. */}
+                <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
+                  {c.label}
+                </span>
+                <span className="text-muted-foreground text-[0.65rem] break-words">
+                  {candidateDescription(c)}
                 </span>
                 {fit === "missing" ? (
                   <span
@@ -305,14 +346,11 @@ export function PickerMenu({
           <DropdownMenuItem
             key={id}
             disabled
-            {...(oneClick ? {} : { role: "menuitemcheckbox", "aria-checked": false })}
+            role={choiceRole}
+            aria-checked={false}
             data-testid={`member-pick-unavailable-${id}`}
           >
-            {oneClick ? (
-              <Check className="size-3.5 opacity-0" />
-            ) : (
-              <Checkbox checked={false} aria-hidden tabIndex={-1} className="pointer-events-none" />
-            )}
+            {indicator(false)}
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="truncate font-medium line-through">
                 {t("detail.integrationMemberPicker.unavailableRow")}
@@ -323,24 +361,6 @@ export function PickerMenu({
             </div>
           </DropdownMenuItem>
         ))}
-        {!oneClick && hasCandidates && (
-          <DropdownMenuItem
-            disabled={!canApply}
-            onSelect={(e) => {
-              // Stays open on a refused write, so the ticks stay editable.
-              e.preventDefault();
-              void persist(checkedIds).then((ok) => {
-                if (ok) setOpen(false);
-              });
-            }}
-            data-testid={`member-pick-apply-${integrationId}`}
-          >
-            <Check className="size-3.5" />
-            <span className="font-medium">
-              {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
-            </span>
-          </DropdownMenuItem>
-        )}
         {atCap && (
           <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
             {t("detail.integrationMemberPicker.maxReached", {
@@ -348,30 +368,44 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
-        {/* The way back to the cascade, always on offer: a radio like "no connection", checked
-            while nothing is picked. */}
-        <DropdownMenuItem
-          role="menuitemradio"
-          aria-checked={explicitIds === null}
-          disabled={busy || explicitIds === null}
-          onSelect={() => void persist(null)}
-          data-testid={`member-pick-reset-${integrationId}`}
-        >
-          <Check className={`size-3.5 ${explicitIds === null ? "" : "opacity-0"}`} />
-          <span>{overrideMode ? inheritLabel : t("detail.integrationMemberPicker.automatic")}</span>
-        </DropdownMenuItem>
         {!required && (
           <DropdownMenuItem
-            // A radio, like the rows are checkboxes: its state is read out, not only drawn.
-            role="menuitemradio"
-            aria-checked={pickedNone}
-            disabled={busy || pickedNone}
-            onSelect={() => void persist([])}
+            role={choiceRole}
+            aria-checked={noneChecked}
+            disabled={busy}
+            onSelect={() => {
+              if (!pickedNone) void persist([]);
+            }}
             data-testid={`member-pick-none-${integrationId}`}
           >
-            <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
-            <NoConnectionLabel />
+            {indicator(noneChecked)}
+            <ChoiceLabel
+              label={t("detail.integrationMemberPicker.none")}
+              description={t("detail.integrationMemberPicker.noneHint")}
+            />
           </DropdownMenuItem>
+        )}
+        {/* Nothing ticked, nothing to write: "Hériter" and "Aucune connexion" write on their own. */}
+        {!oneClick && hasCandidates && ticking && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!canApply}
+              onSelect={(e) => {
+                // Stays open on a refused write, so the ticks stay editable.
+                e.preventDefault();
+                void persist(checkedIds).then((ok) => {
+                  if (ok) setOpen(false);
+                });
+              }}
+              data-testid={`member-pick-apply-${integrationId}`}
+            >
+              <Check className="size-3.5" />
+              <span className="font-medium">
+                {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
+              </span>
+            </DropdownMenuItem>
+          </>
         )}
         {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
         {canAddConnection &&
